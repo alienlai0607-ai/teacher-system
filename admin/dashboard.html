@@ -66,11 +66,18 @@ window.addEventListener('load', async () => {
 async function loadImpersonateList() {
   const res = await API.listUsers();
   if (!res.ok) return;
-  const grouped = { manager: [], teacher: [] };
+  const grouped = { manager: [], teacher: [], admin_staff: [] };
   res.users.forEach(u => {
-    if (u.role === 'manager' || u.role === 'teacher') grouped[u.role].push(u);
+    if (grouped[u.role]) grouped[u.role].push(u);
   });
   const wrap = document.getElementById('impersonate-list');
+  const staffBlock = grouped.admin_staff.length ? `
+    <div style="margin-top:12px;">
+      <div style="font-weight:700; margin-bottom:6px;">📁 行政</div>
+      <div style="display:flex; flex-wrap:wrap; gap:6px;">
+        ${grouped.admin_staff.map(u => `<button class="btn btn-sm" onclick="impersonateAs('${u.nickname}')">${u.nickname}（${u.department}）</button>`).join('')}
+      </div>
+    </div>` : '';
   wrap.innerHTML = `
     <div style="margin-bottom:12px;">
       <div style="font-weight:700; margin-bottom:6px;">👔 主管</div>
@@ -84,6 +91,7 @@ async function loadImpersonateList() {
         ${grouped.teacher.map(u => `<button class="btn btn-sm" onclick="impersonateAs('${u.nickname}')">${u.nickname}（${u.department}）</button>`).join('')}
       </div>
     </div>
+    ${staffBlock}
   `;
 }
 

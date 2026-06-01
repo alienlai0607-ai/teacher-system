@@ -117,7 +117,7 @@ window.UI = (function () {
   }
 
   function roleLabel(role) {
-    return { admin: '管理員', manager: '主管', teacher: '老師' }[role] || role;
+    return { admin: '管理員', manager: '主管', teacher: '老師', admin_staff: '行政' }[role] || role;
   }
 
   function mountHeader(user) {
@@ -135,10 +135,19 @@ window.UI = (function () {
     div.id = 'impersonate-banner';
     div.innerHTML = `
       🎭 <strong>測試模式</strong>：你正在以 <strong>${user.nickname}</strong>（${roleLabel(user.role)} · ${user.department}）身份檢視
-      <button class="btn-exit-impersonate" onclick="AUTH.exitImpersonate(); window.location.href=AUTH.relativeRoot()+'admin/dashboard.html';">離開 →</button>
+      <button class="btn-exit-impersonate" onclick="UI.exitImpersonateBack()">離開 →</button>
     `;
     document.body.insertBefore(div, document.body.firstChild);
   }
 
-  return { toast, loading, confirmDialog, modal, formatDate, formatDateTime, renderHeader, mountHeader, roleLabel };
+  // 離開切換身份 → 依真實角色（admin / manager）回到對應 dashboard
+  function exitImpersonateBack() {
+    const realRole = AUTH.getRealRole();
+    AUTH.exitImpersonate();
+    const root = AUTH.relativeRoot();
+    if (realRole === 'manager') window.location.href = root + 'manager/dashboard.html';
+    else window.location.href = root + 'admin/dashboard.html'; // 預設 admin
+  }
+
+  return { toast, loading, confirmDialog, modal, formatDate, formatDateTime, renderHeader, mountHeader, roleLabel, exitImpersonateBack };
 })();

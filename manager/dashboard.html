@@ -53,6 +53,12 @@
     <div class="card-title">🎯 待辦提醒</div>
     <ul id="todos" style="margin:0; padding-left:20px;"><li class="muted">載入中...</li></ul>
   </div>
+
+  <div class="card">
+    <div class="card-title">🎭 切換身份檢視（測試用）</div>
+    <div class="text-sm muted mb-2">以下會以指定身份開啟對應頁面，方便你檢核部門老師/行政實際看到什麼。隨時可從頂部橫條離開。</div>
+    <div id="impersonate-list"><div class="muted">載入中...</div></div>
+  </div>
 </div>
 
 <script>
@@ -64,7 +70,46 @@ window.addEventListener('load', async () => {
   document.getElementById('today-str').textContent = new Date().toLocaleDateString('zh-TW');
   await loadDashboard();
   await loadWeekPost();
+  await loadImpersonateList();
 });
+
+async function loadImpersonateList() {
+  const res = await API.listUsers();
+  const wrap = document.getElementById('impersonate-list');
+  if (!res.ok) { wrap.innerHTML = '<div class="muted">無法載入名單</div>'; return; }
+  const grouped = { teacher: [], admin_staff: [] };
+  res.users.forEach(u => {
+    if (u.department === session.department && (u.role === 'teacher' || u.role === 'admin_staff')) {
+      grouped[u.role].push(u);
+    }
+  });
+  const teacherHtml = grouped.teacher.length
+    ? grouped.teacher.map(u => `<button class="btn btn-sm" onclick="impersonateAs('${u.nickname}')">${u.nickname}</button>`).join('')
+    : '<span class="muted">無</span>';
+  const staffHtml = grouped.admin_staff.length
+    ? grouped.admin_staff.map(u => `<button class="btn btn-sm" onclick="impersonateAs('${u.nickname}')">${u.nickname}</button>`).join('')
+    : '<span class="muted">無</span>';
+  wrap.innerHTML = `
+    <div style="margin-bottom:12px;">
+      <div style="font-weight:700; margin-bottom:6px;">👩‍🏫 老師</div>
+      <div style="display:flex; flex-wrap:wrap; gap:6px;">${teacherHtml}</div>
+    </div>
+    <div>
+      <div style="font-weight:700; margin-bottom:6px;">📁 行政</div>
+      <div style="display:flex; flex-wrap:wrap; gap:6px;">${staffHtml}</div>
+    </div>
+  `;
+}
+
+function impersonateAs(nickname) {
+  API.listUsers().then(r => {
+    if (!r.ok) return;
+    const target = r.users.find(u => u.nickname === nickname);
+    if (!target) { UI.toast('找不到使用者', 'danger'); return; }
+    try { AUTH.impersonate(target); } catch (e) { UI.toast(e.message, 'danger'); return; }
+    window.location.href = AUTH.relativeRoot() + 'teacher/today.html';
+  });
+}
 
 async function loadDashboard() {
   UI.loading(true);

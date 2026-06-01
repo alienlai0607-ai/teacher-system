@@ -27,18 +27,40 @@ window.AUTH = (function () {
   }
 
   /**
-   * Admin 切換身份檢視（測試/檢核用）
+   * 切換身份檢視（測試/檢核用）
+   * - admin 可切換任何人
+   * - manager 只能切換成自己部門的 teacher / admin_staff
    */
   function impersonate(targetUser) {
     const real = getSession();
-    if (!real || real.role !== 'admin') {
-      throw new Error('只有 admin 可以切換身份');
+    if (!real) throw new Error('需要先登入');
+    if (real.role === 'admin') {
+      // OK，無限制
+    } else if (real.role === 'manager') {
+      const sameDept = targetUser.department === real.department;
+      const okRole = targetUser.role === 'teacher' || targetUser.role === 'admin_staff';
+      if (!sameDept || !okRole) {
+        throw new Error('主管只能切換成自己部門的老師或行政');
+      }
+    } else {
+      throw new Error('只有 admin 或主管可以切換身份');
     }
-    // 保留 admin 身份（不覆蓋已存在的 real_session）
+    // 保留真實身份（不覆蓋已存在的 real_session）
     if (!localStorage.getItem(REAL_SESSION_KEY)) {
       localStorage.setItem(REAL_SESSION_KEY, JSON.stringify(real));
     }
     setSession({ ...targetUser, impersonate: true });
+  }
+
+  /**
+   * 取得切換身份前的真實角色（離開時用於決定回到哪個 dashboard）
+   */
+  function getRealRole() {
+    try {
+      const raw = localStorage.getItem(REAL_SESSION_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw).role || null;
+    } catch (e) { return null; }
   }
 
   /**
@@ -104,5 +126,5 @@ window.AUTH = (function () {
     else window.location.href = root + 'teacher/today.html';
   }
 
-  return { getSession, setSession, clearSession, requireRole, logout, decodeJwt, routeByRole, relativeRoot, impersonate, exitImpersonate, isImpersonating };
+  return { getSession, setSession, clearSession, requireRole, logout, decodeJwt, routeByRole, relativeRoot, impersonate, exitImpersonate, isImpersonating, getRealRole };
 })();
