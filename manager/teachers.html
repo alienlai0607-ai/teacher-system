@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>老師列表與深度查閱</title>
+<link rel="stylesheet" href="../shared/style.css">
+<script src="../shared/config.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/api.js"></script>
+<script src="../shared/ui.js"></script>
+<style>
+  .layout { display: grid; grid-template-columns: 260px 1fr; gap: 16px; }
+  @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } }
+  .teacher-card {
+    padding: 14px; border-radius: 10px; cursor: pointer;
+    background: #fff; margin-bottom: 8px; border: 1px solid var(--border);
+    transition: all 0.15s;
+  }
+  .teacher-card:hover { border-color: var(--primary); }
+  .teacher-card.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+  @media (max-width: 800px) {
+    .teacher-list-wrap {
+      display: flex; gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 8px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .teacher-list-wrap::-webkit-scrollbar { display: none; }
+    .teacher-card { flex-shrink: 0; min-width: 130px; margin-bottom: 0; }
+  }
+  .feedback-input { flex-wrap: wrap; }
+  .feedback-input input { min-width: 0; }
+  @media (max-width: 500px) {
+    .feedback-input { flex-direction: column; align-items: stretch; }
+    .feedback-input select { width: 100%; }
+  }
+  .log-card {
+    background: #fff; padding: 14px; border-radius: 8px;
+    margin-bottom: 12px; box-shadow: var(--shadow);
+  }
+  .kpi-block { background: #f7f6fb; padding: 10px; border-radius: 6px; margin: 6px 0; }
+  .kpi-block-title { font-weight: 700; font-size: 13px; color: var(--primary); margin-bottom: 6px; }
+  .feedback-input { display: flex; gap: 6px; margin-top: 8px; }
+  .feedback-input input { flex: 1; }
+</style>
+</head>
+<body>
+<div id="app-header"></div>
+
+<div class="container">
+  <h2>👥 部門老師</h2>
+
+  <div class="layout">
+    <div>
+      <input id="search" placeholder="🔍 搜尋暱稱" oninput="filterTeachers()">
+      <div id="teacher-list" class="teacher-list-wrap mt-1"></div>
+    </div>
+
+    <div id="detail">
+      <div class="card muted">← 請點選左側老師查看詳細日誌</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const session = AUTH.requireRole(['manager']);
+let allTeachers = [];
+let selectedTeacher = null;
+
+window.addEventListener('load', async () => {
+  UI.mountHeader(session);
+  await loadTeachers();
+  // 從 URL 帶入預選老師
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('nickname')) {
+    selectTeacher(params.get('nickname'));
+  }
+});
+
+async function loadTeachers() {
+  const res = await API.listUsers();
+  if (!res.ok) return;
+  allTeachers = res.users.filter(u =>
+    u.role === 'teacher' && u.department === session.department && u.status === 'active'
+  );
+  renderTeacherList();
+}
+
+function renderTeacherList() {
+  const q = document.getElementById('search').value.trim();
+  const list = q ? allTeachers.filter(t => t.nickname.includes(q)) : allTeachers;
+  const wrap = document.getElementById('teacher-list');
+  wrap.innerHTML = list.map(t => `
+    <div class="teacher-card ${selectedTeacher === t.nickname ? 'active' : ''}" onclick="selectTeacher('${t.nickname}')">
+      <strong>${t.nickname}</strong>
+      <div class="text-sm" style="opacity:0.8;">${t.email || '尚未綁定 Email'}</div>
+    </div>
+  `).join('') || '<div class="muted">部門尚無老師</div>';
+}
+
+function filterTeachers() { renderTeacherList(); }
+
+async function selectTeacher(nickname) {
+  selectedTeacher = nickname;
+  renderTeacherList();
+  await loadDetail(nickname);
+}
+
+async function loadDetail(nickname) {
+  const detail = document.getElementById('detail');
+  detail.innerHTML = '<div class="card muted">載入中...</div>';
+  const res = await API.listLogs({ viewer: session.nickname, nickname, limit: 15 });
+  if (!res.ok) {
+    detail.innerHTML = '<div class="card">載入失敗：' + res.error + '</div>';
+    return;
+  }
+  const fbRes = await API.listFeedback({ nickname });
+  const fbMap = {};
+  if (fbRes.ok) fbRes.feedback.forEach(f => {
+    fbMap[f.log_id] = fbMap[f.log_id] || [];
+    fbMap[f.log_id].push(f);
+  });
+
+  if (res.logs.length === 0) {
+    detail.innerHTML = `<div class="card"><h3>${nickname}</h3><div class="muted">尚無日誌紀錄</div></div>`;
+    return;
+  }
+
+  detail.innerHTML = `
+    <h3 style="margin-top:0;">${nickname} 的最近日誌</h3>
+    ${res.logs.map(l => renderLogCard(l, fbMap[l.log_id] || [])).join('')}
+  `;
+}
+
+function renderLogCard(l, fbList) {
+  const KPI_DEF = APP_CONFIG.TEACHER_KPI;
+  const helpHtml = l.help_needed
+    ? `<div class="tag tag-danger mb-1">🚨 求助：${l.help_content || ''}</div>`
+    : '';
+  return `
+    <div class="log-card">
+      <div class="flex-between">
+        <div><strong>${UI.formatDate(l.date)}</strong></div>
+        <div class="muted text-sm">${UI.formatDateTime(l.updated_at)}</div>
+      </div>
+      ${helpHtml}
+      ${KPI_DEF.map(k => renderKpiData(k, l['kpi' + k.no + '_data'])).join('')}
+      ${l.reflection ? `<div class="kpi-block"><div class="kpi-block-title">💭 心得</div>${l.reflection}</div>` : ''}
+      ${l.attachments && l.attachments.length > 0 ? `<div class="kpi-block"><div class="kpi-block-title">📎 附件（${l.attachments.length}）</div>${l.attachments.map(a => `<a href="${a.url}" target="_blank">[KPI${a.kpi}] ${a.description || a.url}</a>`).join('<br>')}</div>` : ''}
+      ${fbList.length > 0 ? fbList.map(f => `<div class="kpi-block" style="background:#fff8e7;"><div class="kpi-block-title">💬 ${f.from_nickname} 回饋</div>${f.content} <span class="tag tag-info">${f.tag}</span></div>`).join('') : ''}
+      ${renderFeedbackInput(l.log_id, l.nickname)}
+    </div>
+  `;
+}
+
+function renderKpiData(k, data) {
+  if (!data || typeof data !== 'object' || Object.keys(data).length === 0) return '';
+  const items = Object.entries(data).map(([key, val]) => `<div style="font-size:13px;"><span class="muted">${key}：</span>${val === true ? '✅' : val === false ? '—' : val}</div>`).join('');
+  return `<div class="kpi-block"><div class="kpi-block-title">${k.icon} KPI${k.no} ${k.name}</div>${items}</div>`;
+}
+
+function renderFeedbackInput(log_id, to_nickname) {
+  return `
+    <div class="feedback-input">
+      <input placeholder="給予回饋..." id="fb-${log_id}">
+      <select id="fb-tag-${log_id}" style="width:auto;">
+        <option>已知悉</option>
+        <option>優秀表現</option>
+        <option>需改進</option>
+        <option>求助回應</option>
+      </select>
+      <button class="btn btn-primary btn-sm" onclick="submitFeedback('${log_id}', '${to_nickname}')">送出</button>
+    </div>
+  `;
+}
+
+async function submitFeedback(log_id, to_nickname) {
+  const content = document.getElementById('fb-' + log_id).value.trim();
+  const tag = document.getElementById('fb-tag-' + log_id).value;
+  if (!content) {
+    UI.toast('請填寫回饋內容', 'warn');
+    return;
+  }
+  UI.loading(true);
+  const res = await API.addFeedback({
+    log_id, from_nickname: session.nickname, to_nickname, content, tag
+  });
+  UI.loading(false);
+  if (res.ok) {
+    UI.toast('回饋已送出', 'success');
+    document.getElementById('fb-' + log_id).value = '';
+    loadDetail(selectedTeacher);
+  } else {
+    UI.toast(res.error, 'danger');
+  }
+}
+</script>
+</body>
+</html>

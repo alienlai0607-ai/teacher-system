@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>獎金核發</title>
+<link rel="stylesheet" href="../shared/style.css">
+<script src="../shared/config.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/api.js"></script>
+<script src="../shared/ui.js"></script>
+</head>
+<body>
+<div id="app-header"></div>
+
+<div class="container">
+  <h2>💰 獎金核發</h2>
+
+  <div class="card">
+    <div class="form-row">
+      <label>月份</label>
+      <input type="month" id="ym" onchange="loadAll()" value="">
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">👩‍🏫 老師獎金</div>
+    <table>
+      <thead><tr><th>姓名</th><th>部門</th><th>KPI</th><th>OKR</th><th>總分</th><th>評等</th><th>獎金</th></tr></thead>
+      <tbody id="teacher-tbody"></tbody>
+    </table>
+    <div class="text-sm muted mt-1">小計：NT$<span id="teacher-total">0</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">👔 主管獎金</div>
+    <table>
+      <thead><tr><th>姓名</th><th>部門</th><th>KPI</th><th>OKR</th><th>總分</th><th>評等</th><th>最終獎金</th></tr></thead>
+      <tbody id="manager-tbody"></tbody>
+    </table>
+    <div class="text-sm muted mt-1">小計：NT$<span id="manager-total">0</span></div>
+  </div>
+
+  <div class="card total-box" style="background: linear-gradient(135deg, var(--primary), var(--accent)); color:#fff; text-align:center; padding:24px;">
+    <div>本月獎金總支出</div>
+    <div style="font-size:36px; font-weight:800;">NT$<span id="grand-total">0</span></div>
+  </div>
+</div>
+
+<script>
+const session = AUTH.requireRole(['admin']);
+
+window.addEventListener('load', async () => {
+  UI.mountHeader(session);
+  document.getElementById('ym').value = new Date().toISOString().slice(0, 7);
+  await loadAll();
+});
+
+async function loadAll() {
+  const ym = document.getElementById('ym').value;
+  if (!ym) return;
+  UI.loading(true);
+  const [tRes, mRes, uRes] = await Promise.all([
+    API.listEvals({ year_month: ym }),
+    API.listEvals({ year_month: ym, role: 'manager' }),
+    API.listUsers()
+  ]);
+  UI.loading(false);
+  const usersMap = {};
+  if (uRes.ok) uRes.users.forEach(u => usersMap[u.nickname] = u);
+
+  // Teachers
+  let tTotal = 0;
+  if (tRes.ok) {
+    document.getElementById('teacher-tbody').innerHTML = tRes.evals.map(e => {
+      tTotal += Number(e.bonus || 0);
+      const u = usersMap[e.nickname] || {};
+      const kpiTotal = Number(e.total_score || 0) - Number(e.score_okr || 0);
+      return `<tr>
+        <td><strong>${e.nickname}</strong></td>
+        <td>${u.department || ''}</td>
+        <td>${kpiTotal}</td>
+        <td>${e.score_okr || 0}</td>
+        <td>${e.total_score || 0}</td>
+        <td><span class="tag tag-${gradeColor(e.grade)}">${e.grade || '—'}</span></td>
+        <td>NT$${e.bonus || 0}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="7" class="muted">無資料</td></tr>';
+  }
+  document.getElementById('teacher-total').textContent = tTotal;
+
+  // Managers
+  let mTotal = 0;
+  if (mRes.ok) {
+    document.getElementById('manager-tbody').innerHTML = mRes.evals.map(e => {
+      const bonus = Number(e.final_bonus || e.bonus || 0);
+      mTotal += bonus;
+      const u = usersMap[e.nickname] || {};
+      const kpiTotal = Number(e.total_score || 0) - Number(e.score_okr || 0);
+      return `<tr>
+        <td><strong>${e.nickname}</strong></td>
+        <td>${u.department || ''}</td>
+        <td>${kpiTotal}</td>
+        <td>${e.score_okr || 0}</td>
+        <td>${e.total_score || 0}</td>
+        <td><span class="tag tag-${gradeColor(e.grade)}">${e.grade || '—'}</span></td>
+        <td>NT$${bonus}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="7" class="muted">無資料</td></tr>';
+  }
+  document.getElementById('manager-total').textContent = mTotal;
+  document.getElementById('grand-total').textContent = tTotal + mTotal;
+}
+
+function gradeColor(g) {
+  if (g === '卓越') return 'success';
+  if (g === '優良') return 'success';
+  if (g === '達標') return 'info';
+  if (g === '基本合格') return 'warn';
+  if (g === '待改善') return 'danger';
+  return 'info';
+}
+</script>
+</body>
+</html>

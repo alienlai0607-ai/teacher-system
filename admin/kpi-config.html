@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>KPI 規則設定</title>
+<link rel="stylesheet" href="../shared/style.css">
+<script src="../shared/config.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/api.js"></script>
+<script src="../shared/ui.js"></script>
+</head>
+<body>
+<div id="app-header"></div>
+
+<div class="container">
+  <h2>⚙️ KPI 規則設定</h2>
+  <div class="card">
+    <div class="card-title">📊 老師 KPI</div>
+    <div id="teacher-kpi"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">📊 主管 KPI</div>
+    <div id="manager-kpi"></div>
+  </div>
+  <div class="muted text-sm">＊目前為唯讀檢視。如需調整評分項目與權重，請直接編輯 Google Sheet 的 KPI_Config 分頁。</div>
+</div>
+
+<script>
+const session = AUTH.requireRole(['admin']);
+
+window.addEventListener('load', () => {
+  UI.mountHeader(session);
+  renderKpi('teacher', APP_CONFIG.TEACHER_KPI, 'teacher-kpi');
+  renderKpi('manager', APP_CONFIG.MANAGER_KPI, 'manager-kpi');
+});
+
+function renderKpi(role, list, target) {
+  document.getElementById(target).innerHTML = list.map(k => `
+    <div style="padding:10px 0; border-bottom:1px solid var(--border);">
+      <div class="flex-between">
+        <div><strong>${k.icon} KPI${k.no} ${k.name}</strong></div>
+        <div class="tag">滿分 ${k.max}</div>
+      </div>
+    </div>
+  `).join('');
+}
+</script>
+</body>
+</html>

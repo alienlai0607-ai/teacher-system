@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>我的 KPI 預估</title>
+<link rel="stylesheet" href="../shared/style.css">
+<script src="../shared/config.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/api.js"></script>
+<script src="../shared/ui.js"></script>
+<style>
+  .score-circle {
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+    color: #fff;
+    border-radius: var(--radius);
+    padding: 28px 16px;
+    text-align: center;
+  }
+  .score-big { font-size: 48px; font-weight: 800; line-height: 1; }
+  .score-small { font-size: 14px; opacity: 0.9; }
+  .kpi-bar {
+    display: grid; grid-template-columns: 110px 1fr 60px;
+    gap: 12px; align-items: center;
+    padding: 12px 0; border-bottom: 1px solid var(--border);
+  }
+  .kpi-bar:last-child { border-bottom: none; }
+  .kpi-bar-name { font-size: 13px; font-weight: 600; }
+  .kpi-bar-track { background: var(--border); height: 10px; border-radius: 999px; }
+  .kpi-bar-fill { background: linear-gradient(90deg, var(--primary), var(--accent)); height: 100%; border-radius: 999px; }
+  .kpi-bar-score { text-align: right; font-weight: 700; font-size: 14px; color: var(--primary); }
+  @media (max-width: 500px) {
+    .kpi-bar { grid-template-columns: 1fr 50px; row-gap: 6px; }
+    .kpi-bar-track { grid-column: 1 / -1; }
+  }
+  .log-item {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .log-item:last-child { border-bottom: none; }
+  .feedback-item {
+    background: #fff8e7;
+    padding: 8px 12px; border-radius: 6px; margin-top: 6px;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div id="app-header"></div>
+
+<div class="container">
+  <h2 style="margin-top:0;">📊 我的 KPI 預估（<span id="year-month"></span>）</h2>
+
+  <div id="score-section"></div>
+
+  <div class="card">
+    <div class="card-title">📈 6 大 KPI 進度</div>
+    <div id="kpi-bars"></div>
+  </div>
+
+  <div class="card" id="todos-card" style="display:none;">
+    <div class="card-title">⚠️ 本月待補</div>
+    <ul id="todos-list" style="margin:0; padding-left:20px;"></ul>
+  </div>
+
+  <div class="card">
+    <div class="card-title">📅 最近日誌與回饋</div>
+    <div id="recent-logs"></div>
+  </div>
+</div>
+
+<script>
+const session = AUTH.requireRole(['teacher', 'manager']);
+
+window.addEventListener('load', async () => {
+  UI.mountHeader(session);
+  document.getElementById('year-month').textContent = new Date().toISOString().slice(0, 7);
+  await loadPreview();
+  await loadRecentLogs();
+});
+
+async function loadPreview() {
+  UI.loading(true);
+  const res = await API.getMyKpiPreview(session.nickname);
+  UI.loading(false);
+  if (!res.ok) {
+    UI.toast(res.error, 'danger');
+    return;
+  }
+  renderScore(res);
+  renderKpiBars(res);
+  renderTodos(res.todos);
+}
+
+function renderScore(res) {
+  const wrap = document.getElementById('score-section');
+  wrap.innerHTML = `
+    <div class="score-circle">
+      <div class="score-small">本月預估 KPI 分數</div>
+      <div class="score-big">${res.kpi_total} / 70</div>
+      <div class="score-small" style="margin-top:8px;">⭐ ${res.grade} · 預估獎金 NT$${res.bonus_estimated}</div>
+    </div>
+    <div class="stat-grid mt-2">
+      <div class="stat-box"><div class="stat-num">${res.summary.log_count}</div><div class="stat-label">本月已填日誌</div></div>
+      <div class="stat-box"><div class="stat-num">${res.summary.evidence_count}</div><div class="stat-label">累積證據</div></div>
+      <div class="stat-box"><div class="stat-num">${res.summary.feedback_count}</div><div class="stat-label">主管回饋</div></div>
+    </div>
+  `;
+}
+
+function renderKpiBars(res) {
+  const KPI_DEF = res.role === 'manager' ? APP_CONFIG.MANAGER_KPI : APP_CONFIG.TEACHER_KPI;
+  const wrap = document.getElementById('kpi-bars');
+  wrap.innerHTML = KPI_DEF.map(k => {
+    const score = res.suggestion[`k${k.no}`] || 0;
+    const pct = (score / k.max) * 100;
+    return `<div class="kpi-bar">
+      <div class="kpi-bar-name">${k.icon} ${k.name}</div>
+      <div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:${pct}%;"></div></div>
+      <div class="kpi-bar-score">${score}/${k.max}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderTodos(todos) {
+  if (!todos || todos.length === 0) return;
+  document.getElementById('todos-card').style.display = 'block';
+  document.getElementById('todos-list').innerHTML = todos.map(t => `<li>${t}</li>`).join('');
+}
+
+async function loadRecentLogs() {
+  const res = await API.listLogs({ viewer: session.nickname, nickname: session.nickname, limit: 10 });
+  if (!res.ok) return;
+  const fbRes = await API.listFeedback({ nickname: session.nickname });
+  const fbMap = {};
+  if (fbRes.ok) fbRes.feedback.forEach(f => {
+    fbMap[f.log_id] = fbMap[f.log_id] || [];
+    fbMap[f.log_id].push(f);
+  });
+
+  const wrap = document.getElementById('recent-logs');
+  if (res.logs.length === 0) {
+    wrap.innerHTML = '<div class="muted">尚無日誌紀錄</div>';
+    return;
+  }
+  wrap.innerHTML = res.logs.map(l => {
+    const fbList = fbMap[l.log_id] || [];
+    return `<div class="log-item">
+      <div class="flex-between">
+        <div><strong>${UI.formatDate(l.date)}</strong> ${l.help_needed ? '<span class="tag tag-danger">求助</span>' : '<span class="tag tag-success">已交</span>'}</div>
+        <div class="muted text-sm">${l.reflection ? l.reflection.slice(0, 30) + '...' : ''}</div>
+      </div>
+      ${fbList.map(f => `<div class="feedback-item">💬 <strong>${f.from_nickname}</strong>：${f.content} <span class="tag tag-${tagClass(f.tag)}">${f.tag}</span></div>`).join('')}
+    </div>`;
+  }).join('');
+}
+
+function tagClass(tag) {
+  if (tag === '優秀表現') return 'success';
+  if (tag === '需改進') return 'danger';
+  if (tag === '求助回應') return 'warn';
+  return 'info';
+}
+</script>
+</body>
+</html>

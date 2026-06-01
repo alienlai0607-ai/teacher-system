@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>部門儀表板</title>
+<link rel="stylesheet" href="../shared/style.css">
+<script src="../shared/config.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/api.js"></script>
+<script src="../shared/ui.js"></script>
+<style>
+  .teacher-row {
+    display: grid; grid-template-columns: 1fr auto auto;
+    gap: 12px; align-items: center; padding: 14px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .teacher-row:last-child { border-bottom: none; }
+  .status-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .status-ok { background: var(--success); }
+  .status-warn { background: var(--warn); }
+  .status-danger { background: var(--danger); }
+  @media (max-width: 500px) {
+    .teacher-row { grid-template-columns: 1fr auto; row-gap: 4px; }
+    .teacher-row > div:nth-child(3) { grid-column: 1 / -1; justify-self: end; }
+  }
+</style>
+</head>
+<body>
+<div id="app-header"></div>
+
+<div class="container">
+  <h2 style="margin-top:0;">🏫 <span id="dept-name"></span> · <span id="today-str"></span></h2>
+
+  <div class="stat-grid">
+    <div class="stat-box"><div class="stat-num" id="stat-teachers">—</div><div class="stat-label">在職老師</div></div>
+    <div class="stat-box"><div class="stat-num" id="stat-submitted">—</div><div class="stat-label">今日已交</div></div>
+    <div class="stat-box"><div class="stat-num" id="stat-help" style="color:var(--danger);">—</div><div class="stat-label">求助標記</div></div>
+    <div class="stat-box"><div class="stat-num" id="stat-avg">—</div><div class="stat-label">本月平均</div></div>
+  </div>
+
+  <div class="card mt-2">
+    <div class="card-title">📋 今日老師日誌狀況</div>
+    <div id="teachers-list"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">📣 我的本週發文進度</div>
+    <div id="week-post"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">🎯 待辦提醒</div>
+    <ul id="todos" style="margin:0; padding-left:20px;"><li class="muted">載入中...</li></ul>
+  </div>
+</div>
+
+<script>
+const session = AUTH.requireRole(['manager']);
+
+window.addEventListener('load', async () => {
+  UI.mountHeader(session);
+  document.getElementById('dept-name').textContent = session.department;
+  document.getElementById('today-str').textContent = new Date().toLocaleDateString('zh-TW');
+  await loadDashboard();
+  await loadWeekPost();
+});
+
+async function loadDashboard() {
+  UI.loading(true);
+  const res = await API.getDashboard(session.nickname);
+  UI.loading(false);
+  if (!res.ok) {
+    UI.toast(res.error, 'danger');
+    return;
+  }
+  document.getElementById('stat-teachers').textContent = res.teachers_count;
+  document.getElementById('stat-submitted').textContent = `${res.submitted_count}/${res.teachers_count}`;
+  document.getElementById('stat-help').textContent = res.help_count;
+  document.getElementById('stat-avg').textContent = res.month_avg !== null ? res.month_avg : '—';
+
+  const wrap = document.getElementById('teachers-list');
+  if (res.status.length === 0) {
+    wrap.innerHTML = '<div class="muted">部門尚無老師</div>';
+    return;
+  }
+  wrap.innerHTML = res.status.map(s => {
+    const dotClass = s.help_needed ? 'status-danger' : (s.submitted ? 'status-ok' : 'status-warn');
+    const statusText = s.help_needed ? '🚨 求助' : (s.submitted ? '✅ 已交' : '⏰ 未填');
+    return `<div class="teacher-row">
+      <div>
+        <span class="status-dot ${dotClass}"></span>
+        <strong>${s.nickname}</strong>
+      </div>
+      <div>${statusText}</div>
+      <div>
+        ${s.log_id ? `<a href="teachers.html?nickname=${encodeURIComponent(s.nickname)}" class="btn btn-sm">查看</a>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  // todos
+  const todos = [];
+  res.status.forEach(s => {
+    if (!s.submitted) todos.push(`${s.nickname} 今日尚未填寫日誌`);
+    if (s.help_needed) todos.push(`🚨 ${s.nickname} 標記求助，請優先處理`);
+  });
+  const today = new Date();
+  if (today.getDate() >= 25) todos.push(`本月評核截止：${today.getFullYear()}/${today.getMonth()+1}/${new Date(today.getFullYear(), today.getMonth()+1, 0).getDate()}`);
+  document.getElementById('todos').innerHTML = todos.length === 0
+    ? '<li class="muted">今日無待辦事項</li>'
+    : todos.map(t => `<li>${t}</li>`).join('');
+}
+
+async function loadWeekPost() {
+  const res = await API.getWeekPostCount(session.nickname);
+  const wrap = document.getElementById('week-post');
+  if (!res.ok) return;
+  const ok = res.count >= 3;
+  wrap.innerHTML = `
+    <div class="flex gap-2" style="align-items:center;">
+      <div class="text-lg" style="font-weight:700;">${res.count} / 3 篇</div>
+      <span class="tag tag-${ok ? 'success' : 'warn'}">${ok ? '✅ 達標' : '⚠️ 尚未達標'}</span>
+    </div>
+    <div class="progress-bar mt-1"><div class="progress-fill" style="width:${Math.min(100, res.count/3*100)}%;"></div></div>
+    <div class="text-sm muted mt-1">本週（${res.week}）FB + IG 累計發文</div>
+  `;
+}
+</script>
+</body>
+</html>

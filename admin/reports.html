@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>跨部門報表</title>
+<link rel="stylesheet" href="../shared/style.css">
+<script src="../shared/config.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/api.js"></script>
+<script src="../shared/ui.js"></script>
+</head>
+<body>
+<div id="app-header"></div>
+
+<div class="container">
+  <h2>📊 跨部門報表</h2>
+  <div class="card">
+    <div class="form-row">
+      <label>查詢月份</label>
+      <input type="month" id="ym" onchange="loadReport()">
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">📈 三部門對比</div>
+    <table>
+      <thead><tr><th>部門</th><th>主管</th><th>老師數</th><th>平均 KPI</th><th>主管 KPI</th><th>獎金支出</th></tr></thead>
+      <tbody id="report-tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <button class="btn btn-primary" onclick="exportCSV()">📥 匯出本月評核 CSV</button>
+  </div>
+</div>
+
+<script>
+const session = AUTH.requireRole(['admin']);
+
+window.addEventListener('load', async () => {
+  UI.mountHeader(session);
+  document.getElementById('ym').value = new Date().toISOString().slice(0, 7);
+  await loadReport();
+});
+
+async function loadReport() {
+  const ym = document.getElementById('ym').value;
+  UI.loading(true);
+  const [users, teacherEvals, managerEvals] = await Promise.all([
+    API.listUsers(),
+    API.listEvals({ year_month: ym }),
+    API.listEvals({ year_month: ym, role: 'manager' })
+  ]);
+  UI.loading(false);
+  if (!users.ok) return;
+
+  const rows = APP_CONFIG.DEPARTMENTS.map(dept => {
+    const manager = users.users.find(u => u.department === dept && u.role === 'manager');
+    const teachers = users.users.filter(u => u.department === dept && u.role === 'teacher');
+    const teacherIds = teachers.map(t => t.nickname);
+    const tEvals = teacherEvals.ok ? teacherEvals.evals.filter(e => teacherIds.includes(e.nickname)) : [];
+    const avg = tEvals.length > 0
+      ? Math.round(tEvals.reduce((s, e) => s + Number(e.total_score || 0), 0) / tEvals.length * 10) / 10
+      : null;
+    const mEval = manager && managerEvals.ok
+      ? managerEvals.evals.find(e => e.nickname === manager.nickname)
+      : null;
+    const bonus = tEvals.reduce((s, e) => s + Number(e.bonus || 0), 0)
+      + (mEval ? Number(mEval.final_bonus || mEval.bonus || 0) : 0);
+    return { dept, manager, teachers, avg, mEval, bonus };
+  });
+
+  document.getElementById('report-tbody').innerHTML = rows.map(r => `
+    <tr>
+      <td><strong>🏫 ${r.dept}</strong></td>
+      <td>${r.manager ? r.manager.nickname : '—'}</td>
+      <td>${r.teachers.length}</td>
+      <td><strong>${r.avg !== null ? r.avg : '—'}</strong></td>
+      <td>${r.mEval ? r.mEval.total_score : '—'} ${r.mEval ? `<span class="tag tag-${gradeColor(r.mEval.grade)}">${r.mEval.grade}</span>` : ''}</td>
+      <td>NT$${r.bonus}</td>
+    </tr>
+  `).join('');
+}
+
+function gradeColor(g) {
+  if (['卓越','優良'].includes(g)) return 'success';
+  if (g === '達標') return 'info';
+  if (g === '基本合格') return 'warn';
+  return 'danger';
+}
+
+async function exportCSV() {
+  const ym = document.getElementById('ym').value;
+  const [tRes, mRes, uRes] = await Promise.all([
+    API.listEvals({ year_month: ym }),
+    API.listEvals({ year_month: ym, role: 'manager' }),
+    API.listUsers()
+  ]);
+  const usersMap = {};
+  uRes.users.forEach(u => usersMap[u.nickname] = u);
+
+  let csv = '﻿角色,姓名,部門,KPI,OKR,總分,評等,獎金\n';
+  if (tRes.ok) tRes.evals.forEach(e => {
+    const u = usersMap[e.nickname] || {};
+    const kpi = Number(e.total_score || 0) - Number(e.score_okr || 0);
+    csv += `老師,${e.nickname},${u.department},${kpi},${e.score_okr},${e.total_score},${e.grade},${e.bonus}\n`;
+  });
+  if (mRes.ok) mRes.evals.forEach(e => {
+    const u = usersMap[e.nickname] || {};
+    const kpi = Number(e.total_score || 0) - Number(e.score_okr || 0);
+    const b = e.final_bonus || e.bonus;
+    csv += `主管,${e.nickname},${u.department},${kpi},${e.score_okr},${e.total_score},${e.grade},${b}\n`;
+  });
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `KPI_${ym}.csv`;
+  a.click();
+}
+</script>
+</body>
+</html>

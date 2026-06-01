@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>今日工作日誌</title>
+<link rel="stylesheet" href="../shared/style.css">
+<script src="../shared/config.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/api.js"></script>
+<script src="../shared/ui.js"></script>
+<style>
+  .kpi-page { display: none; }
+  .kpi-page.active { display: block; }
+  .rating-row { display: flex; gap: 8px; margin: 8px 0; }
+  .rating-btn {
+    flex: 1; padding: 10px; background: #fff; border: 1px solid var(--border);
+    border-radius: 8px; cursor: pointer; font-size: 18px;
+  }
+  .rating-btn.selected { background: var(--primary); color: #fff; border-color: var(--primary); }
+  body { padding-bottom: 90px; }
+  .nav-buttons {
+    display: flex; gap: 10px;
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: rgba(247,246,251,0.96);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    z-index: 20;
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -2px 12px rgba(0,0,0,0.06);
+  }
+  .nav-buttons .btn { flex: 1; min-height: 48px; font-size: 15px; }
+  .check-list label {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px; cursor: pointer; font-weight: normal;
+    color: var(--text); font-size: 14px;
+  }
+  .check-list input { width: auto; }
+  .attach-area { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .attach-input {
+    width: 70px; height: 70px; border: 2px dashed var(--border); border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px; color: var(--text-light); cursor: pointer; background: #fff;
+  }
+  .attach-link {
+    background: #f0eef7; padding: 6px 10px; border-radius: 6px;
+    font-size: 12px; display: flex; gap: 6px; align-items: center;
+  }
+  .post-card {
+    background: #fff8e7; border: 1px solid var(--accent);
+    padding: 10px; border-radius: 8px; margin-bottom: 8px;
+  }
+  .helper-text { font-size: 12px; color: var(--text-light); margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<div id="app-header"></div>
+
+<div class="container-narrow">
+
+  <!-- Header info -->
+  <div class="card">
+    <div class="flex-between">
+      <div>
+        <div class="text-lg" style="font-weight:700;">📅 <span id="today-date"></span></div>
+        <div class="muted text-sm">Hi <span id="user-nick"></span>！</div>
+      </div>
+      <button class="btn btn-sm" onclick="copyYesterday()">📋 複製昨日</button>
+    </div>
+  </div>
+
+  <!-- KPI Tab navigation -->
+  <div class="kpi-tabs" id="kpi-tabs"></div>
+
+  <!-- KPI pages container -->
+  <div id="kpi-pages"></div>
+
+  <!-- Reflection + Help -->
+  <div class="card kpi-page" id="page-final">
+    <div class="card-title">💭 今日心得 & 求助</div>
+    <div class="form-row">
+      <label>今日心得（自由文字）</label>
+      <textarea id="reflection" placeholder="記錄今天的觀察、收穫、想分享的事..."></textarea>
+    </div>
+    <div class="form-row">
+      <label style="display:flex; gap:8px; align-items:center;">
+        <input type="checkbox" id="help-needed" style="width:auto;">
+        <span>⚠️ 需要主管協助</span>
+      </label>
+    </div>
+    <div class="form-row" id="help-content-wrap" style="display:none;">
+      <label>求助內容</label>
+      <textarea id="help-content" placeholder="想請主管協助什麼？"></textarea>
+    </div>
+    <button class="btn btn-primary" style="width:100%;" onclick="submitLog()">💾 提交今日日誌</button>
+  </div>
+
+  <!-- Navigation -->
+  <div class="nav-buttons" id="bottom-nav">
+    <button class="btn" id="prev-btn" onclick="prevPage()">← 上一項</button>
+    <button class="btn btn-primary" id="next-btn" onclick="nextPage()">下一項 →</button>
+  </div>
+
+  <div class="text-sm muted text-center mt-2" id="autosave-info"></div>
+</div>
+
+<script>
+const session = AUTH.requireRole(['teacher', 'manager']);
+let role = session ? session.role : 'teacher';
+let currentPage = 0;
+let logData = {};
+let autoSaveTimer;
+
+// === KPI definitions ===
+const TEACHER_KPI_FORM = [
+  { no: 1, name: '學校課業指導', icon: '📚', fields: [
+    { key: 'class_count', label: '今日批改作業班級數', type: 'number', placeholder: '例：3' },
+    { key: 'correction_rate', label: '訂正完成率（%）', type: 'number', placeholder: '0-100' },
+    { key: 'challenge_book', label: '是否設計挑戰本', type: 'checkbox' },
+    { key: 'challenge_content', label: '挑戰本內容/主題', type: 'text', showIf: 'challenge_book' },
+    { key: 'individual_help', label: '個別補強學生（姓名/重點）', type: 'textarea' },
+    { key: 'review_test_prep', label: '今日課業複習/考試準備', type: 'textarea' },
+  ]},
+  { no: 2, name: '班級經營', icon: '🏫', fields: [
+    { key: 'order_rating', label: '今日班級秩序自評', type: 'rating' },
+    { key: 'incident', label: '突發事件', type: 'checkbox' },
+    { key: 'incident_detail', label: '事件處理過程', type: 'textarea', showIf: 'incident' },
+    { key: 'environment', label: '環境整理重點', type: 'text' },
+  ]},
+  { no: 3, name: '專案課程', icon: '🎯', fields: [
+    { key: 'project_name', label: '今日專案名稱', type: 'text' },
+    { key: 'project_progress', label: '專案進度說明', type: 'textarea' },
+    { key: 'engagement', label: '學生參與度自評', type: 'rating' },
+    { key: 'material_ready', label: '教材是否準備完整', type: 'checkbox' },
+  ]},
+  { no: 4, name: '群組經營', icon: '💬', fields: [
+    { key: 'group_post', label: '今日群組發文', type: 'checkbox' },
+    { key: 'group_post_link', label: '發文連結/截圖', type: 'text', showIf: 'group_post' },
+    { key: 'reply_count', label: '回覆訊息筆數', type: 'number' },
+    { key: 'notebook_link', label: '記事本/課程紀錄連結（每月至少2篇）', type: 'text' },
+  ]},
+  { no: 5, name: '親師溝通', icon: '🤝', fields: [
+    { key: 'parent_contact_count', label: '今日主動聯繫家長人數', type: 'number' },
+    { key: 'parent_contact_detail', label: '溝通對象與內容摘要', type: 'textarea' },
+    { key: 'parent_face_count', label: '下課與家長互動人數', type: 'number' },
+    { key: 'special_event', label: '特殊狀況回報', type: 'textarea' },
+  ]},
+  { no: 6, name: '個人態度', icon: '⭐', fields: [
+    { key: 'tasks_done', label: '今日完成的交辦事項', type: 'textarea' },
+    { key: 'self_initiative', label: '主動發現的問題/建議', type: 'textarea' },
+    { key: 'growth_learning', label: '今日學習/成長', type: 'text' },
+  ]},
+];
+
+const MANAGER_KPI_FORM = [
+  { no: 1, name: '團隊領導與培訓', icon: '👥', fields: [
+    { key: 'feedback_count', label: '今日給予老師回饋筆數', type: 'number' },
+    { key: 'observe_done', label: '今日是否完成觀課', type: 'checkbox' },
+    { key: 'observe_target', label: '觀課對象與重點', type: 'textarea', showIf: 'observe_done' },
+    { key: 'patrol_done', label: '今日巡班記錄', type: 'textarea' },
+    { key: 'training_held', label: '今日是否進行培訓', type: 'checkbox' },
+    { key: 'training_content', label: '培訓主題/內容', type: 'textarea', showIf: 'training_held' },
+  ]},
+  { no: 2, name: '教學品質監督', icon: '🔍', fields: [
+    { key: 'quality_issue', label: '今日發現品質問題', type: 'textarea' },
+    { key: 'handle_action', label: '已採取的處理動作', type: 'textarea' },
+    { key: 'material_review', label: '教材教案審核情況', type: 'textarea' },
+    { key: 'incident_guide', label: '突發事件指導案例', type: 'textarea' },
+  ]},
+  { no: 3, name: '部門特色發展', icon: '🚀', fields: [
+    { key: 'new_lesson', label: '新教案/特色課程進度', type: 'textarea' },
+    { key: 'cross_activity', label: '跨班活動策劃', type: 'textarea' },
+    { key: 'resource_update', label: '教學資源更新', type: 'text' },
+  ]},
+  { no: 4, name: '招生與發文', icon: '📣', fields: [
+    { key: 'enrollment_change', label: '今日學生人數異動（+/-）', type: 'text' },
+    { key: 'recruit_activity', label: '招生活動執行', type: 'textarea' },
+    { key: 'posts', label: '今日 FB/IG 發文（每週累計需 ≥3 篇）', type: 'posts' },
+  ]},
+  { no: 5, name: '親師與客訴', icon: '☎️', fields: [
+    { key: 'complaint_count', label: '今日新增客訴件數', type: 'number' },
+    { key: 'complaint_detail', label: '客訴內容與處理', type: 'textarea' },
+    { key: 'parent_event', label: '親師活動進度', type: 'text' },
+    { key: 'serious_case', label: '重大親師事件處理', type: 'textarea' },
+  ]},
+  { no: 6, name: '個人態度', icon: '⭐', fields: [
+    { key: 'tasks_done', label: '今日完成柏翰交辦事項', type: 'textarea' },
+    { key: 'self_initiative', label: '主動發現的部門問題與建議', type: 'textarea' },
+    { key: 'upward_report', label: '今日向上回報重要狀況', type: 'textarea' },
+  ]},
+];
+
+const KPI_FORM = role === 'manager' ? MANAGER_KPI_FORM : TEACHER_KPI_FORM;
+
+window.addEventListener('load', async () => {
+  UI.mountHeader(session);
+  document.getElementById('today-date').textContent = formatToday();
+  document.getElementById('user-nick').textContent = session.nickname;
+
+  renderTabs();
+  renderPages();
+  showPage(0);
+
+  // 載入今日日誌（若有）
+  await loadTodayLog();
+
+  // 自動儲存
+  document.body.addEventListener('input', () => {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(autoSave, 1500);
+  });
+
+  document.getElementById('help-needed').addEventListener('change', e => {
+    document.getElementById('help-content-wrap').style.display = e.target.checked ? 'block' : 'none';
+  });
+});
+
+function formatToday() {
+  const d = new Date();
+  const dayNames = ['日','一','二','三','四','五','六'];
+  return d.getFullYear() + '/' +
+    String(d.getMonth()+1).padStart(2,'0') + '/' +
+    String(d.getDate()).padStart(2,'0') + ' (' + dayNames[d.getDay()] + ')';
+}
+
+function todayDateStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' +
+    String(d.getMonth()+1).padStart(2,'0') + '-' +
+    String(d.getDate()).padStart(2,'0');
+}
+
+function renderTabs() {
+  const wrap = document.getElementById('kpi-tabs');
+  wrap.innerHTML = KPI_FORM.map((k, i) => `
+    <div class="kpi-tab" data-page="${i}" onclick="showPage(${i})">
+      ${k.icon} ${k.no} ${k.name}
+    </div>
+  `).join('') + `<div class="kpi-tab" data-page="${KPI_FORM.length}" onclick="showPage(${KPI_FORM.length})">💭 提交</div>`;
+}
+
+function renderPages() {
+  const wrap = document.getElementById('kpi-pages');
+  wrap.innerHTML = KPI_FORM.map((k, i) => `
+    <div class="card kpi-page" id="page-${i}">
+      <div class="card-title">${k.icon} ${k.name}（KPI${k.no}）</div>
+      ${k.fields.map(f => renderField(k.no, f)).join('')}
+      <div class="form-row">
+        <label>📸 附件（照片/連結）</label>
+        <div id="attach-${k.no}" class="attach-area"></div>
+        <button class="btn btn-sm mt-1" onclick="addAttachment(${k.no})">+ 新增連結/檔案</button>
+        <div class="helper-text">附件會綁定到 KPI${k.no}，月底評核時自動顯示</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderField(kpiNo, f) {
+  const id = `k${kpiNo}_${f.key}`;
+  const showIfAttr = f.showIf ? `data-show-if="k${kpiNo}_${f.showIf}"` : '';
+  if (f.type === 'checkbox') {
+    return `<div class="form-row" ${showIfAttr}>
+      <label style="display:flex; gap:8px; align-items:center;">
+        <input type="checkbox" id="${id}" style="width:auto;" onchange="onCheckboxChange()">
+        <span>${f.label}</span>
+      </label>
+    </div>`;
+  }
+  if (f.type === 'textarea') {
+    return `<div class="form-row" ${showIfAttr}>
+      <label>${f.label}</label>
+      <textarea id="${id}" placeholder="${f.placeholder || ''}"></textarea>
+    </div>`;
+  }
+  if (f.type === 'rating') {
+    return `<div class="form-row" ${showIfAttr}>
+      <label>${f.label}</label>
+      <div class="rating-row" id="${id}-row">
+        ${[1,2,3,4,5].map(n => `<div class="rating-btn" data-val="${n}" onclick="setRating('${id}', ${n})">${'⭐'.repeat(n)}</div>`).join('')}
+      </div>
+      <input type="hidden" id="${id}">
+    </div>`;
+  }
+  if (f.type === 'posts') {
+    return `<div class="form-row" ${showIfAttr}>
+      <label>${f.label}</label>
+      <div id="${id}-list"></div>
+      <button class="btn btn-sm mt-1" onclick="addPost('${id}')">+ 新增發文紀錄</button>
+      <div id="${id}-week-info" class="helper-text">本週進度載入中...</div>
+    </div>`;
+  }
+  return `<div class="form-row" ${showIfAttr}>
+    <label>${f.label}</label>
+    <input type="${f.type}" id="${id}" placeholder="${f.placeholder || ''}">
+  </div>`;
+}
+
+function setRating(id, val) {
+  document.getElementById(id).value = val;
+  const row = document.getElementById(id + '-row');
+  row.querySelectorAll('.rating-btn').forEach(b => {
+    b.classList.toggle('selected', Number(b.dataset.val) === val);
+  });
+  onInputChange();
+}
+
+function onCheckboxChange() {
+  document.querySelectorAll('[data-show-if]').forEach(el => {
+    const dep = el.getAttribute('data-show-if');
+    const depEl = document.getElementById(dep);
+    el.style.display = depEl && depEl.checked ? 'block' : 'none';
+  });
+}
+
+function onInputChange() {
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(autoSave, 1500);
+}
+
+function showPage(idx) {
+  currentPage = idx;
+  document.querySelectorAll('.kpi-page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.kpi-tab').forEach(t => t.classList.remove('active'));
+  const pages = document.querySelectorAll('#kpi-pages .kpi-page');
+  if (idx < pages.length) {
+    pages[idx].classList.add('active');
+  } else {
+    document.getElementById('page-final').classList.add('active');
+  }
+  document.querySelector(`.kpi-tab[data-page="${idx}"]`).classList.add('active');
+  window.scrollTo(0, 0);
+}
+
+function prevPage() { if (currentPage > 0) showPage(currentPage - 1); }
+function nextPage() { if (currentPage < KPI_FORM.length) showPage(currentPage + 1); }
+
+// === Attachments ===
+const attachments = {}; // { kpiNo: [{type, url, description}] }
+function addAttachment(kpiNo) {
+  const url = prompt('請貼上連結（Google Drive、Imgur、社群連結等）：');
+  if (!url) return;
+  const desc = prompt('簡短描述（選填）：') || '';
+  attachments[kpiNo] = attachments[kpiNo] || [];
+  attachments[kpiNo].push({ type: 'link', url, description: desc, kpi: kpiNo });
+  renderAttachments(kpiNo);
+  onInputChange();
+}
+function renderAttachments(kpiNo) {
+  const wrap = document.getElementById(`attach-${kpiNo}`);
+  if (!wrap) return;
+  const list = attachments[kpiNo] || [];
+  wrap.innerHTML = list.map((a, i) => `
+    <div class="attach-link">
+      <a href="${a.url}" target="_blank">🔗 ${a.description || a.url.slice(0, 30)}</a>
+      <span style="cursor:pointer; color:var(--danger);" onclick="removeAttachment(${kpiNo}, ${i})">✕</span>
+    </div>
+  `).join('');
+}
+function removeAttachment(kpiNo, idx) {
+  attachments[kpiNo].splice(idx, 1);
+  renderAttachments(kpiNo);
+  onInputChange();
+}
+
+// === Manager Posts ===
+const managerPosts = [];
+function addPost(id) {
+  const platform = prompt('平台？輸入 FB 或 IG：');
+  if (!platform || !['FB','IG'].includes(platform.toUpperCase())) {
+    UI.toast('平台請輸入 FB 或 IG', 'warn');
+    return;
+  }
+  const url = prompt('貼文連結（可空，但建議填）：') || '';
+  const content_type = prompt('內容類型？\n教學日常 / 招生宣傳 / 活動側拍 / 理念分享 / 學生成果 / 其他');
+  managerPosts.push({
+    platform: platform.toUpperCase(),
+    url,
+    content_type: content_type || '其他',
+    date: todayDateStr(),
+  });
+  renderPosts(id);
+  refreshWeekPostCount(id);
+  onInputChange();
+}
+function renderPosts(id) {
+  const wrap = document.getElementById(id + '-list');
+  if (!wrap) return;
+  wrap.innerHTML = managerPosts.map((p, i) => `
+    <div class="post-card">
+      <strong>${p.platform}</strong> · ${p.content_type}<br>
+      ${p.url ? `<a href="${p.url}" target="_blank">${p.url.slice(0,40)}</a>` : '<span class="muted">無連結</span>'}
+      <span style="float:right; cursor:pointer; color:var(--danger);" onclick="managerPosts.splice(${i},1); renderPosts('${id}')">✕</span>
+    </div>
+  `).join('');
+}
+async function refreshWeekPostCount(id) {
+  const info = document.getElementById(id + '-week-info');
+  if (!info) return;
+  const res = await API.getWeekPostCount(session.nickname, todayDateStr());
+  if (!res.ok) return;
+  const total = res.count + managerPosts.length;
+  info.textContent = `本週累計：${total}/3 篇` + (total >= 3 ? ' ✅ 達標' : ' ⚠️ 尚未達標');
+  info.style.color = total >= 3 ? 'var(--success)' : 'var(--warn)';
+}
+
+// === Load / Save ===
+async function loadTodayLog() {
+  UI.loading(true);
+  const res = await API.getTodayLog(session.nickname);
+  UI.loading(false);
+  if (res.ok && res.log) {
+    populateForm(res.log);
+  }
+  if (role === 'manager') {
+    refreshWeekPostCount('k4_posts');
+  }
+}
+
+function populateForm(log) {
+  for (let k = 1; k <= 6; k++) {
+    const data = log['kpi' + k + '_data'];
+    if (data && typeof data === 'object') {
+      Object.entries(data).forEach(([key, val]) => {
+        const id = `k${k}_${key}`;
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (el.type === 'checkbox') el.checked = !!val;
+        else el.value = val;
+        if (el.tagName === 'INPUT' && el.type === 'hidden') {
+          // rating
+          const row = document.getElementById(id + '-row');
+          if (row) {
+            row.querySelectorAll('.rating-btn').forEach(b => {
+              b.classList.toggle('selected', Number(b.dataset.val) === Number(val));
+            });
+          }
+        }
+      });
+    }
+    // attachments
+    if (log.attachments && Array.isArray(log.attachments)) {
+      log.attachments.filter(a => Number(a.kpi) === k).forEach(a => {
+        attachments[k] = attachments[k] || [];
+        attachments[k].push(a);
+      });
+      renderAttachments(k);
+    }
+  }
+  document.getElementById('reflection').value = log.reflection || '';
+  document.getElementById('help-needed').checked = log.help_needed === true;
+  document.getElementById('help-content').value = log.help_content || '';
+  onCheckboxChange();
+}
+
+function collectFormData() {
+  const data = { kpi1_data: {}, kpi2_data: {}, kpi3_data: {}, kpi4_data: {}, kpi5_data: {}, kpi6_data: {} };
+  KPI_FORM.forEach(k => {
+    k.fields.forEach(f => {
+      if (f.type === 'posts') return;
+      const id = `k${k.no}_${f.key}`;
+      const el = document.getElementById(id);
+      if (!el) return;
+      let val = el.type === 'checkbox' ? el.checked : el.value;
+      if (val !== '' && val !== false) data[`kpi${k.no}_data`][f.key] = val;
+    });
+  });
+  // 收集所有附件
+  const atts = [];
+  Object.entries(attachments).forEach(([kpi, list]) => {
+    list.forEach(a => atts.push({ ...a, kpi: Number(kpi) }));
+  });
+  data.attachments = atts;
+  data.reflection = document.getElementById('reflection').value;
+  data.help_needed = document.getElementById('help-needed').checked;
+  data.help_content = document.getElementById('help-content').value;
+  return data;
+}
+
+async function autoSave() {
+  const data = collectFormData();
+  const payload = {
+    nickname: session.nickname,
+    date: todayDateStr(),
+    ...data,
+  };
+  if (role === 'manager' && managerPosts.length > 0) {
+    payload.posts = managerPosts;
+  }
+  const info = document.getElementById('autosave-info');
+  info.textContent = '💾 儲存中...';
+  const res = await API.saveLog(payload);
+  if (res.ok) {
+    info.textContent = '💾 自動儲存於 ' + new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+    managerPosts.length = 0; // 清空已儲存
+  } else {
+    info.textContent = '⚠️ 儲存失敗：' + (res.error || '未知錯誤');
+    info.style.color = 'var(--danger)';
+  }
+}
+
+async function submitLog() {
+  await autoSave();
+  UI.toast('日誌已提交！', 'success');
+  setTimeout(() => window.location.href = 'mylog.html', 1000);
+}
+
+async function copyYesterday() {
+  const yesterday = new Date(Date.now() - 86400000);
+  const y = yesterday.getFullYear() + '-' +
+    String(yesterday.getMonth()+1).padStart(2,'0') + '-' +
+    String(yesterday.getDate()).padStart(2,'0');
+  UI.loading(true);
+  const res = await API.getLog({ nickname: session.nickname, date: y });
+  UI.loading(false);
+  if (!res.ok || !res.log) {
+    UI.toast('昨日無日誌可複製', 'warn');
+    return;
+  }
+  const ok = await UI.confirmDialog('將套用昨日資料到今日（覆蓋目前內容）？');
+  if (!ok) return;
+  populateForm(res.log);
+  UI.toast('已套用昨日內容，請依今日狀況調整', 'success');
+  onInputChange();
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>人員管理</title>
+<link rel="stylesheet" href="../shared/style.css">
+<script src="../shared/config.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/api.js"></script>
+<script src="../shared/ui.js"></script>
+<style>
+  /* 桌面版：用表格 / 手機版：用卡片 */
+  .users-table { width: 100%; }
+  .user-card {
+    background: #fff; border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px; margin-bottom: 10px;
+    box-shadow: var(--shadow);
+  }
+  .user-card-row {
+    display: flex; justify-content: space-between; gap: 8px;
+    align-items: center; margin-bottom: 6px;
+  }
+  .user-card-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  @media (max-width: 768px) {
+    .users-table { display: none !important; }
+    .users-cards { display: block !important; }
+  }
+  @media (min-width: 769px) {
+    .users-cards { display: none !important; }
+  }
+</style>
+</head>
+<body>
+<div id="app-header"></div>
+
+<div class="container">
+  <h2>👥 人員管理</h2>
+
+  <div class="card">
+    <div class="card-title">+ 新增人員</div>
+    <div class="form-grid">
+      <div class="form-row"><label>暱稱</label><input id="n-nickname" placeholder="例：松鼠"></div>
+      <div class="form-row"><label>Email（選填）</label><input id="n-email" placeholder="可空，等老師自己綁定"></div>
+      <div class="form-row">
+        <label>角色</label>
+        <select id="n-role">
+          <option value="teacher">老師</option>
+          <option value="manager">主管</option>
+          <option value="admin">管理員</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>部門</label>
+        <select id="n-dept">
+          <option>永康教室</option>
+          <option>北區教室</option>
+          <option>才藝部門</option>
+          <option>總部</option>
+        </select>
+      </div>
+      <div class="form-row"><label>電話</label><input id="n-phone"></div>
+      <div class="form-row"><label>備註</label><input id="n-notes"></div>
+    </div>
+    <button class="btn btn-primary" onclick="addUser()">新增</button>
+  </div>
+
+  <div class="card">
+    <div class="card-title">📋 所有人員</div>
+    <input id="search" placeholder="🔍 搜尋暱稱/Email" oninput="renderTable()" class="mb-1">
+    <table class="users-table">
+      <thead>
+        <tr><th>暱稱</th><th>角色</th><th>部門</th><th>Email</th><th>狀態</th><th>操作</th></tr>
+      </thead>
+      <tbody id="users-tbody"></tbody>
+    </table>
+    <div class="users-cards" id="users-cards"></div>
+  </div>
+</div>
+
+<script>
+const session = AUTH.requireRole(['admin']);
+let allUsers = [];
+
+window.addEventListener('load', async () => {
+  UI.mountHeader(session);
+  await loadUsers();
+});
+
+async function loadUsers() {
+  UI.loading(true);
+  const res = await API.listUsers();
+  UI.loading(false);
+  if (!res.ok) return;
+  allUsers = res.users;
+  renderTable();
+}
+
+function renderTable() {
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  const list = q
+    ? allUsers.filter(u => String(u.nickname).toLowerCase().includes(q) || String(u.email).toLowerCase().includes(q))
+    : allUsers;
+
+  // 桌面版表格
+  const tbody = document.getElementById('users-tbody');
+  tbody.innerHTML = list.map(u => `
+    <tr>
+      <td><strong>${u.nickname}</strong></td>
+      <td>${UI.roleLabel(u.role)}</td>
+      <td>${u.department}</td>
+      <td>${u.email || '<span class="muted">未綁定</span>'}</td>
+      <td><span class="tag tag-${u.status === 'active' ? 'success' : 'warn'}">${u.status}</span></td>
+      <td>
+        <button class="btn btn-sm" onclick="editUser('${u.nickname}')">編輯</button>
+        ${u.email ? `<button class="btn btn-sm" onclick="clearEmail('${u.nickname}')">解除綁定</button>` : ''}
+      </td>
+    </tr>
+  `).join('');
+
+  // 手機版卡片
+  const cards = document.getElementById('users-cards');
+  cards.innerHTML = list.map(u => `
+    <div class="user-card">
+      <div class="user-card-row">
+        <div>
+          <span style="font-size:17px; font-weight:700;">${u.nickname}</span>
+          <span class="tag" style="margin-left:6px;">${UI.roleLabel(u.role)}</span>
+        </div>
+        <span class="tag tag-${u.status === 'active' ? 'success' : 'warn'}">${u.status}</span>
+      </div>
+      <div class="text-sm muted">🏫 ${u.department}</div>
+      <div class="text-sm" style="word-break: break-all;">📧 ${u.email || '<span class="muted">尚未綁定</span>'}</div>
+      <div class="user-card-actions">
+        <button class="btn btn-sm" onclick="editUser('${u.nickname}')">編輯</button>
+        ${u.email ? `<button class="btn btn-sm" onclick="clearEmail('${u.nickname}')">解除綁定</button>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+async function addUser() {
+  const payload = {
+    nickname: document.getElementById('n-nickname').value.trim(),
+    email: document.getElementById('n-email').value.trim(),
+    role: document.getElementById('n-role').value,
+    department: document.getElementById('n-dept').value,
+    phone: document.getElementById('n-phone').value,
+    notes: document.getElementById('n-notes').value,
+    operator: session.nickname,
+  };
+  if (!payload.nickname) {
+    UI.toast('請填寫暱稱', 'warn');
+    return;
+  }
+  UI.loading(true);
+  const res = await API.addUser(payload);
+  UI.loading(false);
+  if (!res.ok) {
+    UI.toast(res.error, 'danger');
+    return;
+  }
+  UI.toast('新增成功', 'success');
+  ['n-nickname','n-email','n-phone','n-notes'].forEach(id => document.getElementById(id).value = '');
+  loadUsers();
+}
+
+async function editUser(nickname) {
+  const u = allUsers.find(x => x.nickname === nickname);
+  if (!u) return;
+  const newRole = prompt('角色（teacher/manager/admin）：', u.role);
+  if (!newRole) return;
+  const newDept = prompt('部門（永康教室/北區教室/才藝部門/總部）：', u.department);
+  if (!newDept) return;
+  const newStatus = prompt('狀態（active/suspended）：', u.status);
+  UI.loading(true);
+  const res = await API.updateUser({
+    nickname, role: newRole, department: newDept, status: newStatus,
+    operator: session.nickname
+  });
+  UI.loading(false);
+  if (!res.ok) { UI.toast(res.error, 'danger'); return; }
+  UI.toast('已更新', 'success');
+  loadUsers();
+}
+
+async function clearEmail(nickname) {
+  const ok = await UI.confirmDialog(`確定要解除 ${nickname} 的 Email 綁定？\n（之後此人可重新登入並認領暱稱）`);
+  if (!ok) return;
+  UI.loading(true);
+  const res = await API.updateUser({ nickname, email: '', operator: session.nickname });
+  UI.loading(false);
+  if (!res.ok) { UI.toast(res.error, 'danger'); return; }
+  UI.toast('已解除綁定', 'success');
+  loadUsers();
+}
+</script>
+</body>
+</html>

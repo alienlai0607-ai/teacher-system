@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>月度評核</title>
+<link rel="stylesheet" href="../shared/style.css">
+<script src="../shared/config.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/api.js"></script>
+<script src="../shared/ui.js"></script>
+<style>
+  .eval-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .eval-layout { grid-template-columns: 1fr; } }
+  .evidence-block { background: #f7f6fb; padding: 10px; border-radius: 8px; margin-bottom: 10px; }
+  .evidence-title { font-weight: 700; font-size: 14px; color: var(--primary); margin-bottom: 6px; }
+  .score-row {
+    display: grid;
+    grid-template-columns: 1fr 90px;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 10px;
+    padding: 8px;
+    border-radius: 8px;
+  }
+  .score-row:hover { background: #f7f6fb; }
+  .score-row input { text-align: center; font-weight: 700; font-size: 18px; }
+  .total-box {
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+    color: #fff;
+    padding: 20px 16px;
+    border-radius: var(--radius);
+    text-align: center;
+    position: sticky;
+    bottom: 12px;
+  }
+  .total-num { font-size: 40px; font-weight: 800; }
+  @media (max-width: 600px) {
+    .score-row { grid-template-columns: 1fr 80px; }
+    .score-row input { font-size: 16px; }
+    .total-num { font-size: 36px; }
+  }
+</style>
+</head>
+<body>
+<div id="app-header"></div>
+
+<div class="container">
+  <h2>📝 月度評核</h2>
+
+  <div class="card">
+    <div class="form-grid">
+      <div class="form-row">
+        <label>選擇老師</label>
+        <select id="select-teacher" onchange="loadEvidence()"></select>
+      </div>
+      <div class="form-row">
+        <label>評核月份</label>
+        <input type="month" id="select-month" value="" onchange="loadEvidence()">
+      </div>
+    </div>
+  </div>
+
+  <div id="eval-content" style="display:none;">
+    <div class="eval-layout">
+      <!-- 左側：證據 -->
+      <div>
+        <div class="card">
+          <div class="card-title">📂 自動彙整證據</div>
+          <div id="summary"></div>
+          <div id="evidence-list"></div>
+        </div>
+      </div>
+
+      <!-- 右側：評分 -->
+      <div>
+        <div class="card">
+          <div class="card-title">📊 KPI 評分（70 分）</div>
+          <div id="score-inputs"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">🎯 OKR 評分（30 分）</div>
+          <div class="form-row">
+            <label>OKR 達成度評分</label>
+            <input type="number" id="score_okr" min="0" max="30" value="0" oninput="recalc()">
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">💬 評語與面談紀錄</div>
+          <div class="form-row">
+            <label>主管評語</label>
+            <textarea id="manager_comment" placeholder="本月表現重點、需改進方向、優秀之處..."></textarea>
+          </div>
+          <div class="form-row">
+            <label>面談紀錄</label>
+            <textarea id="interview_notes" placeholder="面談日期、討論內容、下月 OKR 調整..."></textarea>
+          </div>
+        </div>
+
+        <div class="total-box" id="total-box">
+          <div>KPI <span id="kpi-total">0</span> + OKR <span id="okr-display">0</span></div>
+          <div class="total-num"><span id="total-score">0</span> / 100</div>
+          <div>⭐ <span id="grade">—</span> · NT$<span id="bonus">0</span></div>
+        </div>
+
+        <div class="mt-2 flex gap-1">
+          <button class="btn" onclick="saveEval('draft')">儲存草稿</button>
+          <button class="btn btn-primary" onclick="saveEval('submitted')">完成評核</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const session = AUTH.requireRole(['manager']);
+let teacherList = [];
+
+window.addEventListener('load', async () => {
+  UI.mountHeader(session);
+  await loadTeacherOptions();
+  const now = new Date();
+  document.getElementById('select-month').value = now.toISOString().slice(0, 7);
+  renderScoreInputs();
+});
+
+async function loadTeacherOptions() {
+  const res = await API.listUsers();
+  if (!res.ok) return;
+  teacherList = res.users.filter(u => u.role === 'teacher' && u.department === session.department);
+  const sel = document.getElementById('select-teacher');
+  sel.innerHTML = '<option value="">-- 選擇老師 --</option>' +
+    teacherList.map(t => `<option value="${t.nickname}">${t.nickname}</option>`).join('');
+}
+
+function renderScoreInputs() {
+  const KPI_DEF = APP_CONFIG.TEACHER_KPI;
+  const wrap = document.getElementById('score-inputs');
+  wrap.innerHTML = KPI_DEF.map(k => `
+    <div class="score-row">
+      <div>${k.icon} ${k.name}（滿分 ${k.max}）</div>
+      <input type="number" id="score_k${k.no}" min="0" max="${k.max}" value="0" oninput="recalc()">
+    </div>
+  `).join('');
+}
+
+async function loadEvidence() {
+  const nickname = document.getElementById('select-teacher').value;
+  const ym = document.getElementById('select-month').value;
+  if (!nickname || !ym) return;
+
+  UI.loading(true);
+  const res = await API.getEvalEvidence(nickname, ym);
+  UI.loading(false);
+  if (!res.ok) {
+    UI.toast(res.error, 'danger');
+    return;
+  }
+
+  document.getElementById('eval-content').style.display = 'block';
+
+  // 摘要
+  document.getElementById('summary').innerHTML = `
+    <div class="stat-grid mb-2">
+      <div class="stat-box"><div class="stat-num">${res.summary.log_count}</div><div class="stat-label">日誌數</div></div>
+      <div class="stat-box"><div class="stat-num">${res.summary.evidence_count}</div><div class="stat-label">證據</div></div>
+      <div class="stat-box"><div class="stat-num">${res.summary.feedback_count}</div><div class="stat-label">已給回饋</div></div>
+      <div class="stat-box"><div class="stat-num">${res.summary.observation_count}</div><div class="stat-label">觀課/巡班</div></div>
+    </div>
+  `;
+
+  // 證據分類
+  const KPI_DEF = APP_CONFIG.TEACHER_KPI;
+  document.getElementById('evidence-list').innerHTML = KPI_DEF.map(k => {
+    const ev = res.evidence_by_kpi[k.no] || [];
+    return `<div class="evidence-block">
+      <div class="evidence-title">${k.icon} KPI${k.no} ${k.name}（${ev.length} 件）</div>
+      ${ev.length === 0 ? '<div class="muted text-sm">無證據</div>' :
+        ev.map(e => `<div class="text-sm"><a href="${e.url}" target="_blank">📎 ${UI.formatDate(e.date)} ${e.description || e.url.slice(0,30)}</a></div>`).join('')}
+    </div>`;
+  }).join('');
+
+  // 套用建議分數
+  Object.entries(res.suggestion).forEach(([key, val]) => {
+    const el = document.getElementById('score_' + key);
+    if (el) el.value = val;
+  });
+
+  // 載入已有評核
+  const existRes = await API.getEval({ nickname, year_month: ym });
+  if (existRes.ok && existRes.eval) {
+    const e = existRes.eval;
+    for (let i = 1; i <= 6; i++) {
+      const v = e['score_k' + i];
+      if (v !== '' && v != null) document.getElementById('score_k' + i).value = v;
+    }
+    document.getElementById('score_okr').value = e.score_okr || 0;
+    document.getElementById('manager_comment').value = e.manager_comment || '';
+    document.getElementById('interview_notes').value = e.interview_notes || '';
+  }
+
+  recalc();
+}
+
+function recalc() {
+  let kpi = 0;
+  for (let i = 1; i <= 6; i++) {
+    kpi += Number(document.getElementById('score_k' + i).value || 0);
+  }
+  const okr = Number(document.getElementById('score_okr').value || 0);
+  document.getElementById('kpi-total').textContent = kpi;
+  document.getElementById('okr-display').textContent = okr;
+  document.getElementById('total-score').textContent = kpi + okr;
+
+  let grade = '—', bonus = 0;
+  if (kpi >= 67) { grade = '卓越'; bonus = 3000; }
+  else if (kpi >= 63) { grade = '優良'; bonus = 2000; }
+  else if (kpi >= 60) { grade = '達標'; bonus = 1000; }
+  else if (kpi >= 55) { grade = '基本合格'; bonus = 0; }
+  else { grade = '待改善'; bonus = 0; }
+  document.getElementById('grade').textContent = grade;
+  document.getElementById('bonus').textContent = bonus;
+}
+
+async function saveEval(status) {
+  const nickname = document.getElementById('select-teacher').value;
+  const ym = document.getElementById('select-month').value;
+  if (!nickname || !ym) {
+    UI.toast('請先選擇老師與月份', 'warn');
+    return;
+  }
+  const payload = {
+    nickname,
+    year_month: ym,
+    evaluator: session.nickname,
+    status,
+    score_okr: Number(document.getElementById('score_okr').value || 0),
+    manager_comment: document.getElementById('manager_comment').value,
+    interview_notes: document.getElementById('interview_notes').value,
+  };
+  for (let i = 1; i <= 6; i++) {
+    payload['score_k' + i] = Number(document.getElementById('score_k' + i).value || 0);
+  }
+  UI.loading(true);
+  const res = await API.saveEval(payload);
+  UI.loading(false);
+  if (!res.ok) {
+    UI.toast(res.error, 'danger');
+    return;
+  }
+  UI.toast(`儲存成功（${res.grade} · NT$${res.bonus}）`, 'success');
+}
+</script>
+</body>
+</html>

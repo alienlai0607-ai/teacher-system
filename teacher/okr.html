@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>我的 OKR</title>
+<link rel="stylesheet" href="../shared/style.css">
+<script src="../shared/config.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/api.js"></script>
+<script src="../shared/ui.js"></script>
+<style>
+  .okr-card { background: #fff; padding: 16px; border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 16px; }
+  .okr-o { font-size: 16px; font-weight: 700; color: var(--primary); margin-bottom: 8px; }
+  .okr-kr { display: grid; grid-template-columns: 1fr 80px 50px; gap: 8px; align-items: center; padding: 6px 0; }
+  .progress-slider { width: 100%; }
+</style>
+</head>
+<body>
+<div id="app-header"></div>
+
+<div class="container-narrow">
+  <h2>🎯 我的 OKR（<span id="semester-label"></span>）</h2>
+  <div class="muted text-sm mb-2">每學期設定 2 個目標（O），每個目標搭配 2-3 項關鍵成果（KR）</div>
+
+  <div id="okr-list"></div>
+
+  <button class="btn btn-primary mt-2" onclick="showEditor()">+ 新增/編輯目標</button>
+
+  <!-- Editor -->
+  <div class="card" id="editor" style="display:none; margin-top: 16px;">
+    <div class="card-title">📝 設定目標</div>
+    <div class="form-row">
+      <label>目標編號</label>
+      <select id="obj_no"><option value="1">O1</option><option value="2">O2</option></select>
+    </div>
+    <div class="form-row">
+      <label>目標類型</label>
+      <select id="obj_type">
+        <option>專案課程發展型</option>
+        <option>學習成效提升型</option>
+        <option>親師經營型</option>
+        <option>班級經營優化型</option>
+        <option>教師專業成長型</option>
+        <option>另行設定</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>目標描述（O）</label>
+      <textarea id="obj_text" placeholder="例：提升學生主動學習能力"></textarea>
+    </div>
+    <div class="form-row"><label>關鍵成果 KR1</label><input id="kr1" placeholder="例：每週進行 2 種科目複習，訂正率 ≥95%"></div>
+    <div class="form-row"><label>關鍵成果 KR2</label><input id="kr2"></div>
+    <div class="form-row"><label>關鍵成果 KR3（選填）</label><input id="kr3"></div>
+    <button class="btn btn-primary" style="width:100%;" onclick="saveOKR()">儲存</button>
+  </div>
+</div>
+
+<script>
+const session = AUTH.requireRole(['teacher', 'manager']);
+const semester = currentSemester();
+
+window.addEventListener('load', async () => {
+  UI.mountHeader(session);
+  document.getElementById('semester-label').textContent = semester;
+  await loadOKR();
+});
+
+function currentSemester() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  return y + (m >= 8 ? '-下' : '-上');
+}
+
+async function loadOKR() {
+  UI.loading(true);
+  const res = await API.getOKR({ nickname: session.nickname, semester });
+  UI.loading(false);
+  const wrap = document.getElementById('okr-list');
+  if (!res.ok || res.okrs.length === 0) {
+    wrap.innerHTML = '<div class="card muted">尚未設定本學期目標</div>';
+    return;
+  }
+  res.okrs.sort((a, b) => a.objective_no - b.objective_no);
+  wrap.innerHTML = res.okrs.map(o => `
+    <div class="okr-card">
+      <div class="okr-o">🎯 O${o.objective_no}：${o.objective_text} <span class="tag">${o.objective_type}</span></div>
+      ${renderKr(o, 1)}
+      ${renderKr(o, 2)}
+      ${renderKr(o, 3)}
+      <button class="btn btn-sm mt-1" onclick="editOKR(${o.objective_no})">編輯</button>
+    </div>
+  `).join('');
+}
+
+function renderKr(o, n) {
+  const text = o['kr' + n + '_text'];
+  if (!text) return '';
+  const progress = o['kr' + n + '_progress'] || 0;
+  return `
+    <div class="okr-kr">
+      <div>KR${n}: ${text}</div>
+      <input type="range" min="0" max="100" value="${progress}" class="progress-slider"
+             onchange="updateProgress('${o.okr_id}', ${n}, this.value)">
+      <span>${progress}%</span>
+    </div>
+  `;
+}
+
+async function updateProgress(okr_id, n, val) {
+  const data = { okr_id };
+  data['kr' + n + '_progress'] = Number(val);
+  await API.updateOKRProgress(data);
+  UI.toast('進度已更新', 'success');
+  loadOKR();
+}
+
+let editingNo = null;
+function showEditor() {
+  document.getElementById('editor').style.display = 'block';
+  editingNo = null;
+  document.getElementById('obj_text').value = '';
+  document.getElementById('kr1').value = '';
+  document.getElementById('kr2').value = '';
+  document.getElementById('kr3').value = '';
+}
+
+async function editOKR(n) {
+  showEditor();
+  const res = await API.getOKR({ nickname: session.nickname, semester });
+  const o = res.okrs.find(x => Number(x.objective_no) === n);
+  if (!o) return;
+  editingNo = n;
+  document.getElementById('obj_no').value = n;
+  document.getElementById('obj_type').value = o.objective_type;
+  document.getElementById('obj_text').value = o.objective_text;
+  document.getElementById('kr1').value = o.kr1_text || '';
+  document.getElementById('kr2').value = o.kr2_text || '';
+  document.getElementById('kr3').value = o.kr3_text || '';
+}
+
+async function saveOKR() {
+  const payload = {
+    semester,
+    nickname: session.nickname,
+    objective_no: Number(document.getElementById('obj_no').value),
+    objective_type: document.getElementById('obj_type').value,
+    objective_text: document.getElementById('obj_text').value,
+    kr1_text: document.getElementById('kr1').value,
+    kr2_text: document.getElementById('kr2').value,
+    kr3_text: document.getElementById('kr3').value,
+  };
+  if (!payload.objective_text || !payload.kr1_text) {
+    UI.toast('請至少填寫目標與 KR1', 'warn');
+    return;
+  }
+  UI.loading(true);
+  const res = await API.saveOKR(payload);
+  UI.loading(false);
+  if (!res.ok) {
+    UI.toast(res.error, 'danger');
+    return;
+  }
+  UI.toast('儲存成功', 'success');
+  document.getElementById('editor').style.display = 'none';
+  loadOKR();
+}
+</script>
+</body>
+</html>
