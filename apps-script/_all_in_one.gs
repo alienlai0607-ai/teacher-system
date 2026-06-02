@@ -137,9 +137,8 @@ const INITIAL_USERS = [
   { nickname: '小明',     role: 'teacher',     department: '北區教室', status: 'active' },
   { nickname: '浩浩',     role: 'teacher',     department: '才藝部門', status: 'active' },
   { nickname: '毛毛',     role: 'teacher',     department: '才藝部門', status: 'active' },
-  // 行政（歸北區教室，由小魚評核）
-  { nickname: '皮皮老師', role: 'admin_staff', department: '北區教室', status: 'active', subtype: 'general'   },
-  { nickname: '美萱',     role: 'admin_staff', department: '北區教室', status: 'active', subtype: 'marketing' },
+  // 行政美編行銷（歸北區教室，由小魚評核）
+  { nickname: '皮皮老師', role: 'admin_staff', department: '北區教室', status: 'active', subtype: 'marketing' },
 ];
 
 // ============ 獎金級距 ============
