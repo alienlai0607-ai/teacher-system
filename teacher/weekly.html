@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>每週工作週報</title>
+<link rel="stylesheet" href="../shared/style.css">
+<script src="../shared/config.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/api.js"></script>
+<script src="../shared/ui.js"></script>
+<style>
+  body { padding-bottom: 90px; }
+  .week-pick { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+  .week-pick .form-row { margin: 0; }
+  .past-item { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; cursor: pointer; }
+  .past-item:hover { background: #FFF8F0; }
+  .past-item .wk { font-weight: 700; color: var(--primary); }
+  .past-item .snip { font-size: 12.5px; color: var(--text-light); margin-top: 4px; }
+  .save-bar {
+    display: flex; gap: 10px; position: fixed; bottom: 0; left: 0; right: 0;
+    background: rgba(247,246,251,0.96); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); z-index: 20;
+    border-top: 1px solid var(--border); box-shadow: 0 -2px 12px rgba(0,0,0,0.06);
+  }
+  .save-bar .btn { flex: 1; min-height: 48px; font-size: 15px; }
+</style>
+</head>
+<body>
+
+<div id="app-header"></div>
+
+<div class="container-narrow">
+
+  <div class="card">
+    <div class="card-title">🗓 每週工作週報</div>
+    <div class="muted text-sm">每週彙整一次，作為主管追蹤與月評參考</div>
+    <div class="week-pick mt-2">
+      <div class="form-row">
+        <label>選擇週次</label>
+        <input type="week" id="week-input" onchange="loadWeek()">
+      </div>
+      <button class="btn btn-sm" onclick="thisWeek()">本週</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="form-row">
+      <label>📝 教學反思</label>
+      <textarea id="teaching_reflection" placeholder="這週教學上的觀察、調整、心得..."></textarea>
+    </div>
+    <div class="form-row">
+      <label>👀 學生觀察紀錄</label>
+      <textarea id="student_observation" placeholder="需要追蹤的學生、進步或退步狀況..."></textarea>
+    </div>
+    <div class="form-row">
+      <label>🧰 教具需求</label>
+      <textarea id="tool_needs" placeholder="本週發現缺少/需補充/想新增的教具..."></textarea>
+    </div>
+    <div class="form-row">
+      <label>💡 課程改善建議</label>
+      <textarea id="course_improvement" placeholder="課程內容、流程、節奏的改善想法..."></textarea>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">📚 過去週報</div>
+    <div id="past-list"><div class="muted text-sm">載入中...</div></div>
+  </div>
+
+  <div class="text-sm muted text-center" id="save-info"></div>
+</div>
+
+<div class="save-bar">
+  <button class="btn" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑ 回頂端</button>
+  <button class="btn btn-primary" onclick="saveWeekly(true)">💾 儲存週報</button>
+</div>
+
+<script>
+const session = AUTH.requireRole(['teacher', 'manager', 'admin_staff']);
+let autoTimer;
+
+window.addEventListener('load', async () => {
+  UI.mountHeader(session);
+  document.getElementById('week-input').value = isoWeekString(new Date());
+  await loadWeek();
+  await loadPast();
+  document.body.addEventListener('input', () => {
+    clearTimeout(autoTimer);
+    autoTimer = setTimeout(() => saveWeekly(false), 1500);
+  });
+});
+
+// 標準 ISO 8601 週次字串 yyyy-Www（與 <input type=week> 一致）
+function isoWeekString(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return d.getUTCFullYear() + '-W' + String(weekNo).padStart(2, '0');
+}
+
+function thisWeek() {
+  document.getElementById('week-input').value = isoWeekString(new Date());
+  loadWeek();
+}
+
+function weekVal() { return document.getElementById('week-input').value; }
+function setV(id, v) { const el = document.getElementById(id); if (el) el.value = v || ''; }
+function getV(id) { const el = document.getElementById(id); return el ? el.value.trim() : ''; }
+
+async function loadWeek() {
+  const week_of = weekVal();
+  if (!week_of) return;
+  UI.loading(true);
+  const res = await API.getWeekly({ nickname: session.nickname, week_of });
+  UI.loading(false);
+  const w = (res.ok && res.weekly) || {};
+  setV('teaching_reflection', w.teaching_reflection);
+  setV('student_observation', w.student_observation);
+  setV('tool_needs', w.tool_needs);
+  setV('course_improvement', w.course_improvement);
+}
+
+async function saveWeekly(explicit) {
+  const week_of = weekVal();
+  if (!week_of) { UI.toast('請先選擇週次', 'warn'); return; }
+  const payload = {
+    nickname: session.nickname, week_of,
+    teaching_reflection: getV('teaching_reflection'),
+    student_observation: getV('student_observation'),
+    tool_needs: getV('tool_needs'),
+    course_improvement: getV('course_improvement'),
+  };
+  const info = document.getElementById('save-info');
+  info.textContent = '💾 儲存中...';
+  const res = await API.saveWeekly(payload);
+  if (res.ok) {
+    info.textContent = '💾 已儲存於 ' + new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+    info.style.color = '';
+    if (explicit) { UI.toast('週報已儲存 ✅', 'success'); loadPast(); }
+  } else {
+    info.textContent = '⚠️ 儲存失敗：' + (res.error || '');
+    info.style.color = 'var(--danger)';
+  }
+}
+
+async function loadPast() {
+  const res = await API.listWeekly({ viewer: session.nickname, nickname: session.nickname });
+  const wrap = document.getElementById('past-list');
+  if (!res.ok || !res.weeklies || res.weeklies.length === 0) {
+    wrap.innerHTML = '<div class="muted text-sm">尚無過去週報</div>';
+    return;
+  }
+  wrap.innerHTML = res.weeklies.map(w => {
+    const snip = [w.teaching_reflection, w.student_observation].filter(Boolean).join('｜').slice(0, 50);
+    return `<div class="past-item" onclick="jumpWeek('${w.week_of}')">
+      <span class="wk">${w.week_of}</span>
+      <div class="snip">${snip || '（無摘要）'}</div>
+    </div>`;
+  }).join('');
+}
+
+function jumpWeek(week_of) {
+  document.getElementById('week-input').value = week_of;
+  loadWeek();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+</script>
+
+</body>
+</html>

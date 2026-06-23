@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>月度評核報表（列印）</title>
+<link rel="stylesheet" href="../shared/style.css">
+<script src="../shared/config.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/api.js"></script>
+<script src="../shared/ui.js"></script>
+<style>
+  /* ===== 工具列（列印時隱藏） ===== */
+  .toolbar {
+    position: sticky; top: 0; z-index: 30;
+    background: #fff; border-bottom: 1px solid var(--border);
+    padding: 12px 16px; display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end;
+  }
+  .toolbar .form-row { margin: 0; }
+
+  /* ===== 報表本體 ===== */
+  .report {
+    max-width: 800px; margin: 20px auto; background: #fff;
+    padding: 28px 32px; box-shadow: 0 2px 14px rgba(0,0,0,0.08); border-radius: 8px;
+    color: #1F3A68;
+  }
+  .rpt-head { display: flex; align-items: center; gap: 14px; border-bottom: 3px solid #F5941E; padding-bottom: 14px; }
+  .rpt-head img { width: 56px; height: 56px; border-radius: 50%; }
+  .rpt-head h1 { font-size: 22px; margin: 0; color: #1F3A68; }
+  .rpt-head .sub { font-size: 13px; color: #888; margin-top: 2px; }
+
+  .meta-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px 16px; margin: 16px 0; font-size: 14px; }
+  .meta-grid .label { color: #999; font-size: 12px; }
+  .meta-grid .val { font-weight: 700; }
+
+  .stat-row { display: flex; gap: 10px; margin: 14px 0; }
+  .stat-cell { flex: 1; text-align: center; background: #FFF8F0; border: 1px solid #FFE2BF; border-radius: 8px; padding: 10px 4px; }
+  .stat-cell .n { font-size: 22px; font-weight: 800; color: #F5941E; }
+  .stat-cell .l { font-size: 12px; color: #888; }
+
+  .section-title {
+    font-size: 16px; font-weight: 800; color: #1F3A68;
+    border-left: 5px solid #F5941E; padding-left: 8px; margin: 22px 0 10px;
+  }
+
+  table.rpt { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.rpt th, table.rpt td { border: 1px solid #E3E0EC; padding: 6px 8px; text-align: left; vertical-align: top; }
+  table.rpt th { background: #F4F2FA; font-weight: 700; color: #1F3A68; }
+  table.rpt td.c { text-align: center; }
+
+  .kpi-block { border: 1px solid #E3E0EC; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  .kpi-block h3 { font-size: 14px; margin: 0 0 8px; color: #1F3A68; }
+  .kpi-log-line { font-size: 12.5px; color: #444; margin: 3px 0; }
+  .kpi-log-line .d { color: #F5941E; font-weight: 700; margin-right: 6px; }
+  .photo-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .photo-grid a { display: block; }
+  .photo-grid img { width: 110px; height: 110px; object-fit: cover; border: 1px solid #ddd; border-radius: 6px; }
+  .link-list { font-size: 12.5px; margin-top: 6px; }
+  .empty { color: #bbb; font-size: 12.5px; }
+
+  .score-table td.num { text-align: center; font-weight: 700; }
+  .total-banner {
+    background: linear-gradient(135deg, #F5941E, #FFB957); color: #fff;
+    border-radius: 8px; padding: 14px; text-align: center; margin-top: 12px;
+  }
+  .total-banner .big { font-size: 30px; font-weight: 800; }
+
+  .comment-box { border: 1px solid #E3E0EC; border-radius: 8px; padding: 12px; font-size: 13px; min-height: 48px; white-space: pre-wrap; }
+  .sign-row { display: flex; gap: 30px; margin-top: 34px; }
+  .sign-cell { flex: 1; text-align: center; font-size: 13px; }
+  .sign-line { border-top: 1px solid #333; margin-top: 40px; padding-top: 6px; color: #555; }
+
+  #report-area { display: none; }
+
+  @media print {
+    .no-print { display: none !important; }
+    body { background: #fff; padding: 0; margin: 0; }
+    .report { box-shadow: none; margin: 0; max-width: none; padding: 0; border-radius: 0; }
+    .kpi-block, .sign-row, table.rpt, .total-banner, .stat-row { page-break-inside: avoid; }
+    .section-title { page-break-after: avoid; }
+    .photo-grid img { width: 92px; height: 92px; }
+    @page { size: A4; margin: 14mm; }
+  }
+</style>
+</head>
+<body>
+
+<div id="app-header" class="no-print"></div>
+
+<!-- 選擇工具列 -->
+<div class="toolbar no-print">
+  <div class="form-row">
+    <label>選擇人員</label>
+    <select id="sel-person" style="min-width:180px;"></select>
+  </div>
+  <div class="form-row">
+    <label>月份</label>
+    <input type="month" id="sel-month">
+  </div>
+  <button class="btn btn-primary" onclick="generate()">📄 產生報表</button>
+  <button class="btn" id="print-btn" onclick="window.print()" style="display:none;">🖨 列印 / 另存 PDF</button>
+  <span class="muted text-sm" id="hint">選擇人員與月份後按「產生報表」</span>
+</div>
+
+<!-- 報表 -->
+<div id="report-area">
+  <div class="report" id="report"></div>
+</div>
+
+<script>
+const session = AUTH.requireRole(['manager', 'admin']);
+let allUsers = [];
+
+// KPI 欄位標籤對照（與 today.html 表單同步，僅供報表呈現可讀文字）
+const FIELD_LABELS = {
+  // 老師
+  class_count:'批改作業班級數', correction_rate:'訂正完成率%', challenge_book:'設計挑戰本',
+  challenge_content:'挑戰本主題', individual_help:'個別補強', review_test_prep:'課業複習/考試準備',
+  order_rating:'班級秩序自評', incident:'突發事件', incident_detail:'事件處理', environment:'環境整理重點',
+  project_name:'專案名稱', project_progress:'專案進度', engagement:'學生參與度', material_ready:'教材準備完整',
+  group_post:'群組發文', group_post_link:'發文連結', reply_count:'回覆筆數', notebook_link:'記事本連結',
+  parent_contact_count:'主動聯繫家長數', parent_contact_detail:'溝通摘要', parent_face_count:'下課互動數', special_event:'特殊狀況',
+  tasks_done:'完成交辦事項', self_initiative:'主動發現問題/建議', growth_learning:'學習/成長', upward_report:'向上回報',
+  // 主管
+  feedback_count:'回饋筆數', observe_done:'完成觀課', observe_target:'觀課對象/重點', patrol_done:'巡班記錄',
+  training_held:'進行培訓', training_content:'培訓主題', quality_issue:'品質問題', handle_action:'處理動作',
+  material_review:'教材審核', incident_guide:'突發指導', new_lesson:'新教案進度', cross_activity:'跨班活動',
+  resource_update:'資源更新', enrollment_change:'人數異動', recruit_activity:'招生活動',
+  complaint_count:'客訴件數', complaint_detail:'客訴處理', parent_event:'親師活動', serious_case:'重大事件',
+};
+
+window.addEventListener('load', async () => {
+  UI.mountHeader(session);
+  document.getElementById('sel-month').value = new Date().toISOString().slice(0, 7);
+  await loadPeople();
+
+  // 支援 ?nickname=&month= 深連結
+  const q = new URLSearchParams(location.search);
+  if (q.get('month')) document.getElementById('sel-month').value = q.get('month');
+  if (q.get('nickname')) {
+    document.getElementById('sel-person').value = q.get('nickname');
+    generate();
+  }
+});
+
+async function loadPeople() {
+  const res = await API.listUsers();
+  if (!res.ok) return;
+  allUsers = res.users;
+  // 主管只看自己部門的老師/行政；admin 看全部（不含 admin 本人）
+  let people = allUsers.filter(u => u.role !== 'admin');
+  if (session.role === 'manager') {
+    people = people.filter(u => u.department === session.department && u.nickname !== session.nickname);
+  }
+  const sel = document.getElementById('sel-person');
+  sel.innerHTML = people.map(u =>
+    `<option value="${u.nickname}">${u.nickname}（${u.department} · ${UI.roleLabel(u.role)}）</option>`
+  ).join('');
+}
+
+function driveThumb(url, fileId, size) {
+  const id = fileId || ((url || '').match(/\/d\/([^/]+)/) || [])[1];
+  return id ? `https://drive.google.com/thumbnail?id=${id}&sz=w${size || 400}` : url;
+}
+
+function joinLogValues(dataObj) {
+  if (!dataObj || typeof dataObj !== 'object') return '';
+  return Object.entries(dataObj)
+    .filter(([k, v]) => v !== '' && v !== false && v != null)
+    .map(([k, v]) => {
+      const label = FIELD_LABELS[k] || k;
+      if (v === true) return label;
+      return `${label}：${v}`;
+    })
+    .join('｜');
+}
+
+async function generate() {
+  const nickname = document.getElementById('sel-person').value;
+  const ym = document.getElementById('sel-month').value;
+  if (!nickname || !ym) { UI.toast('請選擇人員與月份', 'warn'); return; }
+
+  UI.loading(true);
+  const [evRes, evalRes] = await Promise.all([
+    API.getEvalEvidence(nickname, ym),
+    API.getEval({ nickname, year_month: ym }),
+  ]);
+  UI.loading(false);
+  if (!evRes.ok) { UI.toast(evRes.error || '讀取失敗', 'danger'); return; }
+
+  renderReport(nickname, ym, evRes, evalRes.ok ? evalRes.eval : null);
+  document.getElementById('report-area').style.display = 'block';
+  document.getElementById('print-btn').style.display = 'inline-flex';
+  document.getElementById('hint').textContent = '報表已產生，可按「列印 / 另存 PDF」';
+  window.scrollTo(0, document.getElementById('report-area').offsetTop - 10);
+}
+
+function renderReport(nickname, ym, ev, evalObj) {
+  const isManager = ev.role === 'manager';
+  const KPI_DEF = isManager ? APP_CONFIG.MANAGER_KPI : APP_CONFIG.TEACHER_KPI;
+  const pfx = isManager ? 'm' : 'k';
+  const user = allUsers.find(u => u.nickname === nickname) || {};
+  const logs = (ev.logs || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+  // 解析 logs 的 kpiN_data（後端在 getEvalEvidence 內未 parse，這裡保險處理）
+  logs.forEach(l => {
+    for (let k = 1; k <= 6; k++) {
+      const f = l['kpi' + k + '_data'];
+      if (typeof f === 'string' && f) { try { l['kpi' + k + '_data'] = JSON.parse(f); } catch (e) {} }
+    }
+  });
+
+  // === 抬頭 ===
+  let html = `
+    <div class="rpt-head">
+      <img src="../shared/icons/logo.png" alt="logo">
+      <div>
+        <h1>布拉克星球 · ${ym} 月度 KPI 評核報表</h1>
+        <div class="sub">${isManager ? '主管版' : (ev.role === 'admin_staff' ? '行政版' : '老師版')} ｜ 列印時間：${UI.formatDate(new Date())}</div>
+      </div>
+    </div>
+
+    <div class="meta-grid">
+      <div><div class="label">姓名</div><div class="val">${nickname}</div></div>
+      <div><div class="label">部門</div><div class="val">${ev.department || user.department || '—'}</div></div>
+      <div><div class="label">職務</div><div class="val">${UI.roleLabel(ev.role)}</div></div>
+      <div><div class="label">評核月份</div><div class="val">${ym}</div></div>
+      <div><div class="label">評核人</div><div class="val">${(evalObj && evalObj.evaluator) || (isManager ? '柏翰' : (user.role === 'admin_staff' ? '小魚' : '部門主管'))}</div></div>
+      <div><div class="label">狀態</div><div class="val">${evalObj ? statusLabel(evalObj.status) : '尚未評核'}</div></div>
+    </div>
+
+    <div class="stat-row">
+      <div class="stat-cell"><div class="n">${ev.summary.log_count}</div><div class="l">日誌天數</div></div>
+      <div class="stat-cell"><div class="n">${ev.summary.evidence_count}</div><div class="l">證據附件</div></div>
+      <div class="stat-cell"><div class="n">${ev.summary.feedback_count}</div><div class="l">主管回饋</div></div>
+      ${isManager
+        ? `<div class="stat-cell"><div class="n">${ev.summary.posts_total}</div><div class="l">社群發文</div></div>`
+        : `<div class="stat-cell"><div class="n">${ev.summary.observation_count}</div><div class="l">被觀課</div></div>`}
+    </div>
+  `;
+
+  // === 每日日誌摘要 ===
+  html += `<div class="section-title">📅 每日日誌摘要</div>`;
+  if (logs.length === 0) {
+    html += `<div class="empty">本月無日誌紀錄</div>`;
+  } else {
+    html += `<table class="rpt"><thead><tr>
+      <th style="width:80px;">日期</th><th>當日重點摘要</th><th style="width:60px;" class="c">求助</th>
+    </tr></thead><tbody>`;
+    logs.forEach(l => {
+      const parts = [];
+      for (let k = 1; k <= 6; k++) {
+        const s = joinLogValues(l['kpi' + k + '_data']);
+        if (s) parts.push(s);
+      }
+      if (l.reflection) parts.push('💭 ' + l.reflection);
+      html += `<tr>
+        <td class="c">${String(l.date).slice(5)}</td>
+        <td>${parts.join('　/　') || '<span class="empty">—</span>'}</td>
+        <td class="c">${l.help_needed === true || l.help_needed === 'true' ? '⚠️' : ''}</td>
+      </tr>`;
+    });
+    html += `</tbody></table>`;
+  }
+
+  // === 六大 KPI 證據 ===
+  html += `<div class="section-title">🗂 六大 KPI 證據彙整</div>`;
+  KPI_DEF.forEach(def => {
+    const evList = (ev.evidence_by_kpi[def.no] || []);
+    const photos = evList.filter(e => e.type === 'photo');
+    const links = evList.filter(e => e.type !== 'photo');
+
+    // 該 KPI 當月日誌文字
+    const logLines = [];
+    logs.forEach(l => {
+      const s = joinLogValues(l['kpi' + def.no + '_data']);
+      if (s) logLines.push(`<div class="kpi-log-line"><span class="d">${String(l.date).slice(5)}</span>${s}</div>`);
+    });
+
+    let extra = '';
+    if (isManager && def.no === 4) {
+      const weeksOk = Object.values(ev.posts_by_week || {}).filter(c => c >= 3).length;
+      const weeksTotal = Object.keys(ev.posts_by_week || {}).length;
+      extra = `<div class="kpi-log-line">📣 發文週數達標 ${weeksOk}/${weeksTotal}（共 ${ev.summary.posts_total} 篇）</div>`;
+    }
+
+    html += `<div class="kpi-block">
+      <h3>${def.icon} ${isManager ? 'M' : 'K'}${def.no} ${def.name}（滿分 ${def.max}）</h3>
+      ${extra}
+      ${logLines.join('') || '<div class="empty">本月此項無日誌文字</div>'}
+      ${links.length ? `<div class="link-list">${links.map(e => `🔗 <a href="${e.url}" target="_blank">${UI.formatDate(e.date)} ${e.description || '連結證據'}</a>`).join('<br>')}</div>` : ''}
+      ${photos.length ? `<div class="photo-grid">${photos.map(e => `<a href="${e.url}" target="_blank"><img src="${driveThumb(e.url, e.fileId, 400)}" alt="證據"></a>`).join('')}</div>` : ''}
+      ${(!photos.length && !links.length) ? '<div class="empty">無附件證據</div>' : ''}
+    </div>`;
+  });
+
+  // === OKR ===
+  html += `<div class="section-title">🎯 OKR 學期目標進度</div>`;
+  if (!ev.okrs || ev.okrs.length === 0) {
+    html += `<div class="empty">本學期尚無 OKR 設定</div>`;
+  } else {
+    html += `<table class="rpt"><thead><tr><th>目標 O</th><th>關鍵成果 KR</th><th style="width:70px;" class="c">進度</th></tr></thead><tbody>`;
+    ev.okrs.forEach(o => {
+      [1, 2, 3].forEach(i => {
+        const kr = o['kr' + i + '_text'];
+        if (!kr) return;
+        html += `<tr>
+          <td>${i === 1 ? (o.objective_text || '') : ''}</td>
+          <td>${kr}</td>
+          <td class="c">${o['kr' + i + '_progress'] || 0}%</td>
+        </tr>`;
+      });
+    });
+    html += `</tbody></table>`;
+  }
+
+  // === 評分對照 ===
+  html += `<div class="section-title">📊 評分結果</div>`;
+  html += `<table class="rpt score-table"><thead><tr>
+    <th>KPI 類別</th><th style="width:70px;" class="c">滿分</th><th style="width:70px;" class="c">自評</th><th style="width:70px;" class="c">主管評分</th>
+  </tr></thead><tbody>`;
+  let kpiTotal = 0, maxTotal = 0;
+  KPI_DEF.forEach(def => {
+    const self = evalObj ? (evalObj['self_' + pfx + def.no] ?? '') : '';
+    const score = evalObj ? (evalObj['score_' + pfx + def.no] ?? '') : '';
+    if (score !== '' && score != null) kpiTotal += Number(score);
+    maxTotal += def.max;
+    html += `<tr>
+      <td>${def.icon} ${def.name}</td>
+      <td class="num">${def.max}</td>
+      <td class="num">${self !== '' ? self : '—'}</td>
+      <td class="num">${score !== '' ? score : '—'}</td>
+    </tr>`;
+  });
+  const okrScore = evalObj ? Number(evalObj.score_okr || 0) : 0;
+  html += `<tr>
+    <td>🎯 OKR</td><td class="num">30</td><td class="num">—</td><td class="num">${evalObj ? okrScore : '—'}</td>
+  </tr>`;
+  html += `</tbody></table>`;
+
+  const total = evalObj ? Number(evalObj.total_score || (kpiTotal + okrScore)) : null;
+  const bonus = evalObj ? (evalObj.final_bonus ?? evalObj.bonus ?? 0) : null;
+  html += `<div class="total-banner">
+    <div>KPI ${evalObj ? kpiTotal : '—'} + OKR ${evalObj ? okrScore : '—'}</div>
+    <div class="big">${total != null ? total : '—'} / 100</div>
+    <div>⭐ ${evalObj ? (evalObj.grade || '未評等') : '尚未評核'} ｜ 獎金 NT$ ${bonus != null ? bonus : '—'}</div>
+  </div>`;
+
+  // === 評語 + 簽名 ===
+  html += `<div class="section-title">💬 評語與面談紀錄</div>`;
+  html += `<div class="comment-box">${(evalObj && (evalObj.manager_comment || evalObj.boss_comment)) || ''}</div>`;
+  if (evalObj && evalObj.interview_notes) {
+    html += `<div style="font-size:12px;color:#999;margin:8px 0 4px;">面談紀錄</div>
+             <div class="comment-box">${evalObj.interview_notes}</div>`;
+  }
+
+  html += `<div class="sign-row">
+    <div class="sign-cell"><div class="sign-line">受評人簽名</div></div>
+    <div class="sign-cell"><div class="sign-line">評核主管簽名</div></div>
+    <div class="sign-cell"><div class="sign-line">日期</div></div>
+  </div>`;
+
+  document.getElementById('report').innerHTML = html;
+}
+
+function statusLabel(s) {
+  return { draft: '草稿', submitted: '已評核', confirmed: '已確認' }[s] || s || '—';
+}
+</script>
+</body>
+</html>

@@ -67,6 +67,7 @@ function sheetToObjects(name) {
  */
 function findRow(name, key, value) {
   const sheet = getSheet(name);
+  if (sheet.getLastRow() <= 1) return -1; // 空表（只有表頭）視為找不到，避免 getRange 列數<1 報錯
   const headers = getHeaders(sheet);
   const keyCol = headers.indexOf(key);
   if (keyCol < 0) return -1;

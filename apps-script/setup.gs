@@ -67,6 +67,11 @@ function setupSheets() {
     [SHEET_NAMES.SYSTEM_LOG]: [
       'timestamp', 'nickname', 'action', 'target', 'detail', 'ip'
     ],
+    [SHEET_NAMES.WEEKLY]: [
+      'week_id', 'week_of', 'nickname', 'department', 'role',
+      'teaching_reflection', 'student_observation', 'tool_needs', 'course_improvement',
+      'created_at', 'updated_at'
+    ],
   };
 
   Object.entries(schemas).forEach(([name, headers]) => {

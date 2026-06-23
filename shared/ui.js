@@ -88,7 +88,8 @@ window.UI = (function () {
         <div class="brand">🪐 KPI 系統</div>
         <nav class="top-nav">
           ${isTeacher ? `
-            <a href="${root}teacher/today.html">今日日誌</a>
+            <a href="${root}teacher/today.html">今日日報</a>
+            <a href="${root}teacher/weekly.html">週報</a>
             <a href="${root}teacher/mylog.html">我的 KPI</a>
             <a href="${root}teacher/okr.html">OKR</a>
           ` : ''}
@@ -96,13 +97,16 @@ window.UI = (function () {
             <a href="${root}manager/dashboard.html">部門儀表板</a>
             <a href="${root}manager/teachers.html">老師列表</a>
             <a href="${root}manager/eval.html">月度評核</a>
+            <a href="${root}manager/report.html">列印報表</a>
             <a href="${root}manager/observe.html">觀課紀錄</a>
             <a href="${root}manager/mylog.html">我的日誌</a>
+            <a href="${root}teacher/weekly.html">我的週報</a>
             <a href="${root}manager/myeval.html">我的 KPI</a>
           ` : ''}
           ${isAdmin ? `
             <a href="${root}admin/dashboard.html">總覽</a>
             <a href="${root}admin/eval-manager.html">評核主管</a>
+            <a href="${root}manager/report.html">列印報表</a>
             <a href="${root}admin/users.html">人員管理</a>
             <a href="${root}admin/bonus.html">獎金核發</a>
           ` : ''}

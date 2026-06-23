@@ -35,6 +35,11 @@ window.API = (function () {
     getLog: (params) => call('getLog', params),
     getTodayLog: (nickname) => call('getTodayLog', { nickname }),
     listLogs: (params) => call('listLogs', params),
+    uploadPhoto: (data) => call('uploadPhoto', data),
+
+    saveWeekly: (data) => call('saveWeekly', data),
+    getWeekly: (params) => call('getWeekly', params),
+    listWeekly: (params) => call('listWeekly', params),
 
     addFeedback: (data) => call('addFeedback', data),
     listFeedback: (params) => call('listFeedback', params),

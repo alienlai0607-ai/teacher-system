@@ -44,6 +44,12 @@ function handleRequest(e, method) {
       'getLog': () => getLog(params),
       'listLogs': () => listLogs(params),
       'getTodayLog': () => getTodayLog(params),
+      'uploadPhoto': () => uploadPhoto(params),
+
+      // 週報
+      'saveWeekly': () => saveWeekly(params),
+      'getWeekly': () => getWeekly(params),
+      'listWeekly': () => listWeekly(params),
 
       // 回饋
       'addFeedback': () => addFeedback(params),
@@ -107,6 +113,7 @@ const SHEET_NAMES = {
   POSTS: 'Posts',
   KPI_CONFIG: 'KPI_Config',
   SYSTEM_LOG: 'Logs_System',
+  WEEKLY: 'WeeklyReports',
 };
 
 const DEPARTMENTS = ['永康教室', '北區教室', '才藝部門', '總部'];

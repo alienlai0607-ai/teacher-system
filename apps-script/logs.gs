@@ -210,3 +210,120 @@ function dailyLockOldLogs() {
     }
   }
 }
+
+/**
+ * 拍照存證：把前端壓縮後的照片存進 Google Drive，回傳可公開檢視的網址
+ * params: { nickname, date, kpi, mimeType, base64, description }
+ * 資料夾結構：KPI證據 / 部門 / 暱稱 / 年月
+ * 權限：知道連結即可檢視（檔名用 UUID 亂碼，實務上猜不到）
+ */
+function uploadPhoto(params) {
+  const { nickname, date, kpi, mimeType, base64 } = params;
+  if (!nickname || !base64) return { ok: false, error: 'missing nickname or base64' };
+
+  const user = findUserByNickname(nickname);
+  if (!user) return { ok: false, error: 'user not found' };
+
+  const dateStr = String(date || todayStr());
+  const ym = dateStr.slice(0, 7); // YYYY-MM
+  const mt = mimeType || 'image/jpeg';
+  const ext = mt.indexOf('png') >= 0 ? 'png' : 'jpg';
+
+  // 資料夾：KPI證據 / 部門 / 暱稱 / 年月
+  const root = getEvidenceRootFolder_();
+  const deptF = getOrCreateChildFolder_(root, user.department || '未分部門');
+  const userF = getOrCreateChildFolder_(deptF, nickname);
+  const ymF = getOrCreateChildFolder_(userF, ym);
+
+  const bytes = Utilities.base64Decode(base64);
+  const filename = `K${kpi || 0}-${dateStr}-${Utilities.getUuid().slice(0, 8)}.${ext}`;
+  const blob = Utilities.newBlob(bytes, mt, filename);
+  const file = ymF.createFile(blob);
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (e) {
+    // 部分帳號政策會擋公開分享，仍回傳網址（登入有權限者可看）
+  }
+
+  const fileId = file.getId();
+  const url = 'https://drive.google.com/file/d/' + fileId + '/view';
+
+  logSystem(nickname, 'upload_photo', fileId, { kpi, date: dateStr });
+  return { ok: true, url, fileId };
+}
+
+/** 取得（或建立）證據根資料夾，ID 快取於 Script Properties 避免每次掃描 Drive */
+function getEvidenceRootFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const cached = props.getProperty('EVIDENCE_ROOT_FOLDER_ID');
+  if (cached) {
+    try { return DriveApp.getFolderById(cached); } catch (e) { /* 失效則重建 */ }
+  }
+  const name = 'KPI證據';
+  const it = DriveApp.getFoldersByName(name);
+  const folder = it.hasNext() ? it.next() : DriveApp.createFolder(name);
+  props.setProperty('EVIDENCE_ROOT_FOLDER_ID', folder.getId());
+  return folder;
+}
+
+/** 取得（或建立）子資料夾 */
+function getOrCreateChildFolder_(parent, name) {
+  const it = parent.getFoldersByName(name);
+  if (it.hasNext()) return it.next();
+  return parent.createFolder(name);
+}
+
+/* ========== 週報（教學反思/學生觀察/教具需求/課程改善）========== */
+
+function saveWeekly(params) {
+  const { nickname, week_of } = params;
+  if (!nickname || !week_of) return { ok: false, error: 'missing nickname or week_of' };
+  const user = findUserByNickname(nickname);
+  if (!user) return { ok: false, error: 'user not found' };
+
+  const week_id = 'WK-' + week_of + '-' + nickname;
+  const existing = findObject(SHEET_NAMES.WEEKLY, 'week_id', week_id);
+  const data = {
+    week_id, week_of, nickname, department: user.department, role: user.role,
+    teaching_reflection: params.teaching_reflection || '',
+    student_observation: params.student_observation || '',
+    tool_needs: params.tool_needs || '',
+    course_improvement: params.course_improvement || '',
+    updated_at: nowIso(),
+  };
+  if (existing) {
+    updateRow(SHEET_NAMES.WEEKLY, existing._row, data);
+  } else {
+    data.created_at = nowIso();
+    appendRow(SHEET_NAMES.WEEKLY, data);
+  }
+  logSystem(nickname, 'save_weekly', week_id, { week_of });
+  return { ok: true, week_id };
+}
+
+function getWeekly(params) {
+  const { nickname, week_of } = params;
+  if (!nickname || !week_of) return { ok: false, error: 'missing nickname or week_of' };
+  const week_id = 'WK-' + week_of + '-' + nickname;
+  const w = findObject(SHEET_NAMES.WEEKLY, 'week_id', week_id);
+  return { ok: true, weekly: w || null };
+}
+
+function listWeekly(params) {
+  const { viewer, nickname, week_of } = params;
+  if (!viewer) return { ok: false, error: 'missing viewer' };
+  const viewerUser = findUserByNickname(viewer);
+  if (!viewerUser) return { ok: false, error: 'viewer not found' };
+
+  let list = sheetToObjects(SHEET_NAMES.WEEKLY);
+  if (viewerUser.role === 'teacher' || viewerUser.role === 'admin_staff') {
+    list = list.filter(w => w.nickname === viewer);
+  } else if (viewerUser.role === 'manager') {
+    list = list.filter(w => w.department === viewerUser.department || w.nickname === viewer);
+  }
+  // admin 看全部
+  if (nickname) list = list.filter(w => w.nickname === nickname);
+  if (week_of) list = list.filter(w => w.week_of === week_of);
+  list.sort((a, b) => String(b.week_of).localeCompare(String(a.week_of)));
+  return { ok: true, weeklies: list };
+}

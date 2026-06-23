@@ -3,56 +3,53 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>今日工作日誌</title>
+<title>今日工作日報</title>
 <link rel="stylesheet" href="../shared/style.css">
 <script src="../shared/config.js"></script>
 <script src="../shared/auth.js"></script>
 <script src="../shared/api.js"></script>
 <script src="../shared/ui.js"></script>
 <style>
-  .kpi-page { display: none; }
-  .kpi-page.active { display: block; }
-  .rating-row { display: flex; gap: 8px; margin: 8px 0; }
-  .rating-btn {
-    flex: 1; padding: 10px; background: #fff; border: 1px solid var(--border);
-    border-radius: 8px; cursor: pointer; font-size: 18px;
-  }
-  .rating-btn.selected { background: var(--primary); color: #fff; border-color: var(--primary); }
   body { padding-bottom: 90px; }
-  .nav-buttons {
-    display: flex; gap: 10px;
-    position: fixed;
-    bottom: 0; left: 0; right: 0;
-    background: rgba(247,246,251,0.96);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
-    z-index: 20;
-    border-top: 1px solid var(--border);
-    box-shadow: 0 -2px 12px rgba(0,0,0,0.06);
+  .step-title {
+    font-size: 15px; font-weight: 800; color: var(--primary);
+    margin: 0 0 4px; display: flex; align-items: center; gap: 8px;
   }
-  .nav-buttons .btn { flex: 1; min-height: 48px; font-size: 15px; }
+  .step-no {
+    background: var(--primary); color: #fff; border-radius: 50%;
+    width: 22px; height: 22px; line-height: 22px; text-align: center; font-size: 13px; flex: none;
+  }
+  .req { color: var(--danger); font-weight: 700; }
   .check-list label {
-    display: flex; align-items: center; gap: 8px;
-    padding: 8px; cursor: pointer; font-weight: normal;
-    color: var(--text); font-size: 14px;
+    display: flex; align-items: center; gap: 8px; padding: 8px 0; cursor: pointer;
+    font-weight: normal; color: var(--text); font-size: 14px;
   }
   .check-list input { width: auto; }
+  .punch-row { display: flex; gap: 10px; }
+  .punch-row .btn { flex: 1; min-height: 46px; }
+  .punch-done { background: var(--success, #2e9e5b) !important; color: #fff !important; border-color: transparent !important; }
+  .type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .type-chip {
+    display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: 8px; background: #fff; cursor: pointer; font-size: 14px;
+  }
+  .type-chip input { width: auto; }
+  .type-chip.on { background: #FFF8F0; border-color: var(--accent); }
+  .dyn-card { border-left: 4px solid var(--accent); }
   .attach-area { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-  .attach-input {
-    width: 70px; height: 70px; border: 2px dashed var(--border); border-radius: 8px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 24px; color: var(--text-light); cursor: pointer; background: #fff;
-  }
-  .attach-link {
-    background: #f0eef7; padding: 6px 10px; border-radius: 6px;
-    font-size: 12px; display: flex; gap: 6px; align-items: center;
-  }
-  .post-card {
-    background: #fff8e7; border: 1px solid var(--accent);
-    padding: 10px; border-radius: 8px; margin-bottom: 8px;
-  }
+  .attach-photo { position: relative; width: 76px; height: 76px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+  .attach-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .attach-photo .att-del { position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,0.55); color: #fff; border-radius: 50%; width: 20px; height: 20px; line-height: 20px; text-align: center; font-size: 12px; cursor: pointer; }
+  .photo-uploading { width: 76px; height: 76px; border-radius: 8px; border: 1px dashed var(--border); display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--text-light); text-align: center; background: #fafafa; }
   .helper-text { font-size: 12px; color: var(--text-light); margin-top: 4px; }
+  .nav-buttons {
+    display: flex; gap: 10px; position: fixed; bottom: 0; left: 0; right: 0;
+    background: rgba(247,246,251,0.96); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); z-index: 20;
+    border-top: 1px solid var(--border); box-shadow: 0 -2px 12px rgba(0,0,0,0.06);
+  }
+  .nav-buttons .btn { flex: 1; min-height: 48px; font-size: 15px; }
+  .miss-banner { background: #fde8e8; border: 1px solid var(--danger); color: var(--danger); border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 10px; display: none; }
 </style>
 </head>
 <body>
@@ -61,29 +58,94 @@
 
 <div class="container-narrow">
 
-  <!-- Header info -->
+  <!-- Step 1 基本資料 + 打卡 -->
   <div class="card">
-    <div class="flex-between">
+    <div class="step-title"><span class="step-no">1</span> 基本資料</div>
+    <div class="flex-between mt-1">
       <div>
         <div class="text-lg" style="font-weight:700;">📅 <span id="today-date"></span></div>
-        <div class="muted text-sm">Hi <span id="user-nick"></span>！</div>
+        <div class="muted text-sm">🏫 <span id="user-dept"></span>　👤 <span id="user-nick"></span></div>
       </div>
-      <button class="btn btn-sm" onclick="copyYesterday()">📋 複製昨日</button>
+    </div>
+    <div class="form-row mt-2">
+      <label>出勤打卡 <span class="req">*上班必打</span></label>
+      <div class="punch-row">
+        <button class="btn" id="btn-checkin" onclick="punch('checkin')">🟢 上班打卡</button>
+        <button class="btn" id="btn-checkout" onclick="punch('checkout')">🔴 下班打卡</button>
+      </div>
+      <div class="helper-text" id="punch-info"></div>
     </div>
   </div>
 
-  <!-- KPI Tab navigation -->
-  <div class="kpi-tabs" id="kpi-tabs"></div>
+  <!-- Step 2 每日必填 -->
+  <div class="card">
+    <div class="step-title"><span class="step-no">2</span> 環境整潔 <span class="req">*</span></div>
+    <div class="check-list">
+      <label><input type="checkbox" id="env_classroom"> 教室環境確認完成</label>
+      <label><input type="checkbox" id="env_tools"> 教具歸位</label>
+      <label><input type="checkbox" id="env_trash"> 垃圾清理</label>
+    </div>
+    <div class="form-row">
+      <label>設備異常回報（無則免填）</label>
+      <textarea id="equipment_issue" placeholder="例：A 教室投影機無法開機，已通報..."></textarea>
+    </div>
+  </div>
 
-  <!-- KPI pages container -->
-  <div id="kpi-pages"></div>
+  <div class="card">
+    <div class="step-title"><span class="step-no">2</span> 工作日誌 <span class="req">*</span></div>
+    <div class="form-row">
+      <label>今日執行事項 <span class="req">*</span></label>
+      <textarea id="today_done" placeholder="今天主要做了哪些事..."></textarea>
+    </div>
+    <div class="form-row">
+      <label>班級狀況</label>
+      <textarea id="class_status" placeholder="今日班級整體狀況、秩序、學習氛圍..."></textarea>
+    </div>
+    <div class="form-row">
+      <label>特殊事件紀錄</label>
+      <textarea id="special_event" placeholder="有突發事件再填，並寫處理過程..."></textarea>
+    </div>
+    <div class="form-row">
+      <label>明日待辦事項 <span class="req">*</span></label>
+      <textarea id="tomorrow_todo" placeholder="明天要接續或準備的事..."></textarea>
+    </div>
+  </div>
 
-  <!-- Reflection + Help -->
-  <div class="card kpi-page" id="page-final">
-    <div class="card-title">💭 今日心得 & 求助</div>
+  <div class="card">
+    <div class="step-title"><span class="step-no">2</span> 親師溝通 <span class="req">*</span></div>
+    <div class="form-row">
+      <label>今日是否有家長聯繫？ <span class="req">*</span></label>
+      <div class="punch-row">
+        <button class="btn" id="pc-yes" onclick="setParentContact(true)">有</button>
+        <button class="btn" id="pc-no" onclick="setParentContact(false)">無</button>
+      </div>
+    </div>
+    <div class="form-row" id="parent-summary-wrap" style="display:none;">
+      <label>溝通內容摘要 <span class="req">*</span></label>
+      <textarea id="parent_summary" placeholder="與哪位家長、溝通什麼、結果..."></textarea>
+    </div>
+    <div class="form-row">
+      <label>學生特殊狀況</label>
+      <textarea id="student_special" placeholder="有需要追蹤的學生狀況再填..."></textarea>
+    </div>
+  </div>
+
+  <!-- Step 3 工作類型 -->
+  <div class="card">
+    <div class="step-title"><span class="step-no">3</span> 今日工作類型 <span class="req">*至少 1 項</span></div>
+    <div class="type-grid" id="type-grid"></div>
+    <div class="helper-text">勾選後下方自動展開對應紀錄</div>
+  </div>
+
+  <!-- Step 4 動態展開 -->
+  <div id="dynamic-forms"></div>
+
+  <!-- Step 5 心得 + 送出 -->
+  <div class="card">
+    <div class="step-title"><span class="step-no">5</span> 今日心得 & 求助</div>
     <div class="form-row">
       <label>今日心得（自由文字）</label>
-      <textarea id="reflection" placeholder="記錄今天的觀察、收穫、想分享的事..."></textarea>
+      <textarea id="reflection" placeholder="今天的觀察、收穫、想分享的事..."></textarea>
     </div>
     <div class="form-row">
       <label style="display:flex; gap:8px; align-items:center;">
@@ -95,435 +157,447 @@
       <label>求助內容</label>
       <textarea id="help-content" placeholder="想請主管協助什麼？"></textarea>
     </div>
-    <button class="btn btn-primary" style="width:100%;" onclick="submitLog()">💾 提交今日日誌</button>
-  </div>
-
-  <!-- Navigation -->
-  <div class="nav-buttons" id="bottom-nav">
-    <button class="btn" id="prev-btn" onclick="prevPage()">← 上一項</button>
-    <button class="btn btn-primary" id="next-btn" onclick="nextPage()">下一項 →</button>
+    <div class="miss-banner" id="miss-banner"></div>
+    <button class="btn btn-primary" style="width:100%;" onclick="submitLog()">💾 提交今日日報</button>
   </div>
 
   <div class="text-sm muted text-center mt-2" id="autosave-info"></div>
 </div>
 
+<div class="nav-buttons" id="bottom-nav">
+  <button class="btn" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑ 回頂端</button>
+  <button class="btn btn-primary" onclick="submitLog()">💾 提交日報</button>
+</div>
+
 <script>
 const session = AUTH.requireRole(['teacher', 'manager']);
-let role = session ? session.role : 'teacher';
-let currentPage = 0;
-let logData = {};
+
+// 工作類型 → 對應 KPI 桶與展開區塊類型
+const WORK_TYPES = [
+  { key: '安親課輔', icon: '📖', block: 'tutoring', kpi: 1 },
+  { key: 'STEAM課程', icon: '🔬', block: 'course', kpi: 3 },
+  { key: '積木課程', icon: '🧱', block: 'course', kpi: 3 },
+  { key: '閱讀寫作', icon: '✍️', block: 'course', kpi: 3 },
+  { key: '專案課程', icon: '🎯', block: 'project', kpi: 3 },
+  { key: '行政工作', icon: '🗂', block: 'admin', kpi: 6 },
+];
+
+let punchTimes = { checkin: '', checkout: '' };
+let parentContacted = null;        // null 未選 / true / false
+const attachments = {};            // { kpiNo: [{type,url,fileId,kpi,description,forType}] }
 let autoSaveTimer;
-
-// === KPI definitions ===
-const TEACHER_KPI_FORM = [
-  { no: 1, name: '學校課業指導', icon: '📚', fields: [
-    { key: 'class_count', label: '今日批改作業班級數', type: 'number', placeholder: '例：3' },
-    { key: 'correction_rate', label: '訂正完成率（%）', type: 'number', placeholder: '0-100' },
-    { key: 'challenge_book', label: '是否設計挑戰本', type: 'checkbox' },
-    { key: 'challenge_content', label: '挑戰本內容/主題', type: 'text', showIf: 'challenge_book' },
-    { key: 'individual_help', label: '個別補強學生（姓名/重點）', type: 'textarea' },
-    { key: 'review_test_prep', label: '今日課業複習/考試準備', type: 'textarea' },
-  ]},
-  { no: 2, name: '班級經營', icon: '🏫', fields: [
-    { key: 'order_rating', label: '今日班級秩序自評', type: 'rating' },
-    { key: 'incident', label: '突發事件', type: 'checkbox' },
-    { key: 'incident_detail', label: '事件處理過程', type: 'textarea', showIf: 'incident' },
-    { key: 'environment', label: '環境整理重點', type: 'text' },
-  ]},
-  { no: 3, name: '專案課程', icon: '🎯', fields: [
-    { key: 'project_name', label: '今日專案名稱', type: 'text' },
-    { key: 'project_progress', label: '專案進度說明', type: 'textarea' },
-    { key: 'engagement', label: '學生參與度自評', type: 'rating' },
-    { key: 'material_ready', label: '教材是否準備完整', type: 'checkbox' },
-  ]},
-  { no: 4, name: '群組經營', icon: '💬', fields: [
-    { key: 'group_post', label: '今日群組發文', type: 'checkbox' },
-    { key: 'group_post_link', label: '發文連結/截圖', type: 'text', showIf: 'group_post' },
-    { key: 'reply_count', label: '回覆訊息筆數', type: 'number' },
-    { key: 'notebook_link', label: '記事本/課程紀錄連結（每月至少2篇）', type: 'text' },
-  ]},
-  { no: 5, name: '親師溝通', icon: '🤝', fields: [
-    { key: 'parent_contact_count', label: '今日主動聯繫家長人數', type: 'number' },
-    { key: 'parent_contact_detail', label: '溝通對象與內容摘要', type: 'textarea' },
-    { key: 'parent_face_count', label: '下課與家長互動人數', type: 'number' },
-    { key: 'special_event', label: '特殊狀況回報', type: 'textarea' },
-  ]},
-  { no: 6, name: '個人態度', icon: '⭐', fields: [
-    { key: 'tasks_done', label: '今日完成的交辦事項', type: 'textarea' },
-    { key: 'self_initiative', label: '主動發現的問題/建議', type: 'textarea' },
-    { key: 'growth_learning', label: '今日學習/成長', type: 'text' },
-  ]},
-];
-
-const MANAGER_KPI_FORM = [
-  { no: 1, name: '團隊領導與培訓', icon: '👥', fields: [
-    { key: 'feedback_count', label: '今日給予老師回饋筆數', type: 'number' },
-    { key: 'observe_done', label: '今日是否完成觀課', type: 'checkbox' },
-    { key: 'observe_target', label: '觀課對象與重點', type: 'textarea', showIf: 'observe_done' },
-    { key: 'patrol_done', label: '今日巡班記錄', type: 'textarea' },
-    { key: 'training_held', label: '今日是否進行培訓', type: 'checkbox' },
-    { key: 'training_content', label: '培訓主題/內容', type: 'textarea', showIf: 'training_held' },
-  ]},
-  { no: 2, name: '教學品質監督', icon: '🔍', fields: [
-    { key: 'quality_issue', label: '今日發現品質問題', type: 'textarea' },
-    { key: 'handle_action', label: '已採取的處理動作', type: 'textarea' },
-    { key: 'material_review', label: '教材教案審核情況', type: 'textarea' },
-    { key: 'incident_guide', label: '突發事件指導案例', type: 'textarea' },
-  ]},
-  { no: 3, name: '部門特色發展', icon: '🚀', fields: [
-    { key: 'new_lesson', label: '新教案/特色課程進度', type: 'textarea' },
-    { key: 'cross_activity', label: '跨班活動策劃', type: 'textarea' },
-    { key: 'resource_update', label: '教學資源更新', type: 'text' },
-  ]},
-  { no: 4, name: '招生與發文', icon: '📣', fields: [
-    { key: 'enrollment_change', label: '今日學生人數異動（+/-）', type: 'text' },
-    { key: 'recruit_activity', label: '招生活動執行', type: 'textarea' },
-    { key: 'posts', label: '今日 FB/IG 發文（每週累計需 ≥3 篇）', type: 'posts' },
-  ]},
-  { no: 5, name: '親師與客訴', icon: '☎️', fields: [
-    { key: 'complaint_count', label: '今日新增客訴件數', type: 'number' },
-    { key: 'complaint_detail', label: '客訴內容與處理', type: 'textarea' },
-    { key: 'parent_event', label: '親師活動進度', type: 'text' },
-    { key: 'serious_case', label: '重大親師事件處理', type: 'textarea' },
-  ]},
-  { no: 6, name: '個人態度', icon: '⭐', fields: [
-    { key: 'tasks_done', label: '今日完成柏翰交辦事項', type: 'textarea' },
-    { key: 'self_initiative', label: '主動發現的部門問題與建議', type: 'textarea' },
-    { key: 'upward_report', label: '今日向上回報重要狀況', type: 'textarea' },
-  ]},
-];
-
-const KPI_FORM = role === 'manager' ? MANAGER_KPI_FORM : TEACHER_KPI_FORM;
 
 window.addEventListener('load', async () => {
   UI.mountHeader(session);
   document.getElementById('today-date').textContent = formatToday();
+  document.getElementById('user-dept').textContent = session.department;
   document.getElementById('user-nick').textContent = session.nickname;
 
-  renderTabs();
-  renderPages();
-  showPage(0);
+  renderTypeGrid();
 
-  // 載入今日日誌（若有）
   await loadTodayLog();
 
-  // 自動儲存
-  document.body.addEventListener('input', () => {
-    clearTimeout(autoSaveTimer);
-    autoSaveTimer = setTimeout(autoSave, 1500);
-  });
-
+  document.body.addEventListener('input', scheduleSave);
   document.getElementById('help-needed').addEventListener('change', e => {
     document.getElementById('help-content-wrap').style.display = e.target.checked ? 'block' : 'none';
   });
 });
 
+// ===== 工具 =====
 function formatToday() {
   const d = new Date();
-  const dayNames = ['日','一','二','三','四','五','六'];
-  return d.getFullYear() + '/' +
-    String(d.getMonth()+1).padStart(2,'0') + '/' +
-    String(d.getDate()).padStart(2,'0') + ' (' + dayNames[d.getDay()] + ')';
+  const dn = ['日','一','二','三','四','五','六'];
+  return d.getFullYear() + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + String(d.getDate()).padStart(2,'0') + ' (' + dn[d.getDay()] + ')';
 }
-
 function todayDateStr() {
   const d = new Date();
-  return d.getFullYear() + '-' +
-    String(d.getMonth()+1).padStart(2,'0') + '-' +
-    String(d.getDate()).padStart(2,'0');
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function nowTime() {
+  const d = new Date();
+  return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}
+function val(id) { const el = document.getElementById(id); return el ? el.value.trim() : ''; }
+function chk(id) { const el = document.getElementById(id); return el ? el.checked : false; }
+function scheduleSave() { clearTimeout(autoSaveTimer); autoSaveTimer = setTimeout(autoSave, 1500); }
+
+// ===== 打卡 =====
+function punch(type) {
+  if (!punchTimes[type]) punchTimes[type] = nowTime();
+  renderPunch();
+  scheduleSave();
+}
+function renderPunch() {
+  const inBtn = document.getElementById('btn-checkin');
+  const outBtn = document.getElementById('btn-checkout');
+  if (punchTimes.checkin) { inBtn.textContent = '✅ 上班 ' + punchTimes.checkin; inBtn.classList.add('punch-done'); }
+  if (punchTimes.checkout) { outBtn.textContent = '✅ 下班 ' + punchTimes.checkout; outBtn.classList.add('punch-done'); }
 }
 
-function renderTabs() {
-  const wrap = document.getElementById('kpi-tabs');
-  wrap.innerHTML = KPI_FORM.map((k, i) => `
-    <div class="kpi-tab" data-page="${i}" onclick="showPage(${i})">
-      ${k.icon} ${k.no} ${k.name}
-    </div>
-  `).join('') + `<div class="kpi-tab" data-page="${KPI_FORM.length}" onclick="showPage(${KPI_FORM.length})">💭 提交</div>`;
+// ===== 親師溝通 =====
+function setParentContact(yes) {
+  parentContacted = yes;
+  document.getElementById('pc-yes').classList.toggle('punch-done', yes === true);
+  document.getElementById('pc-no').classList.toggle('punch-done', yes === false);
+  document.getElementById('parent-summary-wrap').style.display = yes ? 'block' : 'none';
+  scheduleSave();
 }
 
-function renderPages() {
-  const wrap = document.getElementById('kpi-pages');
-  wrap.innerHTML = KPI_FORM.map((k, i) => `
-    <div class="card kpi-page" id="page-${i}">
-      <div class="card-title">${k.icon} ${k.name}（KPI${k.no}）</div>
-      ${k.fields.map(f => renderField(k.no, f)).join('')}
-      <div class="form-row">
-        <label>📸 附件（照片/連結）</label>
-        <div id="attach-${k.no}" class="attach-area"></div>
-        <button class="btn btn-sm mt-1" onclick="addAttachment(${k.no})">+ 新增連結/檔案</button>
-        <div class="helper-text">附件會綁定到 KPI${k.no}，月底評核時自動顯示</div>
-      </div>
-    </div>
+// ===== 工作類型 =====
+function renderTypeGrid() {
+  document.getElementById('type-grid').innerHTML = WORK_TYPES.map((t, i) => `
+    <label class="type-chip" id="chip-${i}">
+      <input type="checkbox" value="${t.key}" onchange="onTypeToggle()"> ${t.icon} ${t.key}
+    </label>
   `).join('');
 }
+function checkedTypes() {
+  return WORK_TYPES.filter((t, i) => {
+    const cb = document.querySelector(`#chip-${i} input`);
+    return cb && cb.checked;
+  });
+}
+function onTypeToggle() {
+  WORK_TYPES.forEach((t, i) => {
+    const chip = document.getElementById('chip-' + i);
+    const cb = document.querySelector(`#chip-${i} input`);
+    chip.classList.toggle('on', cb.checked);
+  });
+  renderDynamic();
+  scheduleSave();
+}
 
-function renderField(kpiNo, f) {
-  const id = `k${kpiNo}_${f.key}`;
-  const showIfAttr = f.showIf ? `data-show-if="k${kpiNo}_${f.showIf}"` : '';
-  if (f.type === 'checkbox') {
-    return `<div class="form-row" ${showIfAttr}>
-      <label style="display:flex; gap:8px; align-items:center;">
-        <input type="checkbox" id="${id}" style="width:auto;" onchange="onCheckboxChange()">
-        <span>${f.label}</span>
-      </label>
+// ===== 動態展開 =====
+function renderDynamic(savedData) {
+  const wrap = document.getElementById('dynamic-forms');
+  const types = checkedTypes();
+  // 保留已輸入值
+  const prev = collectDynamic();
+  wrap.innerHTML = types.map((t, idx) => blockHtml(t, idx)).join('');
+  // 回填
+  const src = savedData || prev;
+  types.forEach((t, idx) => fillBlock(t, idx, src));
+  // 照片區重繪
+  types.forEach((t, idx) => { if (t.block === 'course' || t.block === 'project') renderAttachments(blockId(t, idx)); });
+}
+function blockId(t, idx) { return `${t.block}-${idx}`; }
+
+function blockHtml(t, idx) {
+  const id = blockId(t, idx);
+  if (t.block === 'tutoring') {
+    return `<div class="card dyn-card">
+      <div class="step-title"><span class="step-no">4</span> ${t.icon} ${t.key}</div>
+      <div class="form-row"><label>批改作業班級數</label><input type="number" id="${id}_classes" placeholder="例：3"></div>
+      <div class="form-row"><label>訂正完成率（%）</label><input type="number" id="${id}_correction" placeholder="0-100"></div>
+      <div class="form-row"><label>個別補強學生（姓名/重點）</label><textarea id="${id}_help"></textarea></div>
     </div>`;
   }
-  if (f.type === 'textarea') {
-    return `<div class="form-row" ${showIfAttr}>
-      <label>${f.label}</label>
-      <textarea id="${id}" placeholder="${f.placeholder || ''}"></textarea>
+  if (t.block === 'course') {
+    return `<div class="card dyn-card" data-photo="${id}" data-kpi="3">
+      <div class="step-title"><span class="step-no">4</span> ${t.icon} ${t.key} 備課紀錄 <span class="req">*</span></div>
+      <div class="form-row"><label>課程名稱 <span class="req">*</span></label><input type="text" id="${id}_name"></div>
+      <div class="form-row"><label>上課班級</label><input type="text" id="${id}_class"></div>
+      <div class="form-row"><label>教學進度 <span class="req">*</span></label><textarea id="${id}_progress"></textarea></div>
+      <div class="form-row"><label>孩子學習狀況</label><textarea id="${id}_learning"></textarea></div>
+      <div class="form-row"><label>下次課程準備事項</label><textarea id="${id}_next"></textarea></div>
+      ${photoArea(id, 3, '課程／活動照片', true)}
     </div>`;
   }
-  if (f.type === 'rating') {
-    return `<div class="form-row" ${showIfAttr}>
-      <label>${f.label}</label>
-      <div class="rating-row" id="${id}-row">
-        ${[1,2,3,4,5].map(n => `<div class="rating-btn" data-val="${n}" onclick="setRating('${id}', ${n})">${'⭐'.repeat(n)}</div>`).join('')}
-      </div>
-      <input type="hidden" id="${id}">
+  if (t.block === 'project') {
+    return `<div class="card dyn-card" data-photo="${id}" data-kpi="3">
+      <div class="step-title"><span class="step-no">4</span> ${t.icon} ${t.key}紀錄 <span class="req">*</span></div>
+      <div class="form-row"><label>今日進度 <span class="req">*</span></label><textarea id="${id}_progress"></textarea></div>
+      <div class="form-row"><label>完成項目</label><textarea id="${id}_done"></textarea></div>
+      <div class="form-row"><label>遇到問題</label><textarea id="${id}_problem"></textarea></div>
+      <div class="form-row"><label>下階段規劃</label><textarea id="${id}_plan"></textarea></div>
+      ${photoArea(id, 3, '專案照片', false)}
     </div>`;
   }
-  if (f.type === 'posts') {
-    return `<div class="form-row" ${showIfAttr}>
-      <label>${f.label}</label>
-      <div id="${id}-list"></div>
-      <button class="btn btn-sm mt-1" onclick="addPost('${id}')">+ 新增發文紀錄</button>
-      <div id="${id}-week-info" class="helper-text">本週進度載入中...</div>
+  if (t.block === 'admin') {
+    return `<div class="card dyn-card">
+      <div class="step-title"><span class="step-no">4</span> ${t.icon} ${t.key}成果</div>
+      <div class="form-row"><label>行政工作內容/成果</label><textarea id="${id}_result" placeholder="完成的行政事項..."></textarea></div>
     </div>`;
   }
-  return `<div class="form-row" ${showIfAttr}>
-    <label>${f.label}</label>
-    <input type="${f.type}" id="${id}" placeholder="${f.placeholder || ''}">
+  return '';
+}
+
+function photoArea(id, kpi, label, required) {
+  return `<div class="form-row">
+    <label>📸 ${label} ${required ? '<span class="req">*至少 1 張</span>' : ''}</label>
+    <div id="attach-${id}" class="attach-area"></div>
+    <input type="file" accept="image/*" capture="environment" id="photo-input-${id}" style="display:none" onchange="onPhotoPicked(event, '${id}', ${kpi})">
+    <button class="btn btn-sm mt-1" onclick="document.getElementById('photo-input-${id}').click()">📷 拍照／選圖</button>
   </div>`;
 }
 
-function setRating(id, val) {
-  document.getElementById(id).value = val;
-  const row = document.getElementById(id + '-row');
-  row.querySelectorAll('.rating-btn').forEach(b => {
-    b.classList.toggle('selected', Number(b.dataset.val) === val);
-  });
-  onInputChange();
-}
-
-function onCheckboxChange() {
-  document.querySelectorAll('[data-show-if]').forEach(el => {
-    const dep = el.getAttribute('data-show-if');
-    const depEl = document.getElementById(dep);
-    el.style.display = depEl && depEl.checked ? 'block' : 'none';
+function fillBlock(t, idx, src) {
+  const id = blockId(t, idx);
+  const d = (src && src[id]) || {};
+  Object.entries(d).forEach(([k, v]) => {
+    if (k === '_photos') { attachments[id] = v.slice(); return; }
+    const el = document.getElementById(id + '_' + k);
+    if (el) el.value = v;
   });
 }
 
-function onInputChange() {
-  clearTimeout(autoSaveTimer);
-  autoSaveTimer = setTimeout(autoSave, 1500);
-}
-
-function showPage(idx) {
-  currentPage = idx;
-  document.querySelectorAll('.kpi-page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.kpi-tab').forEach(t => t.classList.remove('active'));
-  const pages = document.querySelectorAll('#kpi-pages .kpi-page');
-  if (idx < pages.length) {
-    pages[idx].classList.add('active');
-  } else {
-    document.getElementById('page-final').classList.add('active');
-  }
-  document.querySelector(`.kpi-tab[data-page="${idx}"]`).classList.add('active');
-  window.scrollTo(0, 0);
-}
-
-function prevPage() { if (currentPage > 0) showPage(currentPage - 1); }
-function nextPage() { if (currentPage < KPI_FORM.length) showPage(currentPage + 1); }
-
-// === Attachments ===
-const attachments = {}; // { kpiNo: [{type, url, description}] }
-function addAttachment(kpiNo) {
-  const url = prompt('請貼上連結（Google Drive、Imgur、社群連結等）：');
-  if (!url) return;
-  const desc = prompt('簡短描述（選填）：') || '';
-  attachments[kpiNo] = attachments[kpiNo] || [];
-  attachments[kpiNo].push({ type: 'link', url, description: desc, kpi: kpiNo });
-  renderAttachments(kpiNo);
-  onInputChange();
-}
-function renderAttachments(kpiNo) {
-  const wrap = document.getElementById(`attach-${kpiNo}`);
-  if (!wrap) return;
-  const list = attachments[kpiNo] || [];
-  wrap.innerHTML = list.map((a, i) => `
-    <div class="attach-link">
-      <a href="${a.url}" target="_blank">🔗 ${a.description || a.url.slice(0, 30)}</a>
-      <span style="cursor:pointer; color:var(--danger);" onclick="removeAttachment(${kpiNo}, ${i})">✕</span>
-    </div>
-  `).join('');
-}
-function removeAttachment(kpiNo, idx) {
-  attachments[kpiNo].splice(idx, 1);
-  renderAttachments(kpiNo);
-  onInputChange();
-}
-
-// === Manager Posts ===
-const managerPosts = [];
-function addPost(id) {
-  const platform = prompt('平台？輸入 FB 或 IG：');
-  if (!platform || !['FB','IG'].includes(platform.toUpperCase())) {
-    UI.toast('平台請輸入 FB 或 IG', 'warn');
-    return;
-  }
-  const url = prompt('貼文連結（可空，但建議填）：') || '';
-  const content_type = prompt('內容類型？\n教學日常 / 招生宣傳 / 活動側拍 / 理念分享 / 學生成果 / 其他');
-  managerPosts.push({
-    platform: platform.toUpperCase(),
-    url,
-    content_type: content_type || '其他',
-    date: todayDateStr(),
-  });
-  renderPosts(id);
-  refreshWeekPostCount(id);
-  onInputChange();
-}
-function renderPosts(id) {
-  const wrap = document.getElementById(id + '-list');
-  if (!wrap) return;
-  wrap.innerHTML = managerPosts.map((p, i) => `
-    <div class="post-card">
-      <strong>${p.platform}</strong> · ${p.content_type}<br>
-      ${p.url ? `<a href="${p.url}" target="_blank">${p.url.slice(0,40)}</a>` : '<span class="muted">無連結</span>'}
-      <span style="float:right; cursor:pointer; color:var(--danger);" onclick="managerPosts.splice(${i},1); renderPosts('${id}')">✕</span>
-    </div>
-  `).join('');
-}
-async function refreshWeekPostCount(id) {
-  const info = document.getElementById(id + '-week-info');
-  if (!info) return;
-  const res = await API.getWeekPostCount(session.nickname, todayDateStr());
-  if (!res.ok) return;
-  const total = res.count + managerPosts.length;
-  info.textContent = `本週累計：${total}/3 篇` + (total >= 3 ? ' ✅ 達標' : ' ⚠️ 尚未達標');
-  info.style.color = total >= 3 ? 'var(--success)' : 'var(--warn)';
-}
-
-// === Load / Save ===
-async function loadTodayLog() {
-  UI.loading(true);
-  const res = await API.getTodayLog(session.nickname);
-  UI.loading(false);
-  if (res.ok && res.log) {
-    populateForm(res.log);
-  }
-  if (role === 'manager') {
-    refreshWeekPostCount('k4_posts');
-  }
-}
-
-function populateForm(log) {
-  for (let k = 1; k <= 6; k++) {
-    const data = log['kpi' + k + '_data'];
-    if (data && typeof data === 'object') {
-      Object.entries(data).forEach(([key, val]) => {
-        const id = `k${k}_${key}`;
-        const el = document.getElementById(id);
-        if (!el) return;
-        if (el.type === 'checkbox') el.checked = !!val;
-        else el.value = val;
-        if (el.tagName === 'INPUT' && el.type === 'hidden') {
-          // rating
-          const row = document.getElementById(id + '-row');
-          if (row) {
-            row.querySelectorAll('.rating-btn').forEach(b => {
-              b.classList.toggle('selected', Number(b.dataset.val) === Number(val));
-            });
-          }
-        }
-      });
-    }
-    // attachments
-    if (log.attachments && Array.isArray(log.attachments)) {
-      log.attachments.filter(a => Number(a.kpi) === k).forEach(a => {
-        attachments[k] = attachments[k] || [];
-        attachments[k].push(a);
-      });
-      renderAttachments(k);
-    }
-  }
-  document.getElementById('reflection').value = log.reflection || '';
-  document.getElementById('help-needed').checked = log.help_needed === true;
-  document.getElementById('help-content').value = log.help_content || '';
-  onCheckboxChange();
-}
-
-function collectFormData() {
-  const data = { kpi1_data: {}, kpi2_data: {}, kpi3_data: {}, kpi4_data: {}, kpi5_data: {}, kpi6_data: {} };
-  KPI_FORM.forEach(k => {
-    k.fields.forEach(f => {
-      if (f.type === 'posts') return;
-      const id = `k${k.no}_${f.key}`;
-      const el = document.getElementById(id);
-      if (!el) return;
-      let val = el.type === 'checkbox' ? el.checked : el.value;
-      if (val !== '' && val !== false) data[`kpi${k.no}_data`][f.key] = val;
+function collectDynamic() {
+  const out = {};
+  // 以目前勾選類型逐一收
+  checkedTypes().forEach((t, idx) => {
+    const id = blockId(t, idx);
+    const obj = {};
+    document.querySelectorAll(`[id^="${id}_"]`).forEach(el => {
+      const key = el.id.slice(id.length + 1);
+      if (el.value !== undefined && el.value !== '') obj[key] = el.value;
     });
+    if (attachments[id] && attachments[id].length) obj._photos = attachments[id].slice();
+    out[id] = obj;
   });
-  // 收集所有附件
-  const atts = [];
-  Object.entries(attachments).forEach(([kpi, list]) => {
-    list.forEach(a => atts.push({ ...a, kpi: Number(kpi) }));
+  return out;
+}
+
+// ===== 照片（壓縮 + 上傳 Drive）=====
+function driveThumb(url, fileId) {
+  const id = fileId || ((url || '').match(/\/d\/([^/]+)/) || [])[1];
+  return id ? `https://drive.google.com/thumbnail?id=${id}&sz=w200` : url;
+}
+function compressImage(file, maxDim = 1280, quality = 0.7) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = e => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        let { width, height } = img;
+        if (width >= height && width > maxDim) { height = Math.round(height * maxDim / width); width = maxDim; }
+        else if (height > width && height > maxDim) { width = Math.round(width * maxDim / height); height = maxDim; }
+        const c = document.createElement('canvas');
+        c.width = width; c.height = height;
+        c.getContext('2d').drawImage(img, 0, 0, width, height);
+        resolve(c.toDataURL('image/jpeg', quality));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
   });
-  data.attachments = atts;
-  data.reflection = document.getElementById('reflection').value;
-  data.help_needed = document.getElementById('help-needed').checked;
-  data.help_content = document.getElementById('help-content').value;
+}
+async function onPhotoPicked(event, blockKey, kpiNo) {
+  const file = event.target.files[0];
+  event.target.value = '';
+  if (!file || !file.type.startsWith('image/')) return;
+  const wrap = document.getElementById('attach-' + blockKey);
+  const ph = document.createElement('div');
+  ph.className = 'photo-uploading'; ph.textContent = '上傳中…';
+  if (wrap) wrap.appendChild(ph);
+  let dataUrl;
+  try { dataUrl = await compressImage(file); }
+  catch (e) { ph.remove(); UI.toast('照片讀取失敗', 'danger'); return; }
+  const res = await API.uploadPhoto({
+    nickname: session.nickname, date: todayDateStr(), kpi: kpiNo, mimeType: 'image/jpeg', base64: dataUrl.split(',')[1],
+  });
+  ph.remove();
+  if (!res.ok) { UI.toast('上傳失敗：' + (res.error || ''), 'danger'); return; }
+  attachments[blockKey] = attachments[blockKey] || [];
+  attachments[blockKey].push({ type: 'photo', url: res.url, fileId: res.fileId, kpi: kpiNo, description: '', forType: blockKey });
+  renderAttachments(blockKey);
+  scheduleSave();
+  UI.toast('照片已存檔 ✅', 'success');
+}
+function renderAttachments(blockKey) {
+  const wrap = document.getElementById('attach-' + blockKey);
+  if (!wrap) return;
+  const list = attachments[blockKey] || [];
+  wrap.innerHTML = list.map((a, i) => `
+    <div class="attach-photo">
+      <a href="${a.url}" target="_blank"><img src="${driveThumb(a.url, a.fileId)}" alt="照片" loading="lazy"></a>
+      <span class="att-del" onclick="removeAttachment('${blockKey}', ${i})">✕</span>
+    </div>`).join('');
+}
+function removeAttachment(blockKey, idx) {
+  attachments[blockKey].splice(idx, 1);
+  renderAttachments(blockKey);
+  scheduleSave();
+}
+
+// ===== 組裝成 KPI 六桶（後端評核相容）=====
+function collectFormData() {
+  const dyn = collectDynamic();
+  const types = checkedTypes().map(t => t.key);
+
+  // 把動態區塊匯回 KPI 桶
+  const kpi1 = {}, kpi3 = { courses: [], project: null };
+  const allPhotos = [];
+  checkedTypes().forEach((t, idx) => {
+    const id = blockId(t, idx);
+    const d = dyn[id] || {};
+    const photos = (d._photos || []).map(p => ({ ...p, kpi: t.kpi }));
+    allPhotos.push(...photos);
+    if (t.block === 'tutoring') {
+      if (d.classes) kpi1.class_count = d.classes;
+      if (d.correction) kpi1.correction_rate = d.correction;
+      if (d.help) kpi1.individual_help = d.help;
+    } else if (t.block === 'course') {
+      kpi3.courses.push({ type: t.key, name: d.name || '', class: d.class || '', progress: d.progress || '', learning: d.learning || '', next: d.next || '' });
+    } else if (t.block === 'project') {
+      kpi3.project = { progress: d.progress || '', done: d.done || '', problem: d.problem || '', plan: d.plan || '' };
+    }
+  });
+
+  const data = {
+    kpi1_data: kpi1,
+    kpi2_data: {
+      env_classroom: chk('env_classroom'), env_tools: chk('env_tools'), env_trash: chk('env_trash'),
+      equipment_issue: val('equipment_issue'), class_status: val('class_status'),
+    },
+    kpi3_data: kpi3,
+    kpi4_data: {},
+    kpi5_data: {
+      parent_contacted: parentContacted,   // 三態：null 未選 / true / false
+      parent_summary: val('parent_summary'),
+      student_special: val('student_special'),
+    },
+    kpi6_data: {
+      today_done: val('today_done'), tomorrow_todo: val('tomorrow_todo'),
+      special_event: val('special_event'),
+      work_types: types,
+      admin_result: (dyn[Object.keys(dyn).find(k => k.startsWith('admin-')) || ''] || {}).result || '',
+    },
+    attachments: allPhotos,
+    reflection: val('reflection'),
+    help_needed: chk('help-needed'),
+    help_content: val('help-content'),
+    checkin_at: punchTimes.checkin,
+    checkout_at: punchTimes.checkout,
+  };
   return data;
 }
 
-async function autoSave() {
+// ===== 必填檢核 =====
+function findMissing() {
+  const m = [];
+  if (!punchTimes.checkin) m.push('上班打卡');
+  if (!(chk('env_classroom') && chk('env_tools') && chk('env_trash'))) m.push('環境整潔三項確認');
+  if (!val('today_done')) m.push('今日執行事項');
+  if (!val('tomorrow_todo')) m.push('明日待辦事項');
+  if (parentContacted === null) m.push('親師溝通（請選有/無）');
+  if (parentContacted === true && !val('parent_summary')) m.push('溝通內容摘要');
+  const types = checkedTypes();
+  if (types.length === 0) m.push('至少勾選 1 個工作類型');
+  types.forEach((t, idx) => {
+    const id = blockId(t, idx);
+    if (t.block === 'course') {
+      if (!val(id + '_name')) m.push(`${t.key}：課程名稱`);
+      if (!val(id + '_progress')) m.push(`${t.key}：教學進度`);
+      if (!(attachments[id] && attachments[id].length)) m.push(`${t.key}：至少 1 張課程照片`);
+    }
+    if (t.block === 'project') {
+      if (!val(id + '_progress')) m.push(`${t.key}：今日進度`);
+    }
+  });
+  return m;
+}
+
+// ===== 儲存 / 送出 =====
+async function autoSave(silent) {
   const data = collectFormData();
-  const payload = {
-    nickname: session.nickname,
-    date: todayDateStr(),
-    ...data,
-  };
-  if (role === 'manager' && managerPosts.length > 0) {
-    payload.posts = managerPosts;
-  }
+  const payload = { nickname: session.nickname, date: todayDateStr(), ...data };
   const info = document.getElementById('autosave-info');
-  info.textContent = '💾 儲存中...';
+  if (!silent) info.textContent = '💾 儲存中...';
   const res = await API.saveLog(payload);
   if (res.ok) {
-    info.textContent = '💾 自動儲存於 ' + new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
-    managerPosts.length = 0; // 清空已儲存
+    info.textContent = '💾 草稿自動儲存於 ' + nowTime();
+    info.style.color = '';
   } else {
     info.textContent = '⚠️ 儲存失敗：' + (res.error || '未知錯誤');
     info.style.color = 'var(--danger)';
   }
+  return res;
 }
 
 async function submitLog() {
-  await autoSave();
-  UI.toast('日誌已提交！', 'success');
+  const missing = findMissing();
+  const banner = document.getElementById('miss-banner');
+  if (missing.length) {
+    banner.style.display = 'block';
+    banner.innerHTML = '❌ 還不能送出，請補完：<br>• ' + missing.join('<br>• ');
+    banner.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    UI.toast('有必填未完成', 'warn');
+    return;
+  }
+  banner.style.display = 'none';
+  const res = await autoSave(true);
+  if (!res.ok) { UI.toast('送出失敗：' + (res.error || ''), 'danger'); return; }
+  UI.toast('日報已提交！', 'success');
   setTimeout(() => window.location.href = 'mylog.html', 1000);
 }
 
-async function copyYesterday() {
-  const yesterday = new Date(Date.now() - 86400000);
-  const y = yesterday.getFullYear() + '-' +
-    String(yesterday.getMonth()+1).padStart(2,'0') + '-' +
-    String(yesterday.getDate()).padStart(2,'0');
+// ===== 載入今日草稿 =====
+async function loadTodayLog() {
   UI.loading(true);
-  const res = await API.getLog({ nickname: session.nickname, date: y });
+  const res = await API.getTodayLog(session.nickname);
   UI.loading(false);
-  if (!res.ok || !res.log) {
-    UI.toast('昨日無日誌可複製', 'warn');
-    return;
-  }
-  const ok = await UI.confirmDialog('將套用昨日資料到今日（覆蓋目前內容）？');
-  if (!ok) return;
-  populateForm(res.log);
-  UI.toast('已套用昨日內容，請依今日狀況調整', 'success');
-  onInputChange();
+  if (res.ok && res.log) populateForm(res.log);
+}
+
+function populateForm(log) {
+  const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+  const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+
+  // 打卡
+  punchTimes.checkin = log.checkin_at || ''; punchTimes.checkout = log.checkout_at || '';
+  renderPunch();
+
+  const k2 = log.kpi2_data || {}, k5 = log.kpi5_data || {}, k6 = log.kpi6_data || {};
+  setChk('env_classroom', k2.env_classroom); setChk('env_tools', k2.env_tools); setChk('env_trash', k2.env_trash);
+  set('equipment_issue', k2.equipment_issue); set('class_status', k2.class_status);
+  set('today_done', k6.today_done); set('tomorrow_todo', k6.tomorrow_todo); set('special_event', k6.special_event);
+  set('parent_summary', k5.parent_summary); set('student_special', k5.student_special);
+  set('reflection', log.reflection);
+  setChk('help-needed', log.help_needed === true);
+  set('help-content', log.help_content);
+  if (log.help_needed === true) document.getElementById('help-content-wrap').style.display = 'block';
+
+  // 親師溝通有/無還原（三態，未選則維持 null 不還原）
+  if (k5.parent_contacted === true) setParentContact(true);
+  else if (k5.parent_contacted === false) setParentContact(false);
+
+  // 工作類型 + 動態還原
+  const types = Array.isArray(k6.work_types) ? k6.work_types : [];
+  const savedBlocks = rebuildBlocksFromKpi(log, types);
+  // 勾選 checkbox
+  WORK_TYPES.forEach((t, i) => {
+    const cb = document.querySelector(`#chip-${i} input`);
+    if (cb && types.includes(t.key)) { cb.checked = true; document.getElementById('chip-'+i).classList.add('on'); }
+  });
+  renderDynamic(savedBlocks);
+}
+
+// 把 KPI 桶還原成動態區塊資料（依目前勾選順序對齊）
+function rebuildBlocksFromKpi(log, types) {
+  const out = {};
+  const k1 = log.kpi1_data || {}, k3 = log.kpi3_data || {}, k6 = log.kpi6_data || {};
+  const courses = Array.isArray(k3.courses) ? k3.courses : [];
+  const photos = Array.isArray(log.attachments) ? log.attachments.filter(a => a.type === 'photo') : [];
+  let courseIdx = 0;
+  // 依 WORK_TYPES 定義的順序，過濾出有勾的，與展開後 index 對齊
+  const ordered = WORK_TYPES.filter(t => types.includes(t.key));
+  ordered.forEach((t, idx) => {
+    const id = `${t.block}-${idx}`;
+    if (t.block === 'tutoring') {
+      out[id] = { classes: k1.class_count, correction: k1.correction_rate, help: k1.individual_help };
+    } else if (t.block === 'course') {
+      const c = courses.find(c => c.type === t.key) || courses[courseIdx++] || {};
+      out[id] = { name: c.name, class: c.class, progress: c.progress, learning: c.learning, next: c.next, _photos: photos.filter(p => p.forType === id) };
+    } else if (t.block === 'project') {
+      const p = k3.project || {};
+      out[id] = { progress: p.progress, done: p.done, problem: p.problem, plan: p.plan, _photos: photos.filter(ph => ph.forType === id) };
+    } else if (t.block === 'admin') {
+      out[id] = { result: k6.admin_result };
+    }
+  });
+  return out;
 }
 </script>
 
