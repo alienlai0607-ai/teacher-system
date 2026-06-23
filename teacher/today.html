@@ -281,14 +281,13 @@ function toggleStudent(i) {
   scheduleSave();
 }
 
-// 安親方法標籤：點一下把方法帶入指定 textarea（避免重複）
+// 安親方法標籤：點一下把方法帶入指定 textarea（重組、去重、濾掉髒 undefined）
 function addMethod(targetId, text) {
   const el = document.getElementById(targetId);
   if (!el) return;
-  const cur = el.value.trim();
-  const parts = cur ? cur.split(/[、,，\n]/).map(s => s.trim()).filter(Boolean) : [];
-  if (parts.includes(text)) return;   // 已加過就略過
-  el.value = cur ? (cur.replace(/[、,，\s]*$/, '') + '、' + text) : text;
+  const parts = (el.value || '').split(/[、,，\n]/).map(s => s.trim()).filter(s => s && s !== 'undefined');
+  if (!parts.includes(text)) parts.push(text);
+  el.value = parts.join('、');
   scheduleSave();
 }
 
@@ -401,7 +400,7 @@ function fillBlock(t, idx, src) {
   Object.entries(d).forEach(([k, v]) => {
     if (k === '_photos') { attachments[id] = v.slice(); return; }
     const el = document.getElementById(id + '_' + k);
-    if (el) el.value = v;
+    if (el && v != null && v !== 'undefined') el.value = v;   // 略過 undefined/null 與被誤存的字串，避免欄位顯示 "undefined"
   });
 }
 
