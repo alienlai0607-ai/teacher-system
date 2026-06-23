@@ -85,7 +85,7 @@ window.UI = (function () {
     const isTeacher = user.role === 'teacher';
     return `
       <header class="top-bar">
-        <div class="brand">🪐 KPI 系統</div>
+        <div class="brand"><img src="${root}shared/icons/logo.png" class="brand-logo" alt="布拉克星球"> KPI 系統</div>
         <nav class="top-nav">
           ${isTeacher ? `
             <a href="${root}teacher/today.html">今日日報</a>
