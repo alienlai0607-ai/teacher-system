@@ -42,8 +42,12 @@ body::before {
   position: fixed;
   inset: 0;
   z-index: -1;
-  background: url('icons/bg.jpg') center bottom / cover no-repeat;
+  background: url('icons/bg.jpg') center bottom / cover no-repeat;  /* 電腦版：橫式 */
   pointer-events: none;
+}
+/* 手機版：直式背景圖 */
+@media (max-width: 768px) {
+  body::before { background-image: url('icons/bg-mobile.jpg'); }
 }
 
 a { color: var(--primary); text-decoration: none; }
