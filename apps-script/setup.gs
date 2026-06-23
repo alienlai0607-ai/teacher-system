@@ -79,14 +79,7 @@ function setupSheets() {
     if (!sheet) {
       sheet = ss.insertSheet(name);
     }
-    if (sheet.getLastRow() === 0) {
-      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-      sheet.getRange(1, 1, 1, headers.length)
-        .setFontWeight('bold')
-        .setBackground('#1976d2')
-        .setFontColor('#ffffff');
-      sheet.setFrozenRows(1);
-    }
+    ensureHeaders(sheet, headers);  // 自動補缺欄（含舊表新增的 subtype 等）
   });
 
   // 預填初始使用者
@@ -105,6 +98,30 @@ function setupSheets() {
 
   Logger.log('Setup completed');
   return { ok: true };
+}
+
+/**
+ * 確保 sheet 含有所有指定表頭欄。
+ * - 空表：一次建立全部表頭、套樣式、凍結首列。
+ * - 已有資料：把缺少的欄補在最右邊（不動既有資料與順序）。
+ * 這讓日後 schema 新增欄位（如 subtype）重跑 setupSheets 就會自動補上。
+ */
+function ensureHeaders(sheet, headers) {
+  if (sheet.getLastRow() === 0) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1, 1, 1, headers.length)
+      .setFontWeight('bold').setBackground('#1976d2').setFontColor('#ffffff');
+    sheet.setFrozenRows(1);
+    return;
+  }
+  const lastCol = sheet.getLastColumn();
+  const existing = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h).trim());
+  const missing = headers.filter(h => existing.indexOf(h) === -1);
+  if (missing.length) {
+    const rng = sheet.getRange(1, lastCol + 1, 1, missing.length);
+    rng.setValues([missing]);
+    rng.setFontWeight('bold').setBackground('#1976d2').setFontColor('#ffffff');
+  }
 }
 
 function seedKpiConfig() {
