@@ -61,6 +61,9 @@
   .guide-note[open] > summary::after { content: ' ▴'; }
   .guide-note .guide-body { padding: 0 14px 12px; }
   .guide-note .guide-body p { margin: 6px 0; font-size: 14px; line-height: 1.7; color: #5b4a2e; }
+  .method-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
+  .method-chips .mchip { padding: 5px 11px; border: 1px dashed #E0A861; border-radius: 999px; background: #FFF8EF; color: #B5710E; font-size: 13px; cursor: pointer; -webkit-user-select: none; user-select: none; transition: all .12s; }
+  .method-chips .mchip:active { background: #F5941E; color: #fff; border-style: solid; }
 </style>
 </head>
 <body>
@@ -192,6 +195,12 @@ const WORK_TYPES = [
   { key: '行政工作', icon: '🗂', block: 'admin', kpi: 6 },
 ];
 
+// 安親複習方法快捷標籤（點選帶入「複習方式」欄）
+const TUTOR_METHODS = [
+  '易錯題解析', '觀念提醒', '小組討論', '互相教學', '遊戲化複習',
+  '問答挑戰', '口頭測驗', '學習單整理', '重點筆記', '情境任務', '個別補救',
+];
+
 let studentRoster = [];                  // 該老師的班級學生 [{student_id,name,...}]
 let selectedStudents = new Set();        // 目前勾選的學生姓名
 let parentContacted = null;        // null 未選 / true / false
@@ -272,6 +281,17 @@ function toggleStudent(i) {
   scheduleSave();
 }
 
+// 安親方法標籤：點一下把方法帶入指定 textarea（避免重複）
+function addMethod(targetId, text) {
+  const el = document.getElementById(targetId);
+  if (!el) return;
+  const cur = el.value.trim();
+  const parts = cur ? cur.split(/[、,，\n]/).map(s => s.trim()).filter(Boolean) : [];
+  if (parts.includes(text)) return;   // 已加過就略過
+  el.value = cur ? (cur.replace(/[、,，\s]*$/, '') + '、' + text) : text;
+  scheduleSave();
+}
+
 // ===== 工作類型 =====
 function renderTypeGrid() {
   document.getElementById('type-grid').innerHTML = WORK_TYPES.map((t, i) => `
@@ -314,17 +334,23 @@ function blockId(t, idx) { return `${t.block}-${idx}`; }
 function blockHtml(t, idx) {
   const id = blockId(t, idx);
   if (t.block === 'tutoring') {
+    const methodChips = TUTOR_METHODS.map(m =>
+      `<span class="mchip" onclick="addMethod('${id}_review','${m}')">＋ ${m}</span>`
+    ).join('');
     return `<div class="card dyn-card">
       <div class="step-title"><span class="step-no">4</span> ${t.icon} ${t.key}</div>
       <details class="guide-note">
-        <summary>💡 記錄理念與引導</summary>
+        <summary>💡 安親輔導紀錄說明</summary>
         <div class="guide-body">
-          <p>請記錄今日帶領孩子<strong>複習與學習鞏固</strong>的方式。</p>
-          <p>鼓勵跳脫單純反覆書寫與考卷練習，依孩子的學習需求，運用<strong>遊戲、挑戰、討論、提問、實作、錯題分析</strong>等方式，引導孩子主動思考與複習。</p>
-          <p>布拉克星球重視的不是「寫了多少」，而是「<strong>孩子是否真正理解</strong>」。讓複習不只是完成作業，而是培養孩子整理知識、發現問題與自主學習的能力。</p>
+          <p>記錄今日協助孩子<strong>複習與學習鞏固</strong>的方式，不限於考卷或書寫練習——可點下方標籤快速帶入方法，再補充孩子的學習反應。</p>
+          <p>重點不在完成多少考卷，而在透過適合的方法，幫助孩子<strong>理解、複習與建立自主學習能力</strong>。</p>
         </div>
       </details>
-      <div class="form-row"><label>1. 今天用了什麼方式幫助孩子複習？</label><textarea id="${id}_review" placeholder="例：用搶答遊戲複習數學公式、討論方式整理國語重點..."></textarea></div>
+      <div class="form-row">
+        <label>1. 今天用了什麼方式幫助孩子複習？</label>
+        <div class="method-chips">${methodChips}</div>
+        <textarea id="${id}_review" placeholder="點上方標籤帶入，或自行輸入（例：用搶答遊戲複習數學公式）..."></textarea>
+      </div>
       <div class="form-row"><label>2. 孩子在哪些地方容易出錯？</label><textarea id="${id}_errors" placeholder="例：分數通分、形近字、進退位..."></textarea></div>
       <div class="form-row"><label>3. 我用了什麼方法協助孩子理解？</label><textarea id="${id}_understand" placeholder="例：實物操作、畫圖、錯題重做、舉生活例子..."></textarea></div>
       <div class="form-row"><label>4. 孩子的反應與學習成效如何？</label><textarea id="${id}_outcome" placeholder="例：理解後能舉一反三、主動發問、訂正後答對..."></textarea></div>
