@@ -54,6 +54,13 @@
   .chip-select .chip { padding: 7px 14px; border: 1.5px solid var(--border, #e5d3b8); border-radius: 999px; background: #fff; cursor: pointer; font-size: 15px; -webkit-user-select: none; user-select: none; transition: all .12s; min-height: 38px; display: inline-flex; align-items: center; }
   .chip-select .chip.selected { background: #F5941E; border-color: #F5941E; color: #fff; font-weight: 700; }
   .chip-select .chip-hint { color: #aaa; font-size: 13px; padding: 6px 0; }
+  .guide-note { background: #FFF6E9; border: 1px solid #F3D9A8; border-radius: 10px; margin: 4px 0 12px; }
+  .guide-note > summary { cursor: pointer; padding: 10px 14px; font-weight: 700; color: #C77A12; list-style: none; -webkit-user-select: none; user-select: none; }
+  .guide-note > summary::-webkit-details-marker { display: none; }
+  .guide-note > summary::after { content: ' ▾'; font-weight: 400; }
+  .guide-note[open] > summary::after { content: ' ▴'; }
+  .guide-note .guide-body { padding: 0 14px 12px; }
+  .guide-note .guide-body p { margin: 6px 0; font-size: 14px; line-height: 1.7; color: #5b4a2e; }
 </style>
 </head>
 <body>
@@ -310,8 +317,18 @@ function blockHtml(t, idx) {
     return `<div class="card dyn-card">
       <div class="step-title"><span class="step-no">4</span> ${t.icon} ${t.key}</div>
       <div class="form-row"><label>批改作業班級數</label><input type="number" id="${id}_classes" placeholder="例：3"></div>
-      <div class="form-row"><label>訂正完成率（%）</label><input type="number" id="${id}_correction" placeholder="0-100"></div>
-      <div class="form-row"><label>個別補強學生（姓名/重點）</label><textarea id="${id}_help"></textarea></div>
+      <details class="guide-note">
+        <summary>💡 記錄理念與引導</summary>
+        <div class="guide-body">
+          <p>請記錄今日帶領孩子<strong>複習與學習鞏固</strong>的方式。</p>
+          <p>鼓勵跳脫單純反覆書寫與考卷練習，依孩子的學習需求，運用<strong>遊戲、挑戰、討論、提問、實作、錯題分析</strong>等方式，引導孩子主動思考與複習。</p>
+          <p>布拉克星球重視的不是「寫了多少」，而是「<strong>孩子是否真正理解</strong>」。讓複習不只是完成作業，而是培養孩子整理知識、發現問題與自主學習的能力。</p>
+        </div>
+      </details>
+      <div class="form-row"><label>1. 今天用了什麼方式幫助孩子複習？</label><textarea id="${id}_review" placeholder="例：用搶答遊戲複習數學公式、討論方式整理國語重點..."></textarea></div>
+      <div class="form-row"><label>2. 孩子在哪些地方容易出錯？</label><textarea id="${id}_errors" placeholder="例：分數通分、形近字、進退位..."></textarea></div>
+      <div class="form-row"><label>3. 我用了什麼方法協助孩子理解？</label><textarea id="${id}_understand" placeholder="例：實物操作、畫圖、錯題重做、舉生活例子..."></textarea></div>
+      <div class="form-row"><label>4. 孩子的反應與學習成效如何？</label><textarea id="${id}_outcome" placeholder="例：理解後能舉一反三、主動發問、訂正後答對..."></textarea></div>
     </div>`;
   }
   if (t.block === 'course') {
@@ -458,8 +475,10 @@ function collectFormData() {
     allPhotos.push(...photos);
     if (t.block === 'tutoring') {
       if (d.classes) kpi1.class_count = d.classes;
-      if (d.correction) kpi1.correction_rate = d.correction;
-      if (d.help) kpi1.individual_help = d.help;
+      if (d.review) kpi1.review_method = d.review;
+      if (d.errors) kpi1.error_points = d.errors;
+      if (d.understand) kpi1.help_method = d.understand;
+      if (d.outcome) kpi1.outcome = d.outcome;
     } else if (t.block === 'course') {
       kpi3.courses.push({ type: t.key, name: d.name || '', class: d.class || '', progress: d.progress || '', learning: d.learning || '', next: d.next || '' });
     } else if (t.block === 'project') {
@@ -616,7 +635,7 @@ function rebuildBlocksFromKpi(log, types) {
   ordered.forEach((t, idx) => {
     const id = `${t.block}-${idx}`;
     if (t.block === 'tutoring') {
-      out[id] = { classes: k1.class_count, correction: k1.correction_rate, help: k1.individual_help };
+      out[id] = { classes: k1.class_count, review: k1.review_method, errors: k1.error_points, understand: k1.help_method, outcome: k1.outcome };
     } else if (t.block === 'course') {
       const c = courses.find(c => c.type === t.key) || courses[courseIdx++] || {};
       out[id] = { name: c.name, class: c.class, progress: c.progress, learning: c.learning, next: c.next, _photos: photos.filter(p => p.forType === id) };
