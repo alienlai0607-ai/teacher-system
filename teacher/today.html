@@ -183,17 +183,36 @@
 </div>
 
 <script>
-const session = AUTH.requireRole(['teacher', 'manager']);
+const session = AUTH.requireRole(['teacher', 'manager', 'admin_staff']);
 
-// 工作類型 → 對應 KPI 桶與展開區塊類型
-const WORK_TYPES = [
-  { key: '安親課輔', icon: '📖', block: 'tutoring', kpi: 1 },
-  { key: 'STEAM課程', icon: '🔬', block: 'course', kpi: 3 },
-  { key: '積木課程', icon: '🧱', block: 'course', kpi: 3 },
-  { key: '閱讀寫作', icon: '✍️', block: 'course', kpi: 3 },
-  { key: '專案課程', icon: '🎯', block: 'project', kpi: 3 },
-  { key: '行政工作', icon: '🗂', block: 'admin', kpi: 6 },
-];
+// 工作類型分組（依部門/角色顯示不同清單）
+const WORK_TYPE_GROUPS = {
+  // 安親組：永康教室 / 北區教室
+  care: [
+    { key: '安親輔導', icon: '📖', block: 'tutoring', kpi: 1 },
+    { key: '專案選修', icon: '🎯', block: 'course', kpi: 3 },
+    { key: '學習歷程', icon: '📚', block: 'course', kpi: 3 },
+    { key: 'SEL聊心室', icon: '💗', block: 'course', kpi: 3 },
+  ],
+  // 才藝組：才藝部門
+  talent: [
+    { key: 'STEAM課程', icon: '🔬', block: 'course', kpi: 3 },
+    { key: '積木課程', icon: '🧱', block: 'course', kpi: 3 },
+    { key: '閱讀寫作', icon: '✍️', block: 'course', kpi: 3 },
+    { key: '專案課程', icon: '🎯', block: 'project', kpi: 3 },
+  ],
+  // 行政組：admin_staff（皮皮老師）
+  admin: [
+    { key: '行政工作', icon: '🗂', block: 'admin', kpi: 6 },
+  ],
+};
+const CARE_DEPTS = ['永康教室', '北區教室'];
+function pickWorkTypes(s) {
+  if (s.role === 'admin_staff') return WORK_TYPE_GROUPS.admin;
+  return CARE_DEPTS.includes(s.department) ? WORK_TYPE_GROUPS.care : WORK_TYPE_GROUPS.talent;
+}
+// 工作類型 → 對應 KPI 桶與展開區塊類型（依登入者部門決定）
+const WORK_TYPES = pickWorkTypes(session);
 
 // 安親複習方法快捷標籤（點選帶入「複習方式」欄）
 const TUTOR_METHODS = [
