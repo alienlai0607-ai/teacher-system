@@ -316,7 +316,6 @@ function blockHtml(t, idx) {
   if (t.block === 'tutoring') {
     return `<div class="card dyn-card">
       <div class="step-title"><span class="step-no">4</span> ${t.icon} ${t.key}</div>
-      <div class="form-row"><label>批改作業班級數</label><input type="number" id="${id}_classes" placeholder="例：3"></div>
       <details class="guide-note">
         <summary>💡 記錄理念與引導</summary>
         <div class="guide-body">
@@ -474,7 +473,6 @@ function collectFormData() {
     const photos = (d._photos || []).map(p => ({ ...p, kpi: t.kpi }));
     allPhotos.push(...photos);
     if (t.block === 'tutoring') {
-      if (d.classes) kpi1.class_count = d.classes;
       if (d.review) kpi1.review_method = d.review;
       if (d.errors) kpi1.error_points = d.errors;
       if (d.understand) kpi1.help_method = d.understand;
@@ -635,7 +633,7 @@ function rebuildBlocksFromKpi(log, types) {
   ordered.forEach((t, idx) => {
     const id = `${t.block}-${idx}`;
     if (t.block === 'tutoring') {
-      out[id] = { classes: k1.class_count, review: k1.review_method, errors: k1.error_points, understand: k1.help_method, outcome: k1.outcome };
+      out[id] = { review: k1.review_method, errors: k1.error_points, understand: k1.help_method, outcome: k1.outcome };
     } else if (t.block === 'course') {
       const c = courses.find(c => c.type === t.key) || courses[courseIdx++] || {};
       out[id] = { name: c.name, class: c.class, progress: c.progress, learning: c.learning, next: c.next, _photos: photos.filter(p => p.forType === id) };
