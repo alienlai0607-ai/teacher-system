@@ -62,7 +62,7 @@
 
 <div class="container-narrow">
 
-  <!-- Step 1 基本資料 + 打卡 -->
+  <!-- Step 1 基本資料 -->
   <div class="card">
     <div class="step-title"><span class="step-no">1</span> 基本資料</div>
     <div class="flex-between mt-1">
@@ -70,14 +70,6 @@
         <div class="text-lg" style="font-weight:700;">📅 <span id="today-date"></span></div>
         <div class="muted text-sm">🏫 <span id="user-dept"></span>　👤 <span id="user-nick"></span></div>
       </div>
-    </div>
-    <div class="form-row mt-2">
-      <label>出勤打卡 <span class="req">*上班必打</span></label>
-      <div class="punch-row">
-        <button class="btn" id="btn-checkin" onclick="punch('checkin')">🟢 上班打卡</button>
-        <button class="btn" id="btn-checkout" onclick="punch('checkout')">🔴 下班打卡</button>
-      </div>
-      <div class="helper-text" id="punch-info"></div>
     </div>
   </div>
 
@@ -193,7 +185,6 @@ const WORK_TYPES = [
   { key: '行政工作', icon: '🗂', block: 'admin', kpi: 6 },
 ];
 
-let punchTimes = { checkin: '', checkout: '' };
 let studentRoster = [];                  // 該老師的班級學生 [{student_id,name,...}]
 let selectedStudents = new Set();        // 目前勾選的學生姓名
 let parentContacted = null;        // null 未選 / true / false
@@ -235,18 +226,6 @@ function val(id) { const el = document.getElementById(id); return el ? el.value.
 function chk(id) { const el = document.getElementById(id); return el ? el.checked : false; }
 function scheduleSave() { clearTimeout(autoSaveTimer); autoSaveTimer = setTimeout(autoSave, 1500); }
 
-// ===== 打卡 =====
-function punch(type) {
-  if (!punchTimes[type]) punchTimes[type] = nowTime();
-  renderPunch();
-  scheduleSave();
-}
-function renderPunch() {
-  const inBtn = document.getElementById('btn-checkin');
-  const outBtn = document.getElementById('btn-checkout');
-  if (punchTimes.checkin) { inBtn.textContent = '✅ 上班 ' + punchTimes.checkin; inBtn.classList.add('punch-done'); }
-  if (punchTimes.checkout) { outBtn.textContent = '✅ 下班 ' + punchTimes.checkout; outBtn.classList.add('punch-done'); }
-}
 
 // ===== 親師溝通 =====
 function setParentContact(yes) {
@@ -516,8 +495,8 @@ function collectFormData() {
     reflection: val('reflection'),
     help_needed: chk('help-needed'),
     help_content: val('help-content'),
-    checkin_at: punchTimes.checkin,
-    checkout_at: punchTimes.checkout,
+    checkin_at: '',
+    checkout_at: '',
   };
   return data;
 }
@@ -525,7 +504,6 @@ function collectFormData() {
 // ===== 必填檢核 =====
 function findMissing() {
   const m = [];
-  if (!punchTimes.checkin) m.push('上班打卡');
   if (!(chk('env_classroom') && chk('env_tools') && chk('env_trash'))) m.push('環境整潔三項確認');
   if (!(attachments['env'] && attachments['env'].length)) m.push('環境照片佐證（至少 1 張）');
   if (!val('today_done')) m.push('今日執行事項');
@@ -593,10 +571,6 @@ async function loadTodayLog() {
 function populateForm(log) {
   const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
   const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
-
-  // 打卡
-  punchTimes.checkin = log.checkin_at || ''; punchTimes.checkout = log.checkout_at || '';
-  renderPunch();
 
   const k2 = log.kpi2_data || {}, k5 = log.kpi5_data || {}, k6 = log.kpi6_data || {};
   setChk('env_classroom', k2.env_classroom); setChk('env_tools', k2.env_tools); setChk('env_trash', k2.env_trash);
