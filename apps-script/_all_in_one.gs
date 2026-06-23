@@ -88,6 +88,12 @@ function handleRequest(e, method) {
       'getEval': () => getEval(params),
       'listEvals': () => listEvals(params),
 
+      // 學生名冊
+      'listStudents': () => listStudents(params),
+      'addStudent': () => addStudent(params),
+      'updateStudent': () => updateStudent(params),
+      'deleteStudent': () => deleteStudent(params),
+
       // 報表
       'getDashboard': () => getDashboard(params),
       'getMyKpiPreview': () => getMyKpiPreview(params),
@@ -126,6 +132,7 @@ const SHEET_NAMES = {
   KPI_CONFIG: 'KPI_Config',
   SYSTEM_LOG: 'Logs_System',
   WEEKLY: 'WeeklyReports',
+  STUDENTS: 'Students',
 };
 
 const DEPARTMENTS = ['永康教室', '北區教室', '才藝部門', '總部'];
@@ -250,6 +257,10 @@ function setupSheets() {
       'week_id', 'week_of', 'nickname', 'department', 'role',
       'teaching_reflection', 'student_observation', 'tool_needs', 'course_improvement',
       'created_at', 'updated_at'
+    ],
+    [SHEET_NAMES.STUDENTS]: [
+      'student_id', 'name', 'teacher', 'department', 'status',
+      'notes', 'created_at', 'updated_at'
     ],
   };
 
@@ -653,6 +664,11 @@ function updateRow(name, rowNum, obj) {
     return v;
   });
   sheet.getRange(rowNum, 1, 1, headers.length).setValues([newRow]);
+}
+
+function deleteRow(name, rowNum) {
+  if (rowNum <= 1) return; // 不刪表頭
+  getSheet(name).deleteRow(rowNum);
 }
 
 function upsertRow(name, key, obj) {
@@ -1781,5 +1797,72 @@ function getDashboard(params) {
   }
 
   return { ok: false, error: 'unknown role' };
+}
+
+// ════════════════════════════════════════════════════════════
+//  students.gs — 學生名冊（後台統一建，每位老師自己的班）
+// ════════════════════════════════════════════════════════════
+
+function listStudents(params) {
+  const { teacher, department, includeInactive } = params || {};
+  let list = sheetToObjects(SHEET_NAMES.STUDENTS);
+  if (teacher) list = list.filter(s => s.teacher === teacher);
+  if (department) list = list.filter(s => s.department === department);
+  if (!includeInactive) list = list.filter(s => s.status !== 'inactive');
+  list.sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-Hant'));
+  return { ok: true, students: list };
+}
+
+function addStudent(params) {
+  const { name, teacher } = params;
+  if (!name || !teacher) return { ok: false, error: '缺少姓名或老師' };
+  const t = findUserByNickname(teacher);
+  if (!t) return { ok: false, error: '老師不存在：' + teacher };
+  const dup = sheetToObjects(SHEET_NAMES.STUDENTS)
+    .some(s => s.teacher === teacher && s.name === name && s.status !== 'inactive');
+  if (dup) return { ok: false, error: '此老師班上已有同名學生' };
+
+  appendRow(SHEET_NAMES.STUDENTS, {
+    student_id: Utilities.getUuid(),
+    name: String(name).trim(),
+    teacher,
+    department: t.department,
+    status: 'active',
+    notes: params.notes || '',
+    created_at: nowIso(),
+    updated_at: nowIso()
+  });
+  logSystem(params.operator || 'system', 'add_student', name, { teacher });
+  return { ok: true, msg: '新增成功' };
+}
+
+function updateStudent(params) {
+  const { student_id } = params;
+  if (!student_id) return { ok: false, error: '缺少 student_id' };
+  const rowNum = findRow(SHEET_NAMES.STUDENTS, 'student_id', student_id);
+  if (rowNum < 0) return { ok: false, error: '學生不存在' };
+
+  const updates = {};
+  ['name', 'teacher', 'department', 'status', 'notes'].forEach(k => {
+    if (params[k] !== undefined) updates[k] = params[k];
+  });
+  if (params.teacher) {
+    const t = findUserByNickname(params.teacher);
+    if (t) updates.department = t.department;
+  }
+  updates.updated_at = nowIso();
+  updateRow(SHEET_NAMES.STUDENTS, rowNum, updates);
+  logSystem(params.operator || 'system', 'update_student', student_id, updates);
+  return { ok: true, msg: '更新成功' };
+}
+
+function deleteStudent(params) {
+  const { student_id } = params;
+  if (!student_id) return { ok: false, error: '缺少 student_id' };
+  const rowNum = findRow(SHEET_NAMES.STUDENTS, 'student_id', student_id);
+  if (rowNum < 0) return { ok: false, error: '學生不存在' };
+  deleteRow(SHEET_NAMES.STUDENTS, rowNum);
+  logSystem(params.operator || 'system', 'delete_student', student_id, {});
+  return { ok: true, msg: '已刪除' };
 }
 

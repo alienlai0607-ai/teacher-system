@@ -72,6 +72,10 @@ function setupSheets() {
       'teaching_reflection', 'student_observation', 'tool_needs', 'course_improvement',
       'created_at', 'updated_at'
     ],
+    [SHEET_NAMES.STUDENTS]: [
+      'student_id', 'name', 'teacher', 'department', 'status',
+      'notes', 'created_at', 'updated_at'
+    ],
   };
 
   Object.entries(schemas).forEach(([name, headers]) => {

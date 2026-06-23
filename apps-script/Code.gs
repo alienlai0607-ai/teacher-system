@@ -76,6 +76,12 @@ function handleRequest(e, method) {
       'getEval': () => getEval(params),
       'listEvals': () => listEvals(params),
 
+      // 學生名冊
+      'listStudents': () => listStudents(params),
+      'addStudent': () => addStudent(params),
+      'updateStudent': () => updateStudent(params),
+      'deleteStudent': () => deleteStudent(params),
+
       // 報表
       'getDashboard': () => getDashboard(params),
       'getMyKpiPreview': () => getMyKpiPreview(params),
@@ -114,6 +120,7 @@ const SHEET_NAMES = {
   KPI_CONFIG: 'KPI_Config',
   SYSTEM_LOG: 'Logs_System',
   WEEKLY: 'WeeklyReports',
+  STUDENTS: 'Students',
 };
 
 const DEPARTMENTS = ['永康教室', '北區教室', '才藝部門', '總部'];

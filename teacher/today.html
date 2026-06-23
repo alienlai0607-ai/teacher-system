@@ -50,6 +50,10 @@
   }
   .nav-buttons .btn { flex: 1; min-height: 48px; font-size: 15px; }
   .miss-banner { background: #fde8e8; border: 1px solid var(--danger); color: var(--danger); border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 10px; display: none; }
+  .chip-select { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .chip-select .chip { padding: 7px 14px; border: 1.5px solid var(--border, #e5d3b8); border-radius: 999px; background: #fff; cursor: pointer; font-size: 15px; -webkit-user-select: none; user-select: none; transition: all .12s; min-height: 38px; display: inline-flex; align-items: center; }
+  .chip-select .chip.selected { background: #F5941E; border-color: #F5941E; color: #fff; font-weight: 700; }
+  .chip-select .chip-hint { color: #aaa; font-size: 13px; padding: 6px 0; }
 </style>
 </head>
 <body>
@@ -132,7 +136,8 @@
     </div>
     <div class="form-row">
       <label>學生特殊狀況</label>
-      <textarea id="student_special" placeholder="有需要追蹤的學生狀況再填..."></textarea>
+      <div id="special-students" class="chip-select"><span class="chip-hint">載入學生名單中…</span></div>
+      <textarea id="student_special" placeholder="勾選上方相關的孩子，這裡補充狀況描述..."></textarea>
     </div>
   </div>
 
@@ -189,6 +194,8 @@ const WORK_TYPES = [
 ];
 
 let punchTimes = { checkin: '', checkout: '' };
+let studentRoster = [];                  // 該老師的班級學生 [{student_id,name,...}]
+let selectedStudents = new Set();        // 目前勾選的學生姓名
 let parentContacted = null;        // null 未選 / true / false
 const attachments = {};            // { kpiNo: [{type,url,fileId,kpi,description,forType}] }
 let autoSaveTimer;
@@ -201,6 +208,7 @@ window.addEventListener('load', async () => {
 
   renderTypeGrid();
 
+  await loadStudents();
   await loadTodayLog();
 
   document.body.addEventListener('input', scheduleSave);
@@ -246,6 +254,35 @@ function setParentContact(yes) {
   document.getElementById('pc-yes').classList.toggle('punch-done', yes === true);
   document.getElementById('pc-no').classList.toggle('punch-done', yes === false);
   document.getElementById('parent-summary-wrap').style.display = yes ? 'block' : 'none';
+  scheduleSave();
+}
+
+// ===== 學生名冊（勾選孩子） =====
+function htmlEsc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+async function loadStudents() {
+  const res = await API.listStudents({ teacher: session.nickname });
+  studentRoster = (res && res.ok && Array.isArray(res.students)) ? res.students : [];
+  renderStudentChips();
+}
+function renderStudentChips() {
+  const box = document.getElementById('special-students');
+  if (!box) return;
+  if (!studentRoster.length) {
+    box.innerHTML = '<span class="chip-hint">尚無學生名單（請洽管理員在後台建立）</span>';
+    return;
+  }
+  box.innerHTML = studentRoster.map((s, i) =>
+    `<span class="chip${selectedStudents.has(s.name) ? ' selected' : ''}" onclick="toggleStudent(${i})">${htmlEsc(s.name)}</span>`
+  ).join('');
+}
+function toggleStudent(i) {
+  const name = studentRoster[i] && studentRoster[i].name;
+  if (!name) return;
+  if (selectedStudents.has(name)) selectedStudents.delete(name);
+  else selectedStudents.add(name);
+  renderStudentChips();
   scheduleSave();
 }
 
@@ -467,6 +504,7 @@ function collectFormData() {
       parent_contacted: parentContacted,   // 三態：null 未選 / true / false
       parent_summary: val('parent_summary'),
       student_special: val('student_special'),
+      special_students: Array.from(selectedStudents),  // 勾選的孩子姓名
     },
     kpi6_data: {
       today_done: val('today_done'), tomorrow_todo: val('tomorrow_todo'),
@@ -569,6 +607,8 @@ function populateForm(log) {
   renderAttachments('env');
   set('today_done', k6.today_done); set('tomorrow_todo', k6.tomorrow_todo); set('special_event', k6.special_event);
   set('parent_summary', k5.parent_summary); set('student_special', k5.student_special);
+  selectedStudents = new Set(Array.isArray(k5.special_students) ? k5.special_students : []);
+  renderStudentChips();
   set('reflection', log.reflection);
   setChk('help-needed', log.help_needed === true);
   set('help-content', log.help_content);

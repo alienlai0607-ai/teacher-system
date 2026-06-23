@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>學生名單</title>
+<link rel="stylesheet" href="../shared/style.css">
+<script src="../shared/config.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/api.js"></script>
+<script src="../shared/ui.js"></script>
+<style>
+  .stu-chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #fff; border: 1.5px solid var(--border, #e5d3b8);
+    border-radius: 999px; padding: 6px 8px 6px 14px; margin: 0 8px 8px 0;
+    font-size: 15px;
+  }
+  .stu-chip .del { cursor: pointer; color: #c0392b; font-weight: 700; padding: 0 6px; border-radius: 50%; }
+  .stu-chip .del:hover { background: #fde8e8; }
+  #stu-list { margin-top: 8px; }
+  .empty-hint { color: #aaa; font-size: 14px; padding: 8px 0; }
+</style>
+</head>
+<body>
+<div id="app-header"></div>
+
+<div class="container">
+  <h2>🧒 學生名單</h2>
+  <p class="muted text-sm">每位老師管理自己班級的學生名單。老師填日報的「學生特殊狀況」時，會看到自己班的孩子可勾選。</p>
+
+  <div class="card">
+    <div class="card-title">選擇老師</div>
+    <div class="form-row">
+      <select id="teacher-select" onchange="loadStudents()">
+        <option value="">— 請選擇老師 —</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="manage" style="display:none;">
+    <div class="card">
+      <div class="card-title">➕ 新增學生</div>
+      <div class="form-row">
+        <label>批次新增（一行一個姓名，可一次貼整班）</label>
+        <textarea id="bulk-names" placeholder="小明&#10;小華&#10;球球"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="addBulk()">新增到此老師班上</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📋 <span id="cls-teacher"></span> 的班級（<span id="cls-count">0</span> 人）</div>
+      <div id="stu-list"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const session = AUTH.requireRole(['admin']);
+let teachers = [];
+let students = [];
+
+window.addEventListener('load', async () => {
+  UI.mountHeader(session);
+  await loadTeachers();
+});
+
+async function loadTeachers() {
+  UI.loading(true);
+  const res = await API.listUsers();
+  UI.loading(false);
+  if (!res.ok) { UI.toast('載入老師失敗', 'danger'); return; }
+  // 有班級的角色：teacher（admin_staff/manager 通常無學生，但仍允許指派）
+  teachers = (res.users || []).filter(u => u.role === 'teacher');
+  const sel = document.getElementById('teacher-select');
+  sel.innerHTML = '<option value="">— 請選擇老師 —</option>' +
+    teachers.map(t => `<option value="${t.nickname}">${t.nickname}（${t.department}）</option>`).join('');
+}
+
+async function loadStudents() {
+  const teacher = document.getElementById('teacher-select').value;
+  const manage = document.getElementById('manage');
+  if (!teacher) { manage.style.display = 'none'; return; }
+  manage.style.display = 'block';
+  document.getElementById('cls-teacher').textContent = teacher;
+  UI.loading(true);
+  const res = await API.listStudents({ teacher });
+  UI.loading(false);
+  students = (res.ok && res.students) ? res.students : [];
+  renderList();
+}
+
+function renderList() {
+  document.getElementById('cls-count').textContent = students.length;
+  const box = document.getElementById('stu-list');
+  if (!students.length) {
+    box.innerHTML = '<div class="empty-hint">尚無學生，請在上方新增。</div>';
+    return;
+  }
+  box.innerHTML = students.map(s =>
+    `<span class="stu-chip">${esc(s.name)}<span class="del" title="刪除" onclick="delStudent('${s.student_id}','${esc(s.name)}')">✕</span></span>`
+  ).join('');
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+async function addBulk() {
+  const teacher = document.getElementById('teacher-select').value;
+  if (!teacher) return;
+  const raw = document.getElementById('bulk-names').value;
+  const names = raw.split('\n').map(s => s.trim()).filter(Boolean);
+  if (!names.length) { UI.toast('請輸入至少一個姓名', 'warn'); return; }
+  UI.loading(true);
+  let ok = 0, fail = 0, dup = 0;
+  for (const name of names) {
+    const res = await API.addStudent({ name, teacher, operator: session.nickname });
+    if (res.ok) ok++;
+    else if (String(res.error || '').includes('同名')) dup++;
+    else fail++;
+  }
+  UI.loading(false);
+  document.getElementById('bulk-names').value = '';
+  UI.toast(`新增 ${ok} 人${dup ? `，略過 ${dup} 重複` : ''}${fail ? `，失敗 ${fail}` : ''}`, fail ? 'warn' : 'success');
+  loadStudents();
+}
+
+async function delStudent(id, name) {
+  const ok = await UI.confirmDialog(`確定要從名單刪除「${name}」？`);
+  if (!ok) return;
+  UI.loading(true);
+  const res = await API.deleteStudent(id);
+  UI.loading(false);
+  if (!res.ok) { UI.toast(res.error || '刪除失敗', 'danger'); return; }
+  UI.toast('已刪除', 'success');
+  loadStudents();
+}
+</script>
+</body>
+</html>

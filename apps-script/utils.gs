@@ -128,6 +128,11 @@ function upsertRow(name, key, obj) {
   }
 }
 
+function deleteRow(name, rowNum) {
+  if (rowNum <= 1) return; // 不刪表頭
+  getSheet(name).deleteRow(rowNum);
+}
+
 function nowIso() {
   return Utilities.formatDate(new Date(), 'Asia/Taipei', "yyyy-MM-dd'T'HH:mm:ss");
 }

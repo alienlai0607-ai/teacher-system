@@ -108,6 +108,7 @@ window.UI = (function () {
             <a href="${root}admin/eval-manager.html">評核主管</a>
             <a href="${root}manager/report.html">列印報表</a>
             <a href="${root}admin/users.html">人員管理</a>
+            <a href="${root}admin/students.html">學生名單</a>
             <a href="${root}admin/bonus.html">獎金核發</a>
           ` : ''}
         </nav>

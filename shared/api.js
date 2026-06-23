@@ -62,6 +62,11 @@ window.API = (function () {
     getEval: (params) => call('getEval', params),
     listEvals: (params) => call('listEvals', params),
 
+    listStudents: (params) => call('listStudents', params),
+    addStudent: (data) => call('addStudent', data),
+    updateStudent: (data) => call('updateStudent', data),
+    deleteStudent: (id) => call('deleteStudent', { student_id: id }),
+
     getDashboard: (viewer) => call('getDashboard', { viewer }),
     getMyKpiPreview: (nickname) => call('getMyKpiPreview', { nickname }),
   };
