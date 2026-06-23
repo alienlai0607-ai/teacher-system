@@ -94,7 +94,7 @@
       <textarea id="equipment_issue" placeholder="例：A 教室投影機無法開機，已通報..."></textarea>
     </div>
     <div class="form-row">
-      <label>📸 環境照片佐證（建議拍打掃後/整潔狀態）</label>
+      <label>📸 環境照片佐證（拍打掃後/整潔狀態） <span class="req">*</span></label>
       <div id="attach-env" class="attach-area"></div>
       <input type="file" accept="image/*" capture="environment" id="photo-input-env" style="display:none" onchange="onPhotoPicked(event, 'env', 2)">
       <button class="btn btn-sm mt-1" onclick="document.getElementById('photo-input-env').click()">📷 拍照／選圖</button>
@@ -527,6 +527,7 @@ function findMissing() {
   const m = [];
   if (!punchTimes.checkin) m.push('上班打卡');
   if (!(chk('env_classroom') && chk('env_tools') && chk('env_trash'))) m.push('環境整潔三項確認');
+  if (!(attachments['env'] && attachments['env'].length)) m.push('環境照片佐證（至少 1 張）');
   if (!val('today_done')) m.push('今日執行事項');
   if (!val('tomorrow_todo')) m.push('明日待辦事項');
   if (parentContacted === null) m.push('親師溝通（請選有/無）');
