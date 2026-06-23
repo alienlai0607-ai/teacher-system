@@ -54,15 +54,17 @@ function getDashboard(params) {
   const ym = yearMonth();
   const users = sheetToObjects(SHEET_NAMES.USERS);
 
-  if (user.role === 'teacher') {
+  if (user.role === 'teacher' || user.role === 'admin_staff') {
     return getMyKpiPreview({ nickname: viewer });
   }
 
   if (user.role === 'manager') {
     const deptTeachers = users.filter(u => u.department === user.department && u.role === 'teacher');
+    // 部門成員（含行政美編行銷，皆需每日填報）
+    const deptMembers = users.filter(u => u.department === user.department && (u.role === 'teacher' || u.role === 'admin_staff'));
     const todayLogs = sheetToObjects(SHEET_NAMES.LOGS)
       .filter(l => l.date === today && l.department === user.department);
-    const status = deptTeachers.map(t => {
+    const status = deptMembers.map(t => {
       const log = todayLogs.find(l => l.nickname === t.nickname);
       return {
         nickname: t.nickname,
@@ -87,13 +89,14 @@ function getDashboard(params) {
       role: 'manager',
       department: user.department,
       date: today,
-      teachers_count: deptTeachers.length,
+      teachers_count: deptMembers.length,
       submitted_count: submittedCount,
       help_count: helpCount,
       status,
       month_avg: avg
     };
   }
+  // 注意：teachers_count 改用 deptMembers（見上方）；month_avg 仍只算 teacher
 
   if (user.role === 'admin') {
     const deptStats = DEPARTMENTS.filter(d => d !== '總部').map(dept => {

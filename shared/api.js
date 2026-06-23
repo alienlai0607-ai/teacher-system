@@ -30,6 +30,7 @@ window.API = (function () {
     listUsers: () => call('listUsers'),
     addUser: (data) => call('addUser', data),
     updateUser: (data) => call('updateUser', data),
+    approveUser: (data) => call('approveUser', data),
 
     saveLog: (data) => call('saveLog', data),
     getLog: (params) => call('getLog', params),

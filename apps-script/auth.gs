@@ -129,6 +129,11 @@ function addUser(params) {
   if (!ROLES.includes(role)) return { ok: false, error: 'invalid role' };
   if (!DEPARTMENTS.includes(department)) return { ok: false, error: 'invalid department' };
 
+  // 行政美編行銷必須有 subtype（general/marketing），否則 KPI_Config 查不到
+  const subtype = role === 'admin_staff'
+    ? (ADMIN_STAFF_SUBTYPES.includes(params.subtype) ? params.subtype : 'general')
+    : '';
+
   // 檢查暱稱重複
   if (findUserByNickname(nickname)) {
     return { ok: false, error: '暱稱已存在' };
@@ -147,7 +152,8 @@ function addUser(params) {
     phone: phone || '',
     joined_at: nowIso(),
     last_login: '',
-    notes: notes || ''
+    notes: notes || '',
+    subtype
   });
   logSystem(params.operator || 'system', 'add_user', nickname, { role, department });
 
@@ -164,7 +170,7 @@ function updateUser(params) {
   if (!user) return { ok: false, error: 'user not found' };
 
   const updates = {};
-  ['email', 'role', 'department', 'status', 'phone', 'notes'].forEach(k => {
+  ['email', 'role', 'department', 'status', 'phone', 'notes', 'subtype'].forEach(k => {
     if (params[k] !== undefined) updates[k] = params[k];
   });
   updateRow(SHEET_NAMES.USERS, user._row, updates);

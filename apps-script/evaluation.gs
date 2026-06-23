@@ -39,10 +39,10 @@ function getEvalEvidence(params) {
   const observations = sheetToObjects(SHEET_NAMES.OBSERVATION)
     .filter(o => o.observed === nickname && String(o.date) >= from && String(o.date) <= to);
 
-  // 5. 主管發文（如果是主管）
+  // 5. 發文證據：主管(安親發文 KPI4) + 行政美編行銷(社群內容 KPI1)
   let posts = [];
   let postsByWeek = {};
-  if (user.role === 'manager') {
+  if (user.role === 'manager' || (user.role === 'admin_staff' && user.subtype === 'marketing')) {
     posts = sheetToObjects(SHEET_NAMES.POSTS)
       .filter(p => p.nickname === nickname && String(p.date) >= from && String(p.date) <= to);
     posts.forEach(p => {

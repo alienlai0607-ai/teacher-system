@@ -89,6 +89,12 @@
       <label>設備異常回報（無則免填）</label>
       <textarea id="equipment_issue" placeholder="例：A 教室投影機無法開機，已通報..."></textarea>
     </div>
+    <div class="form-row">
+      <label>📸 環境照片佐證（建議拍打掃後/整潔狀態）</label>
+      <div id="attach-env" class="attach-area"></div>
+      <input type="file" accept="image/*" capture="environment" id="photo-input-env" style="display:none" onchange="onPhotoPicked(event, 'env', 2)">
+      <button class="btn btn-sm mt-1" onclick="document.getElementById('photo-input-env').click()">📷 拍照／選圖</button>
+    </div>
   </div>
 
   <div class="card">
@@ -445,6 +451,10 @@ function collectFormData() {
     }
   });
 
+  // 環境整潔照片（綁 KPI2）
+  const envPhotos = (attachments['env'] || []).map(p => ({ ...p, kpi: 2, forType: 'env' }));
+  allPhotos.push(...envPhotos);
+
   const data = {
     kpi1_data: kpi1,
     kpi2_data: {
@@ -552,6 +562,11 @@ function populateForm(log) {
   const k2 = log.kpi2_data || {}, k5 = log.kpi5_data || {}, k6 = log.kpi6_data || {};
   setChk('env_classroom', k2.env_classroom); setChk('env_tools', k2.env_tools); setChk('env_trash', k2.env_trash);
   set('equipment_issue', k2.equipment_issue); set('class_status', k2.class_status);
+
+  // 還原環境整潔照片
+  const allPhotos = Array.isArray(log.attachments) ? log.attachments.filter(a => a.type === 'photo') : [];
+  attachments['env'] = allPhotos.filter(p => p.forType === 'env');
+  renderAttachments('env');
   set('today_done', k6.today_done); set('tomorrow_todo', k6.tomorrow_todo); set('special_event', k6.special_event);
   set('parent_summary', k5.parent_summary); set('student_special', k5.student_special);
   set('reflection', log.reflection);

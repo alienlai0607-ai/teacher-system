@@ -827,6 +827,11 @@ function addUser(params) {
   if (!ROLES.includes(role)) return { ok: false, error: 'invalid role' };
   if (!DEPARTMENTS.includes(department)) return { ok: false, error: 'invalid department' };
 
+  // 行政美編行銷必須有 subtype（general/marketing），否則 KPI_Config 查不到
+  const subtype = role === 'admin_staff'
+    ? (ADMIN_STAFF_SUBTYPES.includes(params.subtype) ? params.subtype : 'general')
+    : '';
+
   // 檢查暱稱重複
   if (findUserByNickname(nickname)) {
     return { ok: false, error: '暱稱已存在' };
@@ -845,7 +850,8 @@ function addUser(params) {
     phone: phone || '',
     joined_at: nowIso(),
     last_login: '',
-    notes: notes || ''
+    notes: notes || '',
+    subtype
   });
   logSystem(params.operator || 'system', 'add_user', nickname, { role, department });
 
@@ -862,7 +868,7 @@ function updateUser(params) {
   if (!user) return { ok: false, error: 'user not found' };
 
   const updates = {};
-  ['email', 'role', 'department', 'status', 'phone', 'notes'].forEach(k => {
+  ['email', 'role', 'department', 'status', 'phone', 'notes', 'subtype'].forEach(k => {
     if (params[k] !== undefined) updates[k] = params[k];
   });
   updateRow(SHEET_NAMES.USERS, user._row, updates);
@@ -993,7 +999,7 @@ function listLogs(params) {
   let logs = sheetToObjects(SHEET_NAMES.LOGS);
 
   // 權限過濾
-  if (viewerUser.role === 'teacher') {
+  if (viewerUser.role === 'teacher' || viewerUser.role === 'admin_staff') {
     logs = logs.filter(l => l.nickname === viewer);
   } else if (viewerUser.role === 'manager') {
     logs = logs.filter(l => l.department === viewerUser.department || l.nickname === viewer);
@@ -1444,10 +1450,10 @@ function getEvalEvidence(params) {
   const observations = sheetToObjects(SHEET_NAMES.OBSERVATION)
     .filter(o => o.observed === nickname && String(o.date) >= from && String(o.date) <= to);
 
-  // 5. 主管發文（如果是主管）
+  // 5. 發文證據：主管(安親發文 KPI4) + 行政美編行銷(社群內容 KPI1)
   let posts = [];
   let postsByWeek = {};
-  if (user.role === 'manager') {
+  if (user.role === 'manager' || (user.role === 'admin_staff' && user.subtype === 'marketing')) {
     posts = sheetToObjects(SHEET_NAMES.POSTS)
       .filter(p => p.nickname === nickname && String(p.date) >= from && String(p.date) <= to);
     posts.forEach(p => {
@@ -1686,15 +1692,17 @@ function getDashboard(params) {
   const ym = yearMonth();
   const users = sheetToObjects(SHEET_NAMES.USERS);
 
-  if (user.role === 'teacher') {
+  if (user.role === 'teacher' || user.role === 'admin_staff') {
     return getMyKpiPreview({ nickname: viewer });
   }
 
   if (user.role === 'manager') {
     const deptTeachers = users.filter(u => u.department === user.department && u.role === 'teacher');
+    // 部門成員（含行政美編行銷，皆需每日填報）
+    const deptMembers = users.filter(u => u.department === user.department && (u.role === 'teacher' || u.role === 'admin_staff'));
     const todayLogs = sheetToObjects(SHEET_NAMES.LOGS)
       .filter(l => l.date === today && l.department === user.department);
-    const status = deptTeachers.map(t => {
+    const status = deptMembers.map(t => {
       const log = todayLogs.find(l => l.nickname === t.nickname);
       return {
         nickname: t.nickname,
@@ -1719,7 +1727,7 @@ function getDashboard(params) {
       role: 'manager',
       department: user.department,
       date: today,
-      teachers_count: deptTeachers.length,
+      teachers_count: deptMembers.length,
       submitted_count: submittedCount,
       help_count: helpCount,
       status,

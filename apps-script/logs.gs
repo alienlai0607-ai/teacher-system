@@ -99,7 +99,7 @@ function listLogs(params) {
   let logs = sheetToObjects(SHEET_NAMES.LOGS);
 
   // 權限過濾
-  if (viewerUser.role === 'teacher') {
+  if (viewerUser.role === 'teacher' || viewerUser.role === 'admin_staff') {
     logs = logs.filter(l => l.nickname === viewer);
   } else if (viewerUser.role === 'manager') {
     logs = logs.filter(l => l.department === viewerUser.department || l.nickname === viewer);
