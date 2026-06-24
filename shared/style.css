@@ -48,7 +48,7 @@ body::before {
 }
 /* 手機版：直式背景圖 */
 @media (max-width: 768px) {
-  body::before { background-image: url('icons/bg-mobile.jpg'); }
+  body::before { background-image: url('icons/bg-mobile.jpg?v=2'); }
 }
 
 a { color: var(--primary); text-decoration: none; }
