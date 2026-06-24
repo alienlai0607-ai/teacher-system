@@ -190,7 +190,10 @@ const WORK_TYPE_GROUPS = {
   // 安親組：永康教室 / 北區教室
   care: [
     { key: '安親輔導', icon: '📖', block: 'tutoring', kpi: 1 },
-    { key: '專案選修', icon: '🎯', block: 'course', kpi: 3 },
+    { key: '專案選修', icon: '🎯', block: 'course', kpi: 3, options: [
+      '布拉克星球盃樂高科展大賽', '布拉克餐車計劃', 'WeDo程式機器人課程',
+      'Spike進階程式機器人課程', '藝術手作課', '無人機足球', '料理達人班',
+    ] },
     { key: '學習歷程', icon: '📚', block: 'course', kpi: 3 },
     { key: 'SEL聊心室', icon: '💗', block: 'course', kpi: 3 },
   ],
@@ -375,9 +378,13 @@ function blockHtml(t, idx) {
     </div>`;
   }
   if (t.block === 'course') {
+    const nameLabel = t.options ? '專案項目' : '課程名稱';
+    const nameField = t.options
+      ? `<select id="${id}_name"><option value="">— 請選擇 —</option>${t.options.map(o => `<option>${o}</option>`).join('')}</select>`
+      : `<input type="text" id="${id}_name">`;
     return `<div class="card dyn-card" data-photo="${id}" data-kpi="3">
       <div class="step-title"><span class="step-no">4</span> ${t.icon} ${t.key} 備課紀錄 <span class="req">*</span></div>
-      <div class="form-row"><label>課程名稱 <span class="req">*</span></label><input type="text" id="${id}_name"></div>
+      <div class="form-row"><label>${nameLabel} <span class="req">*</span></label>${nameField}</div>
       <div class="form-row"><label>上課班級</label><input type="text" id="${id}_class"></div>
       <div class="form-row"><label>教學進度 <span class="req">*</span></label><textarea id="${id}_progress"></textarea></div>
       <div class="form-row"><label>孩子學習狀況</label><textarea id="${id}_learning"></textarea></div>
