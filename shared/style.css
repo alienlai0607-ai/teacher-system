@@ -148,7 +148,7 @@ a:hover { text-decoration: underline; }
   padding: 24px;
   box-shadow: var(--shadow-card);
   margin-bottom: 20px;
-  border: 1px solid transparent;
+  border: 1.5px solid #FAD9A8;   /* 淡橘邊框，與背景區隔 */
   transition: box-shadow 0.2s;
 }
 .card:hover { box-shadow: 0 6px 28px rgba(0,0,0,.08); }
