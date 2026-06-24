@@ -35,7 +35,8 @@ html, body {
   line-height: 1.6;
   min-height: 100vh;
 }
-html, body { background: var(--bg); }
+html { background: var(--bg); }
+body { background: transparent; }   /* 透明才能看到下方 ::before 背景圖 */
 /* 布拉克星球角色背景：用 position:fixed 偽元素（手機相容，避免 background-attachment:fixed 在行動裝置失效/模糊）*/
 body::before {
   content: '';
@@ -411,7 +412,7 @@ tbody tr:last-child td { border-bottom: none; }
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #FFF8F0 0%, #FFE9CC 50%, #FFB266 100%);
+  background: transparent;   /* 透明，露出 ::before 角色背景 */
   padding: 20px;
 }
 .login-card {
