@@ -43,12 +43,22 @@ body::before {
   position: fixed;
   inset: 0;
   z-index: -1;
-  background: url('icons/bg.jpg') center bottom / cover no-repeat;  /* 電腦版：橫式 */
   pointer-events: none;
+  /* 淡白遮罩疊在背景圖上，柔化畫面、確保文字可讀 */
+  background-image:
+    linear-gradient(rgba(255,250,243,0.68), rgba(255,250,243,0.68)),
+    url('icons/bg.jpg');                 /* 電腦版：橫式 */
+  background-size: cover, cover;
+  background-position: center, center bottom;
+  background-repeat: no-repeat, no-repeat;
 }
-/* 手機版：直式背景圖 */
+/* 手機版：直式背景圖（遮罩稍強一點，圖較鮮豔）*/
 @media (max-width: 768px) {
-  body::before { background-image: url('icons/bg-mobile.jpg?v=2'); }
+  body::before {
+    background-image:
+      linear-gradient(rgba(255,250,243,0.74), rgba(255,250,243,0.74)),
+      url('icons/bg-mobile.jpg?v=2');
+  }
 }
 
 a { color: var(--primary); text-decoration: none; }
@@ -519,8 +529,8 @@ h4 { font-size: 16px; }
   h1 { font-size: 22px; }
   h2 { font-size: 19px; }
 
-  .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  .stat-box { padding: 14px 10px; }
+  .stat-grid { grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .stat-box { padding: 14px 6px; }
   .stat-num { font-size: 22px; }
   .stat-label { font-size: 11px; }
 
@@ -537,7 +547,7 @@ h4 { font-size: 16px; }
 }
 
 @media (max-width: 380px) {
-  .stat-grid { grid-template-columns: 1fr 1fr; }
+  .stat-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .stat-num { font-size: 20px; }
   .brand { font-size: 15px; }
   .user-name { font-size: 12px; }
