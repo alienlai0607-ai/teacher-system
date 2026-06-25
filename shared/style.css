@@ -58,6 +58,7 @@ body::before {
     background-image:
       linear-gradient(rgba(255,250,243,0.45), rgba(255,250,243,0.45)),
       url('icons/bg-mobile.jpg?v=3');
+    background-position: center, center 60%;   /* 圖往下、置中一點 */
   }
 }
 
