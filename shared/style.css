@@ -56,8 +56,8 @@ body::before {
 @media (max-width: 768px) {
   body::before {
     background-image:
-      linear-gradient(rgba(255,250,243,0.74), rgba(255,250,243,0.74)),
-      url('icons/bg-mobile.jpg?v=2');
+      linear-gradient(rgba(255,250,243,0.45), rgba(255,250,243,0.45)),
+      url('icons/bg-mobile.jpg?v=3');
   }
 }
 
