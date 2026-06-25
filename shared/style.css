@@ -58,9 +58,9 @@ body::before {
     background-image:
       linear-gradient(rgba(255,250,243,0.45), rgba(255,250,243,0.45)),
       url('icons/bg-mobile.jpg?v=3');
-    /* 圖與螢幕比例相近，放大一點才有空間把角色往下、置中 */
-    background-size: cover, 130% auto;
-    background-position: center, center 78%;
+    /* 圖與螢幕比例相近，微放大給空間，定位靠下讓角色往下 */
+    background-size: cover, auto 115%;
+    background-position: center, center 95%;
   }
 }
 
