@@ -128,29 +128,50 @@ function pushLine_(userId, text) {
   } catch (e) { return false; }
 }
 
-// OneSignal Web Push（用暱稱當 external_id）
+// OneSignal Web Push（用暱稱當 external_id）。自動嘗試新版/舊版格式。
+function oneSignalAttempts_(appId, key, externalId, title, message) {
+  const link = 'https://teacher.blockplanetcamp.com/teacher/tasks.html';
+  return [
+    { url: 'https://api.onesignal.com/notifications', auth: 'Key ' + key,
+      body: { app_id: appId, target_channel: 'push', include_aliases: { external_id: [String(externalId)] }, headings: { en: title }, contents: { en: message }, url: link } },
+    { url: 'https://onesignal.com/api/v1/notifications', auth: 'Basic ' + key,
+      body: { app_id: appId, include_external_user_ids: [String(externalId)], headings: { en: title }, contents: { en: message }, url: link } }
+  ];
+}
 function pushOneSignal_(externalId, title, message) {
   const props = PropertiesService.getScriptProperties();
   const appId = props.getProperty('ONESIGNAL_APP_ID');
   const key = props.getProperty('ONESIGNAL_REST_KEY');
   if (!appId || !key || !externalId) return false;
-  try {
-    UrlFetchApp.fetch('https://api.onesignal.com/notifications', {
-      method: 'post',
-      contentType: 'application/json',
-      headers: { Authorization: 'Key ' + key },
-      payload: JSON.stringify({
-        app_id: appId,
-        target_channel: 'push',
-        include_aliases: { external_id: [String(externalId)] },
-        headings: { en: title },
-        contents: { en: message },
-        url: 'https://teacher.blockplanetcamp.com/teacher/tasks.html'
-      }),
-      muteHttpExceptions: true
-    });
-    return true;
-  } catch (e) { return false; }
+  const attempts = oneSignalAttempts_(appId, key, externalId, title, message);
+  for (let i = 0; i < attempts.length; i++) {
+    try {
+      const r = UrlFetchApp.fetch(attempts[i].url, {
+        method: 'post', contentType: 'application/json',
+        headers: { Authorization: attempts[i].auth },
+        payload: JSON.stringify(attempts[i].body), muteHttpExceptions: true
+      });
+      const code = r.getResponseCode(), txt = r.getContentText();
+      if (code >= 200 && code < 300 && txt.indexOf('"recipients":0') < 0 && txt.indexOf('"errors"') < 0) return true;
+    } catch (e) {}
+  }
+  return false;
+}
+// 診斷：回傳每種格式的 OneSignal 回應
+function debugPush(params) {
+  const props = PropertiesService.getScriptProperties();
+  const appId = props.getProperty('ONESIGNAL_APP_ID');
+  const key = props.getProperty('ONESIGNAL_REST_KEY');
+  if (!appId || !key) return { ok: false, hasApp: !!appId, hasKey: !!key };
+  const ext = String((params && params.nickname) || '柏翰');
+  const attempts = oneSignalAttempts_(appId, key, ext, 'debug', 'debug push');
+  const results = attempts.map(a => {
+    try {
+      const r = UrlFetchApp.fetch(a.url, { method: 'post', contentType: 'application/json', headers: { Authorization: a.auth }, payload: JSON.stringify(a.body), muteHttpExceptions: true });
+      return { url: a.url, auth: a.auth.split(' ')[0], code: r.getResponseCode(), body: r.getContentText().slice(0, 250) };
+    } catch (e) { return { url: a.url, auth: a.auth.split(' ')[0], err: String(e) }; }
+  });
+  return { ok: true, ext: ext, results: results };
 }
 
 // 同時發 LINE + OneSignal

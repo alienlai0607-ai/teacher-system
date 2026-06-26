@@ -86,6 +86,7 @@ function handleRequest(e, method) {
 
       // 事項
       'setConfig': () => setConfig(params),
+      'debugPush': () => debugPush(params),
       'addTask': () => addTask(params),
       'listTasks': () => listTasks(params),
       'updateTaskStatus': () => updateTaskStatus(params),
