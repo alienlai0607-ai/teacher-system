@@ -9,6 +9,19 @@ function canCreateTask_(role) {
   return role === 'admin' || role === 'manager' || role === 'admin_staff';
 }
 
+// 由 admin 透過 API 設定機密（OneSignal / LINE），免去手動點指令碼屬性
+function setConfig(params) {
+  const u = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!u || u.role !== 'admin') return { ok: false, error: '需 admin 權限' };
+  const allowed = ['ONESIGNAL_APP_ID', 'ONESIGNAL_REST_KEY', 'LINE_TOKEN'];
+  const props = PropertiesService.getScriptProperties();
+  const set = [];
+  allowed.forEach(k => {
+    if (params[k] !== undefined && params[k] !== '') { props.setProperty(k, String(params[k])); set.push(k); }
+  });
+  return { ok: true, set: set };
+}
+
 function addTask(params) {
   const { title, created_by } = params;
   if (!title) return { ok: false, error: '缺少事項標題' };

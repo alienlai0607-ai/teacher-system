@@ -85,6 +85,7 @@ function handleRequest(e, method) {
       'listEvals': () => listEvals(params),
 
       // 事項
+      'setConfig': () => setConfig(params),
       'addTask': () => addTask(params),
       'listTasks': () => listTasks(params),
       'updateTaskStatus': () => updateTaskStatus(params),
