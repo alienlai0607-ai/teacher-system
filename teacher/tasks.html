@@ -36,7 +36,10 @@
       <div style="font-weight:700;">🔔 推播通知</div>
       <div class="muted text-sm" id="push-status">開啟後，新事項與每日提醒會直接推到這台裝置</div>
     </div>
-    <button class="btn btn-primary" onclick="enablePush()">開啟推播通知</button>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="enablePush()">開啟推播通知</button>
+      <button class="btn" onclick="testLocalNotif()">測試通知</button>
+    </div>
   </div>
 
   <!-- 建立事項（行政/主管/admin 才看得到） -->
@@ -192,6 +195,21 @@ async function delTask(id, title) {
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+// 本機通知測試（驗證 macOS/瀏覽器會不會顯示通知）
+async function testLocalNotif() {
+  const st = document.getElementById('push-status');
+  if (!('Notification' in window)) { UI.toast('此瀏覽器不支援通知', 'danger'); return; }
+  let perm = Notification.permission;
+  if (perm !== 'granted') perm = await Notification.requestPermission();
+  if (perm !== 'granted') { st.textContent = '通知權限未開啟（瀏覽器/系統擋住了）'; UI.toast('權限未允許', 'warn'); return; }
+  try {
+    new Notification('🔔 測試通知', { body: '看得到我，代表這台裝置通知顯示正常！' });
+    st.textContent = '已送出測試通知，看右上角有沒有跳出來';
+  } catch (e) {
+    st.textContent = '無法顯示通知：' + e.message;
+  }
 }
 
 // 開啟推播：呼叫 OneSignal 要權限 + 訂閱 + 綁定暱稱
