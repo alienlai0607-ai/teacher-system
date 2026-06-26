@@ -25,6 +25,11 @@
     font-weight: normal; color: var(--text); font-size: 14px;
   }
   .check-list input { width: auto; }
+  .env-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+  .env-item label { display: flex; align-items: center; gap: 8px; flex: 1; font-weight: normal; color: var(--text); font-size: 14px; cursor: pointer; }
+  .env-item label input { width: auto; }
+  .env-item label input:disabled { cursor: not-allowed; }
+  .env-cam { white-space: nowrap; flex: none; }
   .punch-row { display: flex; gap: 10px; }
   .punch-row .btn { flex: 1; min-height: 46px; }
   .punch-done { background: var(--success, #2e9e5b) !important; color: #fff !important; border-color: transparent !important; }
@@ -86,20 +91,39 @@
   <!-- Step 2 每日必填 -->
   <div class="card">
     <div class="step-title"><span class="step-no">2</span> 環境整潔 <span class="req">*</span></div>
-    <div class="check-list">
-      <label><input type="checkbox" id="env_classroom"> 教室環境確認完成</label>
-      <label><input type="checkbox" id="env_tools"> 教具歸位</label>
-      <label><input type="checkbox" id="env_trash"> 垃圾清理</label>
+    <div class="helper-text mb-1">📸 每項都要先拍照，才能打勾確認</div>
+    <div id="env-checklist">
+      <div class="env-item">
+        <label><input type="checkbox" id="env_classroom" disabled> 教室環境確認完成</label>
+        <input type="file" accept="image/*" capture="environment" id="photo-input-env_classroom" style="display:none" onchange="onPhotoPicked(event,'env_classroom',2)">
+        <button class="btn btn-sm env-cam" onclick="document.getElementById('photo-input-env_classroom').click()">📷 拍照</button>
+      </div>
+      <div id="attach-env_classroom" class="attach-area"></div>
+
+      <div class="env-item">
+        <label><input type="checkbox" id="env_tools" disabled> 教具歸位</label>
+        <input type="file" accept="image/*" capture="environment" id="photo-input-env_tools" style="display:none" onchange="onPhotoPicked(event,'env_tools',2)">
+        <button class="btn btn-sm env-cam" onclick="document.getElementById('photo-input-env_tools').click()">📷 拍照</button>
+      </div>
+      <div id="attach-env_tools" class="attach-area"></div>
+
+      <div class="env-item">
+        <label><input type="checkbox" id="env_trash" disabled> 垃圾清理</label>
+        <input type="file" accept="image/*" capture="environment" id="photo-input-env_trash" style="display:none" onchange="onPhotoPicked(event,'env_trash',2)">
+        <button class="btn btn-sm env-cam" onclick="document.getElementById('photo-input-env_trash').click()">📷 拍照</button>
+      </div>
+      <div id="attach-env_trash" class="attach-area"></div>
+
+      <div class="env-item">
+        <label><input type="checkbox" id="env_toilet" disabled> 廁所清理</label>
+        <input type="file" accept="image/*" capture="environment" id="photo-input-env_toilet" style="display:none" onchange="onPhotoPicked(event,'env_toilet',2)">
+        <button class="btn btn-sm env-cam" onclick="document.getElementById('photo-input-env_toilet').click()">📷 拍照</button>
+      </div>
+      <div id="attach-env_toilet" class="attach-area"></div>
     </div>
-    <div class="form-row">
+    <div class="form-row mt-2">
       <label>設備異常回報（無則免填）</label>
       <textarea id="equipment_issue" placeholder="例：A 教室投影機無法開機，已通報..."></textarea>
-    </div>
-    <div class="form-row">
-      <label>📸 環境照片佐證（拍打掃後/整潔狀態） <span class="req">*</span></label>
-      <div id="attach-env" class="attach-area"></div>
-      <input type="file" accept="image/*" capture="environment" id="photo-input-env" style="display:none" onchange="onPhotoPicked(event, 'env', 2)">
-      <button class="btn btn-sm mt-1" onclick="document.getElementById('photo-input-env').click()">📷 拍照／選圖</button>
     </div>
   </div>
 
@@ -491,8 +515,17 @@ async function onPhotoPicked(event, blockKey, kpiNo) {
   attachments[blockKey] = attachments[blockKey] || [];
   attachments[blockKey].push({ type: 'photo', url: res.url, fileId: res.fileId, kpi: kpiNo, description: '', forType: blockKey });
   renderAttachments(blockKey);
+  syncEnvCheckbox(blockKey);   // 環境整潔：拍照後解鎖並自動打勾
   scheduleSave();
   UI.toast('照片已存檔 ✅', 'success');
+}
+// 環境整潔項目：有照片才能勾選；拍照後自動勾、刪光則取消勾並上鎖
+function syncEnvCheckbox(key) {
+  const cb = document.getElementById(key);
+  if (!cb || cb.type !== 'checkbox') return;   // 只處理 env_* 那幾個 checkbox
+  const hasPhoto = (attachments[key] || []).length > 0;
+  cb.disabled = !hasPhoto;
+  cb.checked = hasPhoto;
 }
 function renderAttachments(blockKey) {
   const wrap = document.getElementById('attach-' + blockKey);
@@ -507,6 +540,7 @@ function renderAttachments(blockKey) {
 function removeAttachment(blockKey, idx) {
   attachments[blockKey].splice(idx, 1);
   renderAttachments(blockKey);
+  syncEnvCheckbox(blockKey);   // 照片刪光 → 取消勾選並上鎖
   scheduleSave();
 }
 
@@ -535,14 +569,15 @@ function collectFormData() {
     }
   });
 
-  // 環境整潔照片（綁 KPI2）
-  const envPhotos = (attachments['env'] || []).map(p => ({ ...p, kpi: 2, forType: 'env' }));
-  allPhotos.push(...envPhotos);
+  // 環境整潔照片（每項各自綁 KPI2）
+  ['env_classroom', 'env_tools', 'env_trash', 'env_toilet'].forEach(k => {
+    (attachments[k] || []).forEach(p => allPhotos.push({ ...p, kpi: 2, forType: k }));
+  });
 
   const data = {
     kpi1_data: kpi1,
     kpi2_data: {
-      env_classroom: chk('env_classroom'), env_tools: chk('env_tools'), env_trash: chk('env_trash'),
+      env_classroom: chk('env_classroom'), env_tools: chk('env_tools'), env_trash: chk('env_trash'), env_toilet: chk('env_toilet'),
       equipment_issue: val('equipment_issue'), class_status: val('class_status'),
     },
     kpi3_data: kpi3,
@@ -572,8 +607,7 @@ function collectFormData() {
 // ===== 必填檢核 =====
 function findMissing() {
   const m = [];
-  if (!(chk('env_classroom') && chk('env_tools') && chk('env_trash'))) m.push('環境整潔三項確認');
-  if (!(attachments['env'] && attachments['env'].length)) m.push('環境照片佐證（至少 1 張）');
+  if (!(chk('env_classroom') && chk('env_tools') && chk('env_trash') && chk('env_toilet'))) m.push('環境整潔四項（需先拍照才能打勾）');
   if (!val('today_done')) m.push('今日執行事項');
   if (!val('tomorrow_todo')) m.push('明日待辦事項');
   if (parentContacted === null) m.push('親師溝通（請選有/無）');
@@ -641,13 +675,15 @@ function populateForm(log) {
   const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
 
   const k2 = log.kpi2_data || {}, k5 = log.kpi5_data || {}, k6 = log.kpi6_data || {};
-  setChk('env_classroom', k2.env_classroom); setChk('env_tools', k2.env_tools); setChk('env_trash', k2.env_trash);
   set('equipment_issue', k2.equipment_issue); set('class_status', k2.class_status);
 
-  // 還原環境整潔照片
+  // 還原環境整潔：每項照片 + 依「有無照片」決定勾選與鎖定
   const allPhotos = Array.isArray(log.attachments) ? log.attachments.filter(a => a.type === 'photo') : [];
-  attachments['env'] = allPhotos.filter(p => p.forType === 'env');
-  renderAttachments('env');
+  ['env_classroom', 'env_tools', 'env_trash', 'env_toilet'].forEach(k => {
+    attachments[k] = allPhotos.filter(p => p.forType === k);
+    renderAttachments(k);
+    syncEnvCheckbox(k);
+  });
   set('today_done', k6.today_done); set('tomorrow_todo', k6.tomorrow_todo); set('special_event', k6.special_event);
   set('parent_summary', k5.parent_summary); set('student_special', k5.student_special);
   selectedStudents = new Set(Array.isArray(k5.special_students) ? k5.special_students : []);
