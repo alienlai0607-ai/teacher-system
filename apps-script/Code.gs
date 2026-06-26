@@ -45,6 +45,7 @@ function handleRequest(e, method) {
       'listLogs': () => listLogs(params),
       'getTodayLog': () => getTodayLog(params),
       'uploadPhoto': () => uploadPhoto(params),
+      'getEvidenceLog': () => getEvidenceLog(params),
 
       // 週報
       'saveWeekly': () => saveWeekly(params),

@@ -30,6 +30,16 @@ function getEvalEvidence(params) {
     const k = Number(e.kpi_category);
     if (k >= 1 && k <= 6) evidenceByKpi[k].push(e);
   });
+  // 證據以「天」計：環境整潔(KPI2)、教案歸檔(KPI3) 各算有幾天執行（同一天多張只算 1）
+  const _evDay = {};
+  evidence.forEach(e => {
+    const k = Number(e.kpi_category), d = String(e.date);
+    _evDay[d] = _evDay[d] || { env: false, lesson: false };
+    if (k === 2) _evDay[d].env = true;
+    if (k === 3) _evDay[d].lesson = true;
+  });
+  const env_days = Object.values(_evDay).filter(x => x.env).length;
+  const lesson_days = Object.values(_evDay).filter(x => x.lesson).length;
 
   // 3. 主管當月回饋
   const feedback = sheetToObjects(SHEET_NAMES.FEEDBACK)
@@ -67,6 +77,8 @@ function getEvalEvidence(params) {
     summary: {
       log_count: logs.length,
       evidence_count: evidence.length,
+      env_days: env_days,
+      lesson_days: lesson_days,
       feedback_count: feedback.length,
       observation_count: observations.length,
       posts_total: posts.length,

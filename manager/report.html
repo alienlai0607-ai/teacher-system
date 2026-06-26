@@ -291,7 +291,7 @@ function renderReport(nickname, ym, ev, evalObj) {
       ${extra}
       ${logLines.join('') || '<div class="empty">本月此項無日誌文字</div>'}
       ${links.length ? `<div class="link-list">${links.map(e => `🔗 <a href="${e.url}" target="_blank">${UI.formatDate(e.date)} ${e.description || '連結證據'}</a>`).join('<br>')}</div>` : ''}
-      ${photos.length ? `<div class="photo-grid">${photos.map(e => `<a href="${e.url}" target="_blank"><img src="${driveThumb(e.url, e.fileId, 400)}" alt="證據"></a>`).join('')}</div>` : ''}
+      ${photos.length ? `<div class="link-list">📷 本月 ${photos.length} 張照片證據（檔案存於雲端，未附圖）：${photos.map((e, i) => `<a href="${e.url}" target="_blank">${String(e.date).slice(5)}#${i + 1}</a>`).join('、')}</div>` : ''}
       ${(!photos.length && !links.length) ? '<div class="empty">無附件證據</div>' : ''}
     </div>`;
   });

@@ -43,6 +43,18 @@
     padding: 8px 12px; border-radius: 6px; margin-top: 6px;
     font-size: 13px;
   }
+  /* 證據明細 modal */
+  .ev-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
+  .ev-overlay.show { display: flex; }
+  .ev-modal { background: #fff; border-radius: 14px; width: 100%; max-width: 520px; max-height: 84vh; overflow: auto; padding: 20px; }
+  .ev-modal h3 { margin: 0 0 4px; color: var(--primary); }
+  .ev-day { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .ev-day:last-child { border-bottom: none; }
+  .ev-date { font-weight: 800; min-width: 92px; }
+  .ev-badge { border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 700; }
+  .ev-badge.env { background: #E3F3E8; color: #1a8a4a; }
+  .ev-badge.lesson { background: #FFF1DD; color: #C77A12; }
+  .ev-link { font-size: 12px; color: #1565c0; }
 </style>
 </head>
 <body>
@@ -66,6 +78,18 @@
   <div class="card">
     <div class="card-title">📅 最近日誌與回饋</div>
     <div id="recent-logs"></div>
+  </div>
+</div>
+
+<!-- 證據明細 modal -->
+<div class="ev-overlay" id="ev-overlay" onclick="if(event.target===this)closeEvidence()">
+  <div class="ev-modal">
+    <div class="flex-between">
+      <h3>📎 本月證據明細</h3>
+      <button class="btn btn-sm" onclick="closeEvidence()">關閉</button>
+    </div>
+    <div class="muted text-sm mb-1">環境整潔 / 教案歸檔 以「天」計（同一天多張只算 1 次）</div>
+    <div id="ev-body"></div>
   </div>
 </div>
 
@@ -102,7 +126,10 @@ function renderScore(res) {
     </div>
     <div class="stat-grid mt-2">
       <div class="stat-box"><div class="stat-num">${res.summary.log_count}</div><div class="stat-label">本月已填日誌</div></div>
-      <div class="stat-box"><div class="stat-num">${res.summary.evidence_count}</div><div class="stat-label">累積證據</div></div>
+      <div class="stat-box ev-box" onclick="openEvidence()" style="cursor:pointer;">
+        <div style="font-size:15px; font-weight:800; color:var(--primary); line-height:1.6;">環境整潔 ${res.summary.env_days || 0} 天<br>教案歸檔 ${res.summary.lesson_days || 0} 天</div>
+        <div class="stat-label">證據明細 ›</div>
+      </div>
       <div class="stat-box"><div class="stat-num">${res.summary.feedback_count}</div><div class="stat-label">主管回饋</div></div>
     </div>
   `;
@@ -153,6 +180,31 @@ async function loadRecentLogs() {
       ${fbList.map(f => `<div class="feedback-item">💬 <strong>${f.from_nickname}</strong>：${f.content} <span class="tag tag-${tagClass(f.tag)}">${f.tag}</span></div>`).join('')}
     </div>`;
   }).join('');
+}
+
+// ===== 證據明細 =====
+async function openEvidence() {
+  const ym = new Date().toISOString().slice(0, 7);
+  const body = document.getElementById('ev-body');
+  body.innerHTML = '<div class="muted">載入中…</div>';
+  document.getElementById('ev-overlay').classList.add('show');
+  const res = await API.getEvidenceLog({ viewer: session.nickname, year_month: ym, nickname: session.nickname });
+  if (!res.ok) { body.innerHTML = '<div class="muted">載入失敗</div>'; return; }
+  const p = (res.people || [])[0];
+  if (!p || !p.days.length) { body.innerHTML = '<div class="muted">本月尚無證據</div>'; return; }
+  body.innerHTML = `
+    <div class="mb-1"><strong>環境整潔 ${p.env_days} 天</strong>　|　<strong>教案歸檔 ${p.lesson_days} 天</strong></div>
+    ${p.days.map(d => `
+      <div class="ev-day">
+        <span class="ev-date">${UI.formatDate(d.date)}</span>
+        ${d.env > 0 ? `<span class="ev-badge env">環境整潔 ×${d.env}</span>` : ''}
+        ${d.lesson > 0 ? `<span class="ev-badge lesson">教案歸檔 ×${d.lesson}</span>` : ''}
+        ${(d.urls || []).map((u, i) => `<a class="ev-link" href="${u}" target="_blank">照片${i + 1}</a>`).join(' ')}
+      </div>`).join('')}
+  `;
+}
+function closeEvidence() {
+  document.getElementById('ev-overlay').classList.remove('show');
 }
 
 function tagClass(tag) {

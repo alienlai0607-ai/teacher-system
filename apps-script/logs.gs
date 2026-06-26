@@ -150,6 +150,55 @@ function saveEvidenceFromLog(log_id, nickname, date, attachmentsRaw) {
 }
 
 /**
+ * 證據紀錄（以天計）— 老師看自己、主管看部門、admin 全部
+ * 分類：KPI2=環境整潔(env)、KPI3=教案歸檔(lesson)
+ */
+function getEvidenceLog(params) {
+  const { viewer, year_month, nickname } = params || {};
+  if (!viewer || !year_month) return { ok: false, error: 'missing viewer/year_month' };
+  const vu = findUserByNickname(viewer);
+  if (!vu) return { ok: false, error: 'viewer not found' };
+  const users = sheetToObjects(SHEET_NAMES.USERS);
+
+  let scope;
+  if (vu.role === 'admin') scope = users.map(u => u.nickname);
+  else if (vu.role === 'manager') scope = users.filter(u => u.department === vu.department).map(u => u.nickname);
+  else scope = [viewer];
+  if (nickname) {
+    if (scope.indexOf(nickname) < 0) return { ok: false, error: 'no permission' };
+    scope = [nickname];
+  }
+
+  const evAll = sheetToObjects(SHEET_NAMES.EVIDENCE)
+    .filter(e => String(e.date).slice(0, 7) === year_month && scope.indexOf(e.nickname) >= 0);
+
+  const usersMap = {}; users.forEach(u => usersMap[u.nickname] = u);
+  const byPerson = {};
+  evAll.forEach(e => {
+    const nk = e.nickname, d = String(e.date), k = Number(e.kpi_category);
+    if (k !== 2 && k !== 3) return;
+    byPerson[nk] = byPerson[nk] || {};
+    byPerson[nk][d] = byPerson[nk][d] || { date: d, env: 0, lesson: 0, urls: [] };
+    if (k === 2) byPerson[nk][d].env++;
+    if (k === 3) byPerson[nk][d].lesson++;
+    if (e.url) byPerson[nk][d].urls.push(e.url);
+  });
+
+  const people = Object.keys(byPerson).map(nk => {
+    const days = Object.values(byPerson[nk]).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    return {
+      nickname: nk,
+      department: (usersMap[nk] || {}).department || '',
+      env_days: days.filter(d => d.env > 0).length,
+      lesson_days: days.filter(d => d.lesson > 0).length,
+      days: days
+    };
+  }).sort((a, b) => String(a.nickname).localeCompare(String(b.nickname)));
+
+  return { ok: true, year_month, people };
+}
+
+/**
  * 主管發文 → Posts（每週 3 篇 KPI 證據）
  */
 function saveManagerPosts(nickname, department, date, posts) {

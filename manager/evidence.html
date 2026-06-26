@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>證據紀錄</title>
+<link rel="stylesheet" href="../shared/style.css?v=20260624k">
+<script src="../shared/config.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/api.js"></script>
+<script src="../shared/ui.js"></script>
+<style>
+  .toolbar { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+  .person-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; cursor: pointer; }
+  .person-head .nm { font-size: 16px; font-weight: 800; }
+  .cnt { border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 700; }
+  .cnt.env { background: #E3F3E8; color: #1a8a4a; }
+  .cnt.lesson { background: #FFF1DD; color: #C77A12; }
+  .ev-day { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .ev-day:last-child { border-bottom: none; }
+  .ev-date { font-weight: 800; min-width: 92px; }
+  .ev-badge { border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 700; }
+  .ev-badge.env { background: #E3F3E8; color: #1a8a4a; }
+  .ev-badge.lesson { background: #FFF1DD; color: #C77A12; }
+  .ev-link { font-size: 12px; color: #1565c0; }
+  .days-wrap { margin-top: 8px; display: none; }
+  .days-wrap.show { display: block; }
+</style>
+</head>
+<body>
+<div id="app-header"></div>
+
+<div class="container">
+  <h2 style="margin-top:0;">📎 證據紀錄</h2>
+  <p class="muted text-sm">環境整潔 / 教案歸檔 以「天」計（同一天多張只算 1 次）。點老師可展開每日明細。</p>
+
+  <div class="card">
+    <div class="toolbar">
+      <div class="form-row" style="margin:0;">
+        <label>月份</label>
+        <input type="month" id="sel-month">
+      </div>
+      <button class="btn btn-primary" onclick="load()">查詢</button>
+    </div>
+  </div>
+
+  <div id="list"></div>
+</div>
+
+<script>
+const session = AUTH.requireRole(['manager', 'admin']);
+
+window.addEventListener('load', () => {
+  UI.mountHeader(session);
+  document.getElementById('sel-month').value = new Date().toISOString().slice(0, 7);
+  load();
+});
+
+async function load() {
+  const ym = document.getElementById('sel-month').value;
+  if (!ym) return;
+  UI.loading(true);
+  const res = await API.getEvidenceLog({ viewer: session.nickname, year_month: ym });
+  UI.loading(false);
+  const list = document.getElementById('list');
+  if (!res.ok) { list.innerHTML = '<div class="card muted">載入失敗</div>'; return; }
+  if (!res.people.length) { list.innerHTML = '<div class="card muted">本月部門尚無證據</div>'; return; }
+
+  list.innerHTML = res.people.map((p, idx) => `
+    <div class="card">
+      <div class="person-head" onclick="document.getElementById('days-${idx}').classList.toggle('show')">
+        <span class="nm">${p.nickname}</span>
+        <span class="muted text-sm">${p.department}</span>
+        <span class="cnt env">環境整潔 ${p.env_days} 天</span>
+        <span class="cnt lesson">教案歸檔 ${p.lesson_days} 天</span>
+        <span class="muted text-sm" style="margin-left:auto;">▼ 每日明細</span>
+      </div>
+      <div class="days-wrap" id="days-${idx}">
+        ${p.days.map(d => `
+          <div class="ev-day">
+            <span class="ev-date">${UI.formatDate(d.date)}</span>
+            ${d.env > 0 ? `<span class="ev-badge env">環境整潔 ×${d.env}</span>` : ''}
+            ${d.lesson > 0 ? `<span class="ev-badge lesson">教案歸檔 ×${d.lesson}</span>` : ''}
+            ${(d.urls || []).map((u, i) => `<a class="ev-link" href="${u}" target="_blank">照片${i + 1}</a>`).join(' ')}
+          </div>`).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+</script>
+</body>
+</html>

@@ -57,6 +57,7 @@ function handleRequest(e, method) {
       'listLogs': () => listLogs(params),
       'getTodayLog': () => getTodayLog(params),
       'uploadPhoto': () => uploadPhoto(params),
+      'getEvidenceLog': () => getEvidenceLog(params),
 
       // 週報
       'saveWeekly': () => saveWeekly(params),
@@ -1474,6 +1475,16 @@ function getEvalEvidence(params) {
     const k = Number(e.kpi_category);
     if (k >= 1 && k <= 6) evidenceByKpi[k].push(e);
   });
+  // 證據以「天」計：環境整潔(KPI2)、教案歸檔(KPI3) 各算有幾天執行（同一天多張只算 1）
+  const _evDay = {};
+  evidence.forEach(e => {
+    const k = Number(e.kpi_category), d = String(e.date);
+    _evDay[d] = _evDay[d] || { env: false, lesson: false };
+    if (k === 2) _evDay[d].env = true;
+    if (k === 3) _evDay[d].lesson = true;
+  });
+  const env_days = Object.values(_evDay).filter(x => x.env).length;
+  const lesson_days = Object.values(_evDay).filter(x => x.lesson).length;
 
   // 3. 主管當月回饋
   const feedback = sheetToObjects(SHEET_NAMES.FEEDBACK)
@@ -1511,6 +1522,8 @@ function getEvalEvidence(params) {
     summary: {
       log_count: logs.length,
       evidence_count: evidence.length,
+      env_days: env_days,
+      lesson_days: lesson_days,
       feedback_count: feedback.length,
       observation_count: observations.length,
       posts_total: posts.length,
@@ -1870,3 +1883,52 @@ function deleteStudent(params) {
   return { ok: true, msg: '已刪除' };
 }
 
+
+/**
+ * 證據紀錄（以天計）— 老師看自己、主管看部門、admin 全部
+ * 分類：KPI2=環境整潔(env)、KPI3=教案歸檔(lesson)
+ */
+function getEvidenceLog(params) {
+  const { viewer, year_month, nickname } = params || {};
+  if (!viewer || !year_month) return { ok: false, error: 'missing viewer/year_month' };
+  const vu = findUserByNickname(viewer);
+  if (!vu) return { ok: false, error: 'viewer not found' };
+  const users = sheetToObjects(SHEET_NAMES.USERS);
+
+  let scope;
+  if (vu.role === 'admin') scope = users.map(u => u.nickname);
+  else if (vu.role === 'manager') scope = users.filter(u => u.department === vu.department).map(u => u.nickname);
+  else scope = [viewer];
+  if (nickname) {
+    if (scope.indexOf(nickname) < 0) return { ok: false, error: 'no permission' };
+    scope = [nickname];
+  }
+
+  const evAll = sheetToObjects(SHEET_NAMES.EVIDENCE)
+    .filter(e => String(e.date).slice(0, 7) === year_month && scope.indexOf(e.nickname) >= 0);
+
+  const usersMap = {}; users.forEach(u => usersMap[u.nickname] = u);
+  const byPerson = {};
+  evAll.forEach(e => {
+    const nk = e.nickname, d = String(e.date), k = Number(e.kpi_category);
+    if (k !== 2 && k !== 3) return;
+    byPerson[nk] = byPerson[nk] || {};
+    byPerson[nk][d] = byPerson[nk][d] || { date: d, env: 0, lesson: 0, urls: [] };
+    if (k === 2) byPerson[nk][d].env++;
+    if (k === 3) byPerson[nk][d].lesson++;
+    if (e.url) byPerson[nk][d].urls.push(e.url);
+  });
+
+  const people = Object.keys(byPerson).map(nk => {
+    const days = Object.values(byPerson[nk]).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    return {
+      nickname: nk,
+      department: (usersMap[nk] || {}).department || '',
+      env_days: days.filter(d => d.env > 0).length,
+      lesson_days: days.filter(d => d.lesson > 0).length,
+      days: days
+    };
+  }).sort((a, b) => String(a.nickname).localeCompare(String(b.nickname)));
+
+  return { ok: true, year_month, people };
+}
