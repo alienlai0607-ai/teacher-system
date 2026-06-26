@@ -2060,14 +2060,29 @@ function pushTaskToLine_(user, task, prefix) {
   pushLine_(user.line_user_id, txt);
 }
 
-// 每日定時提醒：今天(含逾期)未完成事項，依老師彙整推播。設定一個每日時間觸發器呼叫它。
-function sendDailyTaskReminders() {
+function addDaysStr_(dateStr, n) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+// 共用：依模式推播。morning=當天(含逾期)、evening=隔天預告。依老師彙整成一則。
+function sendTaskReminders_(mode) {
   const today = todayStr();
-  const tasks = sheetToObjects(SHEET_NAMES.TASKS).filter(t => t.status === 'open' && String(t.due_date) <= today);
+  const tomorrow = addDaysStr_(today, 1);
+  const open = sheetToObjects(SHEET_NAMES.TASKS).filter(t => t.status === 'open');
+  let relevant, header;
+  if (mode === 'evening') {
+    relevant = open.filter(t => String(t.due_date) === tomorrow);
+    header = '🌙 明日事項預告（' + tomorrow + '）';
+  } else {
+    relevant = open.filter(t => String(t.due_date) <= today);
+    header = '☀️ 今日待辦事項提醒';
+  }
   const users = sheetToObjects(SHEET_NAMES.USERS);
   const umap = {}; users.forEach(u => umap[u.nickname] = u);
   const byAssignee = {};
-  tasks.forEach(t => { (byAssignee[t.assignee] = byAssignee[t.assignee] || []).push(t); });
+  relevant.forEach(t => { (byAssignee[t.assignee] = byAssignee[t.assignee] || []).push(t); });
   let sent = 0;
   Object.keys(byAssignee).forEach(nk => {
     const u = umap[nk];
@@ -2075,11 +2090,15 @@ function sendDailyTaskReminders() {
     const items = byAssignee[nk]
       .map((t, i) => (i + 1) + '. ' + t.title + '（' + t.due_date + (String(t.due_date) < today ? ' 逾期' : '') + '）')
       .join('\n');
-    pushLine_(u.line_user_id, '☀️ 今日待辦事項提醒\n━━━━━━━━\n' + items + '\n\n完成後請到系統標記 ✅');
+    pushLine_(u.line_user_id, header + '\n━━━━━━━━\n' + items + '\n\n完成後請到系統標記 ✅');
     sent++;
   });
-  return { ok: true, sent: sent };
+  return { ok: true, mode: mode, sent: sent };
 }
+
+// 觸發器用（不可帶參數，故拆兩個函式）
+function sendMorningReminders() { return sendTaskReminders_('morning'); }
+function sendEveningPreview() { return sendTaskReminders_('evening'); }
 
 // LINE webhook：老師加好友後傳「綁定 暱稱」→ 綁定 line_user_id
 function handleLineWebhook_(body) {
@@ -2122,11 +2141,14 @@ function replyLine_(replyToken, text) {
   } catch (e) {}
 }
 
-// 一次性：在 Apps Script 編輯器執行此函式，建立每日 07:30 的提醒觸發器
+// 一次性：在 Apps Script 編輯器執行此函式，建立兩個定時觸發器
+// 晚上 20:00 預告隔天、早上 07:30 提醒當天(含逾期)
 function setupTaskReminderTrigger() {
+  const old = ['sendDailyTaskReminders', 'sendMorningReminders', 'sendEveningPreview'];
   ScriptApp.getProjectTriggers().forEach(t => {
-    if (t.getHandlerFunction() === 'sendDailyTaskReminders') ScriptApp.deleteTrigger(t);
+    if (old.indexOf(t.getHandlerFunction()) >= 0) ScriptApp.deleteTrigger(t);
   });
-  ScriptApp.newTrigger('sendDailyTaskReminders').timeBased().everyDays(1).atHour(7).nearMinute(30).create();
-  return { ok: true, msg: '每日 07:30 事項提醒觸發器已建立' };
+  ScriptApp.newTrigger('sendEveningPreview').timeBased().everyDays(1).atHour(20).nearMinute(0).create();
+  ScriptApp.newTrigger('sendMorningReminders').timeBased().everyDays(1).atHour(7).nearMinute(30).create();
+  return { ok: true, msg: '已建立：晚上 20:00 預告隔天 + 早上 07:30 提醒當天' };
 }
