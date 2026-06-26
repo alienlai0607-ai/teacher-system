@@ -1955,6 +1955,12 @@ function canCreateTask_(role) {
   return role === 'admin' || role === 'manager' || role === 'admin_staff';
 }
 
+// 把 due_date 正規化成 yyyy-MM-dd（Sheets 會把日期字串自動轉成 Date 物件）
+function taskDateStr_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  return String(v == null ? '' : v).slice(0, 10);
+}
+
 // 由 admin 透過 API 設定機密（OneSignal / LINE），免去手動點指令碼屬性
 function setConfig(params) {
   const u = params && params.operator ? findUserByNickname(params.operator) : null;
@@ -2010,6 +2016,7 @@ function listTasks(params) {
   const vu = findUserByNickname(viewer);
   if (!vu) return { ok: false, error: 'viewer not found' };
   let list = sheetToObjects(SHEET_NAMES.TASKS);
+  list.forEach(t => { t.due_date = taskDateStr_(t.due_date); });   // 正規化日期
   if (vu.role === 'admin') {
     // 全部
   } else if (vu.role === 'manager') {
@@ -2110,6 +2117,7 @@ function sendTaskReminders_(mode) {
   const today = todayStr();
   const tomorrow = addDaysStr_(today, 1);
   const open = sheetToObjects(SHEET_NAMES.TASKS).filter(t => t.status === 'open');
+  open.forEach(t => { t.due_date = taskDateStr_(t.due_date); });   // 正規化日期
   let relevant, header;
   if (mode === 'evening') {
     relevant = open.filter(t => String(t.due_date) === tomorrow);
