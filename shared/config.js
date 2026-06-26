@@ -6,6 +6,9 @@ window.APP_CONFIG = {
   // Google OAuth Client ID（在 Google Cloud Console 建立）
   GOOGLE_CLIENT_ID: '110974418283-75a7ifti599cauhptkcd0jsqshfrupbf.apps.googleusercontent.com',
 
+  // OneSignal Web Push App ID（PWA 推播）
+  ONESIGNAL_APP_ID: 'b597673d-9c75-440e-8e8b-1b5b49c4dad4',
+
   // 系統設定
   APP_NAME: '布拉克星球 KPI 系統',
   DEPARTMENTS: ['永康教室', '北區教室', '才藝部門'],

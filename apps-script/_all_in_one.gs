@@ -1984,7 +1984,7 @@ function addTask(params) {
       done_at: ''
     });
     created++;
-    if (params.notify !== false) pushTaskToLine_(u, { title: title, detail: params.detail || '', due_date: due }, '🆕 你有新事項');
+    if (params.notify !== false) notifyUser_(u, '🆕 你有新事項：' + title, (params.detail ? params.detail + '\n' : '') + '期限 ' + due);
   });
   logSystem(created_by, 'add_task', title, { assignees: assignees, due: due });
   return { ok: true, created: created };
@@ -2053,11 +2053,36 @@ function pushLine_(userId, text) {
   } catch (e) { return false; }
 }
 
-function pushTaskToLine_(user, task, prefix) {
-  if (!user || !user.line_user_id) return;
-  const txt = (prefix || '📌 事項提醒') + '\n━━━━━━━━\n' + task.title +
-    (task.detail ? ('\n內容：' + task.detail) : '') + '\n期限：' + task.due_date;
-  pushLine_(user.line_user_id, txt);
+// OneSignal Web Push（用暱稱當 external_id）
+function pushOneSignal_(externalId, title, message) {
+  const props = PropertiesService.getScriptProperties();
+  const appId = props.getProperty('ONESIGNAL_APP_ID');
+  const key = props.getProperty('ONESIGNAL_REST_KEY');
+  if (!appId || !key || !externalId) return false;
+  try {
+    UrlFetchApp.fetch('https://api.onesignal.com/notifications', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { Authorization: 'Key ' + key },
+      payload: JSON.stringify({
+        app_id: appId,
+        target_channel: 'push',
+        include_aliases: { external_id: [String(externalId)] },
+        headings: { en: title },
+        contents: { en: message },
+        url: 'https://teacher.blockplanetcamp.com/teacher/tasks.html'
+      }),
+      muteHttpExceptions: true
+    });
+    return true;
+  } catch (e) { return false; }
+}
+
+// 同時發 LINE + OneSignal
+function notifyUser_(user, title, body) {
+  if (!user) return;
+  if (user.line_user_id) pushLine_(user.line_user_id, title + '\n━━━━━━━━\n' + body);
+  pushOneSignal_(user.nickname, title, body);
 }
 
 function addDaysStr_(dateStr, n) {
@@ -2086,11 +2111,11 @@ function sendTaskReminders_(mode) {
   let sent = 0;
   Object.keys(byAssignee).forEach(nk => {
     const u = umap[nk];
-    if (!u || !u.line_user_id) return;
+    if (!u) return;
     const items = byAssignee[nk]
       .map((t, i) => (i + 1) + '. ' + t.title + '（' + t.due_date + (String(t.due_date) < today ? ' 逾期' : '') + '）')
       .join('\n');
-    pushLine_(u.line_user_id, header + '\n━━━━━━━━\n' + items + '\n\n完成後請到系統標記 ✅');
+    notifyUser_(u, header, items + '\n\n完成後請到系統標記 ✅');
     sent++;
   });
   return { ok: true, mode: mode, sent: sent };
