@@ -29,7 +29,7 @@ function setupSheets() {
       'self_k1', 'self_k2', 'self_k3', 'self_k4', 'self_k5', 'self_k6',
       'self_summary',
       'score_k1', 'score_k2', 'score_k3', 'score_k4', 'score_k5', 'score_k6',
-      'score_okr', 'total_score', 'grade', 'bonus',
+      'score_okr', 'total_score', 'grade', 'bonus', 'bonus_granted',
       'manager_comment', 'interview_notes',
       'status', 'created_at', 'updated_at'
     ],
@@ -38,7 +38,7 @@ function setupSheets() {
       'self_m1', 'self_m2', 'self_m3', 'self_m4', 'self_m5', 'self_m6',
       'self_summary',
       'score_m1', 'score_m2', 'score_m3', 'score_m4', 'score_m5', 'score_m6',
-      'score_okr', 'total_score', 'grade', 'bonus',
+      'score_okr', 'total_score', 'grade', 'bonus', 'bonus_granted',
       'dept_avg_score',
       'bonus_okr', 'bonus_recruit', 'bonus_dept', 'final_bonus',
       'boss_comment', 'interview_notes',

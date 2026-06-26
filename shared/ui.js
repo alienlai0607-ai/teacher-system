@@ -92,6 +92,7 @@ window.UI = (function () {
             <a href="${root}teacher/weekly.html">週報</a>
             <a href="${root}teacher/mylog.html">我的 KPI</a>
             <a href="${root}teacher/okr.html">OKR</a>
+            <a href="${root}teacher/rules.html">規則</a>
           ` : ''}
           ${isManager ? `
             <a href="${root}manager/dashboard.html">部門儀表板</a>
@@ -102,6 +103,7 @@ window.UI = (function () {
             <a href="${root}manager/mylog.html">我的日誌</a>
             <a href="${root}teacher/weekly.html">我的週報</a>
             <a href="${root}manager/myeval.html">我的 KPI</a>
+            <a href="${root}teacher/rules.html">規則</a>
           ` : ''}
           ${isAdmin ? `
             <a href="${root}admin/dashboard.html">總覽</a>
@@ -110,6 +112,7 @@ window.UI = (function () {
             <a href="${root}admin/users.html">人員管理</a>
             <a href="${root}admin/students.html">學生名單</a>
             <a href="${root}admin/bonus.html">獎金核發</a>
+            <a href="${root}teacher/rules.html">規則</a>
           ` : ''}
         </nav>
         <div class="user-info">

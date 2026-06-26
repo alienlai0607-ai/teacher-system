@@ -142,6 +142,9 @@ function saveEval(params) {
   const okrScore = Number(params.score_okr || 0);
   const totalScore = kpiTotal + okrScore;
   const tier = calcBonus(kpiTotal, user.role);
+  // 主管核發決定：未帶＝預設核發（true）
+  const bonusGranted = (params.bonus_granted === undefined || params.bonus_granted === '')
+    ? true : (params.bonus_granted === true || params.bonus_granted === 'true');
 
   const data = {
     eval_id, year_month, nickname, evaluator,
@@ -149,6 +152,7 @@ function saveEval(params) {
     total_score: totalScore,
     grade: tier.grade,
     bonus: tier.bonus,
+    bonus_granted: bonusGranted,
     manager_comment: params.manager_comment || params.boss_comment || '',
     interview_notes: params.interview_notes || '',
     status: params.status || 'draft',

@@ -102,7 +102,11 @@
         <div class="total-box" id="total-box">
           <div>KPI <span id="kpi-total">0</span> + OKR <span id="okr-display">0</span></div>
           <div class="total-num"><span id="total-score">0</span> / 100</div>
-          <div>⭐ <span id="grade">—</span> · NT$<span id="bonus">0</span></div>
+          <div>⭐ <span id="grade">—</span> · 級距獎金 NT$<span id="bonus">0</span></div>
+          <label style="display:flex; align-items:center; justify-content:center; gap:8px; margin-top:12px; cursor:pointer;">
+            <input type="checkbox" id="bonus_granted" checked onchange="recalc()" style="width:auto;"> 核發此獎金（不勾＝本月不發）
+          </label>
+          <div style="margin-top:6px; font-size:17px;">實發獎金：<strong>NT$<span id="bonus-final">0</span></strong></div>
         </div>
 
         <div class="mt-2 flex gap-1">
@@ -199,6 +203,8 @@ async function loadEvidence() {
     document.getElementById('score_okr').value = e.score_okr || 0;
     document.getElementById('manager_comment').value = e.manager_comment || '';
     document.getElementById('interview_notes').value = e.interview_notes || '';
+    // 還原核發決定（沒這欄位＝舊資料，預設核發）
+    document.getElementById('bonus_granted').checked = !(e.bonus_granted === false || e.bonus_granted === 'FALSE' || e.bonus_granted === 'false');
   }
 
   recalc();
@@ -222,6 +228,8 @@ function recalc() {
   else { grade = '待改善'; bonus = 0; }
   document.getElementById('grade').textContent = grade;
   document.getElementById('bonus').textContent = bonus;
+  const granted = document.getElementById('bonus_granted').checked;
+  document.getElementById('bonus-final').textContent = granted ? bonus : 0;
 }
 
 async function saveEval(status) {
@@ -239,6 +247,7 @@ async function saveEval(status) {
     score_okr: Number(document.getElementById('score_okr').value || 0),
     manager_comment: document.getElementById('manager_comment').value,
     interview_notes: document.getElementById('interview_notes').value,
+    bonus_granted: document.getElementById('bonus_granted').checked,
   };
   for (let i = 1; i <= 6; i++) {
     payload['score_k' + i] = Number(document.getElementById('score_k' + i).value || 0);

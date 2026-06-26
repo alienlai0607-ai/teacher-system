@@ -215,7 +215,7 @@ function setupSheets() {
       'self_k1', 'self_k2', 'self_k3', 'self_k4', 'self_k5', 'self_k6',
       'self_summary',
       'score_k1', 'score_k2', 'score_k3', 'score_k4', 'score_k5', 'score_k6',
-      'score_okr', 'total_score', 'grade', 'bonus',
+      'score_okr', 'total_score', 'grade', 'bonus', 'bonus_granted',
       'manager_comment', 'interview_notes',
       'status', 'created_at', 'updated_at'
     ],
@@ -224,7 +224,7 @@ function setupSheets() {
       'self_m1', 'self_m2', 'self_m3', 'self_m4', 'self_m5', 'self_m6',
       'self_summary',
       'score_m1', 'score_m2', 'score_m3', 'score_m4', 'score_m5', 'score_m6',
-      'score_okr', 'total_score', 'grade', 'bonus',
+      'score_okr', 'total_score', 'grade', 'bonus', 'bonus_granted',
       'dept_avg_score',
       'bonus_okr', 'bonus_recruit', 'bonus_dept', 'final_bonus',
       'boss_comment', 'interview_notes',
@@ -1586,6 +1586,9 @@ function saveEval(params) {
   const okrScore = Number(params.score_okr || 0);
   const totalScore = kpiTotal + okrScore;
   const tier = calcBonus(kpiTotal, user.role);
+  // 主管核發決定：未帶＝預設核發（true）
+  const bonusGranted = (params.bonus_granted === undefined || params.bonus_granted === '')
+    ? true : (params.bonus_granted === true || params.bonus_granted === 'true');
 
   const data = {
     eval_id, year_month, nickname, evaluator,
@@ -1593,6 +1596,7 @@ function saveEval(params) {
     total_score: totalScore,
     grade: tier.grade,
     bonus: tier.bonus,
+    bonus_granted: bonusGranted,
     manager_comment: params.manager_comment || params.boss_comment || '',
     interview_notes: params.interview_notes || '',
     status: params.status || 'draft',

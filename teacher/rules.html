@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>KPI 與獎金規則</title>
+<link rel="stylesheet" href="../shared/style.css?v=20260624k">
+<script src="../shared/config.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/api.js"></script>
+<script src="../shared/ui.js"></script>
+<style>
+  .rule-h { font-size: 17px; font-weight: 800; color: var(--primary); margin: 4px 0 10px; }
+  .bonus-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .bonus-table th, .bonus-table td { border: 1px solid var(--border); padding: 9px 10px; text-align: center; }
+  .bonus-table th { background: #FFF1DD; color: var(--text); }
+  .bonus-table .hi { background: #FFF8F0; font-weight: 700; }
+  .bonus-table .has { color: #1a8a4a; font-weight: 800; }
+  .bonus-table .no { color: #aaa; }
+  .kpi-item { padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; background:#fff; }
+  .kpi-item .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .kpi-item .name { font-weight: 800; color: var(--text); }
+  .kpi-item .max { color: var(--primary); font-weight: 800; white-space: nowrap; }
+  .kpi-item .sub { font-size: 13px; color: var(--text-light); margin-top: 4px; line-height: 1.7; }
+  .note { font-size: 13px; color: var(--text-light); line-height: 1.8; }
+  .pill { display:inline-block; background:#FFF1DD; color:var(--primary); border-radius:999px; padding:2px 10px; font-size:12px; font-weight:700; margin-left:6px; }
+</style>
+</head>
+<body>
+<div id="app-header"></div>
+
+<div class="container-narrow">
+  <h2>📋 KPI 與獎金規則</h2>
+  <div class="muted text-sm mb-2" id="role-hint"></div>
+  <div id="content"></div>
+</div>
+
+<script>
+const session = AUTH.requireRole(['teacher', 'manager', 'admin', 'admin_staff']);
+
+// ===== 規則資料 =====
+const BONUS = {
+  teacher: { label:'老師 / 行政', tiers:[
+    { range:'67–70', grade:'卓越', bonus:3000 },
+    { range:'63–66', grade:'優良', bonus:2000 },
+    { range:'60–62', grade:'達標', bonus:1000 },
+    { range:'55–59', grade:'基本合格', bonus:0 },
+    { range:'≤54', grade:'待改善', bonus:0, extra:'＋改善追蹤' },
+  ]},
+  manager: { label:'主管', tiers:[
+    { range:'67–70', grade:'卓越', bonus:5000 },
+    { range:'63–66', grade:'優良', bonus:3500 },
+    { range:'60–62', grade:'達標', bonus:2000 },
+    { range:'55–59', grade:'基本合格', bonus:0 },
+    { range:'≤54', grade:'待改善', bonus:0, extra:'＋改善追蹤' },
+  ], addon:[
+    'OKR 完全達成：＋NT$2,000',
+    '部門招生 ≥110%：＋NT$3,000',
+    '部門 KPI 平均 ≥65：＋NT$2,000',
+    '⚠️ 連坐：部門平均 <55，主管獎金減半',
+  ]},
+};
+
+const KPI = {
+  teacher: [
+    { name:'① 學校課業指導', max:15, sub:'作業完成率/錯誤率、字體工整、訂正檢查、每日挑戰本設計、課業複習與考試準備、個別弱點補強' },
+    { name:'② 班級經營與學習氛圍', max:15, sub:'作業時間秩序、主動學習/專注度、獎勵規範執行、環境整潔、班級氛圍、情緒衝突處理' },
+    { name:'③ 專案課程執行', max:10, sub:'教案/材料準備、引導互動、節奏掌握、進度執行（每月一次正式觀課）' },
+    { name:'④ 班級群組經營', max:10, sub:'課程分享/品質（每月至少 2 篇課程紀錄）、群組訊息即時回覆、活動推廣/互動率' },
+    { name:'⑤ 親師溝通與關係經營', max:15, sub:'主動回饋學生狀況（每週至少 1 次）、溝通專業度、親師信任建立、問題與客訴處理' },
+    { name:'⑥ 個人工作態度與表現', max:5, sub:'出勤/時間觀念、主動性（每日上傳工作日誌、主動發現問題、願意學習）' },
+  ],
+  manager: [
+    { name:'① 團隊領導與培訓', max:15, sub:'老師日誌即時回饋（48h）、觀課執行、巡班記錄、個別輔導、團體培訓、成長追蹤' },
+    { name:'② 教學品質監督與部門風氣', max:15, sub:'部門老師平均 KPI、品質問題即時處理、跨班氛圍、教材把關、突發處理、進度追蹤' },
+    { name:'③ 部門課程/特色發展', max:10, sub:'新教案/特色課程、跨班活動策劃、教學資源整合、課程競爭力' },
+    { name:'④ 招生續班與部門經營', max:10, sub:'人數變化、續班率、招生活動、安親內容發文（每週≥3 篇）、品牌經營' },
+    { name:'⑤ 親師關係與客訴處理', max:15, sub:'客訴件數控制、處理時效（24h 回應/72h 解決）、重大事件、親師活動、信任建立' },
+    { name:'⑥ 個人工作態度與表現', max:5, sub:'出勤/時間觀念、主動性（每日日誌、主動發現問題提解方、向上回報）' },
+  ],
+};
+
+window.addEventListener('load', () => {
+  UI.mountHeader(session);
+  // admin / admin_staff 都先看老師版；主管看主管版
+  const isMgr = session.role === 'manager';
+  const roleKey = isMgr ? 'manager' : 'teacher';
+  document.getElementById('role-hint').textContent =
+    `以下為「${BONUS[roleKey].label}」適用的評核與獎金規則，可隨時回來查閱。`;
+  render(roleKey);
+});
+
+function render(roleKey) {
+  const b = BONUS[roleKey];
+  const kpi = KPI[roleKey];
+  const rows = b.tiers.map(t => `
+    <tr class="${t.bonus > 0 ? 'hi' : ''}">
+      <td>${t.range} 分</td>
+      <td>${t.grade}</td>
+      <td class="${t.bonus > 0 ? 'has' : 'no'}">${t.bonus > 0 ? 'NT$' + t.bonus.toLocaleString() : '無'}${t.extra ? '<div class="note">'+t.extra+'</div>' : ''}</td>
+    </tr>`).join('');
+
+  const addon = b.addon ? `
+    <div class="card">
+      <div class="rule-h">🎁 主管加碼獎金</div>
+      <div class="note">${b.addon.map(a => '• ' + a).join('<br>')}</div>
+    </div>` : '';
+
+  const kpiHtml = kpi.map(k => `
+    <div class="kpi-item">
+      <div class="top"><span class="name">${k.name}</span><span class="max">${k.max} 分</span></div>
+      <div class="sub">${k.sub}</div>
+    </div>`).join('');
+
+  document.getElementById('content').innerHTML = `
+    <div class="card">
+      <div class="rule-h">💰 獎金級距（看 KPI 分數，滿分 70）</div>
+      <table class="bonus-table">
+        <thead><tr><th>KPI 分數</th><th>等第</th><th>月獎金</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="note mt-1">📌 <strong>KPI ≥ 60 分</strong>才開始有獎金；55–59 為基本合格（無獎金）；54 以下需改善追蹤。</div>
+    </div>
+    ${addon}
+    <div class="card">
+      <div class="rule-h">📊 計分方式</div>
+      <div class="note">
+        總分 100 = <strong>KPI 70 分</strong>（六大類別）＋ <strong>OKR 30 分</strong>。<br>
+        每月評核一次，<strong>獎金看 KPI 70 分的級距</strong>（上表）。<br>
+        OKR：每學期設定 2 個目標（O），每個搭配 2–3 項關鍵成果（KR）。
+      </div>
+    </div>
+    <div class="card">
+      <div class="rule-h">🎯 KPI 六大類別（共 70 分）</div>
+      ${kpiHtml}
+    </div>
+    <div class="card">
+      <div class="rule-h">📝 證據怎麼來</div>
+      <div class="note">
+        每天填「今日日報」、每週填「週報」，系統會自動把你的日誌、照片、親師溝通、課程紀錄等彙整成 KPI 證據。<br>
+        填得越完整、證據越充足，月底評核分數越有依據。月底可在「我的 KPI」看本月預估分數與獎金。
+      </div>
+    </div>
+  `;
+}
+</script>
+</body>
+</html>

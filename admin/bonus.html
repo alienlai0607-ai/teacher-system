@@ -73,7 +73,9 @@ async function loadAll() {
   let tTotal = 0;
   if (tRes.ok) {
     document.getElementById('teacher-tbody').innerHTML = tRes.evals.map(e => {
-      tTotal += Number(e.bonus || 0);
+      const granted = !(e.bonus_granted === false || e.bonus_granted === 'FALSE' || e.bonus_granted === 'false');
+      const pay = granted ? Number(e.bonus || 0) : 0;
+      tTotal += pay;
       const u = usersMap[e.nickname] || {};
       const kpiTotal = Number(e.total_score || 0) - Number(e.score_okr || 0);
       return `<tr>
@@ -83,7 +85,7 @@ async function loadAll() {
         <td>${e.score_okr || 0}</td>
         <td>${e.total_score || 0}</td>
         <td><span class="tag tag-${gradeColor(e.grade)}">${e.grade || '—'}</span></td>
-        <td>NT$${e.bonus || 0}</td>
+        <td>NT$${pay}${!granted && Number(e.bonus || 0) > 0 ? ' <span class="tag tag-warn">未核發</span>' : ''}</td>
       </tr>`;
     }).join('') || '<tr><td colspan="7" class="muted">無資料</td></tr>';
   }
@@ -93,7 +95,9 @@ async function loadAll() {
   let mTotal = 0;
   if (mRes.ok) {
     document.getElementById('manager-tbody').innerHTML = mRes.evals.map(e => {
-      const bonus = Number(e.final_bonus || e.bonus || 0);
+      const granted = !(e.bonus_granted === false || e.bonus_granted === 'FALSE' || e.bonus_granted === 'false');
+      const earned = Number(e.final_bonus || e.bonus || 0);
+      const bonus = granted ? earned : 0;
       mTotal += bonus;
       const u = usersMap[e.nickname] || {};
       const kpiTotal = Number(e.total_score || 0) - Number(e.score_okr || 0);
@@ -104,7 +108,7 @@ async function loadAll() {
         <td>${e.score_okr || 0}</td>
         <td>${e.total_score || 0}</td>
         <td><span class="tag tag-${gradeColor(e.grade)}">${e.grade || '—'}</span></td>
-        <td>NT$${bonus}</td>
+        <td>NT$${bonus}${!granted && earned > 0 ? ' <span class="tag tag-warn">未核發</span>' : ''}</td>
       </tr>`;
     }).join('') || '<tr><td colspan="7" class="muted">無資料</td></tr>';
   }
