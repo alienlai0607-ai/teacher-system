@@ -1,0 +1,16 @@
+{
+  "name": "布拉克星球 KPI 系統",
+  "short_name": "KPI 系統",
+  "description": "布拉克星球老師工作日誌與 KPI 評核系統",
+  "start_url": "/index.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FFF8F0",
+  "theme_color": "#F5941E",
+  "icons": [
+    { "src": "/shared/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/shared/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/shared/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
