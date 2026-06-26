@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>事項</title>
+<link rel="stylesheet" href="../shared/style.css?v=20260624k">
+<script src="../shared/config.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/api.js"></script>
+<script src="../shared/ui.js"></script>
+<script src="../shared/pwa.js"></script>
+<style>
+  .task-item { display: flex; gap: 10px; align-items: flex-start; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .task-item:last-child { border-bottom: none; }
+  .task-item.done .t-title { text-decoration: line-through; color: #aaa; }
+  .t-main { flex: 1; }
+  .t-title { font-weight: 700; font-size: 15px; }
+  .t-meta { font-size: 12px; color: var(--text-light); margin-top: 2px; }
+  .t-detail { font-size: 13px; color: var(--text); margin-top: 4px; white-space: pre-wrap; }
+  .due-soon { color: #c0392b; font-weight: 700; }
+  .assignee-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .as-chip { padding: 6px 12px; border: 1.5px solid var(--border); border-radius: 999px; background: #fff; cursor: pointer; font-size: 14px; user-select: none; }
+  .as-chip.on { background: #F5941E; border-color: #F5941E; color: #fff; font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="app-header"></div>
+
+<div class="container">
+  <h2 style="margin-top:0;">📋 事項</h2>
+
+  <!-- 建立事項（行政/主管/admin 才看得到） -->
+  <div class="card" id="create-card" style="display:none;">
+    <div class="card-title">➕ 指派事項</div>
+    <div class="form-row"><label>事項標題 <span style="color:var(--danger)">*</span></label><input id="t-title" placeholder="例：交期末成果照片"></div>
+    <div class="form-row"><label>內容說明（選填）</label><textarea id="t-detail" placeholder="補充說明..."></textarea></div>
+    <div class="form-row"><label>期限</label><input type="date" id="t-due"></div>
+    <div class="form-row">
+      <label>指派給（可複選）</label>
+      <div class="assignee-grid" id="assignee-grid"></div>
+    </div>
+    <button class="btn btn-primary" onclick="createTask()">指派並推播</button>
+    <div class="helper-text mt-1">已綁定 LINE 的老師會立即收到推播通知。</div>
+  </div>
+
+  <!-- 我的事項 -->
+  <div class="card">
+    <div class="card-title">📌 我的事項（待辦）</div>
+    <div id="my-open"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">✅ 我已完成</div>
+    <div id="my-done"></div>
+  </div>
+
+  <!-- 我指派的（建立者才看） -->
+  <div class="card" id="assigned-card" style="display:none;">
+    <div class="card-title">📤 我指派出去的事項</div>
+    <div id="assigned-list"></div>
+  </div>
+</div>
+
+<script>
+const session = AUTH.requireRole(['teacher', 'manager', 'admin', 'admin_staff']);
+const canCreate = ['admin', 'manager', 'admin_staff'].includes(session.role);
+let allUsers = [];
+let assignSel = new Set();
+
+window.addEventListener('load', async () => {
+  UI.mountHeader(session);
+  document.getElementById('t-due') && (document.getElementById('t-due').value = new Date().toISOString().slice(0, 10));
+  if (canCreate) {
+    document.getElementById('create-card').style.display = 'block';
+    document.getElementById('assigned-card').style.display = 'block';
+    await loadAssignees();
+  }
+  await loadTasks();
+});
+
+async function loadAssignees() {
+  const res = await API.listUsers();
+  if (!res.ok) return;
+  // 可指派對象：老師/主管/行政（排除 admin）；主管限自己部門
+  allUsers = res.users.filter(u => u.role !== 'admin');
+  if (session.role === 'manager') allUsers = allUsers.filter(u => u.department === session.department);
+  const grid = document.getElementById('assignee-grid');
+  grid.innerHTML = allUsers.map(u =>
+    `<span class="as-chip" data-nk="${u.nickname}" onclick="toggleAssign(this,'${u.nickname}')">${u.nickname}（${u.department}）</span>`
+  ).join('') || '<span class="muted text-sm">沒有可指派的對象</span>';
+}
+function toggleAssign(el, nk) {
+  if (assignSel.has(nk)) { assignSel.delete(nk); el.classList.remove('on'); }
+  else { assignSel.add(nk); el.classList.add('on'); }
+}
+
+async function createTask() {
+  const title = document.getElementById('t-title').value.trim();
+  if (!title) { UI.toast('請填事項標題', 'warn'); return; }
+  if (!assignSel.size) { UI.toast('請至少指派一位', 'warn'); return; }
+  UI.loading(true);
+  const res = await API.addTask({
+    title,
+    detail: document.getElementById('t-detail').value.trim(),
+    due_date: document.getElementById('t-due').value,
+    assignees: Array.from(assignSel),
+    created_by: session.nickname,
+  });
+  UI.loading(false);
+  if (!res.ok) { UI.toast(res.error || '建立失敗', 'danger'); return; }
+  UI.toast(`已指派給 ${res.created} 位（已綁 LINE 者已推播）`, 'success');
+  document.getElementById('t-title').value = '';
+  document.getElementById('t-detail').value = '';
+  assignSel.clear();
+  document.querySelectorAll('.as-chip.on').forEach(e => e.classList.remove('on'));
+  loadTasks();
+}
+
+async function loadTasks() {
+  const res = await API.listTasks({ viewer: session.nickname });
+  if (!res.ok) return;
+  const tasks = res.tasks || [];
+  const today = new Date().toISOString().slice(0, 10);
+
+  const mine = tasks.filter(t => t.assignee === session.nickname);
+  renderTaskList('my-open', mine.filter(t => t.status !== 'done'), today, true);
+  renderTaskList('my-done', mine.filter(t => t.status === 'done'), today, true);
+
+  if (canCreate) {
+    const assigned = tasks.filter(t => t.created_by === session.nickname);
+    renderAssigned(assigned, today);
+  }
+}
+
+function renderTaskList(elId, list, today, mineView) {
+  const wrap = document.getElementById(elId);
+  if (!list.length) { wrap.innerHTML = '<div class="muted text-sm">目前沒有</div>'; return; }
+  wrap.innerHTML = list.map(t => {
+    const overdue = t.status !== 'done' && String(t.due_date) < today;
+    const due = `期限 ${t.due_date}${overdue ? ' ⚠️逾期' : (String(t.due_date) === today ? ' (今天)' : '')}`;
+    return `<div class="task-item ${t.status === 'done' ? 'done' : ''}">
+      <input type="checkbox" ${t.status === 'done' ? 'checked' : ''} onchange="toggleDone('${t.task_id}', this.checked)" style="width:auto;margin-top:3px;">
+      <div class="t-main">
+        <div class="t-title">${esc(t.title)}</div>
+        <div class="t-meta"><span class="${overdue ? 'due-soon' : ''}">${due}</span> · 來自 ${esc(t.created_by)}</div>
+        ${t.detail ? `<div class="t-detail">${esc(t.detail)}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderAssigned(list, today) {
+  const wrap = document.getElementById('assigned-list');
+  if (!list.length) { wrap.innerHTML = '<div class="muted text-sm">尚未指派任何事項</div>'; return; }
+  wrap.innerHTML = list.map(t => {
+    const overdue = t.status !== 'done' && String(t.due_date) < today;
+    return `<div class="task-item ${t.status === 'done' ? 'done' : ''}">
+      <div class="t-main">
+        <div class="t-title">${esc(t.title)} ${t.status === 'done' ? '<span class="tag tag-success">已完成</span>' : '<span class="tag tag-warn">待辦</span>'}</div>
+        <div class="t-meta">指派給 <strong>${esc(t.assignee)}</strong> · <span class="${overdue ? 'due-soon' : ''}">期限 ${t.due_date}${overdue ? ' ⚠️逾期' : ''}</span></div>
+        ${t.detail ? `<div class="t-detail">${esc(t.detail)}</div>` : ''}
+      </div>
+      <button class="btn btn-sm" onclick="delTask('${t.task_id}','${esc(t.title)}')">刪除</button>
+    </div>`;
+  }).join('');
+}
+
+async function toggleDone(id, checked) {
+  const res = await API.updateTaskStatus({ task_id: id, status: checked ? 'done' : 'open', operator: session.nickname });
+  if (!res.ok) { UI.toast(res.error || '更新失敗', 'danger'); return; }
+  loadTasks();
+}
+
+async function delTask(id, title) {
+  const ok = await UI.confirmDialog(`確定刪除事項「${title}」？`);
+  if (!ok) return;
+  const res = await API.deleteTask(id);
+  if (!res.ok) { UI.toast(res.error || '刪除失敗', 'danger'); return; }
+  UI.toast('已刪除', 'success');
+  loadTasks();
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+</script>
+</body>
+</html>

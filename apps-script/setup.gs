@@ -8,7 +8,7 @@ function setupSheets() {
   const schemas = {
     [SHEET_NAMES.USERS]: [
       'nickname', 'email', 'role', 'department', 'status',
-      'phone', 'joined_at', 'last_login', 'notes', 'subtype'
+      'phone', 'joined_at', 'last_login', 'notes', 'subtype', 'line_user_id'
     ],
     [SHEET_NAMES.LOGS]: [
       'log_id', 'date', 'nickname', 'department', 'role',
@@ -75,6 +75,10 @@ function setupSheets() {
     [SHEET_NAMES.STUDENTS]: [
       'student_id', 'name', 'teacher', 'department', 'status',
       'notes', 'created_at', 'updated_at'
+    ],
+    [SHEET_NAMES.TASKS]: [
+      'task_id', 'title', 'detail', 'assignee', 'department', 'due_date',
+      'status', 'created_by', 'created_at', 'updated_at', 'done_at'
     ],
   };
 

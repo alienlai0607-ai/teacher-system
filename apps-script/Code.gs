@@ -24,6 +24,13 @@ function handleRequest(e, method) {
     const params = method === 'POST'
       ? JSON.parse(e.postData.contents || '{}')
       : (e.parameter || {});
+
+    // LINE webhook（老師加好友/傳訊息）— 與一般 API 共用同一個 URL
+    if (params.events && Array.isArray(params.events)) {
+      handleLineWebhook_(params);
+      return jsonOut({ ok: true });
+    }
+
     const action = params.action || '';
 
     const ROUTES = {
@@ -77,6 +84,12 @@ function handleRequest(e, method) {
       'getEval': () => getEval(params),
       'listEvals': () => listEvals(params),
 
+      // 事項
+      'addTask': () => addTask(params),
+      'listTasks': () => listTasks(params),
+      'updateTaskStatus': () => updateTaskStatus(params),
+      'deleteTask': () => deleteTask(params),
+
       // 學生名冊
       'listStudents': () => listStudents(params),
       'addStudent': () => addStudent(params),
@@ -122,6 +135,7 @@ const SHEET_NAMES = {
   SYSTEM_LOG: 'Logs_System',
   WEEKLY: 'WeeklyReports',
   STUDENTS: 'Students',
+  TASKS: 'Tasks',
 };
 
 const DEPARTMENTS = ['永康教室', '北區教室', '才藝部門', '總部'];

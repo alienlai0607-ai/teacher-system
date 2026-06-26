@@ -39,6 +39,11 @@ window.API = (function () {
     uploadPhoto: (data) => call('uploadPhoto', data),
     getEvidenceLog: (params) => call('getEvidenceLog', params),
 
+    addTask: (data) => call('addTask', data),
+    listTasks: (params) => call('listTasks', params),
+    updateTaskStatus: (data) => call('updateTaskStatus', data),
+    deleteTask: (id) => call('deleteTask', { task_id: id }),
+
     saveWeekly: (data) => call('saveWeekly', data),
     getWeekly: (params) => call('getWeekly', params),
     listWeekly: (params) => call('listWeekly', params),

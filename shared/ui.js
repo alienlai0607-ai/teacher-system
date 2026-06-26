@@ -82,13 +82,14 @@ window.UI = (function () {
     const root = AUTH.relativeRoot();
     const isAdmin = user.role === 'admin';
     const isManager = user.role === 'manager';
-    const isTeacher = user.role === 'teacher';
+    const isTeacher = user.role === 'teacher' || user.role === 'admin_staff';
     return `
       <header class="top-bar">
         <div class="brand"><img src="${root}shared/icons/logo.png" class="brand-logo" alt="布拉克星球"> KPI 系統</div>
         <nav class="top-nav">
           ${isTeacher ? `
             <a href="${root}teacher/today.html">今日日報</a>
+            <a href="${root}teacher/tasks.html">事項</a>
             <a href="${root}teacher/weekly.html">週報</a>
             <a href="${root}teacher/mylog.html">我的 KPI</a>
             <a href="${root}teacher/okr.html">OKR</a>
@@ -96,6 +97,7 @@ window.UI = (function () {
           ` : ''}
           ${isManager ? `
             <a href="${root}manager/dashboard.html">部門儀表板</a>
+            <a href="${root}teacher/tasks.html">事項</a>
             <a href="${root}manager/teachers.html">老師列表</a>
             <a href="${root}manager/eval.html">月度評核</a>
             <a href="${root}manager/report.html">列印報表</a>
@@ -108,6 +110,7 @@ window.UI = (function () {
           ` : ''}
           ${isAdmin ? `
             <a href="${root}admin/dashboard.html">總覽</a>
+            <a href="${root}teacher/tasks.html">事項</a>
             <a href="${root}admin/eval-manager.html">評核主管</a>
             <a href="${root}manager/report.html">列印報表</a>
             <a href="${root}admin/users.html">人員管理</a>
