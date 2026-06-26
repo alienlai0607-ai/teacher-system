@@ -31,6 +31,14 @@
 <div class="container">
   <h2 style="margin-top:0;">📋 事項</h2>
 
+  <div class="card" style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+    <div>
+      <div style="font-weight:700;">🔔 推播通知</div>
+      <div class="muted text-sm" id="push-status">開啟後，新事項與每日提醒會直接推到這台裝置</div>
+    </div>
+    <button class="btn btn-primary" onclick="enablePush()">開啟推播通知</button>
+  </div>
+
   <!-- 建立事項（行政/主管/admin 才看得到） -->
   <div class="card" id="create-card" style="display:none;">
     <div class="card-title">➕ 指派事項</div>
@@ -184,6 +192,15 @@ async function delTask(id, title) {
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+// 開啟推播：呼叫 OneSignal 要權限 + 訂閱 + 綁定暱稱
+async function enablePush() {
+  const st = document.getElementById('push-status');
+  if (typeof window.promptPush !== 'function') { UI.toast('推播尚未載入，請重整頁面再試', 'warn'); return; }
+  st.textContent = '處理中…請在跳出的視窗按「允許」';
+  window.promptPush();
+  setTimeout(() => { st.textContent = '若已按允許，這台裝置就會收到推播了 ✅（沒反應請確認瀏覽器通知權限）'; }, 2500);
 }
 </script>
 </body>
