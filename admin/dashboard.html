@@ -29,8 +29,20 @@
 <body>
 <div id="app-header"></div>
 
+<style>
+  @keyframes notifyPulse { 0%,100%{ transform:scale(1); box-shadow:0 3px 12px rgba(245,148,30,.30);} 50%{ transform:scale(1.015); box-shadow:0 5px 18px rgba(245,148,30,.5);} }
+  #notify-banner { cursor:pointer; background:linear-gradient(135deg,#F5941E,#FFB957); color:#fff; padding:14px 18px; border-radius:12px; font-weight:700; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; gap:10px; animation:notifyPulse 1.8s ease-in-out infinite; }
+  #notify-box.flash { box-shadow:0 0 0 3px #F5941E; transition:box-shadow .3s; }
+</style>
+
 <div class="container">
   <h2>👑 全機構總覽 · <span id="ym"></span></h2>
+
+  <!-- 即時訊息匡（點了滑到事項通知欄）-->
+  <div id="notify-banner" style="display:none;" onclick="goNotify()">
+    <span>📩 你有 <span id="notify-count">0</span> 則事項通知</span>
+    <span>點我查看 ›</span>
+  </div>
 
   <div class="dept-grid" id="dept-grid"></div>
 
@@ -43,8 +55,8 @@
     </div>
   </div>
 
-  <div class="card">
-    <div class="card-title">🔔 待處理事項</div>
+  <div class="card" id="notify-box">
+    <div class="card-title">🔔 布拉克星球事項通知欄</div>
     <ul id="todos" style="margin:0; padding-left:20px;"></ul>
   </div>
 
@@ -134,8 +146,22 @@ async function loadDashboard() {
   const todaySubmitted = res.departments.reduce((s, d) => s + d.today_submitted, 0);
   document.getElementById('total-today').textContent = todaySubmitted;
 
-  // todos
+  // 事項通知欄：指派給我的事項（即時）＋ 系統提醒
   const todos = [];
+  let taskCount = 0;
+  const todayStr = new Date().toISOString().slice(0, 10);
+  try {
+    const tr = await API.listTasks({ viewer: session.nickname, status: 'open' });
+    if (tr.ok) {
+      const mine = (tr.tasks || []).filter(t => t.assignee === session.nickname);
+      taskCount = mine.length;
+      mine.forEach(t => {
+        const overdue = String(t.due_date) < todayStr;
+        todos.push(`${overdue ? '⚠️' : '📌'} <strong>${escTodo(t.title)}</strong>（期限 ${t.due_date}${overdue ? ' 逾期' : ''}）— 來自 ${escTodo(t.created_by)}`);
+      });
+    }
+  } catch (e) {}
+
   const today = new Date();
   if (today.getDate() >= 25) {
     todos.push('本月評核期：提醒各部門主管在月底完成老師評核');
@@ -147,8 +173,29 @@ async function loadDashboard() {
     }
   });
   document.getElementById('todos').innerHTML = todos.length === 0
-    ? '<li class="muted">目前無待處理事項</li>'
-    : todos.map(t => `<li>${t}</li>`).join('');
+    ? '<li class="muted">目前沒有通知</li>'
+    : todos.map(t => `<li style="margin:4px 0;">${t}</li>`).join('');
+
+  // 即時訊息匡
+  const banner = document.getElementById('notify-banner');
+  if (taskCount > 0) {
+    document.getElementById('notify-count').textContent = taskCount;
+    banner.style.display = 'flex';
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
+function escTodo(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+}
+
+// 點訊息匡 → 滑到事項通知欄並閃一下
+function goNotify() {
+  const box = document.getElementById('notify-box');
+  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  box.classList.add('flash');
+  setTimeout(() => box.classList.remove('flash'), 1500);
 }
 </script>
 </body>
