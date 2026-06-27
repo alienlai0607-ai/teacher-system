@@ -79,6 +79,15 @@
 
 <div class="container-narrow">
 
+  <!-- 今日重點（被指派/推播的事項，常駐可看） -->
+  <div class="card" id="highlight-card" style="border-color:#F5941E; background:#FFF8EF;">
+    <div class="step-title" style="justify-content:space-between;">
+      <span><span class="step-no" style="background:#F5941E;">📌</span> 今日重點</span>
+      <a href="tasks.html" class="text-sm" style="font-weight:600;">全部事項 ›</a>
+    </div>
+    <div id="highlight-body"><div class="muted text-sm">載入中…</div></div>
+  </div>
+
   <!-- Step 1 基本資料 -->
   <div class="card">
     <div class="step-title"><span class="step-no">1</span> 基本資料</div>
@@ -263,6 +272,7 @@ window.addEventListener('load', async () => {
 
   renderTypeGrid();
 
+  loadTodayHighlights();
   await loadStudents();
   await loadTodayLog();
 
@@ -271,6 +281,32 @@ window.addEventListener('load', async () => {
     document.getElementById('help-content-wrap').style.display = e.target.checked ? 'block' : 'none';
   });
 });
+
+// ===== 今日重點（事項）=====
+async function loadTodayHighlights() {
+  const body = document.getElementById('highlight-body');
+  const today = todayDateStr();
+  const res = await API.listTasks({ viewer: session.nickname, status: 'open' });
+  if (!res || !res.ok) { body.innerHTML = '<div class="muted text-sm">載入失敗</div>'; return; }
+  // 只看自己被指派、且今天到期或逾期的
+  const mine = (res.tasks || []).filter(t => t.assignee === session.nickname && String(t.due_date) <= today);
+  if (!mine.length) {
+    body.innerHTML = '<div class="muted text-sm">今天沒有待辦事項 🎉</div>';
+    return;
+  }
+  body.innerHTML = mine.map(t => {
+    const overdue = String(t.due_date) < today;
+    return `<div style="padding:8px 0; border-bottom:1px solid #F3D9A8;">
+      <div style="font-weight:700;">${overdue ? '⚠️ ' : '🔸 '}${hEsc(t.title)}
+        <span class="text-sm" style="color:${overdue ? '#c0392b' : '#888'};">（${overdue ? '逾期 ' : ''}${t.due_date}）</span></div>
+      ${t.detail ? `<div class="text-sm" style="color:#5b4a2e; margin-top:2px;">${hEsc(t.detail)}</div>` : ''}
+      <div class="text-sm muted">來自 ${hEsc(t.created_by)}</div>
+    </div>`;
+  }).join('') + '<div class="text-sm muted mt-1">完成後到「事項」頁打勾 ✅</div>';
+}
+function hEsc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+}
 
 // ===== 工具 =====
 function formatToday() {
