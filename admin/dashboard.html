@@ -30,18 +30,29 @@
 <div id="app-header"></div>
 
 <style>
-  @keyframes notifyPulse { 0%,100%{ transform:scale(1); box-shadow:0 3px 12px rgba(245,148,30,.30);} 50%{ transform:scale(1.015); box-shadow:0 5px 18px rgba(245,148,30,.5);} }
-  #notify-banner { cursor:pointer; background:linear-gradient(135deg,#F5941E,#FFB957); color:#fff; padding:14px 18px; border-radius:12px; font-weight:700; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; gap:10px; animation:notifyPulse 1.8s ease-in-out infinite; }
+  @keyframes notifyPulse { 0%,100%{ box-shadow:0 2px 10px rgba(245,148,30,.25);} 50%{ box-shadow:0 4px 18px rgba(245,148,30,.45);} }
+  @keyframes bellSwing { 0%,60%,100%{ transform:rotate(0);} 70%{ transform:rotate(14deg);} 80%{ transform:rotate(-10deg);} 90%{ transform:rotate(6deg);} }
+  #notify-banner { cursor:pointer; background:linear-gradient(135deg,#F5941E,#FFB04A); color:#fff; padding:13px 18px; border-radius:14px; font-weight:700; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; gap:10px; animation:notifyPulse 2.6s ease-in-out infinite; }
+  #notify-banner .bell { display:inline-block; animation:bellSwing 2.6s ease-in-out infinite; transform-origin:top center; }
+  #notify-banner .pill { background:rgba(255,255,255,.28); border-radius:999px; padding:1px 9px; font-size:13px; }
+  #notify-banner .go { font-size:13px; opacity:.95; }
   #notify-box.flash { box-shadow:0 0 0 3px #F5941E; transition:box-shadow .3s; }
+  /* 訊息明細彈窗 */
+  .nmodal-mask { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; z-index:60; padding:16px; }
+  .nmodal-mask.show { display:flex; }
+  .nmodal { background:#fff; border-radius:16px; width:100%; max-width:480px; max-height:82vh; overflow:auto; padding:20px; }
+  .nmodal h3 { margin:0; color:var(--primary); }
+  .nmodal .nitem { display:flex; gap:10px; padding:12px 0; border-bottom:1px solid var(--border); font-size:14px; line-height:1.6; }
+  .nmodal .nitem:last-child { border-bottom:none; }
 </style>
 
 <div class="container">
   <h2>👑 全機構總覽 · <span id="ym"></span></h2>
 
-  <!-- 即時訊息匡（點了滑到事項通知欄）-->
+  <!-- 即時訊息匡（點了彈出明細）-->
   <div id="notify-banner" style="display:none;" onclick="goNotify()">
-    <span>📩 你有 <span id="notify-count">0</span> 則事項通知</span>
-    <span>點我查看 ›</span>
+    <span><span class="bell">🔔</span> 你有 <span class="pill"><span id="notify-count">0</span> 則</span> 事項通知</span>
+    <span class="go">點我看 ›</span>
   </div>
 
   <div class="dept-grid" id="dept-grid"></div>
@@ -67,8 +78,21 @@
   </div>
 </div>
 
+<!-- 訊息明細彈窗 -->
+<div class="nmodal-mask" id="nmodal" onclick="if(event.target===this)closeNotify()">
+  <div class="nmodal">
+    <div class="flex-between">
+      <h3>🔔 事項通知</h3>
+      <button class="btn btn-sm" onclick="closeNotify()">關閉</button>
+    </div>
+    <div id="nmodal-body" class="mt-1"></div>
+    <button class="btn btn-primary mt-2" style="width:100%;" onclick="closeNotify(); goNotifyBox();">前往通知欄 ›</button>
+  </div>
+</div>
+
 <script>
 const session = AUTH.requireRole(['admin']);
+let notifyItems = [];
 
 window.addEventListener('load', async () => {
   UI.mountHeader(session);
@@ -172,11 +196,12 @@ async function loadDashboard() {
       todos.push(`⚠️ ${d.department} 本月平均 ${d.month_avg}（<55），主管獎金將連坐減半`);
     }
   });
+  notifyItems = todos;
   document.getElementById('todos').innerHTML = todos.length === 0
     ? '<li class="muted">目前沒有通知</li>'
     : todos.map(t => `<li style="margin:4px 0;">${t}</li>`).join('');
 
-  // 即時訊息匡
+  // 即時訊息匡：有事項才顯示
   const banner = document.getElementById('notify-banner');
   if (taskCount > 0) {
     document.getElementById('notify-count').textContent = taskCount;
@@ -190,8 +215,19 @@ function escTodo(s) {
   return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 }
 
-// 點訊息匡 → 滑到事項通知欄並閃一下
+// 點訊息匡 → 彈出明細視窗
 function goNotify() {
+  const body = document.getElementById('nmodal-body');
+  body.innerHTML = notifyItems.length
+    ? notifyItems.map(t => `<div class="nitem">${t}</div>`).join('')
+    : '<div class="muted">目前沒有通知</div>';
+  document.getElementById('nmodal').classList.add('show');
+}
+function closeNotify() {
+  document.getElementById('nmodal').classList.remove('show');
+}
+// 從彈窗前往通知欄並閃一下
+function goNotifyBox() {
   const box = document.getElementById('notify-box');
   box.scrollIntoView({ behavior: 'smooth', block: 'center' });
   box.classList.add('flash');
