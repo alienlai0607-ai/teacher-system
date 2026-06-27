@@ -13,7 +13,7 @@
   add('meta', { name: 'mobile-web-app-capable', content: 'yes' });
   add('meta', { name: 'apple-mobile-web-app-title', content: 'KPI 系統' });
   add('meta', { name: 'apple-mobile-web-app-status-bar-style', content: 'default' });
-  add('link', { rel: 'apple-touch-icon', href: root + 'shared/icons/icon-192.png' });
+  add('link', { rel: 'apple-touch-icon', href: root + 'shared/icons/icon-192.png?v=2' });
   // 註：service worker 由 OneSignal SDK（push.js）負責註冊 OneSignalSDKWorker.js，
   // 這裡不再另外註冊 sw.js，避免兩個 SW 搶同一個 scope 衝突。
 })();
