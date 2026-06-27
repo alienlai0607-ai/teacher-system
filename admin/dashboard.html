@@ -206,6 +206,7 @@ async function loadDashboard() {
   if (taskCount > 0) {
     document.getElementById('notify-count').textContent = taskCount;
     banner.style.display = 'flex';
+    goNotify();   // 一打開就自動跳出對話匡
   } else {
     banner.style.display = 'none';
   }

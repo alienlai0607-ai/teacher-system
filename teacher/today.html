@@ -305,10 +305,8 @@ window.addEventListener('load', async () => {
   renderTypeGrid();
 
   await loadTodayHighlights();
-  // 從推播點進來(?notify=1) → 自動跳出訊息對話匡
-  if (new URLSearchParams(location.search).get('notify') === '1' && notifyItems.length) {
-    openNotify();
-  }
+  // 一打開就自動跳出對話匡（只要有待辦事項）
+  if (notifyItems.length) openNotify();
   await loadStudents();
   await loadTodayLog();
 
