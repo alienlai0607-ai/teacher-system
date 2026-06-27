@@ -130,7 +130,7 @@ function pushLine_(userId, text) {
 
 // OneSignal Web Push（用暱稱當 external_id）。自動嘗試新版/舊版格式。
 function oneSignalAttempts_(appId, key, externalId, title, message) {
-  const link = 'https://teacher.blockplanetcamp.com/teacher/tasks.html';
+  const link = 'https://teacher.blockplanetcamp.com/teacher/today.html?notify=1';
   return [
     { url: 'https://api.onesignal.com/notifications', auth: 'Key ' + key,
       body: { app_id: appId, target_channel: 'push', include_aliases: { external_id: [String(externalId)] }, headings: { en: title }, contents: { en: message }, url: link } },
