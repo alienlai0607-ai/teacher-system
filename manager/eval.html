@@ -77,16 +77,26 @@
       <!-- 右側：評分 -->
       <div>
         <div class="card">
-          <div class="card-title">📊 KPI 評分（70 分）</div>
+          <div class="card-title" id="kpi-card-title">📊 KPI 評分（70 分）</div>
           <div id="score-inputs"></div>
         </div>
 
-        <div class="card">
+        <div class="card" id="okr-card">
           <div class="card-title">🎯 OKR 評分（30 分）</div>
           <div class="form-row">
             <label>OKR 達成度評分</label>
             <input type="number" id="score_okr" min="0" max="30" value="0" oninput="recalc()">
           </div>
+        </div>
+
+        <div class="card" id="late-card" style="display:none;">
+          <div class="card-title">⏰ 出勤紀律（獨立於 100 分之外）</div>
+          <div class="form-row">
+            <label>本月遲到次數</label>
+            <input type="number" id="score_late_count" min="0" value="0" oninput="recalc()">
+          </div>
+          <div class="muted text-sm">遲到累計 ≥3 次：自第 3 次起每次扣 5 分（前 2 次不扣），或直接降一個獎金等級（系統取較重者）。</div>
+          <div class="text-sm mt-1" id="late-note" style="display:none; color:#c0392b; font-weight:700;"></div>
         </div>
 
         <div class="card">
@@ -102,8 +112,8 @@
         </div>
 
         <div class="total-box" id="total-box">
-          <div>KPI <span id="kpi-total">0</span> + OKR <span id="okr-display">0</span></div>
-          <div class="total-num"><span id="total-score">0</span> / 100</div>
+          <div id="score-breakdown">KPI 0 + OKR 0</div>
+          <div class="total-num"><span id="total-score">0</span> / <span id="total-max">100</span></div>
           <div>⭐ <span id="grade">—</span> · 級距獎金 NT$<span id="bonus">0</span></div>
           <label style="display:flex; align-items:center; justify-content:center; gap:8px; margin-top:12px; cursor:pointer;">
             <input type="checkbox" id="bonus_granted" checked onchange="recalc()" style="width:auto;"> 核發此獎金（不勾＝本月不發）
@@ -123,13 +133,15 @@
 <script>
 const session = AUTH.requireRole(['manager']);
 let teacherList = [];
+let currentTeacher = null;     // 目前評核中的老師物件
+let currentKpiDef = APP_CONFIG.TEACHER_KPI;
+let currentAnqin = false;      // 是否安親 100 分制
 
 window.addEventListener('load', async () => {
   UI.mountHeader(session);
   await loadTeacherOptions();
   const now = new Date();
   document.getElementById('select-month').value = now.toISOString().slice(0, 7);
-  renderScoreInputs();
 });
 
 async function loadTeacherOptions() {
@@ -142,9 +154,8 @@ async function loadTeacherOptions() {
 }
 
 function renderScoreInputs() {
-  const KPI_DEF = APP_CONFIG.TEACHER_KPI;
   const wrap = document.getElementById('score-inputs');
-  wrap.innerHTML = KPI_DEF.map(k => `
+  wrap.innerHTML = currentKpiDef.map(k => `
     <div class="score-row">
       <div>${k.icon} ${k.name}（滿分 ${k.max}）</div>
       <input type="number" id="score_k${k.no}" min="0" max="${k.max}" value="0" oninput="recalc()">
@@ -152,10 +163,24 @@ function renderScoreInputs() {
   `).join('');
 }
 
+// 依老師部門切換計分模型（安親 100 分 vs 老師 70+30）
+function applyModelForTeacher(nickname) {
+  currentTeacher = teacherList.find(t => t.nickname === nickname) || null;
+  currentAnqin = window.isAnqinUser(currentTeacher);
+  currentKpiDef = window.getTeacherKpiDef(currentTeacher);
+  const kpiMax = currentKpiDef.reduce((s, k) => s + k.max, 0);
+  document.getElementById('kpi-card-title').textContent = `📊 KPI 評分（${kpiMax} 分）`;
+  // 安親：KPI 直接 100 分、OKR 獨立另計（不在此評）、顯示遲到欄
+  document.getElementById('okr-card').style.display = currentAnqin ? 'none' : '';
+  document.getElementById('late-card').style.display = currentAnqin ? '' : 'none';
+  renderScoreInputs();
+}
+
 async function loadEvidence() {
   const nickname = document.getElementById('select-teacher').value;
   const ym = document.getElementById('select-month').value;
   if (!nickname || !ym) return;
+  applyModelForTeacher(nickname);
 
   UI.loading(true);
   const res = await API.getEvalEvidence(nickname, ym);
@@ -178,7 +203,7 @@ async function loadEvidence() {
   `;
 
   // 證據分類
-  const KPI_DEF = APP_CONFIG.TEACHER_KPI;
+  const KPI_DEF = currentKpiDef;
   document.getElementById('evidence-list').innerHTML = KPI_DEF.map(k => {
     const ev = res.evidence_by_kpi[k.no] || [];
     return `<div class="evidence-block">
@@ -203,6 +228,7 @@ async function loadEvidence() {
       if (v !== '' && v != null) document.getElementById('score_k' + i).value = v;
     }
     document.getElementById('score_okr').value = e.score_okr || 0;
+    document.getElementById('score_late_count').value = e.score_late_count || 0;
     document.getElementById('manager_comment').value = e.manager_comment || '';
     document.getElementById('interview_notes').value = e.interview_notes || '';
     // 還原核發決定（沒這欄位＝舊資料，預設核發）
@@ -212,26 +238,61 @@ async function loadEvidence() {
   recalc();
 }
 
+// 安親：依 100 分級距取等第；其餘：依 70 分級距
+function tierFor(kpi) {
+  if (currentAnqin) {
+    const t = window.ANQIN_BONUS_TIERS.find(x => kpi >= x.min && kpi <= x.max);
+    return t ? { grade: t.grade, bonus: t.bonus } : { grade: '—', bonus: 0 };
+  }
+  if (kpi >= 67) return { grade: '卓越', bonus: 3000 };
+  if (kpi >= 63) return { grade: '優良', bonus: 2000 };
+  if (kpi >= 60) return { grade: '達標', bonus: 1000 };
+  if (kpi >= 55) return { grade: '基本合格', bonus: 0 };
+  return { grade: '待改善', bonus: 0 };
+}
+
 function recalc() {
   let kpi = 0;
-  for (let i = 1; i <= 6; i++) {
-    kpi += Number(document.getElementById('score_k' + i).value || 0);
-  }
-  const okr = Number(document.getElementById('score_okr').value || 0);
-  document.getElementById('kpi-total').textContent = kpi;
-  document.getElementById('okr-display').textContent = okr;
-  document.getElementById('total-score').textContent = kpi + okr;
+  currentKpiDef.forEach(k => {
+    const el = document.getElementById('score_k' + k.no);
+    kpi += el ? Number(el.value || 0) : 0;
+  });
+  const kpiMax = currentKpiDef.reduce((s, k) => s + k.max, 0);
+  const okr = currentAnqin ? 0 : Number(document.getElementById('score_okr').value || 0);
 
-  let grade = '—', bonus = 0;
-  if (kpi >= 67) { grade = '卓越'; bonus = 3000; }
-  else if (kpi >= 63) { grade = '優良'; bonus = 2000; }
-  else if (kpi >= 60) { grade = '達標'; bonus = 1000; }
-  else if (kpi >= 55) { grade = '基本合格'; bonus = 0; }
-  else { grade = '待改善'; bonus = 0; }
-  document.getElementById('grade').textContent = grade;
-  document.getElementById('bonus').textContent = bonus;
+  document.getElementById('total-score').textContent = kpi + okr;
+  document.getElementById('total-max').textContent = currentAnqin ? kpiMax : 100;
+  document.getElementById('score-breakdown').textContent = currentAnqin
+    ? `KPI ${kpi} 分（OKR 獨立另計）`
+    : `KPI ${kpi} + OKR ${okr}`;
+
+  let tier = tierFor(kpi);
+
+  // 安親遲到扣分預覽（≥3 次：每次 -5 或 降一級，取較重者）
+  const lateNote = document.getElementById('late-note');
+  if (currentAnqin) {
+    const lateCount = Number(document.getElementById('score_late_count').value || 0);
+    if (lateCount >= 3) {
+      const penalty = (lateCount - 2) * 5; // 第 3 次起才扣，每次 5 分
+      const tierByPoints = tierFor(Math.max(0, kpi - penalty));
+      // 降一級
+      const tiers = window.ANQIN_BONUS_TIERS;
+      let idx = tiers.findIndex(t => t.grade === tier.grade);
+      if (idx < 0) idx = tiers.length - 1;
+      const dropped = tiers[Math.min(tiers.length - 1, idx + 1)];
+      const tierByDrop = { grade: dropped.grade, bonus: dropped.bonus };
+      tier = (tierByPoints.bonus <= tierByDrop.bonus) ? tierByPoints : tierByDrop;
+      lateNote.style.display = 'block';
+      lateNote.textContent = `⚠️ 遲到 ${lateCount} 次：扣分後等第「${tier.grade}」、獎金 NT$${tier.bonus}`;
+    } else {
+      lateNote.style.display = 'none';
+    }
+  }
+
+  document.getElementById('grade').textContent = tier.grade;
+  document.getElementById('bonus').textContent = tier.bonus;
   const granted = document.getElementById('bonus_granted').checked;
-  document.getElementById('bonus-final').textContent = granted ? bonus : 0;
+  document.getElementById('bonus-final').textContent = granted ? tier.bonus : 0;
 }
 
 async function saveEval(status) {
@@ -246,7 +307,8 @@ async function saveEval(status) {
     year_month: ym,
     evaluator: session.nickname,
     status,
-    score_okr: Number(document.getElementById('score_okr').value || 0),
+    score_okr: currentAnqin ? 0 : Number(document.getElementById('score_okr').value || 0),
+    score_late_count: currentAnqin ? Number(document.getElementById('score_late_count').value || 0) : 0,
     manager_comment: document.getElementById('manager_comment').value,
     interview_notes: document.getElementById('interview_notes').value,
     bonus_granted: document.getElementById('bonus_granted').checked,

@@ -61,6 +61,14 @@ const BONUS = {
     '部門 KPI 平均 ≥65：＋NT$2,000',
     '⚠️ 連坐：部門平均 <55，主管獎金減半',
   ]},
+  // 安親部門老師（115/9 修訂版）：看 KPI 100 分
+  anqin: { label:'安親部門老師', maxKpi:100, tiers:[
+    { range:'95–100', grade:'卓越', bonus:3000 },
+    { range:'88–94',  grade:'優良', bonus:2000 },
+    { range:'82–87',  grade:'達標', bonus:1000 },
+    { range:'75–81',  grade:'基本合格', bonus:0 },
+    { range:'≤74',    grade:'待改善', bonus:0, extra:'＋改善追蹤回報' },
+  ]},
 };
 
 const KPI = {
@@ -80,17 +88,81 @@ const KPI = {
     { name:'⑤ 親師關係與客訴處理', max:15, sub:'客訴件數控制、處理時效（24h 回應/72h 解決）、重大事件、親師活動、信任建立' },
     { name:'⑥ 個人工作態度與表現', max:5, sub:'出勤/時間觀念、主動性（每日日誌、主動發現問題提解方、向上回報）' },
   ],
+  // 安親部門老師（115/9 修訂版，總分 100）
+  anqin: [
+    { name:'① 課業指導', max:20, sub:'作業完成率與正確率、訂正執行與追蹤（查核訂正本）、字體工整與整潔、每日挑戰本／課業複習設計、考試準備與個別弱點補強（查核：每學期第 7、14 週作業抽查＋學生成績紀錄）' },
+    { name:'② 專案課程', max:20, sub:'教案與材料課前準備、引導能力與學生互動、課程流程與節奏掌握、專案進度掌握與成果產出（查核：每月一次正式觀課 20–30 分鐘）' },
+    { name:'③ 班級經營', max:20, sub:'作業時段秩序與專注度、班級獎勵與規範執行、班級氛圍與主動學習風氣、學生情緒與衝突處理（查核：每月不定期巡班觀察）' },
+    { name:'④ 親師溝通', max:20, sub:'主動回饋學生狀況（每週至少 1 次）、溝通內容專業度與溫度、每日接送時段親師互動與信任建立、群組回覆＋課程紀錄上傳（每天上傳 app）（查核：群組紀錄＋客訴紀錄＋接送觀察）' },
+    { name:'⑤ 個人態度與表現', max:12, sub:'出勤準時（遲到為重點扣分）、工作責任感與交辦事項完成度、主動性與配合度、每日課前備課是否落實（查核：打卡紀錄＋每日工作日誌）' },
+    { name:'⑥ 班級環境整潔', max:8, sub:'教室整潔（地板/桌椅/公共區域/廁所）、教具教材與個人物品歸位、每日環境整理確實完成、每日上傳佐證照片（查核：每日上傳系統照片＋不定期檢查）' },
+  ],
 };
 
 window.addEventListener('load', () => {
   UI.mountHeader(session);
-  // admin / admin_staff 都先看老師版；主管看主管版
+  // 主管看主管版；安親老師看安親 100 分版；其餘（才藝老師/admin/admin_staff）看老師版
   const isMgr = session.role === 'manager';
-  const roleKey = isMgr ? 'manager' : 'teacher';
+  const roleKey = isMgr ? 'manager' : (window.isAnqinUser(session) ? 'anqin' : 'teacher');
   document.getElementById('role-hint').textContent =
     `以下為「${BONUS[roleKey].label}」適用的評核與獎金規則，可隨時回來查閱。`;
-  render(roleKey);
+  if (roleKey === 'anqin') renderAnqin();
+  else render(roleKey);
 });
+
+// 安親部門老師（115/9 修訂版，KPI 100 分、OKR 獨立另計）
+function renderAnqin() {
+  const b = BONUS.anqin;
+  const rows = b.tiers.map(t => `
+    <tr class="${t.bonus > 0 ? 'hi' : ''}">
+      <td>${t.range} 分</td>
+      <td>${t.grade}</td>
+      <td class="${t.bonus > 0 ? 'has' : 'no'}">${t.bonus > 0 ? 'NT$' + t.bonus.toLocaleString() : '無'}${t.extra ? '<div class="note">'+t.extra+'</div>' : ''}</td>
+    </tr>`).join('');
+
+  const kpiHtml = KPI.anqin.map(k => `
+    <div class="kpi-item">
+      <div class="top"><span class="name">${k.name}</span><span class="max">${k.max} 分</span></div>
+      <div class="sub">${k.sub}</div>
+    </div>`).join('');
+
+  document.getElementById('content').innerHTML = `
+    <div class="card">
+      <div class="rule-h">💰 月績效獎金級距（看 KPI 分數，滿分 100）</div>
+      <table class="bonus-table">
+        <thead><tr><th>KPI 分數</th><th>等第</th><th>月獎金</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="note mt-1">📌 <strong>KPI ≥ 82 分</strong>才開始有獎金；75–81 為基本合格（無獎金）；74 以下需改善追蹤回報。</div>
+    </div>
+    <div class="card">
+      <div class="rule-h">📊 計分方式（KPI × OKR 雙軌制）</div>
+      <div class="note">
+        <strong>KPI 月考核：總分 100 分</strong>（六大類別，見下），每月評核一次，<strong>獎金看 KPI 100 分的級距</strong>（上表）。<br>
+        <strong>OKR 學期成長：獨立獎金</strong>，不納入 KPI 的 100 分、兩者互不影響；以一學期為週期，<strong>自 2026/9 起實施</strong>。<br>
+        每學期初與主管討論設定 2 個目標（O），每個搭配 2–3 項關鍵成果（KR），期末依達成比例分級發放。
+      </div>
+    </div>
+    <div class="card">
+      <div class="rule-h">🎯 KPI 六大類別（共 100 分）</div>
+      ${kpiHtml}
+    </div>
+    <div class="card">
+      <div class="rule-h">⏰ 出勤紀律扣分（獨立於 100 分之外）</div>
+      <div class="note">
+        遲到列為重點扣分項目。<strong>當月遲到累計達 3 次（含）以上</strong>，自 KPI 總分<strong>自第 3 次起每次額外扣 5 分</strong>（前 2 次不扣），或<strong>直接降一個獎金等級</strong>（擇重者）。<br>
+        此扣分獨立於各項配分之外，目的在強化基本工作紀律。
+      </div>
+    </div>
+    <div class="card">
+      <div class="rule-h">📝 證據怎麼來</div>
+      <div class="note">
+        每天填「今日日報」、每週填「週報」，系統會自動把你的日誌、照片、親師溝通、課程紀錄、環境整潔佐證等彙整成 KPI 證據。<br>
+        填得越完整、證據越充足，月底評核分數越有依據。月底可在「我的 KPI」看本月預估分數與獎金。
+      </div>
+    </div>
+  `;
+}
 
 function render(roleKey) {
   const b = BONUS[roleKey];

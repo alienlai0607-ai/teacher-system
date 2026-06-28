@@ -29,7 +29,8 @@ function setupSheets() {
       'self_k1', 'self_k2', 'self_k3', 'self_k4', 'self_k5', 'self_k6',
       'self_summary',
       'score_k1', 'score_k2', 'score_k3', 'score_k4', 'score_k5', 'score_k6',
-      'score_okr', 'total_score', 'grade', 'bonus', 'bonus_granted',
+      'score_okr', 'total_score', 'grade', 'bonus',
+      'score_late_count', 'late_penalty', 'bonus_granted',
       'manager_comment', 'interview_notes',
       'status', 'created_at', 'updated_at'
     ],

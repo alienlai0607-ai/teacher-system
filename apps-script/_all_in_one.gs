@@ -153,6 +153,8 @@ const SHEET_NAMES = {
 };
 
 const DEPARTMENTS = ['永康教室', '北區教室', '才藝部門', '總部'];
+// 安親部門：這些部門的「老師」改用 100 分制（才藝部門老師與所有主管維持舊制）
+const ANQIN_DEPARTMENTS = ['永康教室', '北區教室'];
 const ROLES = ['admin', 'manager', 'teacher', 'admin_staff'];
 const ADMIN_STAFF_SUBTYPES = ['general', 'marketing'];
 
@@ -188,6 +190,39 @@ const BONUS_MANAGER = [
   { min: 55, max: 59, grade: '基本合格', bonus: 0 },
   { min: 0,  max: 54, grade: '待改善', bonus: 0 },
 ];
+
+// 安親 100 分制獎金級距（看 KPI 總分，滿分 100）
+const BONUS_ANQIN = [
+  { min: 95, max: 100, grade: '卓越', bonus: 3000 },
+  { min: 88, max: 94,  grade: '優良', bonus: 2000 },
+  { min: 82, max: 87,  grade: '達標', bonus: 1000 },
+  { min: 75, max: 81,  grade: '基本合格', bonus: 0 },
+  { min: 0,  max: 74,  grade: '待改善', bonus: 0 },
+];
+
+// 是否為安親老師（teacher 且部門屬安親）
+function isAnqinUser(user) {
+  return !!user && user.role === 'teacher'
+    && ANQIN_DEPARTMENTS.indexOf(user.department) >= 0;
+}
+
+// 依使用者選正確的獎金級距並計等第（安親看 100 分、其餘看 70 分）
+function calcBonusForUser(kpiScore, user) {
+  if (isAnqinUser(user)) {
+    const tier = BONUS_ANQIN.find(t => kpiScore >= t.min && kpiScore <= t.max);
+    return tier || { grade: '未評等', bonus: 0 };
+  }
+  return calcBonus(kpiScore, user.role);
+}
+
+// 降 n 個獎金等級後的獎金（不低於最低級）
+function bonusAfterDrop(grade, dropLevels, user) {
+  const table = isAnqinUser(user) ? BONUS_ANQIN : (user.role === 'manager' ? BONUS_MANAGER : BONUS_TEACHER);
+  let idx = table.findIndex(t => t.grade === grade);
+  if (idx < 0) idx = table.length - 1;
+  idx = Math.min(table.length - 1, idx + dropLevels);
+  return table[idx];
+}
 
 function calcBonus(kpiScore, role) {
   // admin_staff（行政）獎金級距同 teacher
@@ -232,7 +267,8 @@ function setupSheets() {
       'self_k1', 'self_k2', 'self_k3', 'self_k4', 'self_k5', 'self_k6',
       'self_summary',
       'score_k1', 'score_k2', 'score_k3', 'score_k4', 'score_k5', 'score_k6',
-      'score_okr', 'total_score', 'grade', 'bonus', 'bonus_granted',
+      'score_okr', 'total_score', 'grade', 'bonus',
+      'score_late_count', 'late_penalty', 'bonus_granted',
       'manager_comment', 'interview_notes',
       'status', 'created_at', 'updated_at'
     ],
@@ -1490,9 +1526,15 @@ function getEvalEvidence(params) {
   // 2. 附件證據（依 KPI 分類）
   const evidence = sheetToObjects(SHEET_NAMES.EVIDENCE)
     .filter(e => e.nickname === nickname && String(e.date) >= from && String(e.date) <= to);
+  // 安親新制 KPI 項目順序與舊日報的 kpi_category 編號不同，需對應
+  // 舊日報：1課業 2班級(含環境照) 3課程/專案 4群組 5親師 6態度
+  // 安親新制：1課業 2專案 3班級 4親師 5態度 6班級環境整潔
+  const anqinUser = isAnqinUser(user);
+  const ANQIN_EVIDENCE_MAP = { 1: 1, 2: 6, 3: 2, 4: 4, 5: 4, 6: 5 };
   const evidenceByKpi = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
   evidence.forEach(e => {
-    const k = Number(e.kpi_category);
+    let k = Number(e.kpi_category);
+    if (anqinUser && ANQIN_EVIDENCE_MAP[k]) k = ANQIN_EVIDENCE_MAP[k];
     if (k >= 1 && k <= 6) evidenceByKpi[k].push(e);
   });
   // 證據以「天」計：環境整潔(KPI2)、教案歸檔(KPI3) 各算有幾天執行（同一天多張只算 1）
@@ -1531,7 +1573,7 @@ function getEvalEvidence(params) {
     .filter(o => o.nickname === nickname && o.semester === semester);
 
   // 7. 自動建議分數
-  const suggestion = suggestKpiScores(user.role, logs, evidence, feedback, observations, postsByWeek);
+  const suggestion = suggestKpiScores(user, logs, evidence, feedback, observations, postsByWeek);
 
   return {
     ok: true,
@@ -1563,9 +1605,12 @@ function getEvalEvidence(params) {
 /**
  * 自動建議分數（依日誌頻率、證據數量、回饋標籤）
  */
-function suggestKpiScores(role, logs, evidence, feedback, observations, postsByWeek) {
-  const max = role === 'manager'
-    ? { 1: 15, 2: 15, 3: 10, 4: 10, 5: 15, 6: 5 }
+function suggestKpiScores(user, logs, evidence, feedback, observations, postsByWeek) {
+  const role = user.role;
+  const anqin = isAnqinUser(user);
+  // 安親 100 分制配分；其餘維持 70 分制
+  const max = anqin
+    ? { 1: 20, 2: 20, 3: 20, 4: 20, 5: 12, 6: 8 }
     : { 1: 15, 2: 15, 3: 10, 4: 10, 5: 15, 6: 5 };
 
   // 根據日誌完整度、證據數量、主管回饋標籤推算
@@ -1616,9 +1661,28 @@ function saveEval(params) {
     const v = Number(params[`score_${prefixK}${i}`] || 0);
     kpiTotal += v;
   }
-  const okrScore = Number(params.score_okr || 0);
+  const anqin = isAnqinUser(user);
+  // 安親：KPI 滿分 100、OKR 獨立另計（不納入總分）；其餘：KPI 70 + OKR 30
+  const okrScore = anqin ? 0 : Number(params.score_okr || 0);
   const totalScore = kpiTotal + okrScore;
-  const tier = calcBonus(kpiTotal, user.role);
+
+  // 等第與獎金（安親看 100 分級距，其餘看 70 分級距）
+  let tier = calcBonusForUser(kpiTotal, user);
+
+  // ===== 安親遲到扣分（獨立於 100 分之外）=====
+  // 當月遲到累計 ≥3 次：自 KPI 總分「每次額外扣 5 分」或「直接降一個獎金等級」，擇重者
+  let lateCount = 0, latePenalty = 0;
+  if (anqin) {
+    lateCount = Number(params.score_late_count || 0);
+    if (lateCount >= 3) {
+      const penaltyPoints = (lateCount - 2) * 5; // 第 3 次起才扣，每次 5 分
+      const tierByPoints = calcBonusForUser(Math.max(0, kpiTotal - penaltyPoints), user); // 方案A：扣分
+      const tierByDrop = bonusAfterDrop(tier.grade, 1, user);                              // 方案B：降一級
+      // 擇重者＝獎金較低者
+      tier = (tierByPoints.bonus <= tierByDrop.bonus) ? tierByPoints : tierByDrop;
+      latePenalty = penaltyPoints;
+    }
+  }
   // 主管核發決定：未帶＝預設核發（true）
   const bonusGranted = (params.bonus_granted === undefined || params.bonus_granted === '')
     ? true : (params.bonus_granted === true || params.bonus_granted === 'true');
@@ -1629,6 +1693,8 @@ function saveEval(params) {
     total_score: totalScore,
     grade: tier.grade,
     bonus: tier.bonus,
+    score_late_count: lateCount,
+    late_penalty: latePenalty,
     bonus_granted: bonusGranted,
     manager_comment: params.manager_comment || params.boss_comment || '',
     interview_notes: params.interview_notes || '',
@@ -1725,7 +1791,7 @@ function getMyKpiPreview(params) {
 
   const suggestion = ev.suggestion;
   const kpiTotal = Object.values(suggestion).reduce((s, v) => s + Number(v || 0), 0);
-  const tier = calcBonus(kpiTotal, user.role);
+  const tier = calcBonusForUser(kpiTotal, user);
 
   // 待補事項
   const todos = [];
@@ -1740,6 +1806,7 @@ function getMyKpiPreview(params) {
     year_month: ym,
     role: user.role,
     department: user.department,
+    is_anqin: isAnqinUser(user),
     suggestion,
     kpi_total: kpiTotal,
     grade: tier.grade,

@@ -123,7 +123,7 @@ function renderScore(res) {
   wrap.innerHTML = `
     <div class="score-circle">
       <div class="score-small">本月預估 KPI 分數</div>
-      <div class="score-big">${res.kpi_total} / 70</div>
+      <div class="score-big">${res.kpi_total} / ${window.isAnqinUser({ role: res.role, department: res.department }) ? 100 : 70}</div>
       <div class="score-small" style="margin-top:8px;">⭐ ${res.grade} · 預估獎金 NT$${res.bonus_estimated}</div>
     </div>
     <div class="stat-grid mt-2">
@@ -138,7 +138,9 @@ function renderScore(res) {
 }
 
 function renderKpiBars(res) {
-  const KPI_DEF = res.role === 'manager' ? APP_CONFIG.MANAGER_KPI : APP_CONFIG.TEACHER_KPI;
+  const anqin = window.isAnqinUser({ role: res.role, department: res.department });
+  const KPI_DEF = res.role === 'manager' ? APP_CONFIG.MANAGER_KPI
+    : (anqin ? APP_CONFIG.ANQIN_KPI : APP_CONFIG.TEACHER_KPI);
   const wrap = document.getElementById('kpi-bars');
   wrap.innerHTML = KPI_DEF.map(k => {
     const score = res.suggestion[`k${k.no}`] || 0;

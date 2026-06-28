@@ -32,7 +32,38 @@ window.APP_CONFIG = {
     { no: 6, name: '個人態度', max: 5, icon: '⭐' },
   ],
 
+  // 安親部門老師專用 KPI（115/9 修訂版：KPI 總分 100，OKR 獨立另計、不納入 100）
+  // 適用對象：role==='teacher' 且 department ∈ ANQIN_DEPARTMENTS（才藝部門老師與所有主管維持舊制）
+  ANQIN_DEPARTMENTS: ['永康教室', '北區教室'],
+  ANQIN_KPI: [
+    { no: 1, name: '課業指導',       max: 20, icon: '📚' },
+    { no: 2, name: '專案課程',       max: 20, icon: '🎯' },
+    { no: 3, name: '班級經營',       max: 20, icon: '🏫' },
+    { no: 4, name: '親師溝通',       max: 20, icon: '🤝' },
+    { no: 5, name: '個人態度與表現', max: 12, icon: '⭐' },
+    { no: 6, name: '班級環境整潔',   max: 8,  icon: '🧹' },
+  ],
+
   // 內容類型
   POST_TYPES: ['教學日常', '招生宣傳', '活動側拍', '理念分享', '學生成果', '其他'],
   FEEDBACK_TAGS: ['優秀表現', '已知悉', '需改進', '求助回應'],
 };
+
+// ===== 計分模型判定（前端共用）=====
+// 安親老師：teacher 且部門屬安親 → 100 分制；其餘 → 舊 70+30 制
+window.isAnqinUser = function (user) {
+  return !!user && user.role === 'teacher'
+    && (APP_CONFIG.ANQIN_DEPARTMENTS || []).indexOf(user.department) >= 0;
+};
+// 依使用者回傳該套用的 KPI 定義（安親 100 分 or 老師 70 分）
+window.getTeacherKpiDef = function (user) {
+  return window.isAnqinUser(user) ? APP_CONFIG.ANQIN_KPI : APP_CONFIG.TEACHER_KPI;
+};
+// 安親 100 分制獎金級距（看 KPI 總分，滿分 100）
+window.ANQIN_BONUS_TIERS = [
+  { min: 95, max: 100, grade: '卓越',     bonus: 3000 },
+  { min: 88, max: 94,  grade: '優良',     bonus: 2000 },
+  { min: 82, max: 87,  grade: '達標',     bonus: 1000 },
+  { min: 75, max: 81,  grade: '基本合格', bonus: 0 },
+  { min: 0,  max: 74,  grade: '待改善',   bonus: 0 },
+];

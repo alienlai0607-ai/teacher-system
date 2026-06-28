@@ -201,8 +201,12 @@ async function generate() {
 
 function renderReport(nickname, ym, ev, evalObj) {
   const isManager = ev.role === 'manager';
-  const KPI_DEF = isManager ? APP_CONFIG.MANAGER_KPI : APP_CONFIG.TEACHER_KPI;
+  const anqin = window.isAnqinUser({ role: ev.role, department: ev.department });
+  const KPI_DEF = isManager ? APP_CONFIG.MANAGER_KPI : (anqin ? APP_CONFIG.ANQIN_KPI : APP_CONFIG.TEACHER_KPI);
   const pfx = isManager ? 'm' : 'k';
+  // 安親 KPI 項目 → 對應日報資料桶（today.html 日報沿用舊 6 區塊編號：1課業2班級3課程4群組5親師6態度）
+  const ANQIN_LOG_BUCKET = { 1: 1, 2: 3, 3: 2, 4: 5, 5: 6, 6: 2 };
+  const logBucketNo = (no) => anqin ? (ANQIN_LOG_BUCKET[no] || no) : no;
   const user = allUsers.find(u => u.nickname === nickname) || {};
   const logs = (ev.logs || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
@@ -277,7 +281,7 @@ function renderReport(nickname, ym, ev, evalObj) {
     // 該 KPI 當月日誌文字
     const logLines = [];
     logs.forEach(l => {
-      const s = joinLogValues(l['kpi' + def.no + '_data']);
+      const s = joinLogValues(l['kpi' + logBucketNo(def.no) + '_data']);
       if (s) logLines.push(`<div class="kpi-log-line"><span class="d">${String(l.date).slice(5)}</span>${s}</div>`);
     });
 
@@ -337,15 +341,22 @@ function renderReport(nickname, ym, ev, evalObj) {
     </tr>`;
   });
   const okrScore = evalObj ? Number(evalObj.score_okr || 0) : 0;
-  html += `<tr>
-    <td>🎯 OKR</td><td class="num">30</td><td class="num">—</td><td class="num">${evalObj ? okrScore : '—'}</td>
-  </tr>`;
+  // 安親：KPI 100 分、OKR 獨立另計（報表不列 OKR 列）
+  if (!anqin) {
+    html += `<tr>
+      <td>🎯 OKR</td><td class="num">30</td><td class="num">—</td><td class="num">${evalObj ? okrScore : '—'}</td>
+    </tr>`;
+  }
   html += `</tbody></table>`;
 
   const total = evalObj ? Number(evalObj.total_score || (kpiTotal + okrScore)) : null;
   const bonus = evalObj ? (evalObj.final_bonus ?? evalObj.bonus ?? 0) : null;
+  const lateCount = evalObj ? Number(evalObj.score_late_count || 0) : 0;
+  const breakdown = anqin
+    ? `KPI ${evalObj ? kpiTotal : '—'} 分（OKR 獨立另計）${lateCount >= 3 ? `　⏰ 遲到 ${lateCount} 次已計扣` : ''}`
+    : `KPI ${evalObj ? kpiTotal : '—'} + OKR ${evalObj ? okrScore : '—'}`;
   html += `<div class="total-banner">
-    <div>KPI ${evalObj ? kpiTotal : '—'} + OKR ${evalObj ? okrScore : '—'}</div>
+    <div>${breakdown}</div>
     <div class="big">${total != null ? total : '—'} / 100</div>
     <div>⭐ ${evalObj ? (evalObj.grade || '未評等') : '尚未評核'} ｜ 獎金 NT$ ${bonus != null ? bonus : '—'}</div>
   </div>`;

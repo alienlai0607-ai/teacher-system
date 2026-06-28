@@ -18,11 +18,16 @@
 <div class="container">
   <h2>⚙️ KPI 規則設定</h2>
   <div class="card">
-    <div class="card-title">📊 老師 KPI</div>
+    <div class="card-title">📊 安親部門老師 KPI（永康／北區教室 · 總分 100）</div>
+    <div class="muted text-sm mb-1">115/9 修訂版：KPI 100 分制，OKR 獨立另計（不納入 100）。</div>
+    <div id="anqin-kpi"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">📊 老師 KPI（才藝部門 · KPI 70＋OKR 30）</div>
     <div id="teacher-kpi"></div>
   </div>
   <div class="card">
-    <div class="card-title">📊 主管 KPI</div>
+    <div class="card-title">📊 主管 KPI（KPI 70＋OKR 30）</div>
     <div id="manager-kpi"></div>
   </div>
   <div class="muted text-sm">＊目前為唯讀檢視。如需調整評分項目與權重，請直接編輯 Google Sheet 的 KPI_Config 分頁。</div>
@@ -33,6 +38,7 @@ const session = AUTH.requireRole(['admin']);
 
 window.addEventListener('load', () => {
   UI.mountHeader(session);
+  renderKpi('anqin', APP_CONFIG.ANQIN_KPI, 'anqin-kpi');
   renderKpi('teacher', APP_CONFIG.TEACHER_KPI, 'teacher-kpi');
   renderKpi('manager', APP_CONFIG.MANAGER_KPI, 'manager-kpi');
 });

@@ -141,6 +141,8 @@ const SHEET_NAMES = {
 };
 
 const DEPARTMENTS = ['永康教室', '北區教室', '才藝部門', '總部'];
+// 安親部門：這些部門的「老師」改用 100 分制（才藝部門老師與所有主管維持舊制）
+const ANQIN_DEPARTMENTS = ['永康教室', '北區教室'];
 const ROLES = ['admin', 'manager', 'teacher', 'admin_staff'];
 // admin_staff 子類型：'general'（行政總務）/ 'marketing'（行政宣傳）
 const ADMIN_STAFF_SUBTYPES = ['general', 'marketing'];
@@ -177,6 +179,45 @@ const BONUS_MANAGER = [
   { min: 55, max: 59, grade: '基本合格', bonus: 0 },
   { min: 0,  max: 54, grade: '待改善', bonus: 0 },
 ];
+
+// 安親 100 分制獎金級距（看 KPI 總分，滿分 100）
+const BONUS_ANQIN = [
+  { min: 95, max: 100, grade: '卓越', bonus: 3000 },
+  { min: 88, max: 94,  grade: '優良', bonus: 2000 },
+  { min: 82, max: 87,  grade: '達標', bonus: 1000 },
+  { min: 75, max: 81,  grade: '基本合格', bonus: 0 },
+  { min: 0,  max: 74,  grade: '待改善', bonus: 0 },
+];
+
+// 是否為安親老師（teacher 且部門屬安親）
+function isAnqinUser(user) {
+  return !!user && user.role === 'teacher'
+    && ANQIN_DEPARTMENTS.indexOf(user.department) >= 0;
+}
+
+// 依使用者選正確的獎金級距並計等第（安親看 100 分、其餘看 70 分）
+function calcBonusForUser(kpiScore, user) {
+  if (isAnqinUser(user)) {
+    const tier = BONUS_ANQIN.find(t => kpiScore >= t.min && kpiScore <= t.max);
+    return tier || { grade: '未評等', bonus: 0 };
+  }
+  return calcBonus(kpiScore, user.role);
+}
+
+// 取得某等第在指定級距表的索引（用於遲到「降一級」計算）
+function bonusTierIndex(grade, user) {
+  const table = isAnqinUser(user) ? BONUS_ANQIN : (user.role === 'manager' ? BONUS_MANAGER : BONUS_TEACHER);
+  return table.findIndex(t => t.grade === grade);
+}
+
+// 降 n 個獎金等級後的獎金（不低於最低級）
+function bonusAfterDrop(grade, dropLevels, user) {
+  const table = isAnqinUser(user) ? BONUS_ANQIN : (user.role === 'manager' ? BONUS_MANAGER : BONUS_TEACHER);
+  let idx = table.findIndex(t => t.grade === grade);
+  if (idx < 0) idx = table.length - 1;
+  idx = Math.min(table.length - 1, idx + dropLevels);
+  return table[idx];
+}
 
 function calcBonus(kpiScore, role) {
   // admin_staff（行政）獎金級距同 teacher

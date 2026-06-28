@@ -17,7 +17,7 @@ function getMyKpiPreview(params) {
 
   const suggestion = ev.suggestion;
   const kpiTotal = Object.values(suggestion).reduce((s, v) => s + Number(v || 0), 0);
-  const tier = calcBonus(kpiTotal, user.role);
+  const tier = calcBonusForUser(kpiTotal, user);
 
   // 待補事項
   const todos = [];
@@ -32,6 +32,7 @@ function getMyKpiPreview(params) {
     year_month: ym,
     role: user.role,
     department: user.department,
+    is_anqin: isAnqinUser(user),
     suggestion,
     kpi_total: kpiTotal,
     grade: tier.grade,
