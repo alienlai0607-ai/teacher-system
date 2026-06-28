@@ -75,5 +75,7 @@ window.API = (function () {
 
     getDashboard: (viewer) => call('getDashboard', { viewer }),
     getMyKpiPreview: (nickname) => call('getMyKpiPreview', { nickname }),
+
+    purgeTestData: (params) => call('purgeTestData', params),
   };
 })();

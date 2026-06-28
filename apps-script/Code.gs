@@ -104,6 +104,7 @@ function handleRequest(e, method) {
 
       // 初始化（admin only）
       'setupSheets': () => { setupSheets(); return { ok: true, msg: 'Sheets initialized' }; },
+      'purgeTestData': () => purgeTestData(params),
     };
 
     if (!ROUTES[action]) {

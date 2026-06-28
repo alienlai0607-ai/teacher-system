@@ -24,6 +24,12 @@
   .kpi-item .name { font-weight: 800; color: var(--text); }
   .kpi-item .max { color: var(--primary); font-weight: 800; white-space: nowrap; }
   .kpi-item .sub { font-size: 13px; color: var(--text-light); margin-top: 4px; line-height: 1.7; }
+  .kpi-sublist { list-style: none; margin: 8px 0 0; padding: 0; }
+  .kpi-sublist li { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 13.5px; color: var(--text); padding: 5px 0; border-bottom: 1px dashed var(--border); }
+  .kpi-sublist li:last-child { border-bottom: none; }
+  .kpi-sublist .t { line-height: 1.6; }
+  .kpi-sublist .p { color: var(--primary); font-weight: 700; white-space: nowrap; }
+  .kpi-check { margin-top: 8px; font-size: 12.5px; color: var(--text-light); background: #FFF8F0; border-radius: 8px; padding: 6px 10px; }
   .note { font-size: 13px; color: var(--text-light); line-height: 1.8; }
   .pill { display:inline-block; background:#FFF1DD; color:var(--primary); border-radius:999px; padding:2px 10px; font-size:12px; font-weight:700; margin-left:6px; }
 </style>
@@ -88,14 +94,45 @@ const KPI = {
     { name:'⑤ 親師關係與客訴處理', max:15, sub:'客訴件數控制、處理時效（24h 回應/72h 解決）、重大事件、親師活動、信任建立' },
     { name:'⑥ 個人工作態度與表現', max:5, sub:'出勤/時間觀念、主動性（每日日誌、主動發現問題提解方、向上回報）' },
   ],
-  // 安親部門老師（115/9 修訂版，總分 100）
+  // 安親部門老師（115/9 修訂版，總分 100）— 逐條列點＋細項配分＋查核方式
   anqin: [
-    { name:'① 課業指導', max:20, sub:'作業完成率與正確率、訂正執行與追蹤（查核訂正本）、字體工整與整潔、每日挑戰本／課業複習設計、考試準備與個別弱點補強（查核：每學期第 7、14 週作業抽查＋學生成績紀錄）' },
-    { name:'② 專案課程', max:20, sub:'教案與材料課前準備、引導能力與學生互動、課程流程與節奏掌握、專案進度掌握與成果產出（查核：每月一次正式觀課 20–30 分鐘）' },
-    { name:'③ 班級經營', max:20, sub:'作業時段秩序與專注度、班級獎勵與規範執行、班級氛圍與主動學習風氣、學生情緒與衝突處理（查核：每月不定期巡班觀察）' },
-    { name:'④ 親師溝通', max:20, sub:'主動回饋學生狀況（每週至少 1 次）、溝通內容專業度與溫度、每日接送時段親師互動與信任建立、群組回覆＋課程紀錄上傳（每天上傳 app）（查核：群組紀錄＋客訴紀錄＋接送觀察）' },
-    { name:'⑤ 個人態度與表現', max:12, sub:'出勤準時（遲到為重點扣分）、工作責任感與交辦事項完成度、主動性與配合度、每日課前備課是否落實（查核：打卡紀錄＋每日工作日誌）' },
-    { name:'⑥ 班級環境整潔', max:8, sub:'教室整潔（地板/桌椅/公共區域/廁所）、教具教材與個人物品歸位、每日環境整理確實完成、每日上傳佐證照片（查核：每日上傳系統照片＋不定期檢查）' },
+    { name:'① 課業指導', max:20, check:'每學期第 7、14 週作業抽查＋學生成績紀錄', items:[
+      ['作業完成率與正確率檢查', 5],
+      ['訂正執行與追蹤（查核訂正本）', 4],
+      ['字體工整與作業整潔', 2],
+      ['每日挑戰本／課業複習設計', 4],
+      ['考試準備與個別弱點補強追蹤', 5],
+    ]},
+    { name:'② 專案課程', max:20, check:'每月一次正式觀課 20–30 分鐘', items:[
+      ['教案與材料課前準備', 5],
+      ['引導能力與學生互動狀況', 6],
+      ['課程流程與節奏掌握', 4],
+      ['專案進度掌握與成果產出', 5],
+    ]},
+    { name:'③ 班級經營', max:20, check:'每月不定期巡班觀察', items:[
+      ['作業時段秩序與學生專注度', 5],
+      ['班級獎勵與規範執行', 5],
+      ['班級氛圍與主動學習風氣', 5],
+      ['學生情緒與衝突狀況處理', 5],
+    ]},
+    { name:'④ 親師溝通', max:20, check:'群組紀錄＋客訴紀錄＋接送觀察', items:[
+      ['主動回饋學生狀況（每週至少 1 次，含學習／情緒／生活）', 5],
+      ['溝通內容專業度與溫度（具體、有觀察、有建議）', 5],
+      ['每日親自在接送時段進行親師互動與信任建立', 5],
+      ['群組回覆＋課程紀錄上傳（每天都需上傳 app）', 5],
+    ]},
+    { name:'⑤ 個人態度與表現', max:12, check:'打卡紀錄＋每日工作日誌', items:[
+      ['出勤準時（遲到為重點扣分，詳見出勤紀律）', 4],
+      ['工作責任感與交辦事項完成度', 3],
+      ['主動性與配合度', 2],
+      ['每日課前備課是否落實', 3],
+    ]},
+    { name:'⑥ 班級環境整潔', max:8, check:'每日上傳系統照片佐證＋不定期檢查', items:[
+      ['教室整潔：地板、桌椅、公共區域、廁所', 2],
+      ['教具、教材與個人物品歸位', 2],
+      ['每日環境整理確實完成', 2],
+      ['每日上傳佐證照片', 2],
+    ]},
   ],
 };
 
@@ -110,7 +147,29 @@ window.addEventListener('load', () => {
   else render(roleKey);
 });
 
-// 安親部門老師（115/9 修訂版，KPI 100 分、OKR 獨立另計）
+// 安親部門老師（115/9 修訂版）— 完整制度，內容對應《布拉克星球 安親部門績效制度》
+const ANQIN_POSITION = {
+  '① 課業指導': '主科紮實，與學校學科對接',
+  '② 專案課程': '教室特色，布拉克星球的識別度',
+  '③ 班級經營': '帶班基礎，穩定的學習環境',
+  '④ 親師溝通': '續班命脈，親師信任的關鍵',
+  '⑤ 個人態度與表現': '一切教學品質的基本盤',
+  '⑥ 班級環境整潔': '自班級經營獨立，確保每日落實',
+};
+const ANQIN_OKR_DIRECTIONS = [
+  { title:'① 專案課程發展型', o:'提升專案課程品質與學習成果',
+    kr:'完成 1 次完整專案課（含教案）；產出成果展示（作品／發表）；學生參與度達 80% 以上' },
+  { title:'② 學習成效提升型', o:'提升學生學習理解與表現',
+    kr:'每週 2 種科目複習講解、訂正率達 95%；學生複習表現明顯提升' },
+  { title:'③ 親師經營型', o:'建立高信任班級關係',
+    kr:'每週穩定進行高品質分享、每日家長互動增加；學期內無重大客訴、活動參與率高' },
+  { title:'④ 班級經營優化型', o:'建立穩定學習環境',
+    kr:'課堂干擾事件下降、學生專注度提升；能獨立處理班級問題' },
+  { title:'⑤ 教師專業成長型', o:'發展個人教學特色（請具體提出）',
+    kr:'設計特色課程、進行教學分享；成為種子教師、提出可額外招生開班的規劃' },
+  { title:'⑥ 與主管討論並另行設定', o:'依個人發展提出具體規劃與成果', kr:'' },
+];
+
 function renderAnqin() {
   const b = BONUS.anqin;
   const rows = b.tiers.map(t => `
@@ -120,45 +179,152 @@ function renderAnqin() {
       <td class="${t.bonus > 0 ? 'has' : 'no'}">${t.bonus > 0 ? 'NT$' + t.bonus.toLocaleString() : '無'}${t.extra ? '<div class="note">'+t.extra+'</div>' : ''}</td>
     </tr>`).join('');
 
+  // 第三章：KPI 評分架構總表
+  const archRows = KPI.anqin.map(k => `
+    <tr><td style="text-align:left;">${k.name.replace(/^[①-⑥]\s*/, '')}</td><td class="hi">${k.max}</td><td style="text-align:left; font-size:12.5px;">${ANQIN_POSITION[k.name] || ''}</td></tr>`).join('');
+
+  // 第四章：六大類別細則
   const kpiHtml = KPI.anqin.map(k => `
     <div class="kpi-item">
-      <div class="top"><span class="name">${k.name}</span><span class="max">${k.max} 分</span></div>
-      <div class="sub">${k.sub}</div>
+      <div class="top"><span class="name">${k.name}（${ANQIN_POSITION[k.name] || ''}）</span><span class="max">${k.max} 分</span></div>
+      <ul class="kpi-sublist">
+        ${k.items.map(([t, p]) => `<li><span class="t">${t}</span><span class="p">${p} 分</span></li>`).join('')}
+      </ul>
+      <div class="kpi-check">📋 查核方式：${k.check}</div>
+    </div>`).join('');
+
+  // 第六章：OKR 五大方向
+  const okrDirs = ANQIN_OKR_DIRECTIONS.map(d => `
+    <div class="kpi-item">
+      <div class="name" style="color:var(--primary);">${d.title}</div>
+      <div class="sub"><strong>O 目標：</strong>${d.o}</div>
+      ${d.kr ? `<div class="sub"><strong>KR 範例：</strong>${d.kr}</div>` : ''}
     </div>`).join('');
 
   document.getElementById('content').innerHTML = `
+    <!-- 第一章 制度目的與架構 -->
     <div class="card">
-      <div class="rule-h">💰 月績效獎金級距（看 KPI 分數，滿分 100）</div>
+      <div class="rule-h">🌟 制度總覽：KPI × OKR 雙軌制</div>
+      <div class="note">
+        本制度分成兩條<strong>完全分開</strong>的軌道，互不影響：<br><br>
+        <strong>① KPI（月考核）</strong>　確保日常工作品質，<strong>總分 100 分</strong>，每月評核並發放月績效獎金。<br>
+        <strong>② OKR（學期成長）</strong>　促進專業突破，以一學期為週期，<strong>採獨立獎金制、不納入 KPI 的 100 分</strong>；自 <strong>2026 / 9（115 學年）起實施</strong>。
+      </div>
+    </div>
+
+    <!-- 第二章 定義與比較 -->
+    <div class="card">
+      <div class="rule-h">📖 KPI 與 OKR 怎麼分</div>
+      <div class="note mb-1">
+        <strong>KPI＝日常工作標準與基本品質控管</strong><br>
+        ・衡量「工作是否確實完成」，確保教學、管理與溝通維持穩定水準<br>
+        ・建立一致且可被評估的工作標準<br>
+        ・以每月評分呈現，是發放月績效獎金的依據
+      </div>
+      <div class="note mb-2">
+        <strong>OKR＝成長目標與能力提升機制</strong><br>
+        ・設定「想達成的改變或突破」，強調成長、創新與課程專業度<br>
+        ・鼓勵發展個人教學特色與深度，挑戰而非保守<br>
+        ・與主管討論並自我設定目標，以學期為週期評核達成度
+      </div>
       <table class="bonus-table">
-        <thead><tr><th>KPI 分數</th><th>等第</th><th>月獎金</th></tr></thead>
+        <thead><tr><th>比較</th><th>KPI 月考核</th><th>OKR 學期成長</th></tr></thead>
+        <tbody>
+          <tr><td>核心目的</td><td>穩定品質、確保基本水準</td><td>成長突破、發展特色</td></tr>
+          <tr><td>週期</td><td>每月一次</td><td>每學期一次</td></tr>
+          <tr><td>計分</td><td>總分 100 分</td><td>獨立計算</td></tr>
+          <tr><td>獎金</td><td>月績效獎金</td><td>學期成長獎金</td></tr>
+          <tr><td>性質</td><td>基本要求</td><td>加分鼓勵、不作懲罰</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 第三章 KPI 評分架構 -->
+    <div class="card">
+      <div class="rule-h">📊 KPI 評分架構（總分 100 分）</div>
+      <table class="bonus-table">
+        <thead><tr><th>KPI 項目</th><th>配分</th><th>定位說明</th></tr></thead>
+        <tbody>${archRows}
+          <tr class="hi"><td style="text-align:left;"><strong>合計</strong></td><td class="hi"><strong>100</strong></td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 第四章 各項評分標準 -->
+    <div class="card">
+      <div class="rule-h">🎯 KPI 各項評分標準（六大類別 · 共 100 分）</div>
+      <div class="note mb-1">每一項都列出「評分內容＋配分＋查核方式」，請對照自己做到哪個程度。</div>
+      ${kpiHtml}
+    </div>
+
+    <!-- 第五章 月考核與獎金 -->
+    <div class="card">
+      <div class="rule-h">🗓 每月評核流程</div>
+      <div class="note">
+        <strong>1.</strong> 教師自評　→　<strong>2.</strong> 主管評分　→　<strong>3.</strong> 個別成長面談（10–15 分鐘，看見優點、確認調整方向）　→　<strong>4.</strong> 依 KPI 分數發放當月績效獎金。
+      </div>
+    </div>
+    <div class="card">
+      <div class="rule-h">💰 月績效獎金級距（看 KPI 100 分）</div>
+      <table class="bonus-table">
+        <thead><tr><th>KPI 分數</th><th>評等</th><th>績效獎金</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <div class="note mt-1">📌 <strong>KPI ≥ 82 分</strong>才開始有獎金；75–81 為基本合格（無獎金）；74 以下需改善追蹤回報。</div>
     </div>
     <div class="card">
-      <div class="rule-h">📊 計分方式（KPI × OKR 雙軌制）</div>
-      <div class="note">
-        <strong>KPI 月考核：總分 100 分</strong>（六大類別，見下），每月評核一次，<strong>獎金看 KPI 100 分的級距</strong>（上表）。<br>
-        <strong>OKR 學期成長：獨立獎金</strong>，不納入 KPI 的 100 分、兩者互不影響；以一學期為週期，<strong>自 2026/9 起實施</strong>。<br>
-        每學期初與主管討論設定 2 個目標（O），每個搭配 2–3 項關鍵成果（KR），期末依達成比例分級發放。
-      </div>
-    </div>
-    <div class="card">
-      <div class="rule-h">🎯 KPI 六大類別（共 100 分）</div>
-      ${kpiHtml}
-    </div>
-    <div class="card">
       <div class="rule-h">⏰ 出勤紀律扣分（獨立於 100 分之外）</div>
       <div class="note">
-        遲到列為重點扣分項目。<strong>當月遲到累計達 3 次（含）以上</strong>，自 KPI 總分<strong>自第 3 次起每次額外扣 5 分</strong>（前 2 次不扣），或<strong>直接降一個獎金等級</strong>（擇重者）。<br>
+        遲到列為<strong>重點扣分項目</strong>。<strong>當月遲到累計達 3 次（含）以上</strong>，自 KPI 總分<strong>自第 3 次起每次額外扣 5 分</strong>（前 2 次不扣），或<strong>直接降一個獎金等級</strong>（系統取較重者）。<br>
         此扣分獨立於各項配分之外，目的在強化基本工作紀律。
       </div>
     </div>
+
+    <!-- 第六章 OKR -->
     <div class="card">
-      <div class="rule-h">📝 證據怎麼來</div>
+      <div class="rule-h">🚀 學期制 OKR 獨立獎金（2026/9 起）</div>
+      <div class="note mb-1">
+        <strong>設定方式：</strong><br>
+        ・學期初與主管討論，每位老師設定 <strong>2 個目標（O）</strong>，每個 O 搭配 <strong>2–3 項關鍵成果（KR）</strong><br>
+        ・可從下列方向選擇或與主管討論自訂；鼓勵挑戰高目標，而非保守<br>
+        ・期中進行 1 次 check-in，可微調 KR（調整不扣分）<br>
+        ・學期末依各 KR 達成比例評核達成度
+      </div>
+      <div class="rule-h" style="font-size:15px; margin-top:10px;">OKR 方向（標準選項）</div>
+      ${okrDirs}
+      <div class="rule-h" style="font-size:15px; margin-top:10px;">達成度與獎金（分級發放）</div>
+      <div class="note mb-1">每個目標（O）以其 KR 平均達成率計算，兩個目標各自獨立計獎。</div>
+      <table class="bonus-table">
+        <thead><tr><th>單一目標達成度</th><th>獎金發放比例</th></tr></thead>
+        <tbody>
+          <tr class="hi"><td>80% 以上</td><td class="has">100%</td></tr>
+          <tr class="hi"><td>60% – 79%</td><td class="has">70%</td></tr>
+          <tr><td>40% – 59%</td><td>40%</td></tr>
+          <tr><td>40% 以下</td><td class="no">0%</td></tr>
+        </tbody>
+      </table>
+      <div class="note mt-1">
+        💡 <strong>為何分級而非「達標才給」：</strong>全有全無會逼老師設保守目標；分級制讓你敢挑戰高目標，即使達 70% 也有回報，真正推動成長。<br><br>
+        <strong>OKR 原則：</strong>① 不作為懲罰依據，僅作加分與成長評估；② 鼓勵挑戰而非保守目標；③ 原「專案課優秀加碼」「親師經營優良加碼」等統一收入 OKR，避免同一成果重複獎勵。
+      </div>
+    </div>
+
+    <!-- 第七章 總則、例外與制度調整 -->
+    <div class="card">
+      <div class="rule-h">📋 總則、例外與制度調整</div>
+      <div class="note">
+        <strong>總評精神：</strong>KPI＝穩定品質（確保基本教學與班級經營）；OKR＝成長突破（發展課程特色與專業能力）；有任何問題，直接向各負責主管回報處理。<br><br>
+        <strong>例外與扣發：</strong>如有重大教學事故、嚴重違反工作規範、家長投訴經查屬實，或教學品質未達要求者，本期 KPI 獎金得延期或取消；OKR 獎金以達成度核發，不因單期表現不佳而追溯扣減既有 KPI 獎金。<br><br>
+        <strong>施行日期：</strong>KPI 自 115 年 7 月施行；OKR 自 115 年 9 月起生效。未盡事宜由教室管理團隊依實際情形補充公告。
+      </div>
+    </div>
+
+    <!-- 證據怎麼來 -->
+    <div class="card">
+      <div class="rule-h">📝 分數證據怎麼來</div>
       <div class="note">
         每天填「今日日報」、每週填「週報」，系統會自動把你的日誌、照片、親師溝通、課程紀錄、環境整潔佐證等彙整成 KPI 證據。<br>
-        填得越完整、證據越充足，月底評核分數越有依據。月底可在「我的 KPI」看本月預估分數與獎金。
+        <strong>填得越完整、證據越充足，月底評核越有依據。</strong>實際 KPI 分數由主管月底依證據評核。
       </div>
     </div>
   `;

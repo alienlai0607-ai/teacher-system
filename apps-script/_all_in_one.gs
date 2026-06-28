@@ -116,6 +116,7 @@ function handleRequest(e, method) {
 
       // 初始化（admin only）
       'setupSheets': () => { setupSheets(); return { ok: true, msg: 'Sheets initialized' }; },
+      'purgeTestData': () => purgeTestData(params),
     };
 
     if (!ROUTES[action]) {
@@ -1613,25 +1614,26 @@ function suggestKpiScores(user, logs, evidence, feedback, observations, postsByW
     ? { 1: 20, 2: 20, 3: 20, 4: 20, 5: 12, 6: 8 }
     : { 1: 15, 2: 15, 3: 10, 4: 10, 5: 15, 6: 5 };
 
-  // 根據日誌完整度、證據數量、主管回饋標籤推算
-  // 這只是建議，最終由評核者決定
+  // 從 0 起算的建議分（不再預設 80% 基礎分，避免無資料時亂給分）
+  // 依「本月日誌投入比例 × 滿分 ＋ 證據加成 ＋ 主管回饋」推算；無資料＝0。僅供參考，最終由評核者決定。
   const result = {};
   const positive = feedback.filter(f => f.tag === '優秀表現').length;
   const negative = feedback.filter(f => f.tag === '需改進').length;
+  // 投入比例：本月日誌天數 / 約略工作天目標（18 天）；0 篇 → 0
+  const TARGET_DAYS = 18;
+  const engagement = Math.min(1, (logs.length || 0) / TARGET_DAYS);
 
   for (let k = 1; k <= 6; k++) {
     const kEvidence = evidence.filter(e => Number(e.kpi_category) === k).length;
-    const baseScore = Math.min(max[k], Math.round(max[k] * 0.8 + kEvidence * 0.5));
-    let score = baseScore + positive - negative * 2;
-    score = Math.max(0, Math.min(max[k], score));
+    // 從 0 起算：投入比例×滿分 ＋ 證據加成（封頂 15%）＋ 回饋調整
+    let score = max[k] * engagement + Math.min(max[k] * 0.15, kEvidence) + positive - negative * 2;
+    score = Math.max(0, Math.min(max[k], Math.round(score)));
 
-    // 主管發文 KPI4 特別處理
+    // 主管發文 KPI4：依達標週數比例（從 0 起算）
     if (role === 'manager' && k === 4) {
       const weeksMet = Object.values(postsByWeek).filter(c => c >= 3).length;
       const totalWeeks = Math.max(1, Object.keys(postsByWeek).length || 4);
-      const postScore = Math.round((weeksMet / totalWeeks) * 2);
-      score = baseScore - 2 + postScore;
-      score = Math.max(0, Math.min(max[k], score));
+      score = Math.max(0, Math.min(max[k], Math.round(max[k] * (weeksMet / totalWeeks))));
     }
     result[`k${k}`] = score;
   }
@@ -1765,6 +1767,36 @@ function calcDeptAvg(department, year_month) {
   if (deptEvals.length === 0) return 0;
   const sum = deptEvals.reduce((s, e) => s + Number(e.total_score || 0), 0);
   return Math.round((sum / deptEvals.length) * 10) / 10;
+}
+
+/**
+ * 清除測試交易資料（僅 admin）：日誌/證據/評核/週報/回饋/觀課/發文/OKR/事項
+ * 保留：使用者帳號(Users)、學生名冊(Students，預設保留)、KPI 設定。
+ * 需帶 confirm:'PURGE'；可選 clearStudents:true 一併清學生。
+ */
+function purgeTestData(params) {
+  const operator = params.operator;
+  const u = operator ? findUserByNickname(operator) : null;
+  if (!u || u.role !== 'admin') return { ok: false, error: '僅限管理員操作' };
+  if (params.confirm !== 'PURGE') return { ok: false, error: '需帶 confirm=PURGE 以確認清除' };
+  const targets = [
+    SHEET_NAMES.LOGS, SHEET_NAMES.EVIDENCE,
+    SHEET_NAMES.TEACHER_EVAL, SHEET_NAMES.MANAGER_EVAL,
+    SHEET_NAMES.WEEKLY, SHEET_NAMES.FEEDBACK,
+    SHEET_NAMES.OBSERVATION, SHEET_NAMES.POSTS,
+    SHEET_NAMES.OKR, SHEET_NAMES.TASKS,
+  ];
+  if (params.clearStudents === true || params.clearStudents === 'true') targets.push(SHEET_NAMES.STUDENTS);
+  const cleared = {};
+  targets.forEach(name => {
+    const sh = getSheet(name);
+    if (!sh) { cleared[name] = 'no sheet'; return; }
+    const last = sh.getLastRow();
+    if (last > 1) sh.deleteRows(2, last - 1); // 保留標題列
+    cleared[name] = Math.max(0, last - 1);
+  });
+  logSystem(operator, 'purge_test_data', '', cleared);
+  return { ok: true, cleared };
 }
 
 

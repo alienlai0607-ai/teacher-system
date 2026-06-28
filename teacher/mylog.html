@@ -63,14 +63,10 @@
 <div id="app-header"></div>
 
 <div class="container">
-  <h2 style="margin-top:0;">📊 我的 KPI 預估（<span id="year-month"></span>）</h2>
+  <h2 style="margin-top:0;">📊 我的 KPI 紀錄（<span id="year-month"></span>）</h2>
+  <div class="muted text-sm mb-2">這裡彙整你本月的工作紀錄與證據累積；實際 KPI 分數由主管月底依證據評核，詳細評分標準請看「規則」。</div>
 
   <div id="score-section"></div>
-
-  <div class="card">
-    <div class="card-title">📈 6 大 KPI 進度</div>
-    <div id="kpi-bars"></div>
-  </div>
 
   <div class="card" id="todos-card" style="display:none;">
     <div class="card-title">⚠️ 本月待補</div>
@@ -114,19 +110,14 @@ async function loadPreview() {
     return;
   }
   renderScore(res);
-  renderKpiBars(res);
   renderTodos(res.todos);
 }
 
 function renderScore(res) {
   const wrap = document.getElementById('score-section');
+  // 不顯示預估分數（避免老師誤會），只呈現客觀的本月投入統計
   wrap.innerHTML = `
-    <div class="score-circle">
-      <div class="score-small">本月預估 KPI 分數</div>
-      <div class="score-big">${res.kpi_total} / ${window.isAnqinUser({ role: res.role, department: res.department }) ? 100 : 70}</div>
-      <div class="score-small" style="margin-top:8px;">⭐ ${res.grade} · 預估獎金 NT$${res.bonus_estimated}</div>
-    </div>
-    <div class="stat-grid mt-2">
+    <div class="stat-grid">
       <div class="stat-box"><div class="stat-num">${res.summary.log_count}</div><div class="stat-label">本月已填日誌</div></div>
       <div class="stat-box ev-box" onclick="openEvidence()" style="cursor:pointer;">
         <div style="font-size:15px; font-weight:800; color:var(--primary); line-height:1.6;">環境整潔 ${res.summary.env_days || 0} 天<br>教案歸檔 ${res.summary.lesson_days || 0} 天</div>
@@ -135,22 +126,6 @@ function renderScore(res) {
       <div class="stat-box"><div class="stat-num">${res.summary.feedback_count}</div><div class="stat-label">主管回饋</div></div>
     </div>
   `;
-}
-
-function renderKpiBars(res) {
-  const anqin = window.isAnqinUser({ role: res.role, department: res.department });
-  const KPI_DEF = res.role === 'manager' ? APP_CONFIG.MANAGER_KPI
-    : (anqin ? APP_CONFIG.ANQIN_KPI : APP_CONFIG.TEACHER_KPI);
-  const wrap = document.getElementById('kpi-bars');
-  wrap.innerHTML = KPI_DEF.map(k => {
-    const score = res.suggestion[`k${k.no}`] || 0;
-    const pct = (score / k.max) * 100;
-    return `<div class="kpi-bar">
-      <div class="kpi-bar-name">${k.icon} ${k.name}</div>
-      <div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:${pct}%;"></div></div>
-      <div class="kpi-bar-score">${score}/${k.max}</div>
-    </div>`;
-  }).join('');
 }
 
 function renderTodos(todos) {
