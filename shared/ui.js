@@ -92,6 +92,7 @@ window.UI = (function () {
             <a href="${root}teacher/tasks.html">事項</a>
             <a href="${root}teacher/weekly.html">週報</a>
             <a href="${root}teacher/mylog.html">我的 KPI</a>
+            <a href="${root}teacher/coursereport.html">課程紀錄報表</a>
             <a href="${root}teacher/okr.html">OKR</a>
             <a href="${root}teacher/rules.html">規則</a>
           ` : ''}
@@ -105,6 +106,7 @@ window.UI = (function () {
             <a href="${root}manager/evidence.html">證據紀錄</a>
             <a href="${root}manager/mylog.html">我的日誌</a>
             <a href="${root}teacher/weekly.html">我的週報</a>
+            <a href="${root}teacher/coursereport.html">課程紀錄報表</a>
             <a href="${root}manager/myeval.html">我的 KPI</a>
             <a href="${root}teacher/rules.html">規則</a>
           ` : ''}

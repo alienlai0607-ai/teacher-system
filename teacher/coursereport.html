@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>課程紀錄報表（列印）</title>
+<link rel="stylesheet" href="../shared/style.css?v=20260624k">
+<script src="../shared/config.js"></script>
+<script src="../shared/auth.js"></script>
+<script src="../shared/api.js"></script>
+<script src="../shared/ui.js"></script>
+<script src="../shared/pwa.js"></script>
+<script src="../shared/push.js"></script>
+<style>
+  /* ===== 工具列（列印時隱藏） ===== */
+  .toolbar {
+    position: sticky; top: 0; z-index: 30;
+    background: #fff; border-bottom: 1px solid var(--border);
+    padding: 12px 16px; display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end;
+  }
+  .toolbar .form-row { margin: 0; }
+
+  /* ===== 報表本體 ===== */
+  .report {
+    max-width: 800px; margin: 20px auto; background: #fff;
+    padding: 28px 32px; box-shadow: 0 2px 14px rgba(0,0,0,0.08); border-radius: 8px;
+    color: #1F3A68;
+  }
+  .rpt-head { display: flex; align-items: center; gap: 14px; border-bottom: 3px solid #F5941E; padding-bottom: 14px; }
+  .rpt-head img { width: 56px; height: 56px; border-radius: 50%; }
+  .rpt-head h1 { font-size: 22px; margin: 0; color: #1F3A68; }
+  .rpt-head .sub { font-size: 13px; color: #888; margin-top: 2px; }
+
+  .meta-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px 16px; margin: 16px 0; font-size: 14px; }
+  .meta-grid .label { color: #999; font-size: 12px; }
+  .meta-grid .val { font-weight: 700; }
+
+  .stat-row { display: flex; gap: 10px; margin: 14px 0; }
+  .stat-cell { flex: 1; text-align: center; background: #FFF8F0; border: 1px solid #FFE2BF; border-radius: 8px; padding: 10px 4px; }
+  .stat-cell .n { font-size: 22px; font-weight: 800; color: #F5941E; }
+  .stat-cell .l { font-size: 12px; color: #888; }
+
+  /* ===== 每日課程紀錄 ===== */
+  .day-block { border: 1px solid #E3E0EC; border-radius: 10px; padding: 14px 16px; margin: 14px 0; }
+  .day-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; border-bottom: 2px solid #FFE2BF; padding-bottom: 8px; margin-bottom: 10px; }
+  .day-date { font-size: 17px; font-weight: 800; color: #1F3A68; }
+  .day-week { font-size: 13px; color: #888; }
+  .wt-badge { display: inline-block; background: #FFF1DD; color: #E07A08; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 700; }
+
+  .rec { margin: 10px 0; padding-left: 10px; border-left: 4px solid #F5941E; }
+  .rec-title { font-size: 14.5px; font-weight: 800; color: #E07A08; margin-bottom: 4px; }
+  .rec-line { font-size: 13px; color: #333; line-height: 1.7; margin: 2px 0; }
+  .rec-line .lab { color: #888; font-weight: 700; margin-right: 4px; }
+
+  .photo-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .photo-grid a { display: block; }
+  .photo-grid img { width: 130px; height: 130px; object-fit: cover; border: 1px solid #ddd; border-radius: 8px; }
+  .empty { color: #bbb; font-size: 13px; padding: 18px 0; text-align: center; }
+
+  .sign-row { display: flex; gap: 30px; margin-top: 30px; }
+  .sign-cell { flex: 1; text-align: center; font-size: 13px; }
+  .sign-line { border-top: 1px solid #333; margin-top: 40px; padding-top: 6px; color: #555; }
+
+  #report-area { display: none; }
+
+  @media print {
+    .no-print { display: none !important; }
+    body { background: #fff; padding: 0; margin: 0; }
+    .report { box-shadow: none; margin: 0; max-width: none; padding: 0; border-radius: 0; }
+    .day-block, .sign-row, .rec { page-break-inside: avoid; }
+    .photo-grid img { width: 100px; height: 100px; }
+    @page { size: A4; margin: 14mm; }
+  }
+</style>
+</head>
+<body>
+
+<div id="app-header" class="no-print"></div>
+
+<!-- 選擇工具列 -->
+<div class="toolbar no-print">
+  <div class="form-row">
+    <label>起始日期</label>
+    <input type="date" id="sel-from">
+  </div>
+  <div class="form-row">
+    <label>結束日期</label>
+    <input type="date" id="sel-to">
+  </div>
+  <button class="btn btn-primary" onclick="generate()">📄 產生課程紀錄</button>
+  <button class="btn" id="print-btn" onclick="window.print()" style="display:none;">🖨 列印 / 另存 PDF</button>
+  <span class="muted text-sm" id="hint">選擇日期範圍後按「產生課程紀錄」</span>
+</div>
+
+<!-- 報表 -->
+<div id="report-area">
+  <div class="report" id="report"></div>
+</div>
+
+<script>
+const session = AUTH.requireRole(['teacher', 'admin_staff', 'manager', 'admin']);
+
+const WEEK_ZH = ['日', '一', '二', '三', '四', '五', '六'];
+
+// 各區塊欄位標籤（與 today.html 日報一致）
+const TUTOR_FIELDS = [
+  ['review_method', '複習方式'],
+  ['error_points', '孩子易錯處'],
+  ['help_method', '協助理解方法'],
+  ['outcome', '反應與學習成效'],
+];
+const COURSE_FIELDS = [
+  ['class', '上課班級'],
+  ['progress', '教學進度'],
+  ['learning', '孩子學習狀況'],
+  ['next', '下次課程準備'],
+];
+const PROJECT_FIELDS = [
+  ['progress', '今日進度'],
+  ['done', '完成項目'],
+  ['problem', '遇到問題'],
+  ['plan', '下階段規劃'],
+];
+
+window.addEventListener('load', () => {
+  UI.mountHeader(session);
+  const now = new Date();
+  const first = new Date(now.getFullYear(), now.getMonth(), 1);
+  document.getElementById('sel-from').value = toYmd(first);
+  document.getElementById('sel-to').value = toYmd(now);
+});
+
+function toYmd(d) { return d.toISOString().slice(0, 10); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+function nl2br(s) { return esc(s).replace(/\n/g, '<br>'); }
+function driveThumb(url, fileId, size) {
+  const id = fileId || ((url || '').match(/\/d\/([^/]+)/) || [])[1];
+  return id ? `https://drive.google.com/thumbnail?id=${id}&sz=w${size || 400}` : url;
+}
+function weekday(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return isNaN(d) ? '' : '（週' + WEEK_ZH[d.getDay()] + '）';
+}
+
+// 該日是否有「課程／備課」內容（過濾掉只有環境/親師的日子）
+function hasTeaching(l) {
+  const k1 = l.kpi1_data || {}, k3 = l.kpi3_data || {};
+  const tutoring = TUTOR_FIELDS.some(([k]) => k1[k]);
+  const courses = Array.isArray(k3.courses) && k3.courses.length > 0;
+  const project = k3.project && Object.values(k3.project).some(v => v);
+  const photos = (l.attachments || []).some(p => p.type === 'photo' && !String(p.forType || '').startsWith('env'));
+  return tutoring || courses || project || photos;
+}
+
+async function generate() {
+  const from = document.getElementById('sel-from').value;
+  const to = document.getElementById('sel-to').value;
+  if (!from || !to) { UI.toast('請選擇起訖日期', 'warn'); return; }
+  if (from > to) { UI.toast('起始日期不能晚於結束日期', 'warn'); return; }
+
+  UI.loading(true);
+  const res = await API.listLogs({ viewer: session.nickname, nickname: session.nickname, from, to });
+  UI.loading(false);
+  if (!res.ok) { UI.toast(res.error || '讀取失敗', 'danger'); return; }
+
+  // 只留有課程內容的日子，並依日期由舊到新排列（像一本教學紀錄）
+  const logs = (res.logs || []).filter(hasTeaching).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  renderReport(from, to, logs);
+  document.getElementById('report-area').style.display = 'block';
+  document.getElementById('print-btn').style.display = logs.length ? 'inline-flex' : 'none';
+  document.getElementById('hint').textContent = logs.length ? '報表已產生，可按「列印 / 另存 PDF」' : '此範圍沒有課程紀錄';
+  window.scrollTo(0, document.getElementById('report-area').offsetTop - 10);
+}
+
+function fieldLines(obj, fields) {
+  return fields
+    .filter(([k]) => obj[k])
+    .map(([k, lab]) => `<div class="rec-line"><span class="lab">${lab}：</span>${nl2br(obj[k])}</div>`)
+    .join('');
+}
+
+function photoGrid(photos) {
+  if (!photos.length) return '';
+  return `<div class="photo-grid">${photos.map(p =>
+    `<a href="${esc(p.url)}" target="_blank"><img src="${driveThumb(p.url, p.fileId, 400)}" loading="lazy" alt="課程照片"></a>`
+  ).join('')}</div>`;
+}
+
+function renderReport(from, to, logs) {
+  const dept = session.department || '—';
+  // 統計
+  let courseCount = 0, photoCount = 0;
+  logs.forEach(l => {
+    courseCount += (Array.isArray(l.kpi3_data && l.kpi3_data.courses) ? l.kpi3_data.courses.length : 0);
+    if (l.kpi1_data && TUTOR_FIELDS.some(([k]) => l.kpi1_data[k])) courseCount += 1;
+    if (l.kpi3_data && l.kpi3_data.project && Object.values(l.kpi3_data.project).some(v => v)) courseCount += 1;
+    photoCount += (l.attachments || []).filter(p => p.type === 'photo' && !String(p.forType || '').startsWith('env')).length;
+  });
+
+  let html = `
+    <div class="rpt-head">
+      <img src="../shared/icons/logo.png" alt="logo">
+      <div>
+        <h1>布拉克星球 · 課程紀錄報表</h1>
+        <div class="sub">教學／備課紀錄 ｜ 列印時間：${UI.formatDate(new Date())}</div>
+      </div>
+    </div>
+
+    <div class="meta-grid">
+      <div><div class="label">老師</div><div class="val">${esc(session.nickname)}</div></div>
+      <div><div class="label">部門</div><div class="val">${esc(dept)}</div></div>
+      <div><div class="label">紀錄期間</div><div class="val">${from} ~ ${to}</div></div>
+    </div>
+
+    <div class="stat-row">
+      <div class="stat-cell"><div class="n">${logs.length}</div><div class="l">上課天數</div></div>
+      <div class="stat-cell"><div class="n">${courseCount}</div><div class="l">課程／備課筆數</div></div>
+      <div class="stat-cell"><div class="n">${photoCount}</div><div class="l">課程照片</div></div>
+    </div>
+  `;
+
+  if (!logs.length) {
+    html += `<div class="empty">此日期範圍內沒有課程紀錄。<br>請先在「今日日報」填寫安親輔導／課程內容與照片。</div>`;
+    document.getElementById('report').innerHTML = html;
+    return;
+  }
+
+  logs.forEach(l => {
+    const date = String(l.date);
+    const k1 = l.kpi1_data || {}, k3 = l.kpi3_data || {}, k6 = l.kpi6_data || {};
+    const types = Array.isArray(k6.work_types) ? k6.work_types : [];
+    const allPhotos = (l.attachments || []).filter(p => p.type === 'photo' && !String(p.forType || '').startsWith('env'));
+
+    let body = '';
+
+    // 安親輔導／備課
+    if (TUTOR_FIELDS.some(([k]) => k1[k])) {
+      body += `<div class="rec">
+        <div class="rec-title">📖 安親輔導 · 備課紀錄</div>
+        ${fieldLines(k1, TUTOR_FIELDS)}
+      </div>`;
+    }
+
+    // 課程紀錄（可能多堂）
+    (Array.isArray(k3.courses) ? k3.courses : []).forEach((c, i) => {
+      const heading = [c.type, c.name].filter(Boolean).join('｜') || ('課程 ' + (i + 1));
+      body += `<div class="rec">
+        <div class="rec-title">📚 ${esc(heading)}</div>
+        ${fieldLines(c, COURSE_FIELDS)}
+      </div>`;
+    });
+
+    // 專案／備課準備
+    if (k3.project && Object.values(k3.project).some(v => v)) {
+      body += `<div class="rec">
+        <div class="rec-title">🎯 專案 / 備課準備</div>
+        ${fieldLines(k3.project, PROJECT_FIELDS)}
+      </div>`;
+    }
+
+    // 當日所有課程照片集中呈現（含安親輔導/課程/專案，排除環境照）
+    if (allPhotos.length) {
+      body += `<div class="rec"><div class="rec-title">📷 課程照片（${allPhotos.length} 張）</div>${photoGrid(allPhotos)}</div>`;
+    }
+
+    html += `<div class="day-block">
+      <div class="day-head">
+        <span class="day-date">${date.slice(5)}</span>
+        <span class="day-week">${weekday(date)}</span>
+        ${types.map(t => `<span class="wt-badge">${esc(t)}</span>`).join('')}
+      </div>
+      ${body || '<div class="empty">（無內容）</div>'}
+    </div>`;
+  });
+
+  html += `<div class="sign-row">
+    <div class="sign-cell"><div class="sign-line">老師簽名</div></div>
+    <div class="sign-cell"><div class="sign-line">主管簽名</div></div>
+    <div class="sign-cell"><div class="sign-line">日期</div></div>
+  </div>`;
+
+  document.getElementById('report').innerHTML = html;
+}
+</script>
+</body>
+</html>
