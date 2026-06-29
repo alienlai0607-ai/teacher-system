@@ -23,6 +23,9 @@
   .assignee-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
   .as-chip { padding: 6px 12px; border: 1.5px solid var(--border); border-radius: 999px; background: #fff; cursor: pointer; font-size: 14px; user-select: none; }
   .as-chip.on { background: #F5941E; border-color: #F5941E; color: #fff; font-weight: 700; }
+  /* 指派並推播：用深藍與橘色按鈕明顯區隔，避免混在一起 */
+  .btn-assign { background: linear-gradient(135deg, #1F3A68, #2A6FA8); border-color: #1F3A68; color: #fff; font-weight: 800; }
+  .btn-assign:hover { background: linear-gradient(135deg, #16294b, #245f90); border-color: #16294b; color: #fff; }
 </style>
 </head>
 <body>
@@ -52,7 +55,7 @@
       <label>指派給（可複選）</label>
       <div class="assignee-grid" id="assignee-grid"></div>
     </div>
-    <button class="btn btn-primary" onclick="createTask()">指派並推播</button>
+    <button class="btn btn-assign" onclick="createTask()">📤 指派並推播</button>
     <div class="helper-text mt-1">已綁定 LINE 的老師會立即收到推播通知。</div>
   </div>
 
