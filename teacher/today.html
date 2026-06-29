@@ -464,7 +464,7 @@ function renderDynamic(savedData) {
   const src = savedData || prev;
   types.forEach((t, idx) => fillBlock(t, idx, src));
   // 照片區重繪
-  types.forEach((t, idx) => { if (t.block === 'course' || t.block === 'project') renderAttachments(blockId(t, idx)); });
+  types.forEach((t, idx) => { if (t.block === 'course' || t.block === 'project' || t.block === 'tutoring') renderAttachments(blockId(t, idx)); });
 }
 function blockId(t, idx) { return `${t.block}-${idx}`; }
 
@@ -491,6 +491,7 @@ function blockHtml(t, idx) {
       <div class="form-row"><label>2. 孩子在哪些地方容易出錯？</label><textarea id="${id}_errors" placeholder="例：分數通分、形近字、進退位..."></textarea></div>
       <div class="form-row"><label>3. 我用了什麼方法協助孩子理解？</label><textarea id="${id}_understand" placeholder="例：實物操作、畫圖、錯題重做、舉生活例子..."></textarea></div>
       <div class="form-row"><label>4. 孩子的反應與學習成效如何？</label><textarea id="${id}_outcome" placeholder="例：理解後能舉一反三、主動發問、訂正後答對..."></textarea></div>
+      ${photoArea(id, 1, '備課／課程紀錄照片', true)}
     </div>`;
   }
   if (t.block === 'course') {
@@ -708,6 +709,9 @@ function findMissing() {
   if (types.length === 0) m.push('至少勾選 1 個工作類型');
   types.forEach((t, idx) => {
     const id = blockId(t, idx);
+    if (t.block === 'tutoring') {
+      if (!(attachments[id] && attachments[id].length)) m.push(`${t.key}：至少 1 張備課／課程紀錄照片`);
+    }
     if (t.block === 'course') {
       if (!val(id + '_name')) m.push(`${t.key}：課程名稱`);
       if (!val(id + '_progress')) m.push(`${t.key}：教學進度`);
@@ -812,7 +816,7 @@ function rebuildBlocksFromKpi(log, types) {
   ordered.forEach((t, idx) => {
     const id = `${t.block}-${idx}`;
     if (t.block === 'tutoring') {
-      out[id] = { review: k1.review_method, errors: k1.error_points, understand: k1.help_method, outcome: k1.outcome };
+      out[id] = { review: k1.review_method, errors: k1.error_points, understand: k1.help_method, outcome: k1.outcome, _photos: photos.filter(p => p.forType === id) };
     } else if (t.block === 'course') {
       const c = courses.find(c => c.type === t.key) || courses[courseIdx++] || {};
       out[id] = { name: c.name, class: c.class, progress: c.progress, learning: c.learning, next: c.next, _photos: photos.filter(p => p.forType === id) };
