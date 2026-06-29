@@ -14,7 +14,9 @@
 <style>
   body { padding-bottom: 90px; }
   .week-pick { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
-  .week-pick .form-row { margin: 0; }
+  .week-pick .form-row { flex: 1 1 200px; min-width: 0; margin: 0; }
+  .week-pick #week-input { width: 100%; box-sizing: border-box; }
+  .week-pick .btn { flex: 0 0 auto; white-space: nowrap; min-height: 44px; }
   .past-item { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; cursor: pointer; }
   .past-item:hover { background: #FFF8F0; }
   .past-item .wk { font-weight: 700; color: var(--primary); }
