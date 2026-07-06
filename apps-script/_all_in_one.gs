@@ -66,6 +66,7 @@ function handleRequest(e, method) {
       'uploadPhoto': () => uploadPhoto(params),
       'getEvidenceLog': () => getEvidenceLog(params),
       'getMakeupQuota': () => getMakeupQuota(params),
+      'cleanupDuplicateEvidence': () => cleanupDuplicateEvidence(params),
 
       // 週報
       'saveWeekly': () => saveWeekly(params),
@@ -1077,8 +1078,11 @@ function saveLog(params) {
 
   if (firstSubmit) notifyLogSubmitted_(user, String(date), isMakeup === true, data.help_needed);
 
-  // 處理附件 → 寫入 Evidence
-  saveEvidenceFromLog(log_id, nickname, date, params.attachments);
+  // 附件 → Evidence：只在「正式提交」時寫入，且整份取代
+  // （舊版每次草稿自動存都 append 一次，一天可灌出上百筆重複證據）
+  if (params.submitted === true) {
+    replaceEvidenceForLog_(log_id, nickname, date, params.attachments);
+  }
 
   // 處理發文（如果是主管）→ 寫入 Posts
   if (user.role === 'manager' && params.posts && Array.isArray(params.posts)) {
@@ -1181,6 +1185,51 @@ function listLogs(params) {
   if (limit) logs = logs.slice(0, Number(limit));
 
   return { ok: true, logs };
+}
+
+/**
+ * 附件 → Evidence 整份取代：先刪掉該 log_id 舊列再寫入，確保一份日誌只有一組證據
+ */
+function replaceEvidenceForLog_(log_id, nickname, date, attachmentsRaw) {
+  const sh = getSheet(SHEET_NAMES.EVIDENCE);
+  const last = sh.getLastRow();
+  if (last > 1) {
+    const headers = getHeaders(sh);
+    const col = headers.indexOf('log_id') + 1;
+    const vals = sh.getRange(2, col, last - 1, 1).getValues();
+    for (let r = vals.length - 1; r >= 0; r--) {
+      if (String(vals[r][0]) === String(log_id)) sh.deleteRow(r + 2);
+    }
+  }
+  saveEvidenceFromLog(log_id, nickname, date, attachmentsRaw);
+}
+
+/**
+ * 清除 Evidence 重複列（歷史資料修復用；同 log_id+url+kpi 只留一筆）
+ * 需 operator=admin + confirm:'CLEAN'
+ */
+function cleanupDuplicateEvidence(params) {
+  const u = params.operator ? findUserByNickname(params.operator) : null;
+  if (!u || u.role !== 'admin') return { ok: false, error: '僅限管理員操作' };
+  if (params.confirm !== 'CLEAN') return { ok: false, error: '需帶 confirm=CLEAN 以確認清除' };
+  const sh = getSheet(SHEET_NAMES.EVIDENCE);
+  const values = sh.getDataRange().getValues();
+  if (values.length <= 1) return { ok: true, removed: 0, kept: 0 };
+  const headers = values[0];
+  const li = headers.indexOf('log_id'), ui = headers.indexOf('url'), ki = headers.indexOf('kpi_category');
+  const seen = {};
+  const keep = [headers];
+  for (let r = 1; r < values.length; r++) {
+    const key = values[r][li] + '|' + values[r][ui] + '|' + values[r][ki];
+    if (seen[key]) continue;
+    seen[key] = true;
+    keep.push(values[r]);
+  }
+  const removed = values.length - keep.length;
+  sh.clearContents();
+  sh.getRange(1, 1, keep.length, headers.length).setValues(keep);
+  logSystem(params.operator, 'cleanup_dup_evidence', '', { removed: removed, kept: keep.length - 1 });
+  return { ok: true, removed: removed, kept: keep.length - 1 };
 }
 
 /**

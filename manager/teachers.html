@@ -9,6 +9,7 @@
 <script src="../shared/auth.js"></script>
 <script src="../shared/api.js"></script>
 <script src="../shared/ui.js"></script>
+<script src="../shared/logview.js"></script>
 <script src="../shared/pwa.js"></script>
 <script src="../shared/push.js"></script>
 <style>
@@ -136,30 +137,25 @@ async function loadDetail(nickname) {
 }
 
 function renderLogCard(l, fbList) {
-  const KPI_DEF = APP_CONFIG.TEACHER_KPI;
   const helpHtml = l.help_needed
-    ? `<div class="tag tag-danger mb-1">🚨 求助：${l.help_content || ''}</div>`
+    ? `<div class="tag tag-danger mb-1">🚨 求助：${LOGVIEW.esc(l.help_content || '')}</div>`
     : '';
+  const statusTag = l.submitted_at
+    ? (l.is_makeup === true ? '<span class="tag tag-warn">補繳</span> <span class="tag tag-success">已提交</span>' : '<span class="tag tag-success">已提交</span>')
+    : '<span class="tag tag-info">草稿</span>';
   return `
     <div class="log-card">
       <div class="flex-between">
-        <div><strong>${UI.formatDate(l.date)}</strong></div>
+        <div><strong>${UI.formatDate(l.date)}</strong> ${statusTag}</div>
         <div class="muted text-sm">${UI.formatDateTime(l.updated_at)}</div>
       </div>
       ${helpHtml}
-      ${KPI_DEF.map(k => renderKpiData(k, l['kpi' + k.no + '_data'])).join('')}
-      ${l.reflection ? `<div class="kpi-block"><div class="kpi-block-title">💭 心得</div>${l.reflection}</div>` : ''}
-      ${l.attachments && l.attachments.length > 0 ? `<div class="kpi-block"><div class="kpi-block-title">📎 附件（${l.attachments.length}）</div>${l.attachments.map(a => `<a href="${a.url}" target="_blank">[KPI${a.kpi}] ${a.description || a.url}</a>`).join('<br>')}</div>` : ''}
-      ${fbList.length > 0 ? fbList.map(f => `<div class="kpi-block" style="background:#fff8e7;"><div class="kpi-block-title">💬 ${f.from_nickname} 回饋</div>${f.content} <span class="tag tag-info">${f.tag}</span></div>`).join('') : ''}
+      ${LOGVIEW.renderLog(l)}
+      ${l.reflection ? `<div class="kpi-block"><div class="kpi-block-title">💭 心得</div>${LOGVIEW.esc(l.reflection)}</div>` : ''}
+      ${fbList.length > 0 ? fbList.map(f => `<div class="kpi-block" style="background:#fff8e7;"><div class="kpi-block-title">💬 ${f.from_nickname} 回饋</div>${LOGVIEW.esc(f.content)} <span class="tag tag-info">${f.tag}</span></div>`).join('') : ''}
       ${renderFeedbackInput(l.log_id, l.nickname)}
     </div>
   `;
-}
-
-function renderKpiData(k, data) {
-  if (!data || typeof data !== 'object' || Object.keys(data).length === 0) return '';
-  const items = Object.entries(data).map(([key, val]) => `<div style="font-size:13px;"><span class="muted">${key}：</span>${val === true ? '✅' : val === false ? '—' : val}</div>`).join('');
-  return `<div class="kpi-block"><div class="kpi-block-title">${k.icon} KPI${k.no} ${k.name}</div>${items}</div>`;
 }
 
 function renderFeedbackInput(log_id, to_nickname) {

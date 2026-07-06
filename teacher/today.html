@@ -230,8 +230,9 @@
       <label>求助內容</label>
       <textarea id="help-content" placeholder="想請主管協助什麼？"></textarea>
     </div>
+    <div id="submit-status" style="display:none; background:#EAF7EE; border:1.5px solid #2e9e5b; color:#1e7a44; border-radius:10px; padding:10px 12px; font-size:13px; margin-bottom:10px;"></div>
     <div class="miss-banner" id="miss-banner"></div>
-    <button class="btn btn-primary" style="width:100%;" onclick="submitLog()">💾 提交今日日報</button>
+    <button class="btn btn-primary" id="submit-btn-main" style="width:100%;" onclick="submitLog()">💾 提交今日日報</button>
   </div>
 
   <div class="text-sm muted text-center mt-2" id="autosave-info"></div>
@@ -239,7 +240,7 @@
 
 <div class="nav-buttons" id="bottom-nav">
   <button class="btn" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑ 回頂端</button>
-  <button class="btn btn-primary" onclick="submitLog()">💾 提交日報</button>
+  <button class="btn btn-primary" id="submit-btn-nav" onclick="submitLog()">💾 提交日報</button>
 </div>
 
 <!-- 訊息明細彈窗 -->
@@ -331,6 +332,7 @@ let autoSaveTimer;
 const MK_KEY = 'bp_makeup_date';
 let makeupDate = null;             // 補繳中的過去日期（null = 今日模式）
 let makeupQuota = null;            // { used, limit, remaining }
+let alreadySubmitted = false;      // 今日日報是否已正式提交（可繼續編輯，更新不重複通知）
 
 window.addEventListener('load', async () => {
   UI.mountHeader(session);
@@ -477,6 +479,19 @@ function confirmMakeup() {
 }
 function exitMakeup() { sessionStorage.removeItem(MK_KEY); location.reload(); }
 
+// ===== 已提交狀態（當日可編輯、更新不重複通知）=====
+function markSubmittedUI(submittedAt) {
+  alreadySubmitted = true;
+  const t = submittedAt ? String(submittedAt).slice(11, 16) : '';
+  const box = document.getElementById('submit-status');
+  box.style.display = 'block';
+  box.innerHTML = `✅ 今日日報已提交${t ? `（${t}）` : ''}，今天內仍可修改，改完按「更新日報」即可，主管不會重複收到通知。`;
+  const main = document.getElementById('submit-btn-main');
+  const nav = document.getElementById('submit-btn-nav');
+  if (main) main.textContent = '🔄 更新日報';
+  if (nav) nav.textContent = '🔄 更新日報';
+}
+
 
 // ===== 親師溝通 =====
 function setParentContact(yes) {
@@ -561,7 +576,7 @@ function renderDynamic(savedData) {
   const src = savedData || prev;
   types.forEach((t, idx) => fillBlock(t, idx, src));
   // 照片區重繪
-  types.forEach((t, idx) => { if (t.block === 'course' || t.block === 'project' || t.block === 'tutoring') renderAttachments(blockId(t, idx)); });
+  types.forEach((t, idx) => { if (t.block === 'course' || t.block === 'project' || t.block === 'tutoring' || t.block === 'admin') renderAttachments(blockId(t, idx)); });
 }
 function blockId(t, idx) { return `${t.block}-${idx}`; }
 
@@ -613,13 +628,14 @@ function blockHtml(t, idx) {
       <div class="form-row"><label>完成項目</label><textarea id="${id}_done"></textarea></div>
       <div class="form-row"><label>遇到問題</label><textarea id="${id}_problem"></textarea></div>
       <div class="form-row"><label>下階段規劃</label><textarea id="${id}_plan"></textarea></div>
-      ${photoArea(id, 3, '專案照片', false)}
+      ${photoArea(id, 3, '專案照片', true)}
     </div>`;
   }
   if (t.block === 'admin') {
     return `<div class="card dyn-card">
       <div class="step-title"><span class="step-no">4</span> ${t.icon} ${t.key}成果</div>
-      <div class="form-row"><label>行政工作內容/成果</label><textarea id="${id}_result" placeholder="完成的行政事項..."></textarea></div>
+      <div class="form-row"><label>行政工作內容/成果 <span class="req">*</span></label><textarea id="${id}_result" placeholder="完成的行政事項..."></textarea></div>
+      ${photoArea(id, 6, '行政工作照片（成果/文件）', false)}
     </div>`;
   }
   return '';
@@ -794,11 +810,12 @@ function collectFormData() {
   return data;
 }
 
-// ===== 必填檢核 =====
+// ===== 必填檢核（所有區塊都要有資料＋照片證據才能送出）=====
 function findMissing() {
   const m = [];
   if (!(chk('env_classroom') && chk('env_tools') && chk('env_trash') && chk('env_toilet'))) m.push('環境整潔四項（需先拍照才能打勾）');
   if (!val('today_done')) m.push('今日執行事項');
+  if (session.role !== 'admin_staff' && !val('class_status')) m.push('班級狀況');
   if (!val('tomorrow_todo')) m.push('明日待辦事項');
   if (parentContacted === null) m.push('親師溝通（請選有/無）');
   if (parentContacted === true && !val('parent_summary')) m.push('溝通內容摘要');
@@ -807,6 +824,7 @@ function findMissing() {
   types.forEach((t, idx) => {
     const id = blockId(t, idx);
     if (t.block === 'tutoring') {
+      if (!val(id + '_review')) m.push(`${t.key}：複習方式`);
       if (!(attachments[id] && attachments[id].length)) m.push(`${t.key}：至少 1 張備課／課程紀錄照片`);
     }
     if (t.block === 'course') {
@@ -816,8 +834,13 @@ function findMissing() {
     }
     if (t.block === 'project') {
       if (!val(id + '_progress')) m.push(`${t.key}：今日進度`);
+      if (!(attachments[id] && attachments[id].length)) m.push(`${t.key}：至少 1 張專案照片`);
+    }
+    if (t.block === 'admin') {
+      if (!val(id + '_result')) m.push(`${t.key}：內容/成果`);
     }
   });
+  if (!val('reflection')) m.push('今日心得');
   return m;
 }
 
@@ -870,6 +893,12 @@ async function submitLog() {
     window.location.href = 'mylog.html';
     return;
   }
+  if (alreadySubmitted) {
+    UI.toast('日報已更新 ✅', 'success');
+    markSubmittedUI(new Date().toISOString());
+    return;   // 更新不跳頁，留在原地繼續改
+  }
+  markSubmittedUI(new Date().toISOString());
   UI.toast('日報已提交！', 'success');
   setTimeout(() => window.location.href = 'mylog.html', 1000);
 }
@@ -887,6 +916,9 @@ async function loadTodayLog() {
 function populateForm(log) {
   const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
   const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+
+  // 今日已正式提交過 → 顯示可編輯更新狀態（補繳模式不用）
+  if (!makeupDate && log.submitted_at) markSubmittedUI(log.submitted_at);
 
   const k2 = log.kpi2_data || {}, k5 = log.kpi5_data || {}, k6 = log.kpi6_data || {};
   set('equipment_issue', k2.equipment_issue); set('class_status', k2.class_status);
@@ -942,7 +974,7 @@ function rebuildBlocksFromKpi(log, types) {
       const p = k3.project || {};
       out[id] = { progress: p.progress, done: p.done, problem: p.problem, plan: p.plan, _photos: photos.filter(ph => ph.forType === id) };
     } else if (t.block === 'admin') {
-      out[id] = { result: k6.admin_result };
+      out[id] = { result: k6.admin_result, _photos: photos.filter(p => p.forType === id) };
     }
   });
   return out;

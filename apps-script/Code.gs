@@ -54,6 +54,7 @@ function handleRequest(e, method) {
       'uploadPhoto': () => uploadPhoto(params),
       'getEvidenceLog': () => getEvidenceLog(params),
       'getMakeupQuota': () => getMakeupQuota(params),
+      'cleanupDuplicateEvidence': () => cleanupDuplicateEvidence(params),
 
       // 週報
       'saveWeekly': () => saveWeekly(params),

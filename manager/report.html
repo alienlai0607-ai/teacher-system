@@ -125,6 +125,10 @@ const FIELD_LABELS = {
   group_post:'群組發文', group_post_link:'發文連結', reply_count:'回覆筆數', notebook_link:'記事本連結',
   parent_contact_count:'主動聯繫家長數', parent_contact_detail:'溝通摘要', parent_face_count:'下課互動數', special_event:'特殊狀況',
   tasks_done:'完成交辦事項', self_initiative:'主動發現問題/建議', growth_learning:'學習/成長', upward_report:'向上回報',
+  // 日報新版欄位
+  equipment_issue:'設備異常', class_status:'班級狀況', today_done:'今日執行', tomorrow_todo:'明日待辦',
+  work_types:'工作類型', admin_result:'行政成果', parent_summary:'溝通摘要',
+  student_special:'學生狀況', special_students:'相關學生',
   // 主管
   feedback_count:'回饋筆數', observe_done:'完成觀課', observe_target:'觀課對象/重點', patrol_done:'巡班記錄',
   training_held:'進行培訓', training_content:'培訓主題', quality_issue:'品質問題', handle_action:'處理動作',
@@ -170,13 +174,36 @@ function driveThumb(url, fileId, size) {
 function joinLogValues(dataObj) {
   if (!dataObj || typeof dataObj !== 'object') return '';
   return Object.entries(dataObj)
-    .filter(([k, v]) => v !== '' && v !== false && v != null)
+    .filter(([k, v]) => v !== '' && v !== false && v != null && v !== 'undefined')
     .map(([k, v]) => {
+      // 課程/專案物件另外展開，避免 [object Object]
+      if (k === 'courses' && Array.isArray(v)) {
+        return v.map(c => `📚${c.type || '課程'}${c.name ? '「' + c.name + '」' : ''}${c.progress ? '：' + c.progress : ''}`).filter(Boolean).join('｜');
+      }
+      if (k === 'project') {
+        return (v && typeof v === 'object' && v.progress) ? `🎯專案進度：${v.progress}` : '';
+      }
+      if (k === 'parent_contacted') return v === true ? '有家長聯繫' : '';
+      if (Array.isArray(v)) { const s = v.join('、'); return s ? `${FIELD_LABELS[k] || k}：${s}` : ''; }
+      if (typeof v === 'object') return '';   // 其他物件不硬印
       const label = FIELD_LABELS[k] || k;
       if (v === true) return label;
       return `${label}：${v}`;
     })
+    .filter(Boolean)
     .join('｜');
+}
+
+// 照片證據：去重後按日彙整（一天一行，點編號開原圖）
+function photoDayLines(photos) {
+  const seen = {};
+  const uniq = photos.filter(p => p.url && !seen[p.url] && (seen[p.url] = true));
+  if (!uniq.length) return '';
+  const byDay = {};
+  uniq.forEach(p => { const d = String(p.date).slice(5); (byDay[d] = byDay[d] || []).push(p); });
+  const lines = Object.keys(byDay).sort().map(d =>
+    `<div class="kpi-log-line"><span class="d">${d}</span>📷 ${byDay[d].length} 張：${byDay[d].map((p, i) => `<a href="${p.url}" target="_blank">#${i + 1}</a>`).join(' ')}</div>`);
+  return `<div class="link-list">📷 本月照片證據共 ${uniq.length} 張（點編號開啟原圖）</div>` + lines.join('');
 }
 
 async function generate() {
@@ -297,7 +324,7 @@ function renderReport(nickname, ym, ev, evalObj) {
       ${extra}
       ${logLines.join('') || '<div class="empty">本月此項無日誌文字</div>'}
       ${links.length ? `<div class="link-list">${links.map(e => `🔗 <a href="${e.url}" target="_blank">${UI.formatDate(e.date)} ${e.description || '連結證據'}</a>`).join('<br>')}</div>` : ''}
-      ${photos.length ? `<div class="link-list">📷 本月 ${photos.length} 張照片證據（檔案存於雲端，未附圖）：${photos.map((e, i) => `<a href="${e.url}" target="_blank">${String(e.date).slice(5)}#${i + 1}</a>`).join('、')}</div>` : ''}
+      ${photoDayLines(photos)}
       ${(!photos.length && !links.length) ? '<div class="empty">無附件證據</div>' : ''}
     </div>`;
   });
