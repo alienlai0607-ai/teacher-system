@@ -13,6 +13,7 @@
 <script src="../shared/push.js"></script>
 <style>
   .eval-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .eval-layout > * { min-width: 0; }   /* 格子可縮小，防手機被長內容撐寬 */
   @media (max-width: 900px) { .eval-layout { grid-template-columns: 1fr; } }
   .score-row { display: grid; grid-template-columns: 1fr 70px; gap: 8px; align-items: center; margin-bottom: 6px; }
   .evidence-block { background: #f7f6fb; padding: 10px; border-radius: 6px; margin-bottom: 10px; }
