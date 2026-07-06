@@ -122,33 +122,33 @@
   <!-- Step 2 每日必填 -->
   <div class="card">
     <div class="step-title"><span class="step-no">2</span> 環境整潔 <span class="req">*</span></div>
-    <div class="helper-text mb-1">📸 每項都要先拍照，才能打勾確認</div>
+    <div class="helper-text mb-1">📸 每項都要先拍照或上傳照片，才能打勾確認</div>
     <div id="env-checklist">
       <div class="env-item">
         <label><input type="checkbox" id="env_classroom" disabled> 教室環境確認完成</label>
-        <input type="file" accept="image/*" capture="environment" id="photo-input-env_classroom" style="display:none" onchange="onPhotoPicked(event,'env_classroom',2)">
-        <button class="btn btn-sm env-cam" onclick="document.getElementById('photo-input-env_classroom').click()">📷 拍照</button>
+        <input type="file" accept="image/*" id="photo-input-env_classroom" style="display:none" onchange="onPhotoPicked(event,'env_classroom',2)">
+        <button class="btn btn-sm env-cam" onclick="document.getElementById('photo-input-env_classroom').click()">📷 拍照／選圖</button>
       </div>
       <div id="attach-env_classroom" class="attach-area"></div>
 
       <div class="env-item">
         <label><input type="checkbox" id="env_tools" disabled> 教具歸位</label>
-        <input type="file" accept="image/*" capture="environment" id="photo-input-env_tools" style="display:none" onchange="onPhotoPicked(event,'env_tools',2)">
-        <button class="btn btn-sm env-cam" onclick="document.getElementById('photo-input-env_tools').click()">📷 拍照</button>
+        <input type="file" accept="image/*" id="photo-input-env_tools" style="display:none" onchange="onPhotoPicked(event,'env_tools',2)">
+        <button class="btn btn-sm env-cam" onclick="document.getElementById('photo-input-env_tools').click()">📷 拍照／選圖</button>
       </div>
       <div id="attach-env_tools" class="attach-area"></div>
 
       <div class="env-item">
         <label><input type="checkbox" id="env_trash" disabled> 垃圾清理</label>
-        <input type="file" accept="image/*" capture="environment" id="photo-input-env_trash" style="display:none" onchange="onPhotoPicked(event,'env_trash',2)">
-        <button class="btn btn-sm env-cam" onclick="document.getElementById('photo-input-env_trash').click()">📷 拍照</button>
+        <input type="file" accept="image/*" id="photo-input-env_trash" style="display:none" onchange="onPhotoPicked(event,'env_trash',2)">
+        <button class="btn btn-sm env-cam" onclick="document.getElementById('photo-input-env_trash').click()">📷 拍照／選圖</button>
       </div>
       <div id="attach-env_trash" class="attach-area"></div>
 
       <div class="env-item">
         <label><input type="checkbox" id="env_toilet" disabled> 廁所清理</label>
-        <input type="file" accept="image/*" capture="environment" id="photo-input-env_toilet" style="display:none" onchange="onPhotoPicked(event,'env_toilet',2)">
-        <button class="btn btn-sm env-cam" onclick="document.getElementById('photo-input-env_toilet').click()">📷 拍照</button>
+        <input type="file" accept="image/*" id="photo-input-env_toilet" style="display:none" onchange="onPhotoPicked(event,'env_toilet',2)">
+        <button class="btn btn-sm env-cam" onclick="document.getElementById('photo-input-env_toilet').click()">📷 拍照／選圖</button>
       </div>
       <div id="attach-env_toilet" class="attach-area"></div>
     </div>
@@ -532,7 +532,7 @@ function photoArea(id, kpi, label, required) {
   return `<div class="form-row">
     <label>📸 ${label} ${required ? '<span class="req">*至少 1 張</span>' : ''}</label>
     <div id="attach-${id}" class="attach-area"></div>
-    <input type="file" accept="image/*" capture="environment" id="photo-input-${id}" style="display:none" onchange="onPhotoPicked(event, '${id}', ${kpi})">
+    <input type="file" accept="image/*" id="photo-input-${id}" style="display:none" onchange="onPhotoPicked(event, '${id}', ${kpi})">
     <button class="btn btn-sm mt-1" onclick="document.getElementById('photo-input-${id}').click()">📷 拍照／選圖</button>
   </div>`;
 }
