@@ -47,6 +47,15 @@ function getHeaders(sheet) {
 }
 
 /**
+ * date 欄正規化：Sheets 會把 yyyy-MM-dd 自動轉成 Date 物件，
+ * 讀出來一律轉回字串，否則所有「按月/日比對」（String(l.date) >= from 等）全部失效
+ */
+function cellDateStr_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, 'Asia/Taipei', 'yyyy-MM-dd');
+  return v;
+}
+
+/**
  * 把 sheet 轉成 array of objects
  */
 function sheetToObjects(name) {
@@ -57,7 +66,7 @@ function sheetToObjects(name) {
   const data = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
   return data.map(row => {
     const obj = {};
-    headers.forEach((h, i) => obj[h] = row[i]);
+    headers.forEach((h, i) => obj[h] = (h === 'date') ? cellDateStr_(row[i]) : row[i]);
     return obj;
   });
 }
@@ -85,7 +94,7 @@ function findObject(name, key, value) {
   const headers = getHeaders(sheet);
   const values = sheet.getRange(row, 1, 1, headers.length).getValues()[0];
   const obj = {};
-  headers.forEach((h, i) => obj[h] = values[i]);
+  headers.forEach((h, i) => obj[h] = (h === 'date') ? cellDateStr_(values[i]) : values[i]);
   obj._row = row;
   return obj;
 }
