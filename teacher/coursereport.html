@@ -137,6 +137,19 @@ function driveThumb(url, fileId, size) {
   const id = fileId || ((url || '').match(/\/d\/([^/]+)/) || [])[1];
   return id ? `https://drive.google.com/thumbnail?id=${id}&sz=w${size || 400}` : url;
 }
+// Drive 縮圖失敗 → lh3 備援 → 相機圖示
+function thumbFallback(img) {
+  const id = img.getAttribute('data-fbid');
+  if (!img.dataset.f && id) {
+    img.dataset.f = '1';
+    img.src = 'https://lh3.googleusercontent.com/d/' + id + '=w400';
+    return;
+  }
+  const holder = document.createElement('div');
+  holder.style.cssText = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:22px;';
+  holder.textContent = '📷';
+  img.replaceWith(holder);
+}
 function weekday(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   return isNaN(d) ? '' : '（週' + WEEK_ZH[d.getDay()] + '）';
@@ -182,7 +195,7 @@ function fieldLines(obj, fields) {
 function photoGrid(photos) {
   if (!photos.length) return '';
   return `<div class="photo-grid">${photos.map(p =>
-    `<a href="${esc(p.url)}" target="_blank"><img src="${driveThumb(p.url, p.fileId, 400)}" loading="lazy" alt="課程照片"></a>`
+    `<a href="${esc(p.url)}" target="_blank"><img src="${driveThumb(p.url, p.fileId, 400)}" data-fbid="${esc(p.fileId || ((p.url || '').match(/\/d\/([^/]+)/) || [])[1] || '')}" onerror="thumbFallback(this)" loading="lazy" alt="課程照片"></a>`
   ).join('')}</div>`;
 }
 

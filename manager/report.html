@@ -171,10 +171,12 @@ function driveThumb(url, fileId, size) {
   return id ? `https://drive.google.com/thumbnail?id=${id}&sz=w${size || 400}` : url;
 }
 
-function joinLogValues(dataObj) {
+function joinLogValues(dataObj, opts) {
   if (!dataObj || typeof dataObj !== 'object') return '';
   return Object.entries(dataObj)
     .filter(([k, v]) => v !== '' && v !== false && v != null && v !== 'undefined')
+    .filter(([k]) => !(opts && opts.only) || opts.only.indexOf(k) >= 0)
+    .filter(([k]) => !(opts && opts.skip) || opts.skip.indexOf(k) < 0)
     .map(([k, v]) => {
       // 課程/專案物件另外展開，避免 [object Object]
       if (k === 'courses' && Array.isArray(v)) {
@@ -306,9 +308,13 @@ function renderReport(nickname, ym, ev, evalObj) {
     const links = evList.filter(e => e.type !== 'photo');
 
     // 該 KPI 當月日誌文字
+    // 安親制 K3 班級經營 / K6 環境整潔共用日報第 2 桶 → 拆欄位呈現，避免兩張卡內容一樣
+    let fieldOpts = null;
+    if (anqin && def.no === 3) fieldOpts = { only: ['class_status'] };
+    if (anqin && def.no === 6) fieldOpts = { skip: ['class_status'] };
     const logLines = [];
     logs.forEach(l => {
-      const s = joinLogValues(l['kpi' + logBucketNo(def.no) + '_data']);
+      const s = joinLogValues(l['kpi' + logBucketNo(def.no) + '_data'], fieldOpts);
       if (s) logLines.push(`<div class="kpi-log-line"><span class="d">${String(l.date).slice(5)}</span>${s}</div>`);
     });
 

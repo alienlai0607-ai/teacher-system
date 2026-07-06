@@ -28,9 +28,24 @@ window.LOGVIEW = (function () {
     // 依 url 去重
     const seen = {};
     const uniq = list.filter(p => p.url && !seen[p.url] && (seen[p.url] = true));
-    return `<div class="lv-photos">` + uniq.map(p =>
-      `<a href="${esc(p.url)}" target="_blank"><img src="${esc(thumb(p.url, p.fileId))}" loading="lazy" alt="照片"></a>`
-    ).join('') + `</div>`;
+    return `<div class="lv-photos">` + uniq.map(p => {
+      const id = p.fileId || ((p.url || '').match(/\/d\/([^/]+)/) || [])[1] || '';
+      return `<a href="${esc(p.url)}" target="_blank"><img src="${esc(thumb(p.url, p.fileId))}" data-fbid="${esc(id)}" onerror="LOGVIEW.thumbFallback(this)" loading="lazy" alt="照片"></a>`;
+    }).join('') + `</div>`;
+  }
+
+  // Drive 縮圖失敗 → lh3 備援 → 相機圖示
+  function thumbFallback(img) {
+    const id = img.getAttribute('data-fbid');
+    if (!img.dataset.f && id) {
+      img.dataset.f = '1';
+      img.src = 'https://lh3.googleusercontent.com/d/' + id + '=w200';
+      return;
+    }
+    const holder = document.createElement('div');
+    holder.style.cssText = 'width:64px;height:64px;display:flex;align-items:center;justify-content:center;font-size:20px;background:#faf6ef;border:1px solid #eadbc2;border-radius:8px;';
+    holder.textContent = '📷';
+    img.replaceWith(holder);
   }
 
   function renderLog(l) {
@@ -120,5 +135,5 @@ window.LOGVIEW = (function () {
   .lv-block .kpi-block-title { margin-bottom:4px; }
   `;
 
-  return { renderLog, esc, photoWall, thumb };
+  return { renderLog, esc, photoWall, thumb, thumbFallback };
 })();
