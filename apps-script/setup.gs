@@ -15,7 +15,8 @@ function setupSheets() {
       'checkin_at', 'checkout_at',
       'kpi1_data', 'kpi2_data', 'kpi3_data', 'kpi4_data', 'kpi5_data', 'kpi6_data',
       'reflection', 'help_needed', 'help_content', 'attachments',
-      'created_at', 'updated_at', 'locked'
+      'created_at', 'updated_at', 'locked',
+      'is_makeup', 'submitted_at'
     ],
     [SHEET_NAMES.OKR]: [
       'okr_id', 'semester', 'nickname', 'objective_no', 'objective_type',
@@ -30,7 +31,7 @@ function setupSheets() {
       'self_summary',
       'score_k1', 'score_k2', 'score_k3', 'score_k4', 'score_k5', 'score_k6',
       'score_okr', 'total_score', 'grade', 'bonus',
-      'score_late_count', 'late_penalty', 'bonus_granted',
+      'score_late_count', 'late_penalty', 'makeup_count', 'makeup_penalty', 'bonus_granted',
       'manager_comment', 'interview_notes',
       'status', 'created_at', 'updated_at'
     ],
@@ -40,6 +41,7 @@ function setupSheets() {
       'self_summary',
       'score_m1', 'score_m2', 'score_m3', 'score_m4', 'score_m5', 'score_m6',
       'score_okr', 'total_score', 'grade', 'bonus', 'bonus_granted',
+      'makeup_count', 'makeup_penalty',
       'dept_avg_score',
       'bonus_okr', 'bonus_recruit', 'bonus_dept', 'final_bonus',
       'boss_comment', 'interview_notes',

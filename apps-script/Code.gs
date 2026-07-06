@@ -53,6 +53,7 @@ function handleRequest(e, method) {
       'getTodayLog': () => getTodayLog(params),
       'uploadPhoto': () => uploadPhoto(params),
       'getEvidenceLog': () => getEvidenceLog(params),
+      'getMakeupQuota': () => getMakeupQuota(params),
 
       // 週報
       'saveWeekly': () => saveWeekly(params),

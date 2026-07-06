@@ -82,6 +82,7 @@ function getEvalEvidence(params) {
     department: user.department,
     summary: {
       log_count: logs.length,
+      makeup_count: logs.filter(l => l.is_makeup === true).length,
       evidence_count: evidence.length,
       env_days: env_days,
       lesson_days: lesson_days,
@@ -165,10 +166,17 @@ function saveEval(params) {
   const anqin = isAnqinUser(user);
   // 安親：KPI 滿分 100、OKR 獨立另計（不納入總分）；其餘：KPI 70 + OKR 30
   const okrScore = anqin ? 0 : Number(params.score_okr || 0);
-  const totalScore = kpiTotal + okrScore;
+
+  // ===== 日報補繳扣分：每次補繳扣 2 分（依當月日誌 is_makeup 自動統計，不吃前端參數）=====
+  const makeupCount = sheetToObjects(SHEET_NAMES.LOGS).filter(l =>
+    l.nickname === nickname && String(l.date).slice(0, 7) === year_month && l.is_makeup === true).length;
+  const makeupPenalty = makeupCount * 2;
+  const kpiEffective = Math.max(0, kpiTotal - makeupPenalty);
+
+  const totalScore = kpiEffective + okrScore;
 
   // 等第與獎金（安親看 100 分級距，其餘看 70 分級距）
-  let tier = calcBonusForUser(kpiTotal, user);
+  let tier = calcBonusForUser(kpiEffective, user);
 
   // ===== 安親遲到扣分（獨立於 100 分之外）=====
   // 當月遲到累計 ≥3 次：自 KPI 總分「每次額外扣 5 分」或「直接降一個獎金等級」，擇重者
@@ -177,7 +185,7 @@ function saveEval(params) {
     lateCount = Number(params.score_late_count || 0);
     if (lateCount >= 3) {
       const penaltyPoints = (lateCount - 2) * 5; // 第 3 次起才扣，每次 5 分
-      const tierByPoints = calcBonusForUser(Math.max(0, kpiTotal - penaltyPoints), user); // 方案A：扣分
+      const tierByPoints = calcBonusForUser(Math.max(0, kpiEffective - penaltyPoints), user); // 方案A：扣分
       const tierByDrop = bonusAfterDrop(tier.grade, 1, user);                              // 方案B：降一級
       // 擇重者＝獎金較低者
       tier = (tierByPoints.bonus <= tierByDrop.bonus) ? tierByPoints : tierByDrop;
@@ -196,6 +204,8 @@ function saveEval(params) {
     bonus: tier.bonus,
     score_late_count: lateCount,
     late_penalty: latePenalty,
+    makeup_count: makeupCount,
+    makeup_penalty: makeupPenalty,
     bonus_granted: bonusGranted,
     manager_comment: params.manager_comment || params.boss_comment || '',
     interview_notes: params.interview_notes || '',

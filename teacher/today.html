@@ -85,6 +85,9 @@
   .nmodal h3 { margin:0; color:var(--primary); }
   .nmodal .nitem { padding:12px 0; border-bottom:1px solid var(--border); font-size:14px; line-height:1.6; }
   .nmodal .nitem:last-child { border-bottom:none; }
+  /* 補繳模式 */
+  #makeup-banner { display:none; background:#FFF3E0; border:1.5px solid #F5941E; color:#B5710E; border-radius:10px; padding:10px 12px; font-size:13px; line-height:1.7; margin-top:10px; }
+  .mk-warn { background:#fde8e8; border:1px solid var(--danger); color:#c0392b; border-radius:8px; padding:10px 12px; margin:10px 0; font-size:13px; line-height:1.8; }
 </style>
 </head>
 <body>
@@ -116,7 +119,9 @@
         <div class="text-lg" style="font-weight:700;">📅 <span id="today-date"></span></div>
         <div class="muted text-sm">🏫 <span id="user-dept"></span>　👤 <span id="user-nick"></span></div>
       </div>
+      <button class="btn btn-sm" id="makeup-btn" onclick="openMakeup()">⏰ 補繳</button>
     </div>
+    <div id="makeup-banner"></div>
   </div>
 
   <!-- Step 2 每日必填 -->
@@ -249,6 +254,28 @@
   </div>
 </div>
 
+<!-- 補繳選日期彈窗 -->
+<div class="nmodal-mask" id="mkmodal" onclick="if(event.target===this)closeMakeup()">
+  <div class="nmodal">
+    <div class="flex-between">
+      <h3>⏰ 日報補繳</h3>
+      <button class="btn btn-sm" onclick="closeMakeup()">關閉</button>
+    </div>
+    <div class="mt-1">
+      <div id="mk-quota" style="font-weight:700;"></div>
+      <div class="mk-warn">
+        ⚠️ 每次補繳將於當月 KPI <b>扣 2 分</b>，每月最多 <b>3 次</b>機會。<br>
+        💪 請養成習慣：<b>當天在教室完成課室管理的填寫</b>。
+      </div>
+      <div class="form-row">
+        <label>選擇補繳日期（限本月的過去日期）</label>
+        <input type="date" id="mk-date">
+      </div>
+    </div>
+    <button class="btn btn-primary mt-2" style="width:100%;" onclick="confirmMakeup()">確認進入補繳模式</button>
+  </div>
+</div>
+
 <script>
 const session = AUTH.requireRole(['teacher', 'manager', 'admin_staff', 'admin']);
 
@@ -300,9 +327,17 @@ let parentContacted = null;        // null 未選 / true / false
 const attachments = {};            // { kpiNo: [{type,url,fileId,kpi,description,forType}] }
 let autoSaveTimer;
 
+// ===== 補繳模式狀態 =====
+const MK_KEY = 'bp_makeup_date';
+let makeupDate = null;             // 補繳中的過去日期（null = 今日模式）
+let makeupQuota = null;            // { used, limit, remaining }
+
 window.addEventListener('load', async () => {
   UI.mountHeader(session);
-  document.getElementById('today-date').textContent = formatToday();
+  initMakeupMode();
+  document.getElementById('today-date').textContent = makeupDate
+    ? makeupDate.replace(/-/g, '/') + '（補繳）'
+    : formatToday();
   document.getElementById('user-dept').textContent = session.department;
   document.getElementById('user-nick').textContent = session.nickname;
 
@@ -378,7 +413,69 @@ function nowTime() {
 }
 function val(id) { const el = document.getElementById(id); return el ? el.value.trim() : ''; }
 function chk(id) { const el = document.getElementById(id); return el ? el.checked : false; }
-function scheduleSave() { clearTimeout(autoSaveTimer); autoSaveTimer = setTimeout(autoSave, 1500); }
+function scheduleSave() {
+  if (makeupDate) return;   // 補繳模式不自動存草稿，避免半途離開占用補繳次數
+  clearTimeout(autoSaveTimer); autoSaveTimer = setTimeout(autoSave, 1500);
+}
+function currentDateStr() { return makeupDate || todayDateStr(); }
+
+// ===== 補繳模式 =====
+function initMakeupMode() {
+  const d = sessionStorage.getItem(MK_KEY);
+  const today = todayDateStr();
+  if (d && d < today && d.slice(0, 7) === today.slice(0, 7)) makeupDate = d;
+  else sessionStorage.removeItem(MK_KEY);
+  if (!makeupDate) return;
+  document.getElementById('makeup-btn').style.display = 'none';
+  const b = document.getElementById('makeup-banner');
+  b.style.display = 'block';
+  b.innerHTML = `⏰ <b>補繳模式</b>：正在填寫 <b>${makeupDate}</b> 的日報（送出後扣 2 分）。` +
+    `請養成習慣：當天在教室完成課室管理的填寫 💪 ` +
+    `<button class="btn btn-sm" style="margin-left:6px;" onclick="exitMakeup()">返回今日</button>`;
+  document.getElementById('autosave-info').textContent = '⏰ 補繳模式不會自動存草稿，填完請按「提交」';
+}
+async function openMakeup() {
+  UI.loading(true);
+  const q = await API.getMakeupQuota(session.nickname);
+  UI.loading(false);
+  if (!q.ok) { UI.toast('查詢補繳額度失敗：' + (q.error || ''), 'danger'); return; }
+  makeupQuota = q;
+  if (q.remaining <= 0) {
+    alert('⛔ 本月 3 次補繳機會已用完。\n\n請養成習慣：當天在教室完成課室管理的填寫 💪');
+    return;
+  }
+  const today = todayDateStr();
+  const y = new Date(); y.setDate(y.getDate() - 1);
+  const yStr = y.getFullYear() + '-' + String(y.getMonth() + 1).padStart(2, '0') + '-' + String(y.getDate()).padStart(2, '0');
+  if (yStr.slice(0, 7) !== today.slice(0, 7)) {
+    alert('今天是本月第一天，還沒有可補繳的日期（補繳僅限本月）');
+    return;
+  }
+  document.getElementById('mk-quota').textContent = `本月已用 ${q.used} 次，還剩 ${q.remaining} 次補繳機會`;
+  const inp = document.getElementById('mk-date');
+  inp.min = today.slice(0, 8) + '01';
+  inp.max = yStr;
+  inp.value = '';
+  document.getElementById('mkmodal').classList.add('show');
+}
+function closeMakeup() { document.getElementById('mkmodal').classList.remove('show'); }
+function confirmMakeup() {
+  const d = document.getElementById('mk-date').value;
+  const today = todayDateStr();
+  if (!d) { UI.toast('請先選擇補繳日期', 'warn'); return; }
+  if (d >= today || d.slice(0, 7) !== today.slice(0, 7)) { UI.toast('只能補繳本月的過去日期', 'warn'); return; }
+  const remainAfter = Math.max(0, (makeupQuota ? makeupQuota.remaining : 3) - 1);
+  const ok = confirm(
+    `確定要補繳 ${d} 的日報嗎？\n\n` +
+    `• 本次補繳將扣 2 分\n` +
+    `• 使用後本月還剩 ${remainAfter} 次補繳機會\n` +
+    `• 請養成習慣：當天在教室完成課室管理的填寫 💪`
+  );
+  if (!ok) return;
+  sessionStorage.setItem(MK_KEY, d);
+  location.reload();
+}
+function exitMakeup() { sessionStorage.removeItem(MK_KEY); location.reload(); }
 
 
 // ===== 親師溝通 =====
@@ -601,7 +698,7 @@ async function onPhotoPicked(event, blockKey, kpiNo) {
   try { dataUrl = await compressImage(file); }
   catch (e) { ph.remove(); UI.toast('照片讀取失敗', 'danger'); return; }
   const res = await API.uploadPhoto({
-    nickname: session.nickname, date: todayDateStr(), kpi: kpiNo, mimeType: 'image/jpeg', base64: dataUrl.split(',')[1],
+    nickname: session.nickname, date: currentDateStr(), kpi: kpiNo, mimeType: 'image/jpeg', base64: dataUrl.split(',')[1],
   });
   ph.remove();
   if (!res.ok) { UI.toast('上傳失敗：' + (res.error || ''), 'danger'); return; }
@@ -727,7 +824,7 @@ function findMissing() {
 // ===== 儲存 / 送出 =====
 async function autoSave(silent) {
   const data = collectFormData();
-  const payload = { nickname: session.nickname, date: todayDateStr(), ...data };
+  const payload = { nickname: session.nickname, date: currentDateStr(), ...data };
   const info = document.getElementById('autosave-info');
   if (!silent) info.textContent = '💾 儲存中...';
   const res = await API.saveLog(payload);
@@ -752,16 +849,37 @@ async function submitLog() {
     return;
   }
   banner.style.display = 'none';
-  const res = await autoSave(true);
+  const data = collectFormData();
+  const payload = {
+    nickname: session.nickname, date: currentDateStr(),
+    submitted: true, is_makeup: !!makeupDate,   // submitted=正式提交 → 後端即時通知主管+老闆
+    ...data,
+  };
+  UI.loading(true);
+  const res = await API.saveLog(payload);
+  UI.loading(false);
   if (!res.ok) { UI.toast('送出失敗：' + (res.error || ''), 'danger'); return; }
+  if (makeupDate) {
+    sessionStorage.removeItem(MK_KEY);
+    if (res.is_makeup) {   // 後端實際判定為補繳才顯示扣分訊息（24h 內修改不算補繳）
+      const left = (res.makeup_remaining != null) ? res.makeup_remaining : '—';
+      alert(`✅ ${makeupDate} 補繳完成！\n\n• 本次已扣 2 分\n• 本月還剩 ${left} 次補繳機會\n• 請養成習慣：當天在教室完成課室管理的填寫 💪`);
+    } else {
+      alert(`✅ ${makeupDate} 日報已更新（仍在可修改期限內，不算補繳、不扣分）`);
+    }
+    window.location.href = 'mylog.html';
+    return;
+  }
   UI.toast('日報已提交！', 'success');
   setTimeout(() => window.location.href = 'mylog.html', 1000);
 }
 
-// ===== 載入今日草稿 =====
+// ===== 載入今日草稿（補繳模式載入該日既有紀錄）=====
 async function loadTodayLog() {
   UI.loading(true);
-  const res = await API.getTodayLog(session.nickname);
+  const res = makeupDate
+    ? await API.getLog({ nickname: session.nickname, date: makeupDate })
+    : await API.getTodayLog(session.nickname);
   UI.loading(false);
   if (res.ok && res.log) populateForm(res.log);
 }

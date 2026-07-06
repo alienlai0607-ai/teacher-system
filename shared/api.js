@@ -38,6 +38,7 @@ window.API = (function () {
     listLogs: (params) => call('listLogs', params),
     uploadPhoto: (data) => call('uploadPhoto', data),
     getEvidenceLog: (params) => call('getEvidenceLog', params),
+    getMakeupQuota: (nickname) => call('getMakeupQuota', { nickname }),
 
     addTask: (data) => call('addTask', data),
     listTasks: (params) => call('listTasks', params),

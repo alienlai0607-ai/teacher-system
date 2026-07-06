@@ -65,6 +65,7 @@ function handleRequest(e, method) {
       'getTodayLog': () => getTodayLog(params),
       'uploadPhoto': () => uploadPhoto(params),
       'getEvidenceLog': () => getEvidenceLog(params),
+      'getMakeupQuota': () => getMakeupQuota(params),
 
       // 週報
       'saveWeekly': () => saveWeekly(params),
@@ -254,7 +255,8 @@ function setupSheets() {
       'checkin_at', 'checkout_at',
       'kpi1_data', 'kpi2_data', 'kpi3_data', 'kpi4_data', 'kpi5_data', 'kpi6_data',
       'reflection', 'help_needed', 'help_content', 'attachments',
-      'created_at', 'updated_at', 'locked'
+      'created_at', 'updated_at', 'locked',
+      'is_makeup', 'submitted_at'
     ],
     [SHEET_NAMES.OKR]: [
       'okr_id', 'semester', 'nickname', 'objective_no', 'objective_type',
@@ -269,7 +271,7 @@ function setupSheets() {
       'self_summary',
       'score_k1', 'score_k2', 'score_k3', 'score_k4', 'score_k5', 'score_k6',
       'score_okr', 'total_score', 'grade', 'bonus',
-      'score_late_count', 'late_penalty', 'bonus_granted',
+      'score_late_count', 'late_penalty', 'makeup_count', 'makeup_penalty', 'bonus_granted',
       'manager_comment', 'interview_notes',
       'status', 'created_at', 'updated_at'
     ],
@@ -279,6 +281,7 @@ function setupSheets() {
       'self_summary',
       'score_m1', 'score_m2', 'score_m3', 'score_m4', 'score_m5', 'score_m6',
       'score_okr', 'total_score', 'grade', 'bonus', 'bonus_granted',
+      'makeup_count', 'makeup_penalty',
       'dept_avg_score',
       'bonus_okr', 'bonus_recruit', 'bonus_dept', 'final_bonus',
       'boss_comment', 'interview_notes',
@@ -1006,10 +1009,27 @@ function saveLog(params) {
   const log_id = 'LOG-' + String(date).replace(/-/g, '') + '-' + nickname;
   const existing = findObject(SHEET_NAMES.LOGS, 'log_id', log_id);
 
-  // 鎖定檢查
-  if (existing && existing.locked === true) {
+  // ===== 補繳判定 =====
+  // 回填過去日期，且（該日沒有日誌 或 日誌已鎖定）→ 視為補繳：限當月、每月 3 次、評核時每次扣 2 分
+  const today = todayStr();
+  const isBackdated = String(date) < today;
+  const needMakeup = isBackdated && (!existing || existing.locked === true);
+  let makeupRemaining = null;
+  if (needMakeup) {
+    if (String(date).slice(0, 7) !== today.slice(0, 7)) {
+      return { ok: false, error: '補繳僅限當月日期' };
+    }
+    const used = countMakeupLogs_(nickname, today.slice(0, 7));
+    const alreadyMakeup = existing && existing.is_makeup === true;  // 同一天重複補存不重複扣次數
+    if (!alreadyMakeup && used >= 3) {
+      return { ok: false, error: '本月 3 次補繳機會已用完' };
+    }
+    makeupRemaining = Math.max(0, 3 - used - (alreadyMakeup ? 0 : 1));
+  } else if (existing && existing.locked === true) {
+    // 鎖定檢查（補繳模式可越過鎖定）
     return { ok: false, error: '日誌已鎖定（過 24 小時），無法修改' };
   }
+  const isMakeup = needMakeup || (existing && existing.is_makeup === true);
 
   const data = {
     log_id,
@@ -1030,8 +1050,14 @@ function saveLog(params) {
     help_content: params.help_content || '',
     attachments: params.attachments || '',
     updated_at: nowIso(),
-    locked: false
+    locked: false,
+    is_makeup: isMakeup === true,
+    submitted_at: (existing && existing.submitted_at) || ''
   };
+
+  // 正式提交（非草稿自動存）：首次提交蓋時間戳並通知主管+老闆
+  const firstSubmit = params.submitted === true && !data.submitted_at;
+  if (firstSubmit) data.submitted_at = nowIso();
 
   if (!existing) {
     data.created_at = nowIso();
@@ -1039,6 +1065,8 @@ function saveLog(params) {
   } else {
     updateRow(SHEET_NAMES.LOGS, existing._row, data);
   }
+
+  if (firstSubmit) notifyLogSubmitted_(user, String(date), isMakeup === true, data.help_needed);
 
   // 處理附件 → 寫入 Evidence
   saveEvidenceFromLog(log_id, nickname, date, params.attachments);
@@ -1050,7 +1078,35 @@ function saveLog(params) {
 
   logSystem(nickname, 'save_log', log_id, { date });
 
-  return { ok: true, log_id, msg: '已儲存' };
+  return { ok: true, log_id, msg: '已儲存', is_makeup: isMakeup === true, makeup_remaining: makeupRemaining };
+}
+
+/** 當月已用補繳次數 */
+function countMakeupLogs_(nickname, ym) {
+  return sheetToObjects(SHEET_NAMES.LOGS).filter(l =>
+    l.nickname === nickname && String(l.date).slice(0, 7) === ym && l.is_makeup === true
+  ).length;
+}
+
+/** 查詢本月補繳額度（每月 3 次） */
+function getMakeupQuota(params) {
+  const nickname = params.nickname;
+  if (!nickname) return { ok: false, error: 'missing nickname' };
+  const ym = todayStr().slice(0, 7);
+  const used = countMakeupLogs_(nickname, ym);
+  return { ok: true, year_month: ym, used: used, limit: 3, remaining: Math.max(0, 3 - used) };
+}
+
+/** 日報正式提交 → 即時推播給部門主管 + admin（LINE + OneSignal） */
+function notifyLogSubmitted_(user, date, isMakeup, helpNeeded) {
+  try {
+    const recipients = sheetToObjects(SHEET_NAMES.USERS).filter(u =>
+      u.status === 'active' && u.nickname !== user.nickname &&
+      (u.role === 'admin' || (u.role === 'manager' && u.department === user.department)));
+    const title = '📥 ' + user.nickname + ' 已提交日報' + (isMakeup ? '（補繳）' : '');
+    const body = (user.department || '') + '｜' + date + (helpNeeded ? '\n⚠️ 需要主管協助' : '');
+    recipients.forEach(r => { try { notifyUser_(r, title, body); } catch (e) { /* 單人推播失敗不影響其他人 */ } });
+  } catch (e) { /* 通知失敗不影響日誌儲存 */ }
 }
 
 function getLog(params) {
@@ -1584,6 +1640,7 @@ function getEvalEvidence(params) {
     department: user.department,
     summary: {
       log_count: logs.length,
+      makeup_count: logs.filter(l => l.is_makeup === true).length,
       evidence_count: evidence.length,
       env_days: env_days,
       lesson_days: lesson_days,
@@ -1666,10 +1723,17 @@ function saveEval(params) {
   const anqin = isAnqinUser(user);
   // 安親：KPI 滿分 100、OKR 獨立另計（不納入總分）；其餘：KPI 70 + OKR 30
   const okrScore = anqin ? 0 : Number(params.score_okr || 0);
-  const totalScore = kpiTotal + okrScore;
+
+  // ===== 日報補繳扣分：每次補繳扣 2 分（依當月日誌 is_makeup 自動統計，不吃前端參數）=====
+  const makeupCount = sheetToObjects(SHEET_NAMES.LOGS).filter(l =>
+    l.nickname === nickname && String(l.date).slice(0, 7) === year_month && l.is_makeup === true).length;
+  const makeupPenalty = makeupCount * 2;
+  const kpiEffective = Math.max(0, kpiTotal - makeupPenalty);
+
+  const totalScore = kpiEffective + okrScore;
 
   // 等第與獎金（安親看 100 分級距，其餘看 70 分級距）
-  let tier = calcBonusForUser(kpiTotal, user);
+  let tier = calcBonusForUser(kpiEffective, user);
 
   // ===== 安親遲到扣分（獨立於 100 分之外）=====
   // 當月遲到累計 ≥3 次：自 KPI 總分「每次額外扣 5 分」或「直接降一個獎金等級」，擇重者
@@ -1678,7 +1742,7 @@ function saveEval(params) {
     lateCount = Number(params.score_late_count || 0);
     if (lateCount >= 3) {
       const penaltyPoints = (lateCount - 2) * 5; // 第 3 次起才扣，每次 5 分
-      const tierByPoints = calcBonusForUser(Math.max(0, kpiTotal - penaltyPoints), user); // 方案A：扣分
+      const tierByPoints = calcBonusForUser(Math.max(0, kpiEffective - penaltyPoints), user); // 方案A：扣分
       const tierByDrop = bonusAfterDrop(tier.grade, 1, user);                              // 方案B：降一級
       // 擇重者＝獎金較低者
       tier = (tierByPoints.bonus <= tierByDrop.bonus) ? tierByPoints : tierByDrop;
@@ -1697,6 +1761,8 @@ function saveEval(params) {
     bonus: tier.bonus,
     score_late_count: lateCount,
     late_penalty: latePenalty,
+    makeup_count: makeupCount,
+    makeup_penalty: makeupPenalty,
     bonus_granted: bonusGranted,
     manager_comment: params.manager_comment || params.boss_comment || '',
     interview_notes: params.interview_notes || '',

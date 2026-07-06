@@ -99,6 +99,12 @@
           <div class="text-sm mt-1" id="late-note" style="display:none; color:#c0392b; font-weight:700;"></div>
         </div>
 
+        <div class="card" id="makeup-card" style="display:none;">
+          <div class="card-title">⏳ 日報補繳扣分（系統自動）</div>
+          <div class="text-sm" id="makeup-note" style="color:#c0392b; font-weight:700;"></div>
+          <div class="muted text-sm mt-1">每次補繳日報扣 2 分（每月上限 3 次），依當月日誌自動統計，儲存時後端會再核算一次。</div>
+        </div>
+
         <div class="card">
           <div class="card-title">💬 評語與面談紀錄</div>
           <div class="form-row">
@@ -136,6 +142,7 @@ let teacherList = [];
 let currentTeacher = null;     // 目前評核中的老師物件
 let currentKpiDef = APP_CONFIG.TEACHER_KPI;
 let currentAnqin = false;      // 是否安親 100 分制
+let currentMakeupCount = 0;    // 當月補繳次數（每次扣 2 分，系統自動）
 
 window.addEventListener('load', async () => {
   UI.mountHeader(session);
@@ -193,14 +200,20 @@ async function loadEvidence() {
   document.getElementById('eval-content').style.display = 'block';
 
   // 摘要
+  currentMakeupCount = Number(res.summary.makeup_count || 0);
   document.getElementById('summary').innerHTML = `
     <div class="stat-grid mb-2">
       <div class="stat-box"><div class="stat-num">${res.summary.log_count}</div><div class="stat-label">日誌數</div></div>
       <div class="stat-box"><div class="stat-num">${res.summary.evidence_count}</div><div class="stat-label">證據</div></div>
       <div class="stat-box"><div class="stat-num">${res.summary.feedback_count}</div><div class="stat-label">已給回饋</div></div>
       <div class="stat-box"><div class="stat-num">${res.summary.observation_count}</div><div class="stat-label">觀課/巡班</div></div>
+      <div class="stat-box"><div class="stat-num" style="${currentMakeupCount ? 'color:#c0392b;' : ''}">${currentMakeupCount}</div><div class="stat-label">補繳次數</div></div>
     </div>
   `;
+  // 補繳扣分卡（有補繳才顯示）
+  document.getElementById('makeup-card').style.display = currentMakeupCount ? '' : 'none';
+  document.getElementById('makeup-note').textContent =
+    currentMakeupCount ? `本月補繳 ${currentMakeupCount} 次，自 KPI 總分扣 ${currentMakeupCount * 2} 分` : '';
 
   // 證據分類
   const KPI_DEF = currentKpiDef;
@@ -260,13 +273,18 @@ function recalc() {
   const kpiMax = currentKpiDef.reduce((s, k) => s + k.max, 0);
   const okr = currentAnqin ? 0 : Number(document.getElementById('score_okr').value || 0);
 
-  document.getElementById('total-score').textContent = kpi + okr;
+  // 補繳扣分：每次 -2（與後端 saveEval 相同邏輯）
+  const makeupPenalty = currentMakeupCount * 2;
+  const kpiEff = Math.max(0, kpi - makeupPenalty);
+  const mkText = makeupPenalty ? `｜補繳 ${currentMakeupCount} 次 −${makeupPenalty}` : '';
+
+  document.getElementById('total-score').textContent = kpiEff + okr;
   document.getElementById('total-max').textContent = currentAnqin ? kpiMax : 100;
   document.getElementById('score-breakdown').textContent = currentAnqin
-    ? `KPI ${kpi} 分（OKR 獨立另計）`
-    : `KPI ${kpi} + OKR ${okr}`;
+    ? `KPI ${kpi}${mkText} 分（OKR 獨立另計）`
+    : `KPI ${kpi}${mkText} + OKR ${okr}`;
 
-  let tier = tierFor(kpi);
+  let tier = tierFor(kpiEff);
 
   // 安親遲到扣分預覽（≥3 次：每次 -5 或 降一級，取較重者）
   const lateNote = document.getElementById('late-note');
@@ -274,7 +292,7 @@ function recalc() {
     const lateCount = Number(document.getElementById('score_late_count').value || 0);
     if (lateCount >= 3) {
       const penalty = (lateCount - 2) * 5; // 第 3 次起才扣，每次 5 分
-      const tierByPoints = tierFor(Math.max(0, kpi - penalty));
+      const tierByPoints = tierFor(Math.max(0, kpiEff - penalty));
       // 降一級
       const tiers = window.ANQIN_BONUS_TIERS;
       let idx = tiers.findIndex(t => t.grade === tier.grade);
