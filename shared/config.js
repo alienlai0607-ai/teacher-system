@@ -1,7 +1,7 @@
 // 全站設定
 window.APP_CONFIG = {
   // 部署 Apps Script 後填入網址（doGet 的 Web App URL）
-  API_URL: 'https://script.google.com/macros/s/AKfycbwN1AG8EKW4rFcK3DigccLVbTrDkSil8zyOsjBRaHhnl_AyzCdOJ6TlhoSD5FXXAu4HKw/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbyv7d27_yLo655aaU7KcrxwyL_u1Lx6PmKjQ58gnHKQs4JA2ciGIcqbhPasAy8QFaLG2A/exec',
 
   // Google OAuth Client ID（在 Google Cloud Console 建立）
   GOOGLE_CLIENT_ID: '110974418283-75a7ifti599cauhptkcd0jsqshfrupbf.apps.googleusercontent.com',
