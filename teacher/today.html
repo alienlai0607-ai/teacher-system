@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>今日工作日報</title>
 <link rel="stylesheet" href="../shared/style.css?v=20260624k">
-<script src="../shared/config.js"></script>
-<script src="../shared/auth.js"></script>
-<script src="../shared/api.js"></script>
-<script src="../shared/ui.js"></script>
-<script src="../shared/pwa.js"></script>
-<script src="../shared/push.js"></script>
+<script src="../shared/config.js?v=20260707a"></script>
+<script src="../shared/auth.js?v=20260707a"></script>
+<script src="../shared/api.js?v=20260707a"></script>
+<script src="../shared/ui.js?v=20260707a"></script>
+<script src="../shared/pwa.js?v=20260707a"></script>
+<script src="../shared/push.js?v=20260707a"></script>
 <style>
   body { padding-bottom: 90px; }
   .step-title {
@@ -333,6 +333,7 @@ const MK_KEY = 'bp_makeup_date';
 let makeupDate = null;             // 補繳中的過去日期（null = 今日模式）
 let makeupQuota = null;            // { used, limit, remaining }
 let alreadySubmitted = false;      // 今日日報是否已正式提交（可繼續編輯，更新不重複通知）
+let loadedOk = false;              // 既有日誌載入成功才准自動存檔（避免空白表單蓋掉雲端內容）
 
 window.addEventListener('load', async () => {
   UI.mountHeader(session);
@@ -417,6 +418,7 @@ function val(id) { const el = document.getElementById(id); return el ? el.value.
 function chk(id) { const el = document.getElementById(id); return el ? el.checked : false; }
 function scheduleSave() {
   if (makeupDate) return;   // 補繳模式不自動存草稿，避免半途離開占用補繳次數
+  if (!loadedOk) return;    // 雲端資料還沒載回來前不自動存，防止空白覆蓋
   clearTimeout(autoSaveTimer); autoSaveTimer = setTimeout(autoSave, 1500);
 }
 function currentDateStr() { return makeupDate || todayDateStr(); }
@@ -880,6 +882,10 @@ async function autoSave(silent) {
 }
 
 async function submitLog() {
+  if (!loadedOk) {
+    UI.toast('資料尚未載入成功，請重新整理頁面後再送出（避免覆蓋既有內容）', 'danger');
+    return;
+  }
   const missing = findMissing();
   const banner = document.getElementById('miss-banner');
   if (missing.length) {
@@ -924,11 +930,23 @@ async function submitLog() {
 // ===== 載入今日草稿（補繳模式載入該日既有紀錄）=====
 async function loadTodayLog() {
   UI.loading(true);
-  const res = makeupDate
-    ? await API.getLog({ nickname: session.nickname, date: makeupDate })
-    : await API.getTodayLog(session.nickname);
+  let res = null;
+  try {
+    res = makeupDate
+      ? await API.getLog({ nickname: session.nickname, date: makeupDate })
+      : await API.getTodayLog(session.nickname);
+  } catch (e) { res = null; }
   UI.loading(false);
-  if (res.ok && res.log) populateForm(res.log);
+  if (res && res.ok) {
+    loadedOk = true;   // 載入成功（就算今天還沒有紀錄）才開放自動存檔
+    if (res.log) populateForm(res.log);
+  } else {
+    const info = document.getElementById('autosave-info');
+    if (info) {
+      info.textContent = '⚠️ 資料載入失敗，已暫停自動存檔——請重新整理頁面再填寫，避免覆蓋既有內容';
+      info.style.color = 'var(--danger)';
+    }
+  }
 }
 
 function populateForm(log) {

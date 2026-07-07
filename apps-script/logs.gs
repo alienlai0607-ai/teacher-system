@@ -37,6 +37,18 @@ function saveLog(params) {
   }
   const isMakeup = needMakeup || (existing && existing.is_makeup === true);
 
+  // ===== 空白覆蓋防護 =====
+  // 自動存檔（非正式提交）若內容幾乎全空，而雲端已有實質內容（文字/照片），
+  // 一律跳過不寫入——防止快取舊頁面或尚未載入完成的空白表單把整天的紀錄蓋掉
+  if (params.submitted !== true && existing) {
+    const incomingScore = logContentScore_(params);
+    const existingScore = logContentScore_(existing);
+    if (incomingScore < 20 && existingScore >= 100) {
+      logSystem(nickname, 'skip_empty_autosave', log_id, { incoming: incomingScore, existing: existingScore });
+      return { ok: true, log_id, msg: '雲端已有內容，空白草稿未覆蓋', skipped: true };
+    }
+  }
+
   const data = {
     log_id,
     date,
@@ -88,6 +100,57 @@ function saveLog(params) {
   logSystem(nickname, 'save_log', log_id, { date });
 
   return { ok: true, log_id, msg: '已儲存', is_makeup: isMakeup === true, makeup_remaining: makeupRemaining };
+}
+
+/**
+ * 日誌內容分數：自由文字長度 + 附件數×50（排除 type/work_types 這類選單值）
+ * 用於空白覆蓋防護與補蓋提交時間戳的判斷
+ */
+function logContentScore_(o) {
+  let n = 0;
+  const SKIP_KEYS = { type: 1, work_types: 1, forType: 1, special_students: 1 };
+  function walk(x) {
+    if (x == null) return;
+    if (typeof x === 'string') { n += x.trim().length; return; }
+    if (Array.isArray(x)) { x.forEach(walk); return; }
+    if (typeof x === 'object') { Object.keys(x).forEach(k => { if (!SKIP_KEYS[k]) walk(x[k]); }); }
+  }
+  ['kpi1_data', 'kpi2_data', 'kpi3_data', 'kpi4_data', 'kpi5_data', 'kpi6_data'].forEach(k => {
+    walk(parseJsonField(o[k]));
+  });
+  n += String(o.reflection || '').trim().length * 3;
+  n += String(o.help_content || '').trim().length;
+  const att = parseJsonField(o.attachments);
+  if (Array.isArray(att)) n += att.length * 50;
+  return n;
+}
+
+/**
+ * 補蓋提交時間戳（admin 修復用）：指定日期中「有實質內容但 submitted_at 空白」的日誌
+ * 一律把 submitted_at 補成該筆 updated_at（歷史資料是舊版後端存的，沒蓋到時間戳）
+ * params: { operator(admin), date, nickname? }，不發通知
+ */
+function adminStampSubmitted(params) {
+  const u = params.operator ? findUserByNickname(params.operator) : null;
+  if (!u || u.role !== 'admin') return { ok: false, error: '僅限管理員操作' };
+  if (!params.date) return { ok: false, error: 'missing date' };
+  const sheet = getSheet(SHEET_NAMES.LOGS);
+  const headers = getHeaders(sheet);
+  const col = headers.indexOf('submitted_at') + 1;
+  if (col === 0) return { ok: false, error: 'LOGS 缺 submitted_at 欄，請先執行 setupSheets' };
+  const all = sheetToObjects(SHEET_NAMES.LOGS);   // 依表列順序，index+2 = 實際列號
+  const stamped = [];
+  all.forEach((l, i) => {
+    if (String(l.date) !== String(params.date)) return;
+    if (params.nickname && l.nickname !== params.nickname) return;
+    if (l.submitted_at) return;
+    if (logContentScore_(l) < 100) return;   // 幾乎沒內容的草稿不補蓋
+    const t = l.updated_at ? new Date(l.updated_at).toISOString() : nowIso();
+    sheet.getRange(i + 2, col).setValue(t);
+    stamped.push(l.nickname);
+  });
+  logSystem(params.operator, 'stamp_submitted', String(params.date), { stamped });
+  return { ok: true, date: String(params.date), stamped };
 }
 
 /** 當月已用補繳次數 */
