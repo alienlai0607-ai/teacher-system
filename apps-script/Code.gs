@@ -56,6 +56,7 @@ function handleRequest(e, method) {
       'getMakeupQuota': () => getMakeupQuota(params),
       'cleanupDuplicateEvidence': () => cleanupDuplicateEvidence(params),
       'adminStampSubmitted': () => adminStampSubmitted(params),
+      'adminBroadcast': () => adminBroadcast(params),
 
       // 週報
       'saveWeekly': () => saveWeekly(params),

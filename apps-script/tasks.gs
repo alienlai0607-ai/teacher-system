@@ -181,6 +181,30 @@ function notifyUser_(user, title, body) {
   pushOneSignal_(user.nickname, title, body);
 }
 
+/**
+ * 群發公告（admin 專用）：發給所有 active 使用者（不含 operator 自己），LINE + OneSignal 同步
+ * params: { operator(admin), title, body, roles? }  roles 逗號分隔可過濾（如 'teacher,manager'）
+ * GET 可用：?action=adminBroadcast&operator=柏翰&title=...&body=...
+ */
+function adminBroadcast(params) {
+  const u = params.operator ? findUserByNickname(params.operator) : null;
+  if (!u || u.role !== 'admin') return { ok: false, error: '僅限管理員操作' };
+  const title = String(params.title || '').trim();
+  const body = String(params.body || '').trim();
+  if (!title || !body) return { ok: false, error: 'missing title/body' };
+  const roles = params.roles ? String(params.roles).split(',') : null;
+  const users = sheetToObjects(SHEET_NAMES.USERS).filter(x =>
+    x.status === 'active' && x.nickname !== u.nickname &&
+    (!roles || roles.indexOf(x.role) >= 0)
+  );
+  const sent = [];
+  users.forEach(x => {
+    try { notifyUser_(x, title, body); sent.push(x.nickname); } catch (e) { /* 單人失敗不擋其他人 */ }
+  });
+  logSystem(params.operator, 'broadcast', '', { title: title, count: sent.length });
+  return { ok: true, sent: sent, count: sent.length };
+}
+
 function addDaysStr_(dateStr, n) {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() + n);
