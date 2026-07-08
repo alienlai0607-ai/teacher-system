@@ -94,25 +94,46 @@
       box.style.display = open ? 'block' : 'none';
       toggle.onclick = function () { box.style.display = box.style.display === 'none' ? 'block' : 'none'; if (box.style.display === 'block') load(); };
 
+      var lastThread = Array.isArray(opts.thread) ? opts.thread : [];
+
+      function render(thread) {
+        lastThread = thread || [];
+        var list = document.getElementById(uid + '_list');
+        list.innerHTML = CHAT.renderThread(lastThread, meNick);
+        list.scrollTop = list.scrollHeight;
+        var badge = document.getElementById(uid + '_n');
+        if (badge) badge.textContent = lastThread.length ? '（' + lastThread.length + '）' : '';
+      }
+
       function load() {
         API.listFeedbackThread({ log_id: logId }).then(function (res) {
-          var list = document.getElementById(uid + '_list');
-          if (!res || !res.ok) { list.innerHTML = '<div class="chat-empty">載入失敗</div>'; return; }
-          list.innerHTML = CHAT.renderThread(res.thread, meNick);
-          list.scrollTop = list.scrollHeight;
-          var badge = document.getElementById(uid + '_n');
-          if (badge) badge.textContent = res.thread.length ? '（' + res.thread.length + '）' : '';
+          if (!res || !res.ok) {
+            document.getElementById(uid + '_list').innerHTML = '<div class="chat-empty">載入失敗</div>';
+            return;
+          }
+          render(res.thread);
         });
+      }
+
+      // 回覆對象：優先用指定的 otherNick，否則抓對話裡最後一個「不是自己」的人
+      function targetNick() {
+        if (otherNick) return otherNick;
+        for (var i = lastThread.length - 1; i >= 0; i--) {
+          if (lastThread[i].from_nickname !== meNick) return lastThread[i].from_nickname;
+        }
+        return '';
       }
 
       document.getElementById(uid + '_send').onclick = function () {
         var ta = document.getElementById(uid + '_in');
         var content = ta.value.trim();
         if (!content) { UI.toast('請輸入訊息', 'warn'); return; }
+        var to = targetNick();
+        if (!to) { UI.toast('尚無對話對象（等主管先給回饋）', 'warn'); return; }
         var tagSel = document.getElementById(uid + '_tag');
         var tag = tagSel ? tagSel.value : '';
         UI.loading(true);
-        API.addFeedback({ log_id: logId, from_nickname: meNick, to_nickname: otherNick, content: content, tag: tag })
+        API.addFeedback({ log_id: logId, from_nickname: meNick, to_nickname: to, content: content, tag: tag })
           .then(function (res) {
             UI.loading(false);
             if (!res || !res.ok) { UI.toast((res && res.error) || '送出失敗', 'danger'); return; }
@@ -122,7 +143,9 @@
           });
       };
 
-      if (open && !opts.thread) load();
+      // 有帶初始 thread 直接畫（不再多打一次 API）；沒帶且展開才即時載入
+      if (opts.thread) render(lastThread);
+      else if (open) load();
       return { reload: load };
     }
   };
