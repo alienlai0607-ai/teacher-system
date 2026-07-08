@@ -77,6 +77,7 @@ function handleRequest(e, method) {
       // 回饋
       'addFeedback': () => addFeedback(params),
       'listFeedback': () => listFeedback(params),
+      'listFeedbackThread': () => listFeedbackThread(params),
       'markFeedbackRead': () => markFeedbackRead(params),
 
       // 觀課
@@ -1511,19 +1512,44 @@ function addFeedback(params) {
   if (!log_id || !from_nickname || !to_nickname || !content) {
     return { ok: false, error: 'missing required fields' };
   }
+  const fromU = findUserByNickname(from_nickname);
+  const toU = findUserByNickname(to_nickname);
+  // 主管/老闆發的算「回饋」；老師發的算「回覆」（回覆不需 tag）
+  const isBoss = fromU && (fromU.role === 'manager' || fromU.role === 'admin');
+  const feedback_id = Utilities.getUuid();
   appendRow(SHEET_NAMES.FEEDBACK, {
-    feedback_id: Utilities.getUuid(),
+    feedback_id: feedback_id,
     log_id,
     from_nickname,
     to_nickname,
     content,
-    tag: tag || '已知悉',
+    tag: isBoss ? (tag || '已知悉') : '回覆',
     created_at: nowIso(),
     read_at: ''
   });
-  logSystem(from_nickname, 'add_feedback', log_id, { to: to_nickname, tag });
-  return { ok: true };
+  logSystem(from_nickname, 'add_feedback', log_id, { to: to_nickname, tag: tag, reply: !isBoss });
+
+  // 即時通知對方（LINE + OneSignal）
+  try {
+    const dateStr = String(log_id).replace(/^LOG-(\d{4})(\d{2})(\d{2})-.*$/, '$1/$2/$3');
+    const title = isBoss ? ('💬 ' + from_nickname + ' 給你回饋') : ('💬 ' + from_nickname + ' 回覆了你');
+    const body = (dateStr ? ('（' + dateStr + ' 日報）\n') : '') + String(content).slice(0, 120);
+    notifyUser_(toU, title, body);
+  } catch (e) { /* 通知失敗不影響回饋寫入 */ }
+
+  return { ok: true, feedback_id: feedback_id };
 }
+
+/** 對話串：某則日誌的所有往來訊息，依時間正序（老師/主管共用） */
+function listFeedbackThread(params) {
+  const { log_id } = params;
+  if (!log_id) return { ok: false, error: 'missing log_id' };
+  const list = sheetToObjects(SHEET_NAMES.FEEDBACK)
+    .filter(f => f.log_id === log_id)
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  return { ok: true, thread: list };
+}
+
 
 function listFeedback(params) {
   const { nickname, log_id, unread_only } = params;

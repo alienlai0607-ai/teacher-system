@@ -11,6 +11,7 @@
 <script src="../shared/ui.js?v=20260707a"></script>
 <script src="../shared/pwa.js?v=20260707a"></script>
 <script src="../shared/push.js?v=20260707a"></script>
+<script src="../shared/chat.js?v=20260707a"></script>
 <style>
   .score-circle {
     background: linear-gradient(135deg, var(--primary), var(--accent));
@@ -150,15 +151,26 @@ async function loadRecentLogs() {
     return;
   }
   wrap.innerHTML = res.logs.map(l => {
-    const fbList = fbMap[l.log_id] || [];
+    const fbList = (fbMap[l.log_id] || []).slice().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+    const hasBoss = fbList.some(f => f.from_nickname !== session.nickname);
     return `<div class="log-item">
       <div class="flex-between">
         <div><strong>${UI.formatDate(l.date)}</strong> ${l.help_needed ? '<span class="tag tag-danger">求助</span>' : '<span class="tag tag-success">已交</span>'}</div>
         <div class="muted text-sm">${l.reflection ? l.reflection.slice(0, 30) + '...' : ''}</div>
       </div>
-      ${fbList.map(f => `<div class="feedback-item">💬 <strong>${f.from_nickname}</strong>：${f.content} <span class="tag tag-${tagClass(f.tag)}">${f.tag}</span></div>`).join('')}
+      ${hasBoss ? `<div class="chat-mount" data-logid="${l.log_id}"></div>` : ''}
     </div>`;
   }).join('');
+
+  // 有主管回饋的日誌 → 掛上雙向對話（預設展開，老師就是要看回饋並回覆）
+  wrap.querySelectorAll('.chat-mount').forEach(el => {
+    const logId = el.getAttribute('data-logid');
+    const thread = (fbMap[logId] || []).slice().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+    CHAT.mount(el, {
+      logId, meNick: session.nickname, otherNick: '', open: true, thread,
+      onSent: () => {}   // 送出後 chat 元件自己 reload
+    });
+  });
 }
 
 // ===== 證據明細 =====

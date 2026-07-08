@@ -10,6 +10,7 @@
 <script src="../shared/api.js?v=20260707a"></script>
 <script src="../shared/ui.js?v=20260707a"></script>
 <script src="../shared/logview.js?v=20260707a"></script>
+<script src="../shared/chat.js?v=20260707a"></script>
 <script src="../shared/pwa.js?v=20260707a"></script>
 <script src="../shared/push.js?v=20260707a"></script>
 <style>
@@ -135,6 +136,17 @@ async function loadDetail(nickname) {
     <h3 style="margin-top:0;">${nickname} 的最近日誌</h3>
     ${res.logs.map(l => renderLogCard(l, fbMap[l.log_id] || [])).join('')}
   `;
+
+  // 每則日誌掛上雙向對話（帶入初始 thread，避免每則多打一次 API）
+  detail.querySelectorAll('.chat-mount').forEach(el => {
+    const logId = el.getAttribute('data-logid');
+    const thread = (fbMap[logId] || []).slice().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+    CHAT.mount(el, {
+      logId, meNick: session.nickname, otherNick: nickname,
+      tags: ['已知悉', '優秀表現', '需改進', '求助回應'],
+      open: true, thread,
+    });
+  });
 }
 
 function renderLogCard(l, fbList) {
@@ -153,46 +165,9 @@ function renderLogCard(l, fbList) {
       ${helpHtml}
       ${LOGVIEW.renderLog(l)}
       ${l.reflection ? `<div class="kpi-block"><div class="kpi-block-title">💭 心得</div>${LOGVIEW.esc(l.reflection)}</div>` : ''}
-      ${fbList.length > 0 ? fbList.map(f => `<div class="kpi-block" style="background:#fff8e7;"><div class="kpi-block-title">💬 ${f.from_nickname} 回饋</div>${LOGVIEW.esc(f.content)} <span class="tag tag-info">${f.tag}</span></div>`).join('') : ''}
-      ${renderFeedbackInput(l.log_id, l.nickname)}
+      <div class="chat-mount" data-logid="${l.log_id}"></div>
     </div>
   `;
-}
-
-function renderFeedbackInput(log_id, to_nickname) {
-  return `
-    <div class="feedback-input">
-      <input placeholder="給予回饋..." id="fb-${log_id}">
-      <select id="fb-tag-${log_id}" style="width:auto;">
-        <option>已知悉</option>
-        <option>優秀表現</option>
-        <option>需改進</option>
-        <option>求助回應</option>
-      </select>
-      <button class="btn btn-primary btn-sm" onclick="submitFeedback('${log_id}', '${to_nickname}')">送出</button>
-    </div>
-  `;
-}
-
-async function submitFeedback(log_id, to_nickname) {
-  const content = document.getElementById('fb-' + log_id).value.trim();
-  const tag = document.getElementById('fb-tag-' + log_id).value;
-  if (!content) {
-    UI.toast('請填寫回饋內容', 'warn');
-    return;
-  }
-  UI.loading(true);
-  const res = await API.addFeedback({
-    log_id, from_nickname: session.nickname, to_nickname, content, tag
-  });
-  UI.loading(false);
-  if (res.ok) {
-    UI.toast('回饋已送出', 'success');
-    document.getElementById('fb-' + log_id).value = '';
-    loadDetail(selectedTeacher);
-  } else {
-    UI.toast(res.error, 'danger');
-  }
 }
 </script>
 </body>

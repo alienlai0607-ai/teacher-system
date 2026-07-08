@@ -65,6 +65,7 @@ function handleRequest(e, method) {
       // 回饋
       'addFeedback': () => addFeedback(params),
       'listFeedback': () => listFeedback(params),
+      'listFeedbackThread': () => listFeedbackThread(params),
       'markFeedbackRead': () => markFeedbackRead(params),
 
       // 觀課

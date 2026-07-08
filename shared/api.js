@@ -51,6 +51,7 @@ window.API = (function () {
 
     addFeedback: (data) => call('addFeedback', data),
     listFeedback: (params) => call('listFeedback', params),
+    listFeedbackThread: (params) => call('listFeedbackThread', params),
     markFeedbackRead: (id) => call('markFeedbackRead', { feedback_id: id }),
 
     addObservation: (data) => call('addObservation', data),
