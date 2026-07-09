@@ -70,6 +70,7 @@ function handleRequest(e, method) {
       'adminStampSubmitted': () => adminStampSubmitted(params),
       'adminBroadcast': () => adminBroadcast(params),
       'sendDailyKpiPdf': () => sendDailyKpiPdf(params),
+      'sendSubmitPdf': () => sendSubmitPdf(params),
 
       // 週報
       'saveWeekly': () => saveWeekly(params),
@@ -2770,6 +2771,73 @@ function kpiPdfMsg_(dateStr, r) {
   return t;
 }
 
+/** 老闆名單：所有 active admin ＋ 小魚（另一位老闆；LINE 收全部人、App 通知維持部門制不動） */
+function bossUsers_() {
+  return sheetToObjects(SHEET_NAMES.USERS).filter(x =>
+    x.status === 'active' && (x.role === 'admin' || x.nickname === '小魚')
+  );
+}
+
+/** 單人日報 PDF（老師送出當下即時生成） */
+function generatePersonKpiPdf_(nickname, dateStr) {
+  const log = findObject(SHEET_NAMES.LOGS, 'log_id', 'LOG-' + String(dateStr).replace(/-/g, '') + '-' + nickname);
+  if (!log) return null;
+  let h = '<html><head><meta charset="UTF-8"><style>body{font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif; font-size:12px; color:#2c2c2c; margin:0;}</style></head><body>';
+  h += '<div style="background:#F5941E; color:#fff; padding:16px 20px; border-radius:10px;">'
+     + '<div style="font-size:20px; font-weight:bold;">🪐 KPI 日報｜' + pdfEsc_(nickname) + '</div>'
+     + '<div style="font-size:13px; margin-top:4px;">' + dateStr + '　' + pdfEsc_(log.department || '') + '</div></div>';
+  h += pdfLogCard_(log);
+  h += '<div style="text-align:center; color:#bbb; font-size:10px; margin-top:14px;">布拉克星球教育團隊｜teacher.blockplanetcamp.com</div></body></html>';
+  const blob = Utilities.newBlob(h, 'text/html', 'kpi.html').getAs('application/pdf').setName('KPI_' + nickname + '_' + dateStr + '.pdf');
+  const props = PropertiesService.getScriptProperties();
+  let root;
+  const cached = props.getProperty('KPI_PDF_FOLDER_ID');
+  if (cached) { try { root = DriveApp.getFolderById(cached); } catch (e) {} }
+  if (!root) {
+    const it = DriveApp.getFoldersByName('KPI日報PDF');
+    root = it.hasNext() ? it.next() : DriveApp.createFolder('KPI日報PDF');
+    props.setProperty('KPI_PDF_FOLDER_ID', root.getId());
+  }
+  const ymF = getOrCreateChildFolder_(root, String(dateStr).slice(0, 7));
+  const dup = ymF.getFilesByName('KPI_' + nickname + '_' + dateStr + '.pdf');
+  while (dup.hasNext()) dup.next().setTrashed(true);
+  const file = ymF.createFile(blob);
+  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
+  return { url: 'https://drive.google.com/file/d/' + file.getId() + '/view', log: log };
+}
+
+/**
+ * 老師正式送出後，前端背景呼叫：生成單人 PDF → LINE 分別傳給老闆們（柏翰＋小魚）
+ * 同一份日誌只發一次（重複呼叫/更新日報不重發）
+ */
+function sendSubmitPdf(params) {
+  const nickname = params.nickname;
+  const dateStr = String(params.date || '');
+  if (!nickname || !dateStr) return { ok: false, error: 'missing nickname/date' };
+  const log_id = 'LOG-' + dateStr.replace(/-/g, '') + '-' + nickname;
+  const props = PropertiesService.getScriptProperties();
+  const dedupeKey = 'SENTPDF_' + log_id;
+  if (props.getProperty(dedupeKey)) return { ok: true, skipped: 'already_sent' };
+  const r = generatePersonKpiPdf_(nickname, dateStr);
+  if (!r) return { ok: false, error: 'log not found' };
+  if (!r.log.submitted_at) return { ok: false, error: 'not submitted' };
+  props.setProperty(dedupeKey, nowIso());
+
+  const md = dateStr.slice(5).replace('-', '/');
+  let msg = '📄 ' + nickname + ' ' + md + ' 已繳交';
+  if (r.log.is_makeup === true) msg += '（補繳）';
+  if (r.log.help_needed === true) msg += '\n🚨 有求助：' + String(r.log.help_content || '').slice(0, 100);
+  msg += '\n完整日報（含照片）👇\n' + r.url;
+
+  const sent = [];
+  bossUsers_().forEach(b => {
+    if (b.nickname === nickname) return;   // 自己不用收自己的
+    if (b.line_user_id) { pushLine_(b.line_user_id, msg); sent.push(b.nickname); }
+  });
+  logSystem('system', 'pdf_person', log_id, { sent: sent });
+  return { ok: true, url: r.url, sent: sent };
+}
+
 /** API：手動生成＋推播給所有 admin（?action=sendDailyKpiPdf&operator=柏翰&date=…） */
 function sendDailyKpiPdf(params) {
   const u = params.operator ? findUserByNickname(params.operator) : null;
@@ -2777,10 +2845,9 @@ function sendDailyKpiPdf(params) {
   const dateStr = params.date ? String(params.date) : todayStr();
   const r = generateDailyKpiPdf_(dateStr);
   const msg = kpiPdfMsg_(dateStr, r);
-  const admins = sheetToObjects(SHEET_NAMES.USERS).filter(x => x.role === 'admin' && x.status === 'active');
-  admins.forEach(a => {
+  bossUsers_().forEach(a => {
     if (a.line_user_id) pushLine_(a.line_user_id, msg);
-    pushOneSignal_(a.nickname, '📄 KPI 日報 ' + dateStr, '已提交 ' + r.summary.submitted + '/' + r.summary.total + '，點開看完整報告');
+    if (a.role === 'admin') pushOneSignal_(a.nickname, '📄 KPI 日報 ' + dateStr, '已提交 ' + r.summary.submitted + '/' + r.summary.total + '，點開看完整報告');
   });
   logSystem(params.operator, 'kpi_pdf', dateStr, r.summary);
   return { ok: true, url: r.url, summary: r.summary };
@@ -2791,10 +2858,9 @@ function sendDailyKpiReportAuto() {
   const dateStr = todayStr();
   const r = generateDailyKpiPdf_(dateStr);
   const msg = kpiPdfMsg_(dateStr, r);
-  const admins = sheetToObjects(SHEET_NAMES.USERS).filter(x => x.role === 'admin' && x.status === 'active');
-  admins.forEach(a => {
+  bossUsers_().forEach(a => {
     if (a.line_user_id) pushLine_(a.line_user_id, msg);
-    pushOneSignal_(a.nickname, '📄 KPI 日報 ' + dateStr, '已提交 ' + r.summary.submitted + '/' + r.summary.total + '，點開看完整報告');
+    if (a.role === 'admin') pushOneSignal_(a.nickname, '📄 KPI 日報 ' + dateStr, '已提交 ' + r.summary.submitted + '/' + r.summary.total + '，點開看完整報告');
   });
   logSystem('system', 'kpi_pdf_auto', dateStr, r.summary);
 }

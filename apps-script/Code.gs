@@ -58,6 +58,7 @@ function handleRequest(e, method) {
       'adminStampSubmitted': () => adminStampSubmitted(params),
       'adminBroadcast': () => adminBroadcast(params),
       'sendDailyKpiPdf': () => sendDailyKpiPdf(params),
+      'sendSubmitPdf': () => sendSubmitPdf(params),
 
       // 週報
       'saveWeekly': () => saveWeekly(params),

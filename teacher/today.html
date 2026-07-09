@@ -906,6 +906,15 @@ async function submitLog() {
   const res = await API.saveLog(payload);
   UI.loading(false);
   if (!res.ok) { UI.toast('送出失敗：' + (res.error || ''), 'danger'); return; }
+  // 背景通知老闆（單人 PDF）：keepalive 讓請求離開頁面也能送達；後端會自動去重
+  try {
+    fetch(APP_CONFIG.API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'sendSubmitPdf', nickname: session.nickname, date: currentDateStr() }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch (e) {}
   if (makeupDate) {
     sessionStorage.removeItem(MK_KEY);
     if (res.is_makeup) {   // 後端實際判定為補繳才顯示扣分訊息（24h 內修改不算補繳）
