@@ -57,6 +57,7 @@ function handleRequest(e, method) {
       'cleanupDuplicateEvidence': () => cleanupDuplicateEvidence(params),
       'adminStampSubmitted': () => adminStampSubmitted(params),
       'adminBroadcast': () => adminBroadcast(params),
+      'sendDailyKpiPdf': () => sendDailyKpiPdf(params),
 
       // 週報
       'saveWeekly': () => saveWeekly(params),

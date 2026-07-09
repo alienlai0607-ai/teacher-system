@@ -265,8 +265,14 @@ function handleLineWebhook_(body) {
           updateRow(SHEET_NAMES.USERS, u._row, { line_user_id: userId });
           reply = '✅ ' + nk + ' 綁定成功！之後事項提醒會推播到這裡。';
         }
+      } else if (/^kpi/i.test(text)) {
+        // 老闆專用：生成 KPI 日報 PDF（可能要跑一下，先回覆再推結果）
+        if (ev.replyToken) replyLine_(ev.replyToken, '📄 日報生成中，約 1 分鐘後傳給你…');
+        try { pushLine_(userId, handleKpiLineCommand_(userId, text)); }
+        catch (e) { pushLine_(userId, '❌ 日報生成失敗：' + e.message); }
+        return;
       } else {
-        reply = '請輸入「綁定 你的暱稱」來接收事項提醒，例如：綁定 松鼠';
+        reply = '請輸入「綁定 你的暱稱」來接收事項提醒，例如：綁定 松鼠\n（老闆可輸入「kpi」取得今日日報 PDF）';
       }
       if (ev.replyToken) replyLine_(ev.replyToken, reply);
     }
