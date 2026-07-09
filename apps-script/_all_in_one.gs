@@ -2575,6 +2575,19 @@ function setupTaskReminderTrigger() {
  * - LINE 指令（限 admin）：「kpi」今日、「kpi昨天」、「kpi 2026-07-08」
  */
 
+/** 品牌橫幅圖（放在 GitHub Pages；圖片在 Google 轉檔器一定會顯示，背景色則會被砍掉） */
+function pdfBannerImg_() {
+  try {
+    const r = UrlFetchApp.fetch('https://teacher.blockplanetcamp.com/shared/img/pdf-banner.png', { muteHttpExceptions: true });
+    if (r.getResponseCode() === 200) {
+      const b = r.getBlob();
+      return '<img src="data:image/png;base64,' + Utilities.base64Encode(b.getBytes()) + '" style="width:100%;">';
+    }
+  } catch (e) {}
+  // 備援：橘框橘字（轉檔器會保留邊框與文字色）
+  return '<div style="border:3px solid #E89B3C; border-radius:12px; padding:14px 20px; color:#E89B3C; font-size:22px; font-weight:bold;">🪐 布拉克星球 KPI 日報</div>';
+}
+
 /** 五彩手印圓點（呼應 Logo 的五位居民代表色，品牌記憶點） */
 function pdfDots_() {
   const cs = ['#F4C842', '#5B9BD5', '#E63946', '#7CB342', '#2C3E50'];
@@ -2628,7 +2641,7 @@ function pdfLogCard_(l) {
       + (l.is_makeup === true ? ' <span style="background:#FFF1DD; color:#C77A12; padding:2px 10px; border-radius:10px; font-size:11px; font-weight:bold;">補繳</span>' : '')
     : '<span style="background:#FDEBEC; color:#E63946; padding:2px 10px; border-radius:10px; font-size:11px; font-weight:bold;">✏️ 草稿未送出</span>';
 
-  let h = '<div style="background:#FFFDF5; border:1.5px solid #F0E0C0; box-shadow:3px 3px 0 rgba(61,40,23,0.06); border-left:6px solid #E89B3C; border-radius:8px; padding:12px 14px; margin:10px 0; page-break-inside:avoid;">';
+  let h = '<div style="background:#FFFDF5; border:1.5px solid #F0E0C0; box-shadow:3px 3px 0 rgba(61,40,23,0.06); border-left:6px solid #E89B3C; border-radius:8px; padding:12px 14px; margin:10px 0;">';
   h += '<div style="font-size:15px; font-weight:bold; color:#2C3E50; margin-bottom:6px;">👤 ' + pdfEsc_(l.nickname)
      + ' <span style="font-size:11px; color:#999; font-weight:normal;">' + pdfEsc_(l.department || '') + '</span>　' + submitted + '</div>';
 
@@ -2712,10 +2725,8 @@ function buildDailyKpiHtml_(dateStr) {
 
   let h = '<html><head><meta charset="UTF-8"><style>body{font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif; font-size:12px; color:#3D2817; background:#FFF8E7; margin:0; padding:4px;}</style></head><body>';
   // 封面頁頭
-  h += '<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:4px;"><tr>'
-     + '<td bgcolor="#E89B3C" style="background:#E89B3C; color:#ffffff; padding:18px 20px; border-radius:10px;">'
-     + '<div style="font-size:22px; font-weight:bold; color:#ffffff;">🪐 布拉克星球 KPI 日報</div>'
-     + '<div style="font-size:14px; margin-top:4px; color:#ffffff;">' + dateStr + '</div>' + pdfDots_() + '</td></tr></table>';
+  h += pdfBannerImg_()
+     + '<div style="font-size:15px; font-weight:bold; color:#3D2817; margin:8px 0 0 2px;">📅 ' + dateStr + '　全員日報</div>';
   // 總覽
   h += '<table width="100%" cellpadding="0" cellspacing="0" style="margin:12px 0;"><tr><td bgcolor="#FFFDF5" style="background:#FFFDF5; border:2px solid #F4C842; border-radius:8px; padding:10px 14px;">'
      + '<b style="color:#2C3E50;">📊 今日總覽</b>　'
@@ -2792,10 +2803,8 @@ function generatePersonKpiPdf_(nickname, dateStr) {
   const log = findObject(SHEET_NAMES.LOGS, 'log_id', 'LOG-' + String(dateStr).replace(/-/g, '') + '-' + nickname);
   if (!log) return null;
   let h = '<html><head><meta charset="UTF-8"><style>body{font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif; font-size:12px; color:#3D2817; background:#FFF8E7; margin:0; padding:4px;}</style></head><body>';
-  h += '<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:4px;"><tr>'
-     + '<td bgcolor="#E89B3C" style="background:#E89B3C; color:#ffffff; padding:16px 20px; border-radius:10px;">'
-     + '<div style="font-size:20px; font-weight:bold; color:#ffffff;">🪐 KPI 日報｜' + pdfEsc_(nickname) + '</div>'
-     + '<div style="font-size:13px; margin-top:4px; color:#ffffff;">' + dateStr + '　' + pdfEsc_(log.department || '') + '</div>' + pdfDots_() + '</td></tr></table>';
+  h += pdfBannerImg_()
+     + '<div style="font-size:15px; font-weight:bold; color:#3D2817; margin:8px 0 0 2px;">👤 ' + pdfEsc_(nickname) + '　📅 ' + dateStr + '　' + pdfEsc_(log.department || '') + '</div>';
   h += pdfLogCard_(log);
   h += '<div style="text-align:center; color:#A08B72; font-size:10px; margin-top:14px;">球球・布布・克克・拉拉・星星 陪你紀錄每一天 🪐 布拉克星球教育團隊</div></body></html>';
   const blob = Utilities.newBlob(h, 'text/html', 'kpi.html').getAs('application/pdf').setName('KPI_' + nickname + '_' + dateStr + '.pdf');
