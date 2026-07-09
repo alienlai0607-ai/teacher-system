@@ -2712,11 +2712,12 @@ function buildDailyKpiHtml_(dateStr) {
 
   let h = '<html><head><meta charset="UTF-8"><style>body{font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif; font-size:12px; color:#3D2817; background:#FFF8E7; margin:0; padding:4px;}</style></head><body>';
   // 封面頁頭
-  h += '<div style="background:#E89B3C; color:#fff; padding:18px 20px; border-radius:10px;">'
-     + '<div style="font-size:22px; font-weight:bold;">🪐 布拉克星球 KPI 日報</div>'
-     + '<div style="font-size:14px; margin-top:4px;">' + dateStr + '</div>' + pdfDots_() + '</div>';
+  h += '<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:4px;"><tr>'
+     + '<td bgcolor="#E89B3C" style="background:#E89B3C; color:#ffffff; padding:18px 20px; border-radius:10px;">'
+     + '<div style="font-size:22px; font-weight:bold; color:#ffffff;">🪐 布拉克星球 KPI 日報</div>'
+     + '<div style="font-size:14px; margin-top:4px; color:#ffffff;">' + dateStr + '</div>' + pdfDots_() + '</td></tr></table>';
   // 總覽
-  h += '<div style="background:#FFFDF5; border:2px solid #F4C842; border-radius:8px; padding:10px 14px; margin:12px 0;">'
+  h += '<table width="100%" cellpadding="0" cellspacing="0" style="margin:12px 0;"><tr><td bgcolor="#FFFDF5" style="background:#FFFDF5; border:2px solid #F4C842; border-radius:8px; padding:10px 14px;">'
      + '<b style="color:#2C3E50;">📊 今日總覽</b>　'
      + '✅ 已提交 ' + submittedNames.length + ' 人'
      + '　✏️ 草稿 ' + draftNames.length + ' 人'
@@ -2725,7 +2726,7 @@ function buildDailyKpiHtml_(dateStr) {
      + (draftNames.length ? '<br><span style="color:#C77A12;">草稿：' + draftNames.join('、') + '</span>' : '')
      + (missingNames.length ? '<br><span style="color:#E63946;">未填：' + missingNames.join('、') + '</span>' : '')
      + (helpNames.length ? '<br><span style="color:#E63946; font-weight:bold;">求助：' + helpNames.join('、') + '</span>' : '')
-     + '</div>';
+     + '</td></tr></table>';
 
   // 部門分組
   const deptOrder = ['永康教室', '北區教室', '才藝部門'];
@@ -2791,9 +2792,10 @@ function generatePersonKpiPdf_(nickname, dateStr) {
   const log = findObject(SHEET_NAMES.LOGS, 'log_id', 'LOG-' + String(dateStr).replace(/-/g, '') + '-' + nickname);
   if (!log) return null;
   let h = '<html><head><meta charset="UTF-8"><style>body{font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif; font-size:12px; color:#3D2817; background:#FFF8E7; margin:0; padding:4px;}</style></head><body>';
-  h += '<div style="background:#E89B3C; color:#fff; padding:16px 20px; border-radius:10px;">'
-     + '<div style="font-size:20px; font-weight:bold;">🪐 KPI 日報｜' + pdfEsc_(nickname) + '</div>'
-     + '<div style="font-size:13px; margin-top:4px;">' + dateStr + '　' + pdfEsc_(log.department || '') + '</div>' + pdfDots_() + '</div>';
+  h += '<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:4px;"><tr>'
+     + '<td bgcolor="#E89B3C" style="background:#E89B3C; color:#ffffff; padding:16px 20px; border-radius:10px;">'
+     + '<div style="font-size:20px; font-weight:bold; color:#ffffff;">🪐 KPI 日報｜' + pdfEsc_(nickname) + '</div>'
+     + '<div style="font-size:13px; margin-top:4px; color:#ffffff;">' + dateStr + '　' + pdfEsc_(log.department || '') + '</div>' + pdfDots_() + '</td></tr></table>';
   h += pdfLogCard_(log);
   h += '<div style="text-align:center; color:#A08B72; font-size:10px; margin-top:14px;">球球・布布・克克・拉拉・星星 陪你紀錄每一天 🪐 布拉克星球教育團隊</div></body></html>';
   const blob = Utilities.newBlob(h, 'text/html', 'kpi.html').getAs('application/pdf').setName('KPI_' + nickname + '_' + dateStr + '.pdf');
