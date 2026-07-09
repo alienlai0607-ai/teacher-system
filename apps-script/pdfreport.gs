@@ -5,6 +5,14 @@
  * - LINE 指令（限 admin）：「kpi」今日、「kpi昨天」、「kpi 2026-07-08」
  */
 
+/** 五彩手印圓點（呼應 Logo 的五位居民代表色，品牌記憶點） */
+function pdfDots_() {
+  const cs = ['#F4C842', '#5B9BD5', '#E63946', '#7CB342', '#2C3E50'];
+  return '<div style="margin-top:10px;">' + cs.map(function (c) {
+    return '<span style="display:inline-block; width:9px; height:9px; border-radius:50%; background:' + c + '; margin-right:6px;"></span>';
+  }).join('') + '</div>';
+}
+
 function pdfEsc_(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -46,12 +54,12 @@ function pdfLogCard_(l) {
   const photos = Array.isArray(atts) ? atts.filter(a => a && a.type === 'photo' && a.fileId) : [];
 
   const submitted = l.submitted_at
-    ? '<span style="background:#E3F3E8; color:#1a8a4a; padding:2px 10px; border-radius:10px; font-size:11px; font-weight:bold;">✅ 已提交</span>'
+    ? '<span style="background:#EDF5E3; color:#4E7A28; padding:2px 10px; border-radius:10px; font-size:11px; font-weight:bold;">✅ 已提交</span>'
       + (l.is_makeup === true ? ' <span style="background:#FFF1DD; color:#C77A12; padding:2px 10px; border-radius:10px; font-size:11px; font-weight:bold;">補繳</span>' : '')
-    : '<span style="background:#FDEBEC; color:#C62828; padding:2px 10px; border-radius:10px; font-size:11px; font-weight:bold;">✏️ 草稿未送出</span>';
+    : '<span style="background:#FDEBEC; color:#E63946; padding:2px 10px; border-radius:10px; font-size:11px; font-weight:bold;">✏️ 草稿未送出</span>';
 
-  let h = '<div style="border:1.5px solid #FFE9CC; border-left:6px solid #F5941E; border-radius:8px; padding:12px 14px; margin:10px 0; page-break-inside:avoid;">';
-  h += '<div style="font-size:15px; font-weight:bold; color:#1F3A68; margin-bottom:6px;">👤 ' + pdfEsc_(l.nickname)
+  let h = '<div style="background:#FFFDF5; border:1.5px solid #F0E0C0; box-shadow:3px 3px 0 rgba(61,40,23,0.06); border-left:6px solid #E89B3C; border-radius:8px; padding:12px 14px; margin:10px 0; page-break-inside:avoid;">';
+  h += '<div style="font-size:15px; font-weight:bold; color:#2C3E50; margin-bottom:6px;">👤 ' + pdfEsc_(l.nickname)
      + ' <span style="font-size:11px; color:#999; font-weight:normal;">' + pdfEsc_(l.department || '') + '</span>　' + submitted + '</div>';
 
   // 環境整潔
@@ -73,14 +81,14 @@ function pdfLogCard_(l) {
     const bits = [];
     if (c.name) bits.push(c.name);
     if (c.class) bits.push(c.class);
-    h += '<div style="margin:6px 0 2px; font-weight:bold; color:#1F3A68;">📘 ' + pdfEsc_(c.type || '課程') + (bits.length ? '｜' + pdfEsc_(bits.join('｜')) : '') + '</div>';
+    h += '<div style="margin:6px 0 2px; font-weight:bold; color:#2C3E50;">📘 ' + pdfEsc_(c.type || '課程') + (bits.length ? '｜' + pdfEsc_(bits.join('｜')) : '') + '</div>';
     h += pdfRow_('進度', c.progress);
     h += pdfRow_('學習狀況', c.learning);
     h += pdfRow_('下次計畫', c.next);
   });
   // 專案
   if (k3.project && (k3.project.progress || k3.project.done || k3.project.problem || k3.project.plan)) {
-    h += '<div style="margin:6px 0 2px; font-weight:bold; color:#1F3A68;">🎯 專案</div>';
+    h += '<div style="margin:6px 0 2px; font-weight:bold; color:#2C3E50;">🎯 專案</div>';
     h += pdfRow_('進度', k3.project.progress) + pdfRow_('完成', k3.project.done)
        + pdfRow_('問題', k3.project.problem) + pdfRow_('計畫', k3.project.plan);
   }
@@ -96,7 +104,7 @@ function pdfLogCard_(l) {
   h += pdfRow_('🗂 行政成果', k6.admin_result);
   h += pdfRow_('💭 今日心得', l.reflection);
   if (l.help_needed === true) {
-    h += '<div style="background:#FDEBEC; color:#C62828; padding:6px 10px; border-radius:6px; margin-top:6px; font-weight:bold;">🚨 求助：' + pdfEsc_(l.help_content || '') + '</div>';
+    h += '<div style="background:#FDEBEC; color:#E63946; padding:6px 10px; border-radius:6px; margin-top:6px; font-weight:bold;">🚨 求助：' + pdfEsc_(l.help_content || '') + '</div>';
   }
 
   // 照片牆（每列 4 張）
@@ -132,21 +140,21 @@ function buildDailyKpiHtml_(dateStr) {
   const missingNames = users.filter(u => !logMap[u.nickname]).map(u => u.nickname);
   const helpNames = logs.filter(l => l.help_needed === true).map(l => l.nickname);
 
-  let h = '<html><head><meta charset="UTF-8"><style>body{font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif; font-size:12px; color:#2c2c2c; margin:0;}</style></head><body>';
+  let h = '<html><head><meta charset="UTF-8"><style>body{font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif; font-size:12px; color:#3D2817; background:#FFF8E7; margin:0; padding:4px;}</style></head><body>';
   // 封面頁頭
-  h += '<div style="background:#F5941E; color:#fff; padding:18px 20px; border-radius:10px;">'
+  h += '<div style="background:#E89B3C; color:#fff; padding:18px 20px; border-radius:10px;">'
      + '<div style="font-size:22px; font-weight:bold;">🪐 布拉克星球 KPI 日報</div>'
-     + '<div style="font-size:14px; margin-top:4px;">' + dateStr + '</div></div>';
+     + '<div style="font-size:14px; margin-top:4px;">' + dateStr + '</div>' + pdfDots_() + '</div>';
   // 總覽
-  h += '<div style="background:#FFF6E8; border:1.5px solid #FFE9CC; border-radius:8px; padding:10px 14px; margin:12px 0;">'
-     + '<b style="color:#1F3A68;">📊 今日總覽</b>　'
+  h += '<div style="background:#FFFDF5; border:2px solid #F4C842; border-radius:8px; padding:10px 14px; margin:12px 0;">'
+     + '<b style="color:#2C3E50;">📊 今日總覽</b>　'
      + '✅ 已提交 ' + submittedNames.length + ' 人'
      + '　✏️ 草稿 ' + draftNames.length + ' 人'
      + '　❌ 未填 ' + missingNames.length + ' 人'
      + (helpNames.length ? '　🚨 求助 ' + helpNames.length + ' 人' : '')
      + (draftNames.length ? '<br><span style="color:#C77A12;">草稿：' + draftNames.join('、') + '</span>' : '')
-     + (missingNames.length ? '<br><span style="color:#C62828;">未填：' + missingNames.join('、') + '</span>' : '')
-     + (helpNames.length ? '<br><span style="color:#C62828; font-weight:bold;">求助：' + helpNames.join('、') + '</span>' : '')
+     + (missingNames.length ? '<br><span style="color:#E63946;">未填：' + missingNames.join('、') + '</span>' : '')
+     + (helpNames.length ? '<br><span style="color:#E63946; font-weight:bold;">求助：' + helpNames.join('、') + '</span>' : '')
      + '</div>';
 
   // 部門分組
@@ -157,12 +165,12 @@ function buildDailyKpiHtml_(dateStr) {
     if (!d || seen[d]) return; seen[d] = true;
     const deptLogs = logs.filter(l => l.department === d);
     if (!deptLogs.length) return;
-    h += '<div style="font-size:16px; font-weight:bold; color:#1F3A68; border-bottom:2.5px solid #F5941E; padding-bottom:4px; margin:16px 0 4px;">🏫 ' + pdfEsc_(d) + '</div>';
+    h += '<div style="font-size:16px; font-weight:bold; color:#2C3E50; border-bottom:2.5px solid #E89B3C; padding-bottom:4px; margin:16px 0 4px;">🏫 ' + pdfEsc_(d) + '</div>';
     deptLogs.sort((a, b) => (a.role === 'manager' ? -1 : 1) - (b.role === 'manager' ? -1 : 1));
     deptLogs.forEach(l => { h += pdfLogCard_(l); });
   });
 
-  h += '<div style="text-align:center; color:#bbb; font-size:10px; margin-top:14px;">布拉克星球教育團隊｜teacher.blockplanetcamp.com</div>';
+  h += '<div style="text-align:center; color:#A08B72; font-size:10px; margin-top:14px;">球球・布布・克克・拉拉・星星 陪你紀錄每一天 🪐 布拉克星球教育團隊</div>';
   h += '</body></html>';
   return { html: h, summary: { submitted: submittedNames.length, draft: draftNames.length, missing: missingNames.length, total: users.length, help: helpNames, missingNames: missingNames } };
 }
@@ -212,12 +220,12 @@ function bossUsers_() {
 function generatePersonKpiPdf_(nickname, dateStr) {
   const log = findObject(SHEET_NAMES.LOGS, 'log_id', 'LOG-' + String(dateStr).replace(/-/g, '') + '-' + nickname);
   if (!log) return null;
-  let h = '<html><head><meta charset="UTF-8"><style>body{font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif; font-size:12px; color:#2c2c2c; margin:0;}</style></head><body>';
-  h += '<div style="background:#F5941E; color:#fff; padding:16px 20px; border-radius:10px;">'
+  let h = '<html><head><meta charset="UTF-8"><style>body{font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif; font-size:12px; color:#3D2817; background:#FFF8E7; margin:0; padding:4px;}</style></head><body>';
+  h += '<div style="background:#E89B3C; color:#fff; padding:16px 20px; border-radius:10px;">'
      + '<div style="font-size:20px; font-weight:bold;">🪐 KPI 日報｜' + pdfEsc_(nickname) + '</div>'
-     + '<div style="font-size:13px; margin-top:4px;">' + dateStr + '　' + pdfEsc_(log.department || '') + '</div></div>';
+     + '<div style="font-size:13px; margin-top:4px;">' + dateStr + '　' + pdfEsc_(log.department || '') + '</div>' + pdfDots_() + '</div>';
   h += pdfLogCard_(log);
-  h += '<div style="text-align:center; color:#bbb; font-size:10px; margin-top:14px;">布拉克星球教育團隊｜teacher.blockplanetcamp.com</div></body></html>';
+  h += '<div style="text-align:center; color:#A08B72; font-size:10px; margin-top:14px;">球球・布布・克克・拉拉・星星 陪你紀錄每一天 🪐 布拉克星球教育團隊</div></body></html>';
   const blob = Utilities.newBlob(h, 'text/html', 'kpi.html').getAs('application/pdf').setName('KPI_' + nickname + '_' + dateStr + '.pdf');
   const props = PropertiesService.getScriptProperties();
   let root;
