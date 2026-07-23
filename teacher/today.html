@@ -724,22 +724,37 @@ function compressImage(file, maxDim = 1280, quality = 0.7) {
 async function onPhotoPicked(event, blockKey, kpiNo) {
   const file = event.target.files[0];
   event.target.value = '';
-  if (!file || !file.type.startsWith('image/')) return;
+  if (!file) return;
+  // 部分 Android 選圖後 file.type 是空字串，不能因此擋掉；只擋明確的非圖片
+  if (file.type && !file.type.startsWith('image/')) { UI.toast('這不是圖片檔，請選照片', 'danger'); return; }
   const wrap = document.getElementById('attach-' + blockKey);
   const ph = document.createElement('div');
   ph.className = 'photo-uploading'; ph.textContent = '上傳中…';
   if (wrap) wrap.appendChild(ph);
-  let dataUrl;
+  let dataUrl, mime = 'image/jpeg', compressed = true;
   try { dataUrl = await compressImage(file); }
-  catch (e) { ph.remove(); UI.toast('照片讀取失敗', 'danger'); return; }
+  catch (e) {
+    // HEIC 等瀏覽器解不開的格式 → 不壓縮直接傳原始檔（Drive 看得懂）
+    try {
+      if (file.size > 8 * 1024 * 1024) throw new Error('too big');
+      dataUrl = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onerror = reject;
+        r.onload = ev => resolve(ev.target.result);
+        r.readAsDataURL(file);
+      });
+      mime = file.type || 'image/heic';
+      compressed = false;
+    } catch (e2) { ph.remove(); UI.toast('照片讀取失敗，請改傳 JPG／PNG（或先截圖再傳）', 'danger'); return; }
+  }
   const res = await API.uploadPhoto({
-    nickname: session.nickname, date: currentDateStr(), kpi: kpiNo, mimeType: 'image/jpeg', base64: dataUrl.split(',')[1],
+    nickname: session.nickname, date: currentDateStr(), kpi: kpiNo, mimeType: mime, base64: dataUrl.split(',')[1],
   });
   ph.remove();
-  if (!res.ok) { UI.toast('上傳失敗：' + (res.error || ''), 'danger'); return; }
+  if (!res.ok) { UI.toast('上傳失敗：' + (res.error || '請檢查網路後重試'), 'danger'); return; }
   attachments[blockKey] = attachments[blockKey] || [];
   attachments[blockKey].push({ type: 'photo', url: res.url, fileId: res.fileId, kpi: kpiNo, description: '', forType: blockKey });
-  localThumbs[res.url] = dataUrl;   // 剛上傳先用本機圖顯示，不等 Drive 縮圖生成
+  if (compressed) localThumbs[res.url] = dataUrl;   // 剛上傳先用本機圖顯示；HEIC 瀏覽器顯示不了改等 Drive 縮圖
   renderAttachments(blockKey);
   syncEnvCheckbox(blockKey);   // 環境整潔：拍照後解鎖並自動打勾
   scheduleSave();
