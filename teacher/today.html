@@ -88,11 +88,20 @@
   /* 補繳模式 */
   #makeup-banner { display:none; background:#FFF3E0; border:1.5px solid #F5941E; color:#B5710E; border-radius:10px; padding:10px 12px; font-size:13px; line-height:1.7; margin-top:10px; }
   .mk-warn { background:#fde8e8; border:1px solid var(--danger); color:#c0392b; border-radius:8px; padding:10px 12px; margin:10px 0; font-size:13px; line-height:1.8; }
+  .log-load-error { display:none; margin:16px auto 0; max-width:720px; padding:14px 16px; background:#FFF3E0; border:1.5px solid #E67E22; border-radius:10px; color:#8A4B08; line-height:1.6; }
+  .log-load-error strong { display:block; margin-bottom:4px; }
+  .log-load-error .btn { margin-top:10px; }
 </style>
 </head>
 <body>
 
 <div id="app-header"></div>
+
+<div id="log-load-error" class="log-load-error" role="alert">
+  <strong>資料暫時讀取失敗，尚未寫入任何資料。</strong>
+  <span id="log-load-error-detail">為保護既有日報，填寫功能已暫時鎖住。</span><br>
+  <button class="btn btn-sm" id="log-load-retry" onclick="retryTodayLog()">重新載入資料</button>
+</div>
 
 <div class="container-narrow">
 
@@ -334,6 +343,47 @@ let makeupDate = null;             // 補繳中的過去日期（null = 今日�
 let makeupQuota = null;            // { used, limit, remaining }
 let alreadySubmitted = false;      // 今日日報是否已正式提交（可繼續編輯，更新不重複通知）
 let loadedOk = false;              // 既有日誌載入成功才准自動存檔（避免空白表單蓋掉雲端內容）
+
+function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+// 只鎖住原本可操作的欄位；環境確認等原本禁用的欄位維持原狀。
+function setLogEditingEnabled(enabled) {
+  const areas = [document.querySelector('.container-narrow'), document.getElementById('bottom-nav')];
+  areas.filter(Boolean).forEach(area => {
+    area.querySelectorAll('input, textarea, select, button').forEach(el => {
+      if (!enabled) {
+        if (!el.disabled) {
+          el.dataset.loadGuardDisabled = '1';
+          el.disabled = true;
+        }
+      } else if (el.dataset.loadGuardDisabled === '1') {
+        el.disabled = false;
+        delete el.dataset.loadGuardDisabled;
+      }
+    });
+  });
+}
+
+function showLoadError(message) {
+  const box = document.getElementById('log-load-error');
+  const detail = document.getElementById('log-load-error-detail');
+  if (detail) detail.textContent = message || '為保護既有日報，填寫功能已暫時鎖住。';
+  if (box) box.style.display = 'block';
+  setLogEditingEnabled(false);
+}
+
+function hideLoadError() {
+  const box = document.getElementById('log-load-error');
+  if (box) box.style.display = 'none';
+  setLogEditingEnabled(true);
+}
+
+async function retryTodayLog() {
+  const button = document.getElementById('log-load-retry');
+  if (button) { button.disabled = true; button.textContent = '重新載入中…'; }
+  await loadTodayLog();
+  if (button) { button.disabled = false; button.textContent = '重新載入資料'; }
+}
 
 window.addEventListener('load', async () => {
   UI.mountHeader(session);
@@ -953,24 +1003,45 @@ async function submitLog() {
 
 // ===== 載入今日草稿（補繳模式載入該日既有紀錄）=====
 async function loadTodayLog() {
-  UI.loading(true);
+  const info = document.getElementById('autosave-info');
   let res = null;
-  try {
-    res = makeupDate
-      ? await API.getLog({ nickname: session.nickname, date: makeupDate })
-      : await API.getTodayLog(session.nickname);
-  } catch (e) { res = null; }
-  UI.loading(false);
-  if (res && res.ok) {
-    loadedOk = true;   // 載入成功（就算今天還沒有紀錄）才開放自動存檔
-    if (res.log) populateForm(res.log);
-  } else {
-    const info = document.getElementById('autosave-info');
-    if (info) {
-      info.textContent = '⚠️ 資料載入失敗，已暫停自動存檔——請重新整理頁面再填寫，避免覆蓋既有內容';
-      info.style.color = 'var(--danger)';
+  setLogEditingEnabled(false);
+
+  // Apps Script 偶爾會在轉址或冷啟動時短暫失敗。先重試，成功前絕不開放寫入。
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    UI.loading(true);
+    try {
+      res = makeupDate
+        ? await API.getLog({ nickname: session.nickname, date: makeupDate })
+        : await API.getTodayLog(session.nickname);
+    } catch (e) {
+      res = null;
+    }
+    UI.loading(false);
+    if (res && res.ok) break;
+
+    if (attempt < 3) {
+      if (info) {
+        info.textContent = `連線不穩，正在重新讀取資料（${attempt}/3）…`;
+        info.style.color = 'var(--warn)';
+      }
+      await wait(attempt * 1200);
     }
   }
+
+  if (res && res.ok) {
+    loadedOk = true;   // 載入成功（就算今天還沒有紀錄）才開放自動存檔
+    hideLoadError();
+    if (res.log) populateForm(res.log);
+    return;
+  }
+
+  loadedOk = false;
+  if (info) {
+    info.textContent = '⚠️ 資料讀取暫時失敗，未寫入任何資料';
+    info.style.color = 'var(--danger)';
+  }
+  showLoadError('系統已自動重試 3 次。請按「重新載入資料」；成功前無法填寫或送出，避免覆蓋既有內容。');
 }
 
 function populateForm(log) {
