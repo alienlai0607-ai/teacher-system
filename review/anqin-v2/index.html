@@ -4,24 +4,23 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#fff8e8">
-  <title>布拉克星球KPI系統｜內部審查</title>
+  <title>布拉克星球KPI系統｜安親工作台</title>
   <link rel="icon" type="image/png" href="assets/kpi-logo.png">
-  <link rel="stylesheet" href="styles.css?v=20260824-scoring">
+  <link rel="manifest" href="../../manifest.json">
+  <link rel="apple-touch-icon" href="../../shared/icons/icon-192.png?v=3">
+  <link rel="stylesheet" href="styles.css?v=20260825-release-2">
 </head>
 <body>
-  <div id="review-ribbon" class="review-ribbon" role="status">
-    <img class="review-mark" src="assets/kpi-logo.png" alt="" aria-hidden="true">
-    內部審查版
-    <span class="review-separator" aria-hidden="true"></span>
-    本頁資料只保存在這台裝置
-  </div>
-
   <div id="app" class="app-shell" aria-live="polite"></div>
   <div id="drawer-root"></div>
   <div id="dialog-root"></div>
   <div id="toast-root" class="toast-region" aria-live="polite" aria-atomic="true"></div>
 
   <script src="vendor/lucide.min.js"></script>
-  <script src="app.js?v=20260824-scoring"></script>
+  <script src="../../shared/config.js?v=20260825-release-1"></script>
+  <script src="../../shared/auth.js?v=20260825-release-1"></script>
+  <script src="../../shared/api.js?v=20260825-release-1"></script>
+  <script src="../../shared/push.js?v=20260825-release-1"></script>
+  <script src="app.js?v=20260825-release-2"></script>
 </body>
 </html>

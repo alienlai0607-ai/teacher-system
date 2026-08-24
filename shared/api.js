@@ -27,7 +27,7 @@ window.API = (function () {
     listAvailableNicknames: () => call('listAvailableNicknames'),
     claimNickname: (email, nickname) => call('claimNickname', { email, nickname }),
 
-    listUsers: () => call('listUsers'),
+    listUsers: (operator) => call('listUsers', { operator: operator || window.AUTH?.getSession?.()?.nickname || '' }),
     addUser: (data) => call('addUser', data),
     updateUser: (data) => call('updateUser', data),
     approveUser: (data) => call('approveUser', data),
@@ -37,10 +37,13 @@ window.API = (function () {
     getTodayLog: (nickname) => call('getTodayLog', { nickname }),
     listLogs: (params) => call('listLogs', params),
     uploadPhoto: (data) => call('uploadPhoto', data),
+    uploadFile: (data) => call('uploadFile', data),
     getEvidenceLog: (params) => call('getEvidenceLog', params),
     getMakeupQuota: (nickname) => call('getMakeupQuota', { nickname }),
 
     addTask: (data) => call('addTask', data),
+    saveSelfTask: (data) => call('saveSelfTask', data),
+    deleteSelfTask: (taskId, nickname) => call('deleteSelfTask', { task_id: taskId, nickname }),
     listTasks: (params) => call('listTasks', params),
     updateTaskStatus: (data) => call('updateTaskStatus', data),
     deleteTask: (id) => call('deleteTask', { task_id: id }),
@@ -65,10 +68,20 @@ window.API = (function () {
     getOKR: (params) => call('getOKR', params),
     updateOKRProgress: (data) => call('updateOKRProgress', data),
 
-    getEvalEvidence: (nickname, year_month) => call('getEvalEvidence', { nickname, year_month }),
+    getEvalEvidence: (nickname, year_month) => call('getEvalEvidence', {
+      nickname,
+      year_month,
+      viewer: window.AUTH?.getSession?.()?.nickname || '',
+    }),
     saveEval: (data) => call('saveEval', data),
-    getEval: (params) => call('getEval', params),
-    listEvals: (params) => call('listEvals', params),
+    getEval: (params) => call('getEval', {
+      ...params,
+      viewer: params?.viewer || window.AUTH?.getSession?.()?.nickname || '',
+    }),
+    listEvals: (params = {}) => call('listEvals', {
+      ...params,
+      viewer: params.viewer || window.AUTH?.getSession?.()?.nickname || '',
+    }),
 
     listStudents: (params) => call('listStudents', params),
     addStudent: (data) => call('addStudent', data),
@@ -77,6 +90,17 @@ window.API = (function () {
 
     getDashboard: (viewer) => call('getDashboard', { viewer }),
     getMyKpiPreview: (nickname) => call('getMyKpiPreview', { nickname }),
+
+    sendSubmitPdf: (nickname, date) => call('sendSubmitPdf', { nickname, date }),
+    saveCoursePrep: (data) => call('saveCoursePrep', data),
+    listCoursePreps: (params) => call('listCoursePreps', params),
+    deleteCoursePrep: (prepId, operator) => call('deleteCoursePrep', { prep_id: prepId, operator }),
+    setConfig: (data) => call('setConfig', data),
+    getSystemReadiness: (operator) => call('getSystemReadiness', { operator }),
+    setupSystemAutomation: (operator) => call('setupSystemAutomation', { operator }),
+    testMyNotifications: (operator) => call('testMyNotifications', { operator }),
+    debugPush: (nickname) => call('debugPush', { nickname }),
+    adminBroadcast: (data) => call('adminBroadcast', data),
 
     purgeTestData: (params) => call('purgeTestData', params),
   };

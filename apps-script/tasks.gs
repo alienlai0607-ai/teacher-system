@@ -28,6 +28,54 @@ function setConfig(params) {
   return { ok: true, set: set };
 }
 
+/** 不回傳機密值，只供管理介面檢查通知、教材與排程是否已完成設定。 */
+function getSystemReadiness(params) {
+  const user = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!user || (user.role !== 'admin' && user.role !== 'manager')) return { ok: false, error: '需主管或管理員權限' };
+  const props = PropertiesService.getScriptProperties();
+  const triggers = ScriptApp.getProjectTriggers().map(t => t.getHandlerFunction());
+  return {
+    ok: true,
+    services: {
+      line: Boolean(props.getProperty('LINE_TOKEN')),
+      oneSignalApp: Boolean(props.getProperty('ONESIGNAL_APP_ID')),
+      oneSignalKey: Boolean(props.getProperty('ONESIGNAL_REST_KEY')),
+      materialUpload: true,
+      coursePrepArchive: true,
+      taskCloudSync: true,
+    },
+    triggers: {
+      dailyKpiPdf: triggers.indexOf('sendDailyKpiReportAuto') >= 0,
+      dailyTaskMorning: triggers.indexOf('sendMorningReminders') >= 0,
+      dailyTaskEvening: triggers.indexOf('sendEveningPreview') >= 0,
+      dailyTaskReminder: triggers.indexOf('sendMorningReminders') >= 0 && triggers.indexOf('sendEveningPreview') >= 0,
+    },
+  };
+}
+
+/** 管理員一鍵補齊每日 PDF 與事項提醒排程。 */
+function setupSystemAutomation(params) {
+  const user = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!user || user.role !== 'admin') return { ok: false, error: '需 admin 權限' };
+  setupKpiReportTrigger();
+  setupTaskReminderTrigger();
+  logSystem(user.nickname, 'setup_system_automation', '', {});
+  return getSystemReadiness({ operator: user.nickname });
+}
+
+/** 對目前帳號同時測試 LINE 與 APP 通知，不回傳任何服務密鑰。 */
+function testMyNotifications(params) {
+  const user = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!user || user.status !== 'active') return { ok: false, error: '找不到可用帳號' };
+  const title = '布拉克星球 KPI 通知測試';
+  const body = 'APP 與 LINE 通知設定測試完成。';
+  const lineBound = Boolean(user.line_user_id);
+  const lineSent = lineBound ? pushLine_(user.line_user_id, title + '\n' + body) : false;
+  const appSent = pushOneSignal_(user.nickname, title, body);
+  logSystem(user.nickname, 'test_notifications', '', { lineBound: lineBound, lineSent: lineSent, appSent: appSent });
+  return { ok: true, lineBound: lineBound, lineSent: lineSent, appSent: appSent };
+}
+
 function addTask(params) {
   const { title, created_by } = params;
   if (!title) return { ok: false, error: '缺少事項標題' };
@@ -62,6 +110,43 @@ function addTask(params) {
   });
   logSystem(created_by, 'add_task', title, { assignees: assignees, due: due });
   return { ok: true, created: created };
+}
+
+/** V2 老師將自己的追蹤事項同步到雲端，供提醒排程與跨裝置使用。 */
+function saveSelfTask(params) {
+  const nickname = String(params.nickname || '').trim();
+  const user = nickname ? findUserByNickname(nickname) : null;
+  const task = params.task || {};
+  if (!user || user.status !== 'active') return { ok: false, error: '找不到可用帳號' };
+  if (!task.id || !String(task.title || '').trim()) return { ok: false, error: '事項資料不完整' };
+  const existing = findObject(SHEET_NAMES.TASKS, 'task_id', task.id);
+  if (existing && existing.assignee !== nickname) return { ok: false, error: '不可修改其他人的事項' };
+  const now = nowIso();
+  upsertRow(SHEET_NAMES.TASKS, 'task_id', {
+    task_id: task.id,
+    title: String(task.title || '').trim(),
+    detail: String(task.source || task.detail || ''),
+    assignee: nickname,
+    department: user.department,
+    due_date: String(task.dueDate || todayStr()).slice(0, 10),
+    status: task.status === 'done' ? 'done' : 'open',
+    created_by: existing ? existing.created_by : nickname,
+    created_at: existing ? existing.created_at : now,
+    updated_at: now,
+    done_at: task.status === 'done' ? (existing && existing.done_at || now) : '',
+  });
+  return { ok: true, task_id: task.id, updated_at: now };
+}
+
+function deleteSelfTask(params) {
+  const nickname = String(params.nickname || '').trim();
+  const user = nickname ? findUserByNickname(nickname) : null;
+  if (!user || user.status !== 'active') return { ok: false, error: '找不到可用帳號' };
+  const existing = findObject(SHEET_NAMES.TASKS, 'task_id', params.task_id);
+  if (!existing) return { ok: true, removed: false };
+  if (existing.assignee !== nickname && user.role !== 'admin') return { ok: false, error: '不可刪除其他人的事項' };
+  deleteRow(SHEET_NAMES.TASKS, existing._row);
+  return { ok: true, removed: true };
 }
 
 function listTasks(params) {
@@ -130,7 +215,7 @@ function pushLine_(userId, text) {
 
 // OneSignal Web Push（用暱稱當 external_id）。自動嘗試新版/舊版格式。
 function oneSignalAttempts_(appId, key, externalId, title, message) {
-  const link = 'https://teacher.blockplanetcamp.com/teacher/today.html?notify=1';
+  const link = 'https://teacher.blockplanetcamp.com/review/anqin-v2/index.html?notify=1';
   return [
     { url: 'https://api.onesignal.com/notifications', auth: 'Key ' + key,
       body: { app_id: appId, target_channel: 'push', include_aliases: { external_id: [String(externalId)] }, headings: { en: title }, contents: { en: message }, url: link } },
@@ -261,9 +346,20 @@ function handleLineWebhook_(body) {
         const u = findUserByNickname(nk);
         if (!u) {
           reply = '找不到暱稱「' + nk + '」，請確認後再試。';
+        } else if (u.status !== 'active') {
+          reply = '此帳號目前未啟用，請聯絡管理員。';
+        } else if (!u.email) {
+          reply = '請先用 Google 登入 KPI 系統完成身分綁定，再回來輸入相同指令。';
+        } else if (u.line_user_id && String(u.line_user_id) !== String(userId)) {
+          reply = '此暱稱已綁定其他 LINE，請由管理員先解除舊綁定。';
         } else {
-          updateRow(SHEET_NAMES.USERS, u._row, { line_user_id: userId });
-          reply = '✅ ' + nk + ' 綁定成功！之後事項提醒會推播到這裡。';
+          const sameLineUser = sheetToObjects(SHEET_NAMES.USERS).find(item => item.line_user_id && String(item.line_user_id) === String(userId) && item.nickname !== nk);
+          if (sameLineUser) {
+            reply = '這個 LINE 已綁定「' + sameLineUser.nickname + '」，請由管理員先解除舊綁定。';
+          } else {
+            updateRow(SHEET_NAMES.USERS, u._row, { line_user_id: userId });
+            reply = u.line_user_id ? '✅ ' + nk + ' 已完成綁定。' : '✅ ' + nk + ' 綁定成功！之後事項提醒會推播到這裡。';
+          }
         }
       } else if (/^kpi/i.test(text)) {
         // 老闆專用：生成 KPI 日報 PDF（可能要跑一下，先回覆再推結果）

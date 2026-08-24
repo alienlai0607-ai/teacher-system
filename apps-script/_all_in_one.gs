@@ -64,6 +64,7 @@ function handleRequest(e, method) {
       'listLogs': () => listLogs(params),
       'getTodayLog': () => getTodayLog(params),
       'uploadPhoto': () => uploadPhoto(params),
+      'uploadFile': () => uploadFile(params),
       'getEvidenceLog': () => getEvidenceLog(params),
       'getMakeupQuota': () => getMakeupQuota(params),
       'cleanupDuplicateEvidence': () => cleanupDuplicateEvidence(params),
@@ -71,6 +72,11 @@ function handleRequest(e, method) {
       'adminBroadcast': () => adminBroadcast(params),
       'sendDailyKpiPdf': () => sendDailyKpiPdf(params),
       'sendSubmitPdf': () => sendSubmitPdf(params),
+
+      // 安親 V2 備課教案建檔
+      'saveCoursePrep': () => saveCoursePrep(params),
+      'listCoursePreps': () => listCoursePreps(params),
+      'deleteCoursePrep': () => deleteCoursePrep(params),
 
       // 週報
       'saveWeekly': () => saveWeekly(params),
@@ -105,8 +111,13 @@ function handleRequest(e, method) {
 
       // 事項
       'setConfig': () => setConfig(params),
+      'getSystemReadiness': () => getSystemReadiness(params),
+      'setupSystemAutomation': () => setupSystemAutomation(params),
+      'testMyNotifications': () => testMyNotifications(params),
       'debugPush': () => debugPush(params),
       'addTask': () => addTask(params),
+      'saveSelfTask': () => saveSelfTask(params),
+      'deleteSelfTask': () => deleteSelfTask(params),
       'listTasks': () => listTasks(params),
       'updateTaskStatus': () => updateTaskStatus(params),
       'deleteTask': () => deleteTask(params),
@@ -158,6 +169,7 @@ const SHEET_NAMES = {
   WEEKLY: 'WeeklyReports',
   STUDENTS: 'Students',
   TASKS: 'Tasks',
+  COURSE_PREP: 'CoursePrep',
 };
 
 const DEPARTMENTS = ['永康教室', '北區教室', '才藝部門', '總部'];
@@ -328,6 +340,10 @@ function setupSheets() {
     [SHEET_NAMES.TASKS]: [
       'task_id', 'title', 'detail', 'assignee', 'department', 'due_date',
       'status', 'created_by', 'created_at', 'updated_at', 'done_at'
+    ],
+    [SHEET_NAMES.COURSE_PREP]: [
+      'prep_id', 'nickname', 'department', 'title', 'course_type',
+      'created_date', 'status', 'data_json', 'created_at', 'updated_at'
     ],
   };
 
@@ -920,8 +936,12 @@ function claimNickname(params) {
  * 列出所有使用者（admin 用）
  */
 function listUsers(params) {
-  // TODO: 權限檢查（呼叫者必須是 admin）
-  const users = sheetToObjects(SHEET_NAMES.USERS);
+  const operator = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!operator || operator.status !== 'active' || !['admin', 'manager', 'admin_staff'].includes(operator.role)) {
+    return { ok: false, error: '無查看人員權限' };
+  }
+  let users = sheetToObjects(SHEET_NAMES.USERS);
+  if (operator.role !== 'admin') users = users.filter(user => user.department === operator.department || user.nickname === operator.nickname);
   return { ok: true, users };
 }
 
@@ -929,6 +949,8 @@ function listUsers(params) {
  * admin 新增使用者
  */
 function addUser(params) {
+  const operator = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!operator || operator.role !== 'admin' || operator.status !== 'active') return { ok: false, error: '需 admin 權限' };
   const { nickname, role, department, email, phone, notes } = params;
   if (!nickname || !role || !department) {
     return { ok: false, error: 'missing required fields' };
@@ -971,13 +993,15 @@ function addUser(params) {
  * admin 更新使用者
  */
 function updateUser(params) {
+  const operator = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!operator || operator.role !== 'admin' || operator.status !== 'active') return { ok: false, error: '需 admin 權限' };
   const { nickname } = params;
   if (!nickname) return { ok: false, error: 'missing nickname' };
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
 
   const updates = {};
-  ['email', 'role', 'department', 'status', 'phone', 'notes', 'subtype'].forEach(k => {
+  ['email', 'line_user_id', 'role', 'department', 'status', 'phone', 'notes', 'subtype'].forEach(k => {
     if (params[k] !== undefined) updates[k] = params[k];
   });
   updateRow(SHEET_NAMES.USERS, user._row, updates);
@@ -1020,6 +1044,7 @@ function saveLog(params) {
 
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
+  if (user.status !== 'active') return { ok: false, error: '帳號目前未啟用' };
 
   const log_id = 'LOG-' + String(date).replace(/-/g, '') + '-' + nickname;
   const existing = findObject(SHEET_NAMES.LOGS, 'log_id', log_id);
@@ -1094,6 +1119,7 @@ function saveLog(params) {
   }
 
   if (firstSubmit) notifyLogSubmitted_(user, String(date), isMakeup === true, data.help_needed);
+  else if (params.submitted === true && existing && existing.submitted_at) notifyLogUpdated_(user, String(date));
 
   // 附件 → Evidence：只在「正式提交」時寫入，且整份取代
   // （舊版每次草稿自動存都 append 一次，一天可灌出上百筆重複證據）
@@ -1187,6 +1213,18 @@ function notifyLogSubmitted_(user, date, isMakeup, helpNeeded) {
     const title = '📥 ' + user.nickname + ' 已提交日報' + (isMakeup ? '（補繳）' : '');
     const body = (user.department || '') + '｜' + date + (helpNeeded ? '\n⚠️ 需要主管協助' : '');
     recipients.forEach(r => { try { notifyUser_(r, title, body); } catch (e) { /* 單人推播失敗不影響其他人 */ } });
+  } catch (e) { /* 通知失敗不影響日誌儲存 */ }
+}
+
+/** 已送出日報再次更新 → 通知同部門主管與管理員重新查看。 */
+function notifyLogUpdated_(user, date) {
+  try {
+    const recipients = sheetToObjects(SHEET_NAMES.USERS).filter(u =>
+      u.status === 'active' && u.nickname !== user.nickname &&
+      (u.role === 'admin' || (u.role === 'manager' && u.department === user.department)));
+    const title = '📝 ' + user.nickname + ' 已更新日報';
+    const body = (user.department || '') + '｜' + date + '｜請查看最新內容';
+    recipients.forEach(r => { try { notifyUser_(r, title, body); } catch (e) { /* 單人失敗不影響儲存 */ } });
   } catch (e) { /* 通知失敗不影響日誌儲存 */ }
 }
 
@@ -1425,6 +1463,58 @@ function uploadPhoto(params) {
   return { ok: true, url, fileId };
 }
 
+/**
+ * 教案與教材原始檔上傳。
+ * 資料夾結構：KPI教材 / 部門 / 暱稱 / 年月
+ */
+function uploadFile(params) {
+  const { nickname, date, mimeType, base64 } = params;
+  if (!nickname || !base64) return { ok: false, error: 'missing nickname or base64' };
+
+  const user = findUserByNickname(nickname);
+  if (!user) return { ok: false, error: 'user not found' };
+  if (String(base64).length > 22 * 1024 * 1024) return { ok: false, error: '檔案超過 15 MB 上限' };
+
+  const dateStr = String(date || todayStr());
+  const ym = dateStr.slice(0, 7);
+  const originalName = String(params.fileName || '教材檔案')
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/^\.+/, '')
+    .slice(0, 120) || '教材檔案';
+  const uniqueName = Utilities.getUuid().slice(0, 8) + '-' + originalName;
+  const bytes = Utilities.base64Decode(base64);
+  const blob = Utilities.newBlob(bytes, mimeType || 'application/octet-stream', uniqueName);
+
+  const root = getMaterialRootFolder_();
+  const deptF = getOrCreateChildFolder_(root, user.department || '未分部門');
+  const userF = getOrCreateChildFolder_(deptF, nickname);
+  const ymF = getOrCreateChildFolder_(userF, ym);
+  const file = ymF.createFile(blob);
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (e) {
+    // 組織政策若禁止公開分享，仍保留給有權限的登入者查看。
+  }
+
+  const fileId = file.getId();
+  const url = 'https://drive.google.com/file/d/' + fileId + '/view';
+  logSystem(nickname, 'upload_material', fileId, { date: dateStr, fileName: originalName, category: params.category || '' });
+  return { ok: true, url, fileId, fileName: originalName };
+}
+
+function getMaterialRootFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const cached = props.getProperty('MATERIAL_ROOT_FOLDER_ID');
+  if (cached) {
+    try { return DriveApp.getFolderById(cached); } catch (e) { /* 失效則重建 */ }
+  }
+  const name = 'KPI教材';
+  const it = DriveApp.getFoldersByName(name);
+  const folder = it.hasNext() ? it.next() : DriveApp.createFolder(name);
+  props.setProperty('MATERIAL_ROOT_FOLDER_ID', folder.getId());
+  return folder;
+}
+
 /** 取得（或建立）證據根資料夾，ID 快取於 Script Properties 避免每次掃描 Drive */
 function getEvidenceRootFolder_() {
   const props = PropertiesService.getScriptProperties();
@@ -1453,6 +1543,7 @@ function saveWeekly(params) {
   if (!nickname || !week_of) return { ok: false, error: 'missing nickname or week_of' };
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
+  if (user.status !== 'active') return { ok: false, error: '帳號目前未啟用' };
 
   const week_id = 'WK-' + week_of + '-' + nickname;
   const existing = findObject(SHEET_NAMES.WEEKLY, 'week_id', week_id);
@@ -1517,6 +1608,13 @@ function addFeedback(params) {
   }
   const fromU = findUserByNickname(from_nickname);
   const toU = findUserByNickname(to_nickname);
+  if (!fromU || !toU || fromU.status !== 'active' || toU.status !== 'active') return { ok: false, error: '對話帳號不存在或未啟用' };
+  if (fromU.role === 'teacher' && !(toU.role === 'manager' && toU.department === fromU.department) && toU.role !== 'admin') {
+    return { ok: false, error: '老師只能回覆同部門主管或管理員' };
+  }
+  if (fromU.role === 'manager' && toU.role !== 'admin' && toU.department !== fromU.department) {
+    return { ok: false, error: '主管只能回覆自己部門' };
+  }
   // 主管/老闆發的算「回饋」；老師發的算「回覆」（回覆不需 tag）
   const isBoss = fromU && (fromU.role === 'manager' || fromU.role === 'admin');
   const feedback_id = Utilities.getUuid();
@@ -1534,9 +1632,10 @@ function addFeedback(params) {
 
   // 即時通知對方（LINE + OneSignal）
   try {
-    const dateStr = String(log_id).replace(/^LOG-(\d{4})(\d{2})(\d{2})-.*$/, '$1/$2/$3');
+    const dateMatch = String(log_id).match(/^LOG-(\d{4})(\d{2})(\d{2})-/);
+    const contextLabel = dateMatch ? dateMatch.slice(1).join('/') + ' 日報' : 'KPI 紀錄';
     const title = isBoss ? ('💬 ' + from_nickname + ' 給你回饋') : ('💬 ' + from_nickname + ' 回覆了你');
-    const body = (dateStr ? ('（' + dateStr + ' 日報）\n') : '') + String(content).slice(0, 120);
+    const body = '（' + contextLabel + '）\n' + String(content).slice(0, 120);
     notifyUser_(toU, title, body);
   } catch (e) { /* 通知失敗不影響回饋寫入 */ }
 
@@ -1716,7 +1815,7 @@ function updateOKRProgress(params) {
  * 主管打開「評核某老師當月」時呼叫，自動彙整所有證據
  */
 function getEvalEvidence(params) {
-  const { nickname, year_month } = params;
+  const { nickname, year_month, viewer } = params;
   if (!nickname || !year_month) return { ok: false, error: 'missing nickname or year_month' };
 
   const [year, month] = year_month.split('-').map(Number);
@@ -1726,6 +1825,12 @@ function getEvalEvidence(params) {
 
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
+  const viewerUser = findUserByNickname(viewer);
+  const canReview = viewerUser && viewerUser.status === 'active' && (
+    viewerUser.role === 'admin' ||
+    (viewerUser.role === 'manager' && viewerUser.department === user.department)
+  );
+  if (!canReview) return { ok: false, error: '無評核資料讀取權限' };
 
   // 1. 當月所有日誌
   const logs = sheetToObjects(SHEET_NAMES.LOGS)
@@ -1858,6 +1963,12 @@ function saveEval(params) {
   }
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
+  const evaluatorUser = findUserByNickname(evaluator);
+  const canEvaluate = evaluatorUser && evaluatorUser.status === 'active' && (
+    evaluatorUser.role === 'admin' ||
+    (evaluatorUser.role === 'manager' && user.role === 'teacher' && evaluatorUser.department === user.department)
+  );
+  if (!canEvaluate) return { ok: false, error: '無評核儲存權限' };
 
   const isManager = user.role === 'manager';
   const sheetName = isManager ? SHEET_NAMES.MANAGER_EVAL : SHEET_NAMES.TEACHER_EVAL;
@@ -1954,22 +2065,41 @@ function saveEval(params) {
 }
 
 function getEval(params) {
-  const { nickname, year_month } = params;
-  if (!nickname || !year_month) return { ok: false, error: 'missing fields' };
+  const { nickname, year_month, viewer } = params;
+  if (!nickname || !year_month || !viewer) return { ok: false, error: 'missing fields' };
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
+  const viewerUser = findUserByNickname(viewer);
+  if (!viewerUser || viewerUser.status !== 'active') return { ok: false, error: '無評核讀取權限' };
+  const canRead = viewerUser.role === 'admin' ||
+    (viewerUser.role === 'manager' && viewerUser.department === user.department) ||
+    (viewerUser.role === 'teacher' && viewerUser.nickname === user.nickname);
+  if (!canRead) return { ok: false, error: '無評核讀取權限' };
   const isManager = user.role === 'manager';
   const sheetName = isManager ? SHEET_NAMES.MANAGER_EVAL : SHEET_NAMES.TEACHER_EVAL;
   const prefix = isManager ? 'MEVAL' : 'EVAL';
   const eval_id = `${prefix}-${year_month}-${nickname}`;
   const e = findObject(sheetName, 'eval_id', eval_id);
+  if (viewerUser.role === 'teacher' && e && e.status !== 'submitted') {
+    return { ok: true, eval: null };
+  }
   return { ok: true, eval: e };
 }
 
 function listEvals(params) {
-  const { evaluator, year_month, role } = params;
+  const { evaluator, year_month, role, viewer } = params;
+  const viewerUser = findUserByNickname(viewer);
+  if (!viewerUser || viewerUser.status !== 'active' || !['admin', 'manager'].includes(viewerUser.role)) {
+    return { ok: false, error: '無評核清單讀取權限' };
+  }
   const sheetName = role === 'manager' ? SHEET_NAMES.MANAGER_EVAL : SHEET_NAMES.TEACHER_EVAL;
   let list = sheetToObjects(sheetName);
+  if (viewerUser.role === 'manager') {
+    const allowed = sheetToObjects(SHEET_NAMES.USERS)
+      .filter(user => user.department === viewerUser.department)
+      .map(user => user.nickname);
+    list = list.filter(item => allowed.includes(item.nickname));
+  }
   if (evaluator) list = list.filter(e => e.evaluator === evaluator);
   if (year_month) list = list.filter(e => e.year_month === year_month);
   return { ok: true, evals: list };
@@ -2291,6 +2421,54 @@ function setConfig(params) {
   return { ok: true, set: set };
 }
 
+/** 不回傳機密值，只供管理介面檢查通知、教材與排程是否已完成設定。 */
+function getSystemReadiness(params) {
+  const user = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!user || (user.role !== 'admin' && user.role !== 'manager')) return { ok: false, error: '需主管或管理員權限' };
+  const props = PropertiesService.getScriptProperties();
+  const triggers = ScriptApp.getProjectTriggers().map(t => t.getHandlerFunction());
+  return {
+    ok: true,
+    services: {
+      line: Boolean(props.getProperty('LINE_TOKEN')),
+      oneSignalApp: Boolean(props.getProperty('ONESIGNAL_APP_ID')),
+      oneSignalKey: Boolean(props.getProperty('ONESIGNAL_REST_KEY')),
+      materialUpload: true,
+      coursePrepArchive: true,
+      taskCloudSync: true,
+    },
+    triggers: {
+      dailyKpiPdf: triggers.indexOf('sendDailyKpiReportAuto') >= 0,
+      dailyTaskMorning: triggers.indexOf('sendMorningReminders') >= 0,
+      dailyTaskEvening: triggers.indexOf('sendEveningPreview') >= 0,
+      dailyTaskReminder: triggers.indexOf('sendMorningReminders') >= 0 && triggers.indexOf('sendEveningPreview') >= 0,
+    },
+  };
+}
+
+/** 管理員一鍵補齊每日 PDF 與事項提醒排程。 */
+function setupSystemAutomation(params) {
+  const user = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!user || user.role !== 'admin') return { ok: false, error: '需 admin 權限' };
+  setupKpiReportTrigger();
+  setupTaskReminderTrigger();
+  logSystem(user.nickname, 'setup_system_automation', '', {});
+  return getSystemReadiness({ operator: user.nickname });
+}
+
+/** 對目前帳號同時測試 LINE 與 APP 通知，不回傳任何服務密鑰。 */
+function testMyNotifications(params) {
+  const user = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!user || user.status !== 'active') return { ok: false, error: '找不到可用帳號' };
+  const title = '布拉克星球 KPI 通知測試';
+  const body = 'APP 與 LINE 通知設定測試完成。';
+  const lineBound = Boolean(user.line_user_id);
+  const lineSent = lineBound ? pushLine_(user.line_user_id, title + '\n' + body) : false;
+  const appSent = pushOneSignal_(user.nickname, title, body);
+  logSystem(user.nickname, 'test_notifications', '', { lineBound: lineBound, lineSent: lineSent, appSent: appSent });
+  return { ok: true, lineBound: lineBound, lineSent: lineSent, appSent: appSent };
+}
+
 function addTask(params) {
   const { title, created_by } = params;
   if (!title) return { ok: false, error: '缺少事項標題' };
@@ -2325,6 +2503,43 @@ function addTask(params) {
   });
   logSystem(created_by, 'add_task', title, { assignees: assignees, due: due });
   return { ok: true, created: created };
+}
+
+/** V2 老師將自己的追蹤事項同步到雲端，供提醒排程與跨裝置使用。 */
+function saveSelfTask(params) {
+  const nickname = String(params.nickname || '').trim();
+  const user = nickname ? findUserByNickname(nickname) : null;
+  const task = params.task || {};
+  if (!user || user.status !== 'active') return { ok: false, error: '找不到可用帳號' };
+  if (!task.id || !String(task.title || '').trim()) return { ok: false, error: '事項資料不完整' };
+  const existing = findObject(SHEET_NAMES.TASKS, 'task_id', task.id);
+  if (existing && existing.assignee !== nickname) return { ok: false, error: '不可修改其他人的事項' };
+  const now = nowIso();
+  upsertRow(SHEET_NAMES.TASKS, 'task_id', {
+    task_id: task.id,
+    title: String(task.title || '').trim(),
+    detail: String(task.source || task.detail || ''),
+    assignee: nickname,
+    department: user.department,
+    due_date: String(task.dueDate || todayStr()).slice(0, 10),
+    status: task.status === 'done' ? 'done' : 'open',
+    created_by: existing ? existing.created_by : nickname,
+    created_at: existing ? existing.created_at : now,
+    updated_at: now,
+    done_at: task.status === 'done' ? (existing && existing.done_at || now) : '',
+  });
+  return { ok: true, task_id: task.id, updated_at: now };
+}
+
+function deleteSelfTask(params) {
+  const nickname = String(params.nickname || '').trim();
+  const user = nickname ? findUserByNickname(nickname) : null;
+  if (!user || user.status !== 'active') return { ok: false, error: '找不到可用帳號' };
+  const existing = findObject(SHEET_NAMES.TASKS, 'task_id', params.task_id);
+  if (!existing) return { ok: true, removed: false };
+  if (existing.assignee !== nickname && user.role !== 'admin') return { ok: false, error: '不可刪除其他人的事項' };
+  deleteRow(SHEET_NAMES.TASKS, existing._row);
+  return { ok: true, removed: true };
 }
 
 function listTasks(params) {
@@ -2393,7 +2608,7 @@ function pushLine_(userId, text) {
 
 // OneSignal Web Push（用暱稱當 external_id）。自動嘗試新版/舊版格式。
 function oneSignalAttempts_(appId, key, externalId, title, message) {
-  const link = 'https://teacher.blockplanetcamp.com/teacher/today.html?notify=1';
+  const link = 'https://teacher.blockplanetcamp.com/review/anqin-v2/index.html?notify=1';
   return [
     { url: 'https://api.onesignal.com/notifications', auth: 'Key ' + key,
       body: { app_id: appId, target_channel: 'push', include_aliases: { external_id: [String(externalId)] }, headings: { en: title }, contents: { en: message }, url: link } },
@@ -2524,9 +2739,20 @@ function handleLineWebhook_(body) {
         const u = findUserByNickname(nk);
         if (!u) {
           reply = '找不到暱稱「' + nk + '」，請確認後再試。';
+        } else if (u.status !== 'active') {
+          reply = '此帳號目前未啟用，請聯絡管理員。';
+        } else if (!u.email) {
+          reply = '請先用 Google 登入 KPI 系統完成身分綁定，再回來輸入相同指令。';
+        } else if (u.line_user_id && String(u.line_user_id) !== String(userId)) {
+          reply = '此暱稱已綁定其他 LINE，請由管理員先解除舊綁定。';
         } else {
-          updateRow(SHEET_NAMES.USERS, u._row, { line_user_id: userId });
-          reply = '✅ ' + nk + ' 綁定成功！之後事項提醒會推播到這裡。';
+          const sameLineUser = sheetToObjects(SHEET_NAMES.USERS).find(item => item.line_user_id && String(item.line_user_id) === String(userId) && item.nickname !== nk);
+          if (sameLineUser) {
+            reply = '這個 LINE 已綁定「' + sameLineUser.nickname + '」，請由管理員先解除舊綁定。';
+          } else {
+            updateRow(SHEET_NAMES.USERS, u._row, { line_user_id: userId });
+            reply = u.line_user_id ? '✅ ' + nk + ' 已完成綁定。' : '✅ ' + nk + ' 綁定成功！之後事項提醒會推播到這裡。';
+          }
         }
       } else if (/^kpi/i.test(text)) {
         // 老闆專用：生成 KPI 日報 PDF（可能要跑一下，先回覆再推結果）
@@ -2827,7 +3053,7 @@ function generatePersonKpiPdf_(nickname, dateStr) {
 
 /**
  * 老師正式送出後，前端背景呼叫：生成單人 PDF → LINE 分別傳給老闆們（柏翰＋小魚）
- * 同一份日誌只發一次（重複呼叫/更新日報不重發）
+ * 同一版本只發一次；老師更新日報後會重建最新 PDF 並再次通知。
  */
 function sendSubmitPdf(params) {
   const nickname = params.nickname;
@@ -2836,14 +3062,17 @@ function sendSubmitPdf(params) {
   const log_id = 'LOG-' + dateStr.replace(/-/g, '') + '-' + nickname;
   const props = PropertiesService.getScriptProperties();
   const dedupeKey = 'SENTPDF_' + log_id;
-  if (props.getProperty(dedupeKey)) return { ok: true, skipped: 'already_sent' };
+  const log = findObject(SHEET_NAMES.LOGS, 'log_id', log_id);
+  if (!log) return { ok: false, error: 'log not found' };
+  if (!log.submitted_at) return { ok: false, error: 'not submitted' };
+  const lastSentAt = props.getProperty(dedupeKey) || '';
+  if (lastSentAt && lastSentAt >= String(log.updated_at || '')) return { ok: true, skipped: 'already_current' };
   const r = generatePersonKpiPdf_(nickname, dateStr);
-  if (!r) return { ok: false, error: 'log not found' };
-  if (!r.log.submitted_at) return { ok: false, error: 'not submitted' };
+  if (!r) return { ok: false, error: 'pdf generation failed' };
   props.setProperty(dedupeKey, nowIso());
 
   const md = dateStr.slice(5).replace('-', '/');
-  let msg = '📄 ' + nickname + ' ' + md + ' 已繳交';
+  let msg = '📄 ' + nickname + ' ' + md + (lastSentAt ? ' 日報已更新' : ' 已繳交');
   if (r.log.is_makeup === true) msg += '（補繳）';
   if (r.log.help_needed === true) msg += '\n🚨 有求助：' + String(r.log.help_content || '').slice(0, 100);
   msg += '\n完整日報（含照片）👇\n' + r.url;
@@ -2904,4 +3133,108 @@ function handleKpiLineCommand_(lineUserId, text) {
   else if (text.indexOf('昨') >= 0) dateStr = addDaysStr_(todayStr(), -1);
   const r = generateDailyKpiPdf_(dateStr);
   return kpiPdfMsg_(dateStr, r);
+}
+
+// ===== 安親 V2 備課教案建檔 =====
+function ensureCoursePrepSheet_() {
+  const ss = getSS();
+  let sheet = ss.getSheetByName(SHEET_NAMES.COURSE_PREP);
+  if (!sheet) sheet = ss.insertSheet(SHEET_NAMES.COURSE_PREP);
+  ensureHeaders(sheet, [
+    'prep_id', 'nickname', 'department', 'title', 'course_type',
+    'created_date', 'status', 'data_json', 'created_at', 'updated_at'
+  ]);
+  return sheet;
+}
+
+function coursePrepPayload_(value) {
+  const snapshot = JSON.parse(JSON.stringify(value || {}));
+  function stripInlineMedia(item) {
+    if (!item || typeof item !== 'object') return;
+    if (Array.isArray(item)) {
+      item.forEach(stripInlineMedia);
+      return;
+    }
+    Object.keys(item).forEach(key => {
+      if (key === 'dataUrl') item[key] = '';
+      else stripInlineMedia(item[key]);
+    });
+  }
+  stripInlineMedia(snapshot);
+  return snapshot;
+}
+
+function saveCoursePrep(params) {
+  const nickname = String(params.nickname || '').trim();
+  const user = nickname ? findUserByNickname(nickname) : null;
+  if (!user || user.status !== 'active' || !['teacher', 'manager'].includes(user.role)) {
+    return { ok: false, error: '無備課建檔權限' };
+  }
+  const prep = coursePrepPayload_(params.prep);
+  const plan = params.plan ? coursePrepPayload_(params.plan) : null;
+  if (!prep.id || prep.type !== 'lessonprep' || !String(prep.title || '').trim()) {
+    return { ok: false, error: '備課檔案資料不完整' };
+  }
+  const now = nowIso();
+  ensureCoursePrepSheet_();
+  const existing = findObject(SHEET_NAMES.COURSE_PREP, 'prep_id', prep.id);
+  if (existing && existing.nickname !== nickname && user.role !== 'admin') {
+    return { ok: false, error: '不可覆蓋其他老師的備課檔案' };
+  }
+  const dataJson = JSON.stringify({ schema: 'anqin-course-prep-v1', prep: prep, plan: plan });
+  if (dataJson.length > 45000) return { ok: false, error: '備課內容過大，請移除內嵌圖片後再試' };
+  upsertRow(SHEET_NAMES.COURSE_PREP, 'prep_id', {
+    prep_id: prep.id,
+    nickname: nickname,
+    department: user.department,
+    title: String(prep.title || '').trim(),
+    course_type: String(prep.details && prep.details.targetCourse || ''),
+    created_date: String(prep.date || todayStr()).slice(0, 10),
+    status: String(prep.status || 'draft'),
+    data_json: dataJson,
+    created_at: existing ? existing.created_at : now,
+    updated_at: now,
+  });
+  logSystem(nickname, 'save_course_prep', prep.id, { status: prep.status || 'draft' });
+  return { ok: true, prep_id: prep.id, updated_at: now };
+}
+
+function listCoursePreps(params) {
+  const viewer = String(params.viewer || '').trim();
+  const viewerUser = viewer ? findUserByNickname(viewer) : null;
+  if (!viewerUser || viewerUser.status !== 'active') return { ok: false, error: '無讀取權限' };
+  ensureCoursePrepSheet_();
+  let rows = sheetToObjects(SHEET_NAMES.COURSE_PREP);
+  if (viewerUser.role === 'teacher' || viewerUser.role === 'admin_staff') {
+    rows = rows.filter(row => row.nickname === viewer);
+  } else if (viewerUser.role === 'manager') {
+    rows = rows.filter(row => row.department === viewerUser.department || row.nickname === viewer);
+  }
+  if (params.nickname) rows = rows.filter(row => row.nickname === String(params.nickname));
+  rows.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+  const records = rows.map(row => {
+    const data = parseJsonField(row.data_json) || {};
+    return {
+      prepId: row.prep_id,
+      nickname: row.nickname,
+      department: row.department,
+      updatedAt: row.updated_at,
+      prep: data.prep || null,
+      plan: data.plan || null,
+    };
+  }).filter(record => record.prep && record.prep.id);
+  return { ok: true, records: records };
+}
+
+function deleteCoursePrep(params) {
+  const operator = String(params.operator || '').trim();
+  const user = operator ? findUserByNickname(operator) : null;
+  if (!user || user.status !== 'active') return { ok: false, error: '無刪除權限' };
+  ensureCoursePrepSheet_();
+  const existing = findObject(SHEET_NAMES.COURSE_PREP, 'prep_id', params.prep_id);
+  if (!existing) return { ok: true, removed: false };
+  if (user.role !== 'admin' && existing.nickname !== operator) return { ok: false, error: '不可刪除其他老師的備課檔案' };
+  deleteRow(SHEET_NAMES.COURSE_PREP, existing._row);
+  logSystem(operator, 'delete_course_prep', params.prep_id, {});
+  return { ok: true, removed: true };
 }

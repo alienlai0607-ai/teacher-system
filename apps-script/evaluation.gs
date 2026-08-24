@@ -7,7 +7,7 @@
  * 主管打開「評核某老師當月」時呼叫，自動彙整所有證據
  */
 function getEvalEvidence(params) {
-  const { nickname, year_month } = params;
+  const { nickname, year_month, viewer } = params;
   if (!nickname || !year_month) return { ok: false, error: 'missing nickname or year_month' };
 
   const [year, month] = year_month.split('-').map(Number);
@@ -17,6 +17,12 @@ function getEvalEvidence(params) {
 
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
+  const viewerUser = findUserByNickname(viewer);
+  const canReview = viewerUser && viewerUser.status === 'active' && (
+    viewerUser.role === 'admin' ||
+    (viewerUser.role === 'manager' && viewerUser.department === user.department)
+  );
+  if (!canReview) return { ok: false, error: '無評核資料讀取權限' };
 
   // 1. 當月所有日誌
   const logs = sheetToObjects(SHEET_NAMES.LOGS)
@@ -149,6 +155,12 @@ function saveEval(params) {
   }
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
+  const evaluatorUser = findUserByNickname(evaluator);
+  const canEvaluate = evaluatorUser && evaluatorUser.status === 'active' && (
+    evaluatorUser.role === 'admin' ||
+    (evaluatorUser.role === 'manager' && user.role === 'teacher' && evaluatorUser.department === user.department)
+  );
+  if (!canEvaluate) return { ok: false, error: '無評核儲存權限' };
 
   const isManager = user.role === 'manager';
   const sheetName = isManager ? SHEET_NAMES.MANAGER_EVAL : SHEET_NAMES.TEACHER_EVAL;
@@ -246,22 +258,41 @@ function saveEval(params) {
 }
 
 function getEval(params) {
-  const { nickname, year_month } = params;
-  if (!nickname || !year_month) return { ok: false, error: 'missing fields' };
+  const { nickname, year_month, viewer } = params;
+  if (!nickname || !year_month || !viewer) return { ok: false, error: 'missing fields' };
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
+  const viewerUser = findUserByNickname(viewer);
+  if (!viewerUser || viewerUser.status !== 'active') return { ok: false, error: '無評核讀取權限' };
+  const canRead = viewerUser.role === 'admin' ||
+    (viewerUser.role === 'manager' && viewerUser.department === user.department) ||
+    (viewerUser.role === 'teacher' && viewerUser.nickname === user.nickname);
+  if (!canRead) return { ok: false, error: '無評核讀取權限' };
   const isManager = user.role === 'manager';
   const sheetName = isManager ? SHEET_NAMES.MANAGER_EVAL : SHEET_NAMES.TEACHER_EVAL;
   const prefix = isManager ? 'MEVAL' : 'EVAL';
   const eval_id = `${prefix}-${year_month}-${nickname}`;
   const e = findObject(sheetName, 'eval_id', eval_id);
+  if (viewerUser.role === 'teacher' && e && e.status !== 'submitted') {
+    return { ok: true, eval: null };
+  }
   return { ok: true, eval: e };
 }
 
 function listEvals(params) {
-  const { evaluator, year_month, role } = params;
+  const { evaluator, year_month, role, viewer } = params;
+  const viewerUser = findUserByNickname(viewer);
+  if (!viewerUser || viewerUser.status !== 'active' || !['admin', 'manager'].includes(viewerUser.role)) {
+    return { ok: false, error: '無評核清單讀取權限' };
+  }
   const sheetName = role === 'manager' ? SHEET_NAMES.MANAGER_EVAL : SHEET_NAMES.TEACHER_EVAL;
   let list = sheetToObjects(sheetName);
+  if (viewerUser.role === 'manager') {
+    const allowed = sheetToObjects(SHEET_NAMES.USERS)
+      .filter(user => user.department === viewerUser.department)
+      .map(user => user.nickname);
+    list = list.filter(item => allowed.includes(item.nickname));
+  }
   if (evaluator) list = list.filter(e => e.evaluator === evaluator);
   if (year_month) list = list.filter(e => e.year_month === year_month);
   return { ok: true, evals: list };

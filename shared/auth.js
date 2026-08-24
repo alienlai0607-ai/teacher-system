@@ -8,8 +8,8 @@ window.AUTH = (function () {
       const raw = localStorage.getItem(SESSION_KEY);
       if (!raw) return null;
       const s = JSON.parse(raw);
-      // 1 小時過期（切換身份時不過期）
-      if (!s.impersonate && Date.now() - s.t > 3600 * 1000) {
+      // 覆蓋完整工作日，避免老師上午登入、晚間送出前被迫重新登入。
+      if (!s.impersonate && Date.now() - s.t > 12 * 3600 * 1000) {
         localStorage.removeItem(SESSION_KEY);
         return null;
       }

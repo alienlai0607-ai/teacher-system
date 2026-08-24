@@ -52,6 +52,7 @@ function handleRequest(e, method) {
       'listLogs': () => listLogs(params),
       'getTodayLog': () => getTodayLog(params),
       'uploadPhoto': () => uploadPhoto(params),
+      'uploadFile': () => uploadFile(params),
       'getEvidenceLog': () => getEvidenceLog(params),
       'getMakeupQuota': () => getMakeupQuota(params),
       'cleanupDuplicateEvidence': () => cleanupDuplicateEvidence(params),
@@ -59,6 +60,11 @@ function handleRequest(e, method) {
       'adminBroadcast': () => adminBroadcast(params),
       'sendDailyKpiPdf': () => sendDailyKpiPdf(params),
       'sendSubmitPdf': () => sendSubmitPdf(params),
+
+      // 安親 V2 備課教案建檔
+      'saveCoursePrep': () => saveCoursePrep(params),
+      'listCoursePreps': () => listCoursePreps(params),
+      'deleteCoursePrep': () => deleteCoursePrep(params),
 
       // 週報
       'saveWeekly': () => saveWeekly(params),
@@ -93,8 +99,13 @@ function handleRequest(e, method) {
 
       // 事項
       'setConfig': () => setConfig(params),
+      'getSystemReadiness': () => getSystemReadiness(params),
+      'setupSystemAutomation': () => setupSystemAutomation(params),
+      'testMyNotifications': () => testMyNotifications(params),
       'debugPush': () => debugPush(params),
       'addTask': () => addTask(params),
+      'saveSelfTask': () => saveSelfTask(params),
+      'deleteSelfTask': () => deleteSelfTask(params),
       'listTasks': () => listTasks(params),
       'updateTaskStatus': () => updateTaskStatus(params),
       'deleteTask': () => deleteTask(params),
@@ -146,6 +157,7 @@ const SHEET_NAMES = {
   WEEKLY: 'WeeklyReports',
   STUDENTS: 'Students',
   TASKS: 'Tasks',
+  COURSE_PREP: 'CoursePrep',
 };
 
 const DEPARTMENTS = ['永康教室', '北區教室', '才藝部門', '總部'];

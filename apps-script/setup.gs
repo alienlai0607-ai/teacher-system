@@ -83,6 +83,10 @@ function setupSheets() {
       'task_id', 'title', 'detail', 'assignee', 'department', 'due_date',
       'status', 'created_by', 'created_at', 'updated_at', 'done_at'
     ],
+    [SHEET_NAMES.COURSE_PREP]: [
+      'prep_id', 'nickname', 'department', 'title', 'course_type',
+      'created_date', 'status', 'data_json', 'created_at', 'updated_at'
+    ],
   };
 
   Object.entries(schemas).forEach(([name, headers]) => {

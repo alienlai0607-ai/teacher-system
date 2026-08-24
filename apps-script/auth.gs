@@ -113,8 +113,12 @@ function claimNickname(params) {
  * 列出所有使用者（admin 用）
  */
 function listUsers(params) {
-  // TODO: 權限檢查（呼叫者必須是 admin）
-  const users = sheetToObjects(SHEET_NAMES.USERS);
+  const operator = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!operator || operator.status !== 'active' || !['admin', 'manager', 'admin_staff'].includes(operator.role)) {
+    return { ok: false, error: '無查看人員權限' };
+  }
+  let users = sheetToObjects(SHEET_NAMES.USERS);
+  if (operator.role !== 'admin') users = users.filter(user => user.department === operator.department || user.nickname === operator.nickname);
   return { ok: true, users };
 }
 
@@ -122,6 +126,8 @@ function listUsers(params) {
  * admin 新增使用者
  */
 function addUser(params) {
+  const operator = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!operator || operator.role !== 'admin' || operator.status !== 'active') return { ok: false, error: '需 admin 權限' };
   const { nickname, role, department, email, phone, notes } = params;
   if (!nickname || !role || !department) {
     return { ok: false, error: 'missing required fields' };
@@ -164,13 +170,15 @@ function addUser(params) {
  * admin 更新使用者
  */
 function updateUser(params) {
+  const operator = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!operator || operator.role !== 'admin' || operator.status !== 'active') return { ok: false, error: '需 admin 權限' };
   const { nickname } = params;
   if (!nickname) return { ok: false, error: 'missing nickname' };
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
 
   const updates = {};
-  ['email', 'role', 'department', 'status', 'phone', 'notes', 'subtype'].forEach(k => {
+  ['email', 'line_user_id', 'role', 'department', 'status', 'phone', 'notes', 'subtype'].forEach(k => {
     if (params[k] !== undefined) updates[k] = params[k];
   });
   updateRow(SHEET_NAMES.USERS, user._row, updates);

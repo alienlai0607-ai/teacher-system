@@ -9,6 +9,13 @@ function addFeedback(params) {
   }
   const fromU = findUserByNickname(from_nickname);
   const toU = findUserByNickname(to_nickname);
+  if (!fromU || !toU || fromU.status !== 'active' || toU.status !== 'active') return { ok: false, error: '對話帳號不存在或未啟用' };
+  if (fromU.role === 'teacher' && !(toU.role === 'manager' && toU.department === fromU.department) && toU.role !== 'admin') {
+    return { ok: false, error: '老師只能回覆同部門主管或管理員' };
+  }
+  if (fromU.role === 'manager' && toU.role !== 'admin' && toU.department !== fromU.department) {
+    return { ok: false, error: '主管只能回覆自己部門' };
+  }
   // 主管/老闆發的算「回饋」；老師發的算「回覆」（回覆不需 tag）
   const isBoss = fromU && (fromU.role === 'manager' || fromU.role === 'admin');
   const feedback_id = Utilities.getUuid();
@@ -26,9 +33,10 @@ function addFeedback(params) {
 
   // 即時通知對方（LINE + OneSignal）
   try {
-    const dateStr = String(log_id).replace(/^LOG-(\d{4})(\d{2})(\d{2})-.*$/, '$1/$2/$3');
+    const dateMatch = String(log_id).match(/^LOG-(\d{4})(\d{2})(\d{2})-/);
+    const contextLabel = dateMatch ? dateMatch.slice(1).join('/') + ' 日報' : 'KPI 紀錄';
     const title = isBoss ? ('💬 ' + from_nickname + ' 給你回饋') : ('💬 ' + from_nickname + ' 回覆了你');
-    const body = (dateStr ? ('（' + dateStr + ' 日報）\n') : '') + String(content).slice(0, 120);
+    const body = '（' + contextLabel + '）\n' + String(content).slice(0, 120);
     notifyUser_(toU, title, body);
   } catch (e) { /* 通知失敗不影響回饋寫入 */ }
 

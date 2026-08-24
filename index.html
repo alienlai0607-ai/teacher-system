@@ -6,12 +6,12 @@
 <title>布拉克星球 KPI 系統</title>
 <link rel="stylesheet" href="shared/style.css?v=20260624k">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="shared/config.js?v=20260707a"></script>
-<script src="shared/auth.js?v=20260707a"></script>
-<script src="shared/api.js?v=20260707a"></script>
-<script src="shared/ui.js?v=20260707a"></script>
-<script src="shared/pwa.js?v=20260707a"></script>
-<script src="shared/push.js?v=20260707a"></script>
+<script src="shared/config.js?v=20260825-release-1"></script>
+<script src="shared/auth.js?v=20260825-release-1"></script>
+<script src="shared/api.js?v=20260825-release-1"></script>
+<script src="shared/ui.js?v=20260825-release-1"></script>
+<script src="shared/pwa.js?v=20260825-release-1"></script>
+<script src="shared/push.js?v=20260825-release-1"></script>
 </head>
 <body class="login-page">
 
@@ -34,12 +34,29 @@
 <script>
 let currentEmail = '';
 
+function requestedReturnPath() {
+  const value = new URLSearchParams(window.location.search).get('return') || '';
+  if (!value || value.startsWith('/') || value.includes('..') || value.includes('\\') || /^[a-z][a-z0-9+.-]*:/i.test(value)) return '';
+  return value;
+}
+
+function routeAfterLogin(role) {
+  const target = requestedReturnPath();
+  if (target) window.location.href = target;
+  else AUTH.routeByRole(role);
+}
+
 window.addEventListener('load', () => {
   // 若已有 session 直接跳轉
   const s = AUTH.getSession();
   if (s) {
+    if (s.status === 'suspended') {
+      AUTH.clearSession();
+      setStatus('此帳號目前未啟用，請聯絡管理員');
+      return;
+    }
     setStatus('已登入為 ' + s.nickname + '，導向中...');
-    setTimeout(() => AUTH.routeByRole(s.role), 500);
+    setTimeout(() => routeAfterLogin(s.role), 500);
     return;
   }
   initGoogleSignIn();
@@ -80,9 +97,13 @@ async function onGoogleSignIn(response) {
   }
 
   if (res.registered) {
+    if (res.user.status !== 'active') {
+      setStatus('此帳號目前未啟用，請聯絡管理員');
+      return;
+    }
     AUTH.setSession(res.user);
     setStatus('歡迎 ' + res.user.nickname + '！導向中...');
-    setTimeout(() => AUTH.routeByRole(res.user.role), 600);
+    setTimeout(() => routeAfterLogin(res.user.role), 600);
   } else {
     setStatus('此 Email 尚未綁定暱稱');
     await showNicknameClaimUI();
@@ -123,7 +144,7 @@ async function claimNickname(nickname) {
   }
   AUTH.setSession(res.user);
   UI.toast('綁定成功！', 'success');
-  setTimeout(() => AUTH.routeByRole(res.user.role), 800);
+  setTimeout(() => routeAfterLogin(res.user.role), 800);
 }
 
 function setStatus(msg) {

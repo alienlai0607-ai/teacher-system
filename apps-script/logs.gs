@@ -11,6 +11,7 @@ function saveLog(params) {
 
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
+  if (user.status !== 'active') return { ok: false, error: '帳號目前未啟用' };
 
   const log_id = 'LOG-' + String(date).replace(/-/g, '') + '-' + nickname;
   const existing = findObject(SHEET_NAMES.LOGS, 'log_id', log_id);
@@ -85,6 +86,7 @@ function saveLog(params) {
   }
 
   if (firstSubmit) notifyLogSubmitted_(user, String(date), isMakeup === true, data.help_needed);
+  else if (params.submitted === true && existing && existing.submitted_at) notifyLogUpdated_(user, String(date));
 
   // 附件 → Evidence：只在「正式提交」時寫入，且整份取代
   // （舊版每次草稿自動存都 append 一次，一天可灌出上百筆重複證據）
@@ -178,6 +180,18 @@ function notifyLogSubmitted_(user, date, isMakeup, helpNeeded) {
     const title = '📥 ' + user.nickname + ' 已提交日報' + (isMakeup ? '（補繳）' : '');
     const body = (user.department || '') + '｜' + date + (helpNeeded ? '\n⚠️ 需要主管協助' : '');
     recipients.forEach(r => { try { notifyUser_(r, title, body); } catch (e) { /* 單人推播失敗不影響其他人 */ } });
+  } catch (e) { /* 通知失敗不影響日誌儲存 */ }
+}
+
+/** 已送出日報再次更新 → 通知同部門主管與管理員重新查看。 */
+function notifyLogUpdated_(user, date) {
+  try {
+    const recipients = sheetToObjects(SHEET_NAMES.USERS).filter(u =>
+      u.status === 'active' && u.nickname !== user.nickname &&
+      (u.role === 'admin' || (u.role === 'manager' && u.department === user.department)));
+    const title = '📝 ' + user.nickname + ' 已更新日報';
+    const body = (user.department || '') + '｜' + date + '｜請查看最新內容';
+    recipients.forEach(r => { try { notifyUser_(r, title, body); } catch (e) { /* 單人失敗不影響儲存 */ } });
   } catch (e) { /* 通知失敗不影響日誌儲存 */ }
 }
 
@@ -465,6 +479,58 @@ function uploadPhoto(params) {
   return { ok: true, url, fileId };
 }
 
+/**
+ * 教案與教材原始檔上傳。
+ * 資料夾結構：KPI教材 / 部門 / 暱稱 / 年月
+ */
+function uploadFile(params) {
+  const { nickname, date, mimeType, base64 } = params;
+  if (!nickname || !base64) return { ok: false, error: 'missing nickname or base64' };
+
+  const user = findUserByNickname(nickname);
+  if (!user) return { ok: false, error: 'user not found' };
+  if (String(base64).length > 22 * 1024 * 1024) return { ok: false, error: '檔案超過 15 MB 上限' };
+
+  const dateStr = String(date || todayStr());
+  const ym = dateStr.slice(0, 7);
+  const originalName = String(params.fileName || '教材檔案')
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/^\.+/, '')
+    .slice(0, 120) || '教材檔案';
+  const uniqueName = Utilities.getUuid().slice(0, 8) + '-' + originalName;
+  const bytes = Utilities.base64Decode(base64);
+  const blob = Utilities.newBlob(bytes, mimeType || 'application/octet-stream', uniqueName);
+
+  const root = getMaterialRootFolder_();
+  const deptF = getOrCreateChildFolder_(root, user.department || '未分部門');
+  const userF = getOrCreateChildFolder_(deptF, nickname);
+  const ymF = getOrCreateChildFolder_(userF, ym);
+  const file = ymF.createFile(blob);
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (e) {
+    // 組織政策若禁止公開分享，仍保留給有權限的登入者查看。
+  }
+
+  const fileId = file.getId();
+  const url = 'https://drive.google.com/file/d/' + fileId + '/view';
+  logSystem(nickname, 'upload_material', fileId, { date: dateStr, fileName: originalName, category: params.category || '' });
+  return { ok: true, url, fileId, fileName: originalName };
+}
+
+function getMaterialRootFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const cached = props.getProperty('MATERIAL_ROOT_FOLDER_ID');
+  if (cached) {
+    try { return DriveApp.getFolderById(cached); } catch (e) { /* 失效則重建 */ }
+  }
+  const name = 'KPI教材';
+  const it = DriveApp.getFoldersByName(name);
+  const folder = it.hasNext() ? it.next() : DriveApp.createFolder(name);
+  props.setProperty('MATERIAL_ROOT_FOLDER_ID', folder.getId());
+  return folder;
+}
+
 /** 取得（或建立）證據根資料夾，ID 快取於 Script Properties 避免每次掃描 Drive */
 function getEvidenceRootFolder_() {
   const props = PropertiesService.getScriptProperties();
@@ -493,6 +559,7 @@ function saveWeekly(params) {
   if (!nickname || !week_of) return { ok: false, error: 'missing nickname or week_of' };
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
+  if (user.status !== 'active') return { ok: false, error: '帳號目前未啟用' };
 
   const week_id = 'WK-' + week_of + '-' + nickname;
   const existing = findObject(SHEET_NAMES.WEEKLY, 'week_id', week_id);
