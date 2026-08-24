@@ -16,9 +16,9 @@
     robotics: { label: '機器人／STEAM 課程', icon: 'bot', tone: 'project', track: 'enrichment', kpi: '專案課程', evidence: true, requiresPlan: true },
     portfolio: { label: '學習歷程', icon: 'folder-kanban', tone: 'project', track: 'enrichment', kpi: '專案課程', evidence: true, requiresPlan: true },
     sel: { label: 'SEL 聊心室', icon: 'heart-handshake', tone: 'classroom', track: 'enrichment', kpi: '班級經營', evidence: true, requiresPlan: true },
-    classroom: { label: '班級經營', icon: 'users', tone: 'classroom', track: 'supplemental', kpi: '班級經營', evidence: true, requiresPlan: false },
+    classroom: { label: '班級經營', icon: 'users', tone: 'classroom', track: 'academic', kpi: '班級經營', evidence: true, requiresPlan: false },
     lessonprep: { label: '課程備課檔案', icon: 'notebook-tabs', tone: 'plan', track: 'archive', kpi: '課程研發', evidence: false, requiresPlan: false },
-    support: { label: '教室協作', icon: 'handshake', tone: 'classroom', track: 'supplemental', kpi: '個人態度與表現', evidence: true, requiresPlan: false },
+    support: { label: '教室協作', icon: 'handshake', tone: 'classroom', track: 'legacy', kpi: '個人態度與表現', evidence: true, requiresPlan: false, selectable: false },
   };
 
   const PREP_SOURCE_TYPES = ['tutoring', 'project', 'robotics', 'portfolio', 'sel'];
@@ -752,20 +752,112 @@
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  function exportRecords() {
-    const rows = [['日期', '老師', '狀態', '系統彙整成果', '系統彙整追蹤', '系統彙整待辦', '老師補充', '主管與老師對話']];
-    const currentSummary = buildDailySummary();
-    const currentSubmission = state.submissions.find(item => item.teacher === state.context.teacher && item.date === state.daily.date);
-    rows.push([
-      state.daily.date, state.context.teacher, state.daily.submittedAt ? '已提交' : '草稿',
-      currentSummary.keyResult, currentSummary.followup, currentSummary.tomorrowPriority, state.daily.summary.teacherNote || '', currentSubmission ? feedbackThreadExport(feedbackThreadKey('submission', currentSubmission.id)) : '',
+  function archiveFolderPath(month, teacher = state.context.teacher) {
+    const [year, monthNumber] = String(month || state.daily.date.slice(0, 7)).split('-');
+    return `布拉克星球KPI／安親部／${teacher}／${year}年／${monthNumber}月`;
+  }
+
+  function safeFilePart(value) {
+    return String(value || '').replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '_');
+  }
+
+  function activityFeedbackExport(activity) {
+    return (activity.evidence || []).map(evidence => {
+      const messages = feedbackThreadExport(feedbackThreadKey('evidence', activity.id, evidence.id));
+      return messages ? `${evidence.title || '成果證據'}\n${messages}` : '';
+    }).filter(Boolean).join('\n\n');
+  }
+
+  function monthlyArchiveRows(month) {
+    const teacher = state.context.teacher;
+    const inMonth = value => String(value || '').slice(0, 7) === month;
+    const byDate = (a, b) => String(a.date || '').localeCompare(String(b.date || ''));
+    const rows = [
+      ['布拉克星球 KPI 系統｜安親部月歸檔'],
+      ['老師', teacher],
+      ['月份', month],
+      ['建議雲端資料夾', archiveFolderPath(month, teacher)],
+      ['匯出時間', new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false })],
+      [],
+    ];
+    const submissions = state.submissions.filter(item => item.teacher === teacher && inMonth(item.date)).slice().sort(byDate);
+    const currentSubmission = submissions.find(item => item.date === state.daily.date);
+    const dailyRows = submissions.map(item => [
+      item.date, item.status === 'accepted' ? '已採認' : item.status === 'clarify' ? '待補充' : '待審查',
+      item.keyResult || '', item.followup || '', item.tomorrowPriority || '', item.teacherNote || '', feedbackThreadExport(feedbackThreadKey('submission', item.id)),
     ]);
-    state.submissions.filter(item => item.teacher === state.context.teacher && item.id !== currentSubmission?.id).forEach(item => rows.push([
-      item.date, item.teacher, item.status === 'accepted' ? '已採認' : item.status === 'clarify' ? '待補充' : '待審查',
-      item.keyResult, item.followup, item.tomorrowPriority, item.teacherNote || '', feedbackThreadExport(feedbackThreadKey('submission', item.id)),
-    ]));
-    downloadCsv(`安親KPI_我的紀錄_${state.context.teacher}_${state.daily.date}.csv`, rows);
-    toast('紀錄已匯出', 'success');
+    if (inMonth(state.daily.date) && !currentSubmission) {
+      const summary = buildDailySummary();
+      dailyRows.push([state.daily.date, state.daily.submittedAt ? '已提交' : '草稿', summary.keyResult, summary.followup, summary.tomorrowPriority, state.daily.summary.teacherNote || '', '']);
+      dailyRows.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    }
+    rows.push(['【每日彙整】'], ['日期', '狀態', '今日成果', '持續追蹤', '最近待辦', '老師補充', '主管與老師對話'], ...dailyRows, []);
+
+    const activities = state.activities.filter(item => item.teacher === teacher && item.type !== 'lessonprep' && inMonth(item.date)).slice().sort(byDate);
+    rows.push(['【工作紀錄明細】'], ['日期', '分類', '工作類型', '標題', '班級／對象', '目標', '做法／引導', '實際結果', '問題', '下一步', '追蹤日期', '備課檔案', '成果份數', '成果對話']);
+    activities.forEach(activity => {
+      const source = prepSourceById(activity.prepSourceId);
+      rows.push([
+        activity.date, activityTrackMeta(activityTrack(activity.type)).shortLabel, ACTIVITY_TYPES[activity.type]?.label || activity.type,
+        activity.title, activity.className || '', activity.objective, activity.action, activity.result, activity.issue || '', activity.nextAction,
+        activity.dueDate || '', source?.title || '', (activity.evidence || []).length, activityFeedbackExport(activity),
+      ]);
+    });
+    rows.push([]);
+
+    rows.push(['【成果證據索引】'], ['日期', '工作標題', '證據標題', '附件檔名', '證明內容', '主管查看重點', '品質', '狀態', '主管與老師對話']);
+    activities.forEach(activity => (activity.evidence || []).forEach(evidence => rows.push([
+      activity.date, activity.title, evidence.title || '', evidenceAttachments(evidence).map(item => item.fileName).join('、'), evidence.claim || '', evidence.observation || '', evidence.quality || '', evidence.status || '', feedbackThreadExport(feedbackThreadKey('evidence', activity.id, evidence.id)),
+    ])));
+    rows.push([]);
+
+    const cases = state.studentCases.filter(item => item.teacher === teacher && inMonth(item.date)).slice().sort(byDate);
+    rows.push(['【學生追蹤】'], ['日期', '學生', '類別', '優先度', '具體觀察', '已採取方法', '目前結果', '下一步', '追蹤日期', '狀態', '主管與老師對話']);
+    cases.forEach(item => rows.push([item.date, item.student, item.category, item.urgency, item.observation, item.intervention, item.outcome, item.nextAction, item.dueDate, item.status === 'closed' ? '已結案' : '追蹤中', feedbackThreadExport(feedbackThreadKey('case', item.id))]));
+    rows.push([]);
+
+    const contacts = state.contacts.filter(item => item.teacher === teacher && inMonth(item.date)).slice().sort(byDate);
+    rows.push(['【親師溝通】'], ['日期', '學生', '管道', '主題', '必要摘要', '雙方共識／承諾', '後續行動', '追蹤日期', '狀態']);
+    contacts.forEach(item => rows.push([item.date, item.student, item.channel, item.topic, item.summary, item.decision, item.nextAction || '', item.dueDate || '', item.status === 'closed' ? '已結案' : '待追蹤']));
+    rows.push([]);
+
+    const operations = operationRecords().filter(item => item.dutyOwner === teacher && inMonth(item.date)).slice().sort(byDate);
+    rows.push(['【班務與環境】'], ['日期', '教室', '已附照片', '異常數', '主管狀態', '逐項結果', '主管與老師對話']);
+    operations.forEach(operation => {
+      const details = Object.entries(OPERATION_CHECKS).map(([key, config]) => {
+        const item = operation.evidenceByCheck?.[key] || {};
+        return `${config.label}：${item.status === 'exception' ? `異常｜${item.action || '未填處理'}` : '正常'}｜${item.fileName || '未附照片'}`;
+      }).join('\n');
+      rows.push([operation.date, operation.room, operationProofCount(operation), operationExceptionCount(operation), operationReviewStatus(operation.reviewStatus)[0], details, feedbackThreadExport(feedbackThreadKey('operation', operation.id))]);
+    });
+    rows.push([]);
+
+    const prepFiles = state.activities.filter(item => item.teacher === teacher && item.type === 'lessonprep' && inMonth(item.date)).slice().sort(byDate);
+    rows.push(['【備課教案建檔】'], ['建立日期', '備課檔案', '課程類型', '教案完整度', '教材數', '教案對話']);
+    prepFiles.forEach(item => {
+      const plan = planById(item.planId);
+      rows.push([item.date, item.title, item.details?.targetCourse || '', plan ? `${planReadiness(plan)}%` : '未建立', (plan?.materials || []).length, plan ? feedbackThreadExport(feedbackThreadKey('plan', plan.id)) : '']);
+    });
+    return rows;
+  }
+
+  function openMonthlyExportDialog() {
+    const month = state.daily.date.slice(0, 7);
+    openDialog({
+      title: '匯出每月雲端歸檔',
+      body: `<form id="monthly-export-form"><div class="form-field"><label class="form-label" for="archive-month">歸檔月份 <span class="required">*</span></label><input id="archive-month" name="month" type="month" value="${month}" data-change="archive-month" required></div><div class="archive-path-preview">${icon('folders', 18)}<div><strong>建議雲端資料夾</strong><code id="archive-folder-path">${esc(archiveFolderPath(month))}</code></div></div><div class="notice-band info mt-12">${icon('messages-square', 18)}<div><div class="notice-title">對話會一起匯出</div><div class="notice-copy">日結、成果證據、學生追蹤、班務與教案的主管意見及老師回覆，都會依日期收進同一份月檔。</div></div></div></form>`,
+      footer: `<button type="button" class="btn" data-action="close-dialog">取消</button><button type="button" class="btn btn-primary" data-action="export-monthly-archive">${icon('file-down', 16)}匯出月歸檔</button>`,
+    });
+  }
+
+  function exportMonthlyArchive() {
+    const monthInput = $('#archive-month');
+    if (!monthInput?.reportValidity()) return;
+    const month = monthInput.value;
+    const fileName = `${safeFilePart(month)}_${safeFilePart(state.context.teacher)}_安親KPI月歸檔.csv`;
+    downloadCsv(fileName, monthlyArchiveRows(month));
+    closeDialog();
+    toast(`${month} 月歸檔已匯出`, 'success');
   }
 
   function exportStudentCases() {
@@ -956,15 +1048,15 @@
   }
 
   function activityTrack(type) {
-    return (ACTIVITY_TYPES[type] || ACTIVITY_TYPES.tutoring).track || 'supplemental';
+    return (ACTIVITY_TYPES[type] || ACTIVITY_TYPES.tutoring).track || 'academic';
   }
 
   function activityTrackMeta(track) {
     return {
-      academic: { label: '學科內｜課業輔導', shortLabel: '學科內必填', icon: 'book-open-check', tone: 'blue', description: '國語、數學、英文、自然、社會等課內學習與作業輔導。' },
+      academic: { label: '學科內｜課業輔導／班級經營', shortLabel: '學科內', icon: 'book-open-check', tone: 'blue', description: '安親課業指導每天必填；班級經營有實際事件時再記。' },
       enrichment: { label: '學科外｜當日特色課程', shortLabel: '學科外必填', icon: 'sparkles', tone: 'purple', description: '專案、機器人／STEAM、學習歷程或 SEL 等當日特色課程。' },
-      supplemental: { label: '額外工作紀錄', shortLabel: '額外紀錄', icon: 'plus-circle', tone: 'outline', description: '班級經營與教室協作；不能取代每日兩項必填。' },
-    }[track] || { label: '額外工作紀錄', shortLabel: '額外紀錄', icon: 'plus-circle', tone: 'outline', description: '' };
+      legacy: { label: '歷史紀錄', shortLabel: '歷史資料', icon: 'archive', tone: 'outline', description: '只保留舊資料，不提供新增。' },
+    }[track] || { label: '學科內', shortLabel: '學科內', icon: 'book-open-check', tone: 'blue', description: '' };
   }
 
   function dailyTrackStatus(activities = todayActivities()) {
@@ -972,7 +1064,12 @@
       const items = activities.filter(activity => activityTrack(activity.type) === track);
       return { items, count: items.length, complete: items.filter(activityComplete).length, covered: items.length > 0 };
     };
-    return { academic: build('academic'), enrichment: build('enrichment'), supplemental: build('supplemental') };
+    const academic = build('academic');
+    const requiredAcademic = academic.items.filter(activity => activity.type === 'tutoring');
+    academic.requiredCount = requiredAcademic.length;
+    academic.requiredComplete = requiredAcademic.filter(activityComplete).length;
+    academic.covered = requiredAcademic.length > 0;
+    return { academic, enrichment: build('enrichment') };
   }
 
   function dailyRequiredTracksReady(activities = todayActivities()) {
@@ -1151,7 +1248,7 @@
 
   function renderGuideInvite() {
     if (state.ui.guidePromptDismissed) return '';
-    return `<div class="guide-invite">${icon('book-open-text', 22)}<div><strong>第一次使用，先看填寫指南</strong><small>工作類型、五個欄位、備課教案建檔與證據標準都集中在獨立頁面，正式表單不再重複顯示。</small></div><div class="guide-invite-actions"><button type="button" class="btn btn-small btn-primary" data-action="navigate" data-route="guide">開啟指南</button><button type="button" class="icon-button" data-action="dismiss-guide-prompt" aria-label="略過填寫指南提示" title="略過">${icon('x', 15)}</button></div></div>`;
+    return `<div class="guide-invite">${icon('book-open-text', 22)}<div><strong>第一次使用，先看填寫指南</strong><small>學科內、學科外各有獨立入口，只會顯示該類型需要填寫的內容與範例。</small></div><div class="guide-invite-actions"><button type="button" class="btn btn-small btn-primary" data-action="navigate" data-route="guide">開啟指南</button><button type="button" class="icon-button" data-action="dismiss-guide-prompt" aria-label="略過填寫指南提示" title="略過">${icon('x', 15)}</button></div></div>`;
   }
 
   function renderTeacherToday() {
@@ -1163,13 +1260,13 @@
     const prepReady = prepRequired.filter(activityPreparationReady).length;
     const completion = dailyCompletion();
     const tabStatus = todaySectionStatus();
-    const actions = `<button type="button" class="btn" data-action="open-student-case">${icon('user-round-plus', 16)}<span class="btn-label-mobile-hide">快速記學生</span></button><button type="button" class="btn" data-action="open-activity" data-type="lessonprep">${icon('notebook-tabs', 16)}<span class="btn-label-mobile-hide">新增備課檔案</span></button><button type="button" class="btn btn-primary" data-action="open-activity">${icon('plus', 17)}<span class="btn-label-mobile-hide">新增工作紀錄</span></button>`;
+    const actions = `<button type="button" class="btn" data-action="open-student-case">${icon('user-round-plus', 16)}<span class="btn-label-mobile-hide">快速記學生</span></button><button type="button" class="btn" data-action="open-activity" data-type="lessonprep">${icon('notebook-tabs', 16)}<span class="btn-label-mobile-hide">新增備課檔案</span></button>`;
     return `<div class="page">
       ${pageHead('今日工作紀錄', `${formatDate(state.daily.date)} · ${state.context.department} · ${state.context.teacher}`, actions)}
       ${renderGuideInvite()}
       <div class="status-strip">
         <div class="status-cell"><div class="status-label">今日完成度</div><div class="status-value">${completion}%</div><div class="status-note">${state.daily.status === 'submitted' ? '已正式送出' : '草稿持續自動儲存'}</div></div>
-        <div class="status-cell"><div class="status-label">每日兩項必填</div><div class="status-value">${Number(tracks.academic.covered) + Number(tracks.enrichment.covered)}/2</div><div class="status-note">學科內 ${tracks.academic.count} 筆 · 學科外 ${tracks.enrichment.count} 筆</div></div>
+        <div class="status-cell"><div class="status-label">每日兩項必填</div><div class="status-value">${Number(tracks.academic.covered) + Number(tracks.enrichment.covered)}/2</div><div class="status-note">課業輔導 ${tracks.academic.requiredCount} 筆 · 學科外 ${tracks.enrichment.count} 筆</div></div>
         <div class="status-cell"><div class="status-label">備課檔案已連結</div><div class="status-value">${prepReady}/${prepRequired.length}</div><div class="status-note">成果證據 ${evidenceReady}/${evidenceCount} 份可判讀</div></div>
         <div class="status-cell"><div class="status-label">待追蹤</div><div class="status-value">${openTasks().length}</div><div class="status-note">${openTasks().filter(item => item.priority === 'high').length} 項優先</div></div>
       </div>
@@ -1196,17 +1293,23 @@
     const ready = activities.filter(activityComplete).length;
     return `<div class="content-grid">
       <section class="panel">
-        <div class="panel-head"><div><div class="panel-title">${icon('clipboard-list')}工作紀錄</div><div class="panel-subtitle">每日固定 1 筆學科內、1 筆學科外；目前 ${ready}/${activities.length || 0} 筆資料完整</div></div><button type="button" class="btn btn-small" data-action="open-activity">${icon('plus', 15)}新增</button></div>
+        <div class="panel-head"><div><div class="panel-title">${icon('clipboard-list')}工作紀錄</div><div class="panel-subtitle">每日固定 1 筆課業輔導、1 筆學科外特色課程；目前 ${ready}/${activities.length || 0} 筆資料完整</div></div></div>
         <div class="panel-body">
           <div class="daily-track-requirements">${['academic', 'enrichment'].map(track => {
             const meta = activityTrackMeta(track);
             const status = tracks[track];
             const fullyComplete = status.covered && status.complete === status.count;
-            return `<article class="daily-track-row ${status.covered ? 'is-covered' : ''} ${fullyComplete ? 'is-complete' : ''}"><span class="daily-track-icon">${icon(meta.icon, 20)}</span><div><strong>${esc(meta.label)}</strong><small>${esc(meta.description)}</small><div class="daily-track-progress">${status.count ? `${status.complete}/${status.count} 筆完整` : '尚未新增，今日紀錄無法送出'}</div></div><button type="button" class="btn btn-small ${status.covered ? '' : 'btn-primary'}" data-action="open-activity" data-track="${track}">${icon(status.covered ? 'plus' : 'plus-circle', 14)}${status.covered ? '再記一筆' : '新增必填'}</button></article>`;
+            const progress = track === 'academic'
+              ? status.covered
+                ? `${status.requiredComplete}/${status.requiredCount} 筆課業輔導完整${status.count > status.requiredCount ? ` · 班級經營 ${status.count - status.requiredCount} 筆` : ''}`
+                : status.count
+                  ? '已有班級經營，仍需新增安親課業指導'
+                  : '尚未新增安親課業指導，今日紀錄無法送出'
+              : status.count ? `${status.complete}/${status.count} 筆完整` : '尚未新增，今日紀錄無法送出';
+            return `<article class="daily-track-row ${status.covered ? 'is-covered' : ''} ${fullyComplete ? 'is-complete' : ''}"><span class="daily-track-icon">${icon(meta.icon, 20)}</span><div><strong>${esc(meta.label)}</strong><small>${esc(meta.description)}</small><div class="daily-track-progress">${esc(progress)}</div></div><button type="button" class="btn btn-small ${status.covered ? '' : 'btn-primary'}" data-action="open-activity" data-track="${track}">${icon(status.covered ? 'plus' : 'plus-circle', 14)}${status.covered ? '再記一筆' : '新增必填'}</button></article>`;
           }).join('')}</div>
-          ${tracks.supplemental.count ? `<div class="supplemental-summary">${icon('layers-3', 15)}另有 ${tracks.supplemental.count} 筆班級經營或教室協作紀錄；這些不取代每日兩項必填。</div>` : ''}
           <div class="section-divider"></div>
-          ${activities.length ? `<div class="activity-list">${activities.map(renderActivityRow).join('')}</div>` : renderEmpty('clipboard-plus', '尚無工作紀錄', '請先完成學科內課業輔導與學科外特色課程各一筆。', '新增學科內紀錄', 'open-activity')}
+          ${activities.length ? `<div class="activity-list">${activities.map(renderActivityRow).join('')}</div>` : renderEmpty('clipboard-plus', '尚無工作紀錄', '請從上方分別新增安親課業指導與學科外特色課程。', '', '')}
         </div>
       </section>
       <aside class="stack">
@@ -1313,7 +1416,7 @@
       <div id="${bodyId}" class="panel-body" ${expanded ? '' : 'hidden'}>
         <div class="check-list evidence-standard-list">
           <div class="check-item done"><span class="check-icon">${icon('check', 12)}</span><span>授課前：選擇教案內容與教材已完整的備課檔案</span></div>
-          <div class="check-item done"><span class="check-icon">${icon('check', 12)}</span><span>班級經營、教室協作：不要求教案或備課附件</span></div>
+          <div class="check-item done"><span class="check-icon">${icon('check', 12)}</span><span>班級經營：歸在學科內，不要求教案或備課附件</span></div>
           <div class="check-item done"><span class="check-icon">${icon('check', 12)}</span><span>成果證據：直接對應本次目標與實際結果</span></div>
           <div class="check-item done"><span class="check-icon">${icon('check', 12)}</span><span>指出主管應查看的具體位置或差異</span></div>
           <div class="check-item done"><span class="check-icon">${icon('check', 12)}</span><span>完成隱私確認，避免無關個資</span></div>
@@ -1406,7 +1509,8 @@
   }
 
   function renderOperationPhoto(item, key, label) {
-    return `<div id="operation-preview-${key}" class="operation-photo-preview ${item.dataUrl ? 'has-image' : ''}">${item.dataUrl ? `<img src="${item.dataUrl}" alt="${esc(label)}證據預覽">` : `<span>${icon(item.fileName ? 'image' : 'camera', 28)}</span>`}<div><strong id="operation-photo-name-${key}">${esc(item.fileName || `加入${label}照片`)}</strong><small>${item.fileName ? `${esc(item.size || '已加入')} · 點照片可更換` : '拍清楚指定範圍，不用另寫照片說明'}</small></div></div>`;
+    const hasPhoto = Boolean(item.fileName);
+    return `<div id="operation-preview-${key}" class="operation-photo-preview ${item.dataUrl ? 'has-image' : ''}">${item.dataUrl ? `<img src="${item.dataUrl}" alt="${esc(label)}證據預覽">` : `<span>${icon('image-plus', 17)}</span>`}<div><strong id="operation-photo-name-${key}">${hasPhoto ? '更換照片' : '選擇照片'}</strong><small>${hasPhoto ? `${esc(item.fileName)} · ${esc(item.size || '已加入')}` : '每項一張'}</small></div></div>`;
   }
 
   function renderTodayOperations() {
@@ -1499,7 +1603,8 @@
   }
 
   function renderTeacherGuide() {
-    const selectedType = ACTIVITY_TYPES[state.ui.guideType] && state.ui.guideType !== 'lessonprep' ? state.ui.guideType : 'tutoring';
+    const selectedConfig = ACTIVITY_TYPES[state.ui.guideType];
+    const selectedType = selectedConfig && selectedConfig.selectable !== false && state.ui.guideType !== 'lessonprep' ? state.ui.guideType : 'tutoring';
     const config = ACTIVITY_TYPES[selectedType];
     const guide = activityGuide(selectedType);
     const purpose = {
@@ -1513,8 +1618,8 @@
     }[selectedType];
     const fieldExamples = [guide.objective, guide.action, guide.result, guide.issue, guide.next];
     const dailySteps = [
-      ['1', '學科內課業輔導', '每天至少一筆，寫出題目範圍、學生原本會什麼及實際完成情況。'],
-      ['2', '學科外特色課程', '每天至少一筆，從專案、機器人、學習歷程或 SEL 選擇。'],
+      ['1', '學科內', '從學科內入口新增；安親課業指導每天至少一筆，班級經營有實際事件時再記。'],
+      ['2', '學科外', '從學科外入口新增；只會看到專案、機器人、學習歷程與 SEL。'],
       ['3', '選取備課檔案並補成果', '課程帶入已完成的教案與教材；班級經營與協作不需要備課檔案。'],
       ['4', '完成學生、親師與班務', '有狀況就留下追蹤；值日班務四項各拍一張，正常不寫說明，異常才補處理安排。'],
       ['5', '確認後送主管', '系統直接彙整成果、追蹤與待辦；主管提出意見後，老師可在同一筆資料接續回覆。'],
@@ -1522,11 +1627,12 @@
     return `<div class="page guide-page">
       ${pageHead('填寫指南', '說明與範例集中管理，不占用正式填寫畫面', `<button type="button" class="btn btn-primary" data-action="navigate" data-route="today">${icon('clipboard-pen-line', 16)}<span>開始今天的紀錄</span></button>`)}
       <section class="guide-start-band"><div><span class="guide-kicker">每日工作順序</span><h2>先完成兩項課程，再確認系統彙整</h2><p>以下是固定流程；詳細範例只留在本頁，工作表單只保留必要欄位。</p></div><div class="guide-day-flow">${dailySteps.map(([number, title, copy]) => `<div class="guide-day-step"><span>${number}</span><div><strong>${esc(title)}</strong><small>${esc(copy)}</small></div></div>`).join('')}</div></section>
+      <div class="notice-band info">${icon('folder-down', 19)}<div><div class="notice-title">每月雲端歸檔</div><div class="notice-copy">到「我的紀錄」選擇匯出月份；系統會依老師、年份與月份命名，並把各日期紀錄及主管對話收進同一份月檔。</div></div></div>
 
       <section class="panel guide-section">
         <div class="panel-head"><div><div class="panel-title">${icon('list-tree')}工作類型與欄位怎麼寫</div><div class="panel-subtitle">選一種類型查看專屬欄位及五個欄位的差異</div></div></div>
         <div class="panel-body">
-          <div class="guide-type-picker">${Object.entries(ACTIVITY_TYPES).filter(([key]) => key !== 'lessonprep').map(([key, item]) => `<button type="button" class="guide-type-button ${selectedType === key ? 'active' : ''}" data-action="set-guide-type" data-type="${key}">${icon(item.icon, 16)}<span>${esc(item.label)}</span></button>`).join('')}</div>
+          <div class="guide-type-picker">${Object.entries(ACTIVITY_TYPES).filter(([key, item]) => key !== 'lessonprep' && item.selectable !== false).map(([key, item]) => `<button type="button" class="guide-type-button ${selectedType === key ? 'active' : ''}" data-action="set-guide-type" data-type="${key}">${icon(item.icon, 16)}<span>${esc(item.label)}</span></button>`).join('')}</div>
           <div class="guide-selected-head"><span class="activity-icon ${config.tone}">${icon(config.icon, 21)}</span><div><strong>${esc(config.label)}</strong><p>${esc(purpose)}</p></div><span class="badge ${activityTrackMeta(config.track).tone}">${esc(activityTrackMeta(config.track).shortLabel)}</span></div>
           <div class="guide-specific-fields"><strong>這種類型另外要填</strong><div>${activityDetailSchema(selectedType).length ? activityDetailSchema(selectedType).map(field => `<span>${icon(field.control === 'date' ? 'calendar-days' : 'check', 13)}${esc(field.label)}</span>`).join('') : '<span>沒有額外欄位，直接完成五項工作紀錄</span>'}</div></div>
           <div class="guide-field-list">${fieldExamples.map((field, index) => `<article><span class="guide-field-number">${index + 1}</span><div><strong>${esc(field[0])}</strong><small>${esc(field[1])}</small><p><span>範例</span>${esc(field[2])}</p></div></article>`).join('')}</div>
@@ -1534,7 +1640,7 @@
       </section>
 
       <div class="guide-split">
-        <section class="panel guide-section"><div class="panel-head"><div><div class="panel-title">${icon('package-check')}備課檔案怎麼用</div><div class="panel-subtitle">備課與每日工作分開，教案與教材只整理一次</div></div></div><div class="panel-body"><div class="guide-source-flow"><div><span>1</span><strong>新增備課檔案</strong><small>選擇課程類型並命名；班級可選填。</small></div><div><span>2</span><strong>完成教案與教材</strong><small>整理目標、流程、引導方法、檢核方式及正式附件。</small></div><div><span>3</span><strong>內容完整即可選用</strong><small>不需先填授課日、版本、送審日或鎖定日。</small></div><div><span>4</span><strong>授課當天選用並回饋</strong><small>依建立日期找到檔案，只記實際成果與需調整處。</small></div></div><div class="guide-rule">${icon('info', 17)}<span>班級經營與教室協作不需要備課檔案，直接記錄實際做法、結果、問題、下一步與成果證據。</span></div></div></section>
+        <section class="panel guide-section"><div class="panel-head"><div><div class="panel-title">${icon('package-check')}備課檔案怎麼用</div><div class="panel-subtitle">備課與每日工作分開，教案與教材只整理一次</div></div></div><div class="panel-body"><div class="guide-source-flow"><div><span>1</span><strong>新增備課檔案</strong><small>選擇課程類型並命名；建立日期由系統保留。</small></div><div><span>2</span><strong>完成教案與教材</strong><small>整理目標、流程、引導方法、檢核方式及正式附件。</small></div><div><span>3</span><strong>內容完整即可選用</strong><small>不需先填授課日、版本、送審日或鎖定日。</small></div><div><span>4</span><strong>授課當天選用並回饋</strong><small>依建立日期找到檔案，當天才填實際班級、成果與需調整處。</small></div></div><div class="guide-rule">${icon('info', 17)}<span>班級經營歸在學科內，但不需要備課檔案；直接記錄實際做法、結果、問題、下一步與成果證據。</span></div></div></section>
         <section class="panel guide-section"><div class="panel-head"><div><div class="panel-title">${icon('scan-search')}什麼才算可判讀證據</div><div class="panel-subtitle">主管要能直接看懂資料證明了什麼</div></div></div><div class="panel-body"><div class="guide-evidence-compare"><div><span class="badge yellow">授課前</span><strong>備課檔案</strong><p>教案、任務單、簡報、材料與檢核工具集中管理，不在當日重複上傳。</p></div><div><span class="badge blue">授課後</span><strong>成果證據</strong><p>學生作品、訂正前後、測試數據或行為變化；不能只放一張看不出重點的廣角照。</p></div></div><div class="guide-rule">${icon('scan-line', 17)}<span>工作結果由系統帶入，不用重寫；老師只需標示主管要看檔案的哪個位置，照片可加編號。</span></div><div class="guide-rule">${icon('eye', 17)}<span>工作頁的「課程與工作證據標準」第一次完整顯示；完成第一份成果證據後預設收合，可隨時按「查看證據標準」再次開啟。</span></div></div></section>
       </div>
 
@@ -1595,12 +1701,28 @@
 
   function renderActivityTrackIndicator(type) {
     const meta = activityTrackMeta(activityTrack(type));
-    const isRequired = ['academic', 'enrichment'].includes(activityTrack(type));
-    return `<div class="activity-track-indicator ${activityTrack(type)}">${icon(meta.icon, 17)}<div><strong>${esc(meta.label)}</strong><small>${isRequired ? '可完成每日必填軌道' : '不會取代學科內與學科外必填紀錄'}</small></div></div>`;
+    const requirementCopy = type === 'tutoring'
+      ? '每日學科內必填'
+      : type === 'classroom'
+        ? '歸在學科內，但不取代每日課業輔導'
+        : activityTrack(type) === 'enrichment'
+          ? '可完成每日學科外必填'
+          : '只保留歷史資料，不提供新增';
+    return `<div class="activity-track-indicator ${activityTrack(type)}">${icon(meta.icon, 17)}<div><strong>${esc(meta.label)}</strong><small>${esc(requirementCopy)}</small></div></div>`;
   }
 
-  function renderActivityTypeOptions(selectedType) {
-    return ['academic', 'enrichment', 'supplemental'].map(track => `<optgroup label="${esc(activityTrackMeta(track).label)}">${Object.entries(ACTIVITY_TYPES).filter(([key, config]) => key !== 'lessonprep' && config.track === track).map(([key, config]) => `<option value="${key}" ${selectedType === key ? 'selected' : ''}>${esc(config.label)}</option>`).join('')}</optgroup>`).join('');
+  function activityTypeOptionLabel(type, config) {
+    if (type === 'tutoring') return `${config.label}（每日必填）`;
+    if (type === 'classroom') return `${config.label}（有事件再記）`;
+    return config.label;
+  }
+
+  function selectableActivityTypes(track, selectedType = '') {
+    return Object.entries(ACTIVITY_TYPES).filter(([key, config]) => key !== 'lessonprep' && config.track === track && (config.selectable !== false || key === selectedType));
+  }
+
+  function renderActivityTypeOptions(selectedType, formTrack = activityTrack(selectedType)) {
+    return selectableActivityTypes(formTrack, selectedType).map(([key, config]) => `<option value="${key}" ${selectedType === key ? 'selected' : ''}>${esc(activityTypeOptionLabel(key, config))}</option>`).join('');
   }
 
   function renderPlanLinkStatus(planId, type) {
@@ -1635,7 +1757,7 @@
     const materialCount = (plan?.materials || []).length;
     return `<div id="activity-prep-source-status" class="prep-source-card ${issues.length ? 'is-blocked' : 'is-ready'}">
       <div class="prep-source-card-head"><span>${icon(issues.length ? 'circle-alert' : 'badge-check', 19)}</span><div><strong>${esc(source.title)}</strong><small>${formatDate(source.date)} 建立 · ${formatDate(updatedDate)} 更新</small></div>${statusBadge(issues.length ? '尚不可使用' : '可供選用', issues.length ? 'red' : 'green')}</div>
-      <div class="prep-source-facts"><span><strong>課程類型</strong>${esc(source.details?.targetCourse || '尚未分類')}</span><span><strong>適用對象</strong>${esc(source.className || '跨班適用')}</span><span><strong>教案完整度</strong>${plan ? `${planReadiness(plan)}%` : '尚未填寫'}</span><span><strong>正式教材</strong>${materialCount} 份</span></div>
+      <div class="prep-source-facts"><span><strong>課程類型</strong>${esc(source.details?.targetCourse || '尚未分類')}</span><span><strong>教案完整度</strong>${plan ? `${planReadiness(plan)}%` : '尚未填寫'}</span><span><strong>正式教材</strong>${materialCount} 份</span></div>
       ${source.prep?.summary ? `<div class="prep-source-summary"><strong>備課補充</strong><p>${esc(source.prep.summary)}</p></div>` : ''}
       ${issues.length ? `<div class="prep-source-issues">${icon('triangle-alert', 16)}<span>${esc(issues.join('、'))}</span></div>` : `<div class="prep-source-linked">${icon('link-2', 15)}<span>系統會帶入這份教案與教材；本堂只需記錄實際成果及課後回饋。</span></div>`}
     </div>`;
@@ -1671,7 +1793,7 @@
   function activityFormCopy(type) {
     const isCrossDay = type === 'lessonprep';
     return isCrossDay ? {
-      classLabel: '適用班級／對象', classPlaceholder: '例：五六年級混齡班；可跨班使用則留白',
+      classLabel: '', classPlaceholder: '', hideClass: true,
       titleLabel: '備課檔案名稱', titlePlaceholder: '例：餐車計畫｜菜單成本教學', hideStudents: true,
       prepTitle: '教案內容與教材', prepSubtitle: '教學設計、教材附件與參考資料集中在同一份檔案', prepBadge: '同一份檔案',
       prepSummaryLabel: '備課補充', prepSummaryPlaceholder: '例：第一次接觸成本概念的班級，需先完成共同範例。',
@@ -1680,7 +1802,7 @@
       resultTitle: '備課內容', resultSubtitle: '集中整理教案與教材', resultBadge: '備課檔案',
       ownerLabel: '備課老師', dueLabel: '更新日期',
     } : {
-      classLabel: '班級／對象', classPlaceholder: '例：四年級 A 班',
+      classLabel: '班級／對象', classPlaceholder: '例：四年級 A 班', hideClass: false,
       titleLabel: '紀錄標題', titlePlaceholder: '例：數學｜異分母分數加減', hideStudents: false,
       prepTitle: '本堂採用的備課檔案', prepSubtitle: '由內容完整的教案與教材帶入', prepBadge: '授課前選取',
       prepSummaryLabel: '', prepSummaryPlaceholder: '',
@@ -1698,7 +1820,7 @@
 
   function renderCoursePrepForm(activity) {
     const value = activity || {
-      id: '', type: 'lessonprep', title: '', className: '', details: activityDetailDefaults('lessonprep'), planId: '', prep: { summary: '', adjustment: '' }, prepEvidence: [],
+      id: '', type: 'lessonprep', title: '', details: activityDetailDefaults('lessonprep'), planId: '', prep: { summary: '', adjustment: '' }, prepEvidence: [],
     };
     const details = { ...activityDetailDefaults('lessonprep'), ...(value.details || {}) };
     return `<form id="course-prep-form" data-form="course-prep">
@@ -1711,7 +1833,6 @@
           <div class="form-field"><label class="form-label" for="course-prep-type">備課課程類型 <span class="required">*</span></label><select id="course-prep-type" name="targetCourse" required><option value="">請選擇課程</option>${ACTIVITY_DETAIL_SCHEMAS.lessonprep[0].options.map(option => `<option value="${esc(option)}" ${details.targetCourse === option ? 'selected' : ''}>${esc(option)}</option>`).join('')}</select></div>
           <div class="form-field"><div class="form-label">備課建立日期</div><div class="course-prep-date">${icon('calendar-days', 16)}${formatDate(value.date || state.daily.date)}</div></div>
           <div class="form-field span-2"><label class="form-label" for="course-prep-title">備課檔案名稱 <span class="required">*</span></label><input id="course-prep-title" name="title" value="${esc(value.title || '')}" placeholder="例：餐車計畫｜菜單成本教學" required></div>
-          <div class="form-field span-2"><label class="form-label" for="course-prep-class">適用班級／對象</label><input id="course-prep-class" name="className" value="${esc(value.className || '')}" placeholder="例：五六年級混齡班；可跨班使用則留白"><div class="field-hint">選填。可重複用於不同班級的教案不必限定班級。</div></div>
         </div>
       </section>
       <section class="activity-form-section prep-section"><div class="activity-section-title"><span>${icon('notebook-tabs', 18)}</span><div><strong>教案內容與教材</strong><small>課程流程、引導方式、學習檢核與正式教材集中在同一份檔案</small></div><span class="badge purple">歸檔內容</span></div><div class="form-grid">${renderActivityPlanField('lessonprep', value.planId || '')}</div></section>
@@ -1728,12 +1849,19 @@
     };
     const guide = activityGuide(value.type);
     const copy = activityFormCopy(value.type);
-    return `<form id="activity-form" data-form="activity">
+    const formTrack = value.formTrack || activityTrack(value.type);
+    const typeLabel = formTrack === 'academic' ? '學科內工作類型' : formTrack === 'enrichment' ? '學科外課程類型' : '工作類型';
+    const typeHint = formTrack === 'academic'
+      ? '只顯示安親課業指導與班級經營；班級經營不取代每日課業輔導。'
+      : formTrack === 'enrichment'
+        ? '只顯示專案、機器人／STEAM、學習歷程與 SEL。'
+        : '此類型只保留既有紀錄。';
+    return `<form id="activity-form" data-form="activity" data-activity-track="${esc(formTrack)}">
       <input type="hidden" name="id" value="${esc(value.id)}">
       <div class="form-grid">
         <div class="form-field"><div class="form-label">系統歸類</div><div id="activity-track-indicator">${renderActivityTrackIndicator(value.type)}</div></div>
-        <div class="form-field"><label class="form-label" for="activity-type">工作類型 <span class="required">*</span></label><select id="activity-type" name="type" data-change="activity-type" required>${renderActivityTypeOptions(value.type)}</select></div>
-        <div class="form-field"><label class="form-label" id="activity-class-label" for="activity-class">${esc(copy.classLabel)} <span class="required">*</span></label><input id="activity-class" name="className" value="${esc(value.className)}" placeholder="${esc(copy.classPlaceholder)}" required></div>
+        <div class="form-field"><label class="form-label" for="activity-type">${esc(typeLabel)} <span class="required">*</span></label><select id="activity-type" name="type" data-change="activity-type" required>${renderActivityTypeOptions(value.type, formTrack)}</select><div class="field-hint">${esc(typeHint)}</div></div>
+        ${copy.hideClass ? '<input type="hidden" name="className" value="">' : `<div class="form-field"><label class="form-label" id="activity-class-label" for="activity-class">${esc(copy.classLabel)} <span class="required">*</span></label><input id="activity-class" name="className" value="${esc(value.className)}" placeholder="${esc(copy.classPlaceholder)}" required></div>`}
         <div class="form-field span-2"><label class="form-label" id="activity-title-label" for="activity-title">${esc(copy.titleLabel)} <span class="required">*</span></label><input id="activity-title" name="title" value="${esc(value.title)}" placeholder="${esc(copy.titlePlaceholder)}" required></div>
         <div id="activity-students-field" class="form-field span-2" ${copy.hideStudents ? 'hidden' : ''}><div class="form-label">關聯學生</div><div class="chip-list">${STUDENTS.map(student => `<label class="choice-chip"><input type="checkbox" name="students" value="${esc(student)}" ${(value.students || []).includes(student) ? 'checked' : ''}>${esc(student)}</label>`).join('')}</div><div class="field-hint">全班共同活動可不勾；個別結果請選擇學生。</div></div>
       </div>
@@ -2024,9 +2152,7 @@
       { key: 'objectives', label: '可觀察學習目標', done: String(plan.objectives || '').trim().length >= 12 },
       { key: 'flow', label: '教學流程、時間、師生活動與逐段檢核', done: flowComplete && totalMinutes === Number(plan.duration) },
       { key: 'assessment', label: '學習檢核與達成標準', done: String(plan.assessment || '').trim().length >= 12 },
-      { key: 'differentiation', label: '差異化與支持方式', done: String(plan.differentiation || '').trim().length >= 8 },
       { key: 'materials', label: '至少一份正式教材附件', done: (plan.materials || []).length >= 1 },
-      { key: 'privacy', label: '安全與隱私確認', done: String(plan.safetyPrivacy || '').trim().length >= 8 },
     ];
   }
 
@@ -2054,7 +2180,7 @@
       { label: '備課檔案名稱與課程類型', done: Boolean(activity?.title && activity?.details?.targetCourse) },
       { label: '學習者背景與可觀察目標', done: criterion('context') && criterion('objectives') },
       { label: '教學流程與逐段檢核', done: criterion('flow') },
-      { label: '學習檢核、支持方式與安全確認', done: criterion('assessment') && criterion('differentiation') && criterion('privacy') },
+      { label: '學習檢核與達成標準', done: criterion('assessment') },
       { label: '至少一份正式教材附件', done: criterion('materials') },
     ];
   }
@@ -2104,7 +2230,7 @@
     const status = prepRecordStatus(activity);
     const updatedDate = String(activity.updatedAt || '').slice(0, 10) || activity.date;
     const criterionCount = prepRecordCriteria(activity).filter(item => item.done).length;
-    return `<tr><td><div class="table-primary">${esc(activity.title)}</div><div class="table-secondary">${esc(activity.className || '跨班適用')}</div></td><td><div class="table-primary">${esc(activity.details?.targetCourse || '尚未分類')}</div></td><td><div class="table-primary">${formatShortDate(activity.date)} 建立</div><div class="table-secondary">${formatShortDate(updatedDate)} 更新</div></td><td><div class="table-primary">${plan ? `${designReadiness}% · ${(plan.materials || []).length} 份教材` : '尚未開始填寫'}</div><div class="table-secondary">${plan ? `${plan.duration} 分鐘 · ${criterionCount}/5 項歸檔條件` : '開啟檔案後填寫教案內容'}</div></td><td><span class="badge ${status[1]}">${status[0]}</span></td><td class="text-right"><button type="button" class="btn btn-small" data-action="edit-activity" data-activity-id="${activity.id}">${icon('arrow-right', 14)}開啟檔案</button></td></tr>`;
+    return `<tr><td><div class="table-primary">${esc(activity.title)}</div></td><td><div class="table-primary">${esc(activity.details?.targetCourse || '尚未分類')}</div></td><td><div class="table-primary">${formatShortDate(activity.date)} 建立</div><div class="table-secondary">${formatShortDate(updatedDate)} 更新</div></td><td><div class="table-primary">${plan ? `${designReadiness}% · ${(plan.materials || []).length} 份教材` : '尚未開始填寫'}</div><div class="table-secondary">${plan ? `${plan.duration} 分鐘 · ${criterionCount}/5 項歸檔條件` : '開啟檔案後填寫教案內容'}</div></td><td><span class="badge ${status[1]}">${status[0]}</span></td><td class="text-right"><button type="button" class="btn btn-small" data-action="edit-activity" data-activity-id="${activity.id}">${icon('arrow-right', 14)}開啟檔案</button></td></tr>`;
   }
 
   function renderRecordTimelineEntry(entry) {
@@ -2143,7 +2269,7 @@
     const entries = allEntries.filter(entry => isDateInPeriod(entry.date, filters.period) && (filters.status === 'all' || entry.statusKey === filters.status) && (!query || `${entry.title} ${entry.copy} ${entry.searchText || ''}`.toLowerCase().includes(query)));
     const filtersMarkup = `<div class="filter-bar"><div class="filter-field"><label for="records-period">期間</label><select id="records-period" aria-label="紀錄期間" data-change="view-filter" data-filter-group="records" data-filter-key="period"><option value="30d" ${filters.period === '30d' ? 'selected' : ''}>最近 30 天</option><option value="month" ${filters.period === 'month' ? 'selected' : ''}>本月</option><option value="last-month" ${filters.period === 'last-month' ? 'selected' : ''}>上月</option><option value="all" ${filters.period === 'all' ? 'selected' : ''}>全部</option></select></div><div class="filter-field"><label for="records-status">狀態</label><select id="records-status" data-change="view-filter" data-filter-group="records" data-filter-key="status" aria-label="紀錄狀態"><option value="all" ${filters.status === 'all' ? 'selected' : ''}>全部</option><option value="pending" ${filters.status === 'pending' ? 'selected' : ''}>待審查</option><option value="clarify" ${filters.status === 'clarify' ? 'selected' : ''}>待補充</option><option value="accepted" ${filters.status === 'accepted' ? 'selected' : ''}>已採認</option><option value="draft" ${filters.status === 'draft' ? 'selected' : ''}>草稿</option></select></div><div class="filter-field grow"><label for="records-query">搜尋</label><input id="records-query" value="${esc(filters.query)}" data-input="view-filter" data-filter-group="records" data-filter-key="query" placeholder="搜尋課程、學生或關鍵字"></div></div>`;
     const empty = '<div class="empty-state"><div><div class="empty-icon">' + icon('search-x', 22) + '</div><div class="empty-title">沒有符合的紀錄</div></div></div>';
-    return `<div class="page">${pageHead('我的紀錄', '點選任一日期，查看完整內容與對話紀錄', `<button type="button" class="btn" data-action="export-records">${icon('download', 16)}<span>匯出</span></button>`)}${filtersMarkup}<section class="panel mt-16"><div class="panel-body"><div class="timeline">${entries.length ? entries.map(renderRecordTimelineEntry).join('') : empty}</div></div></section></div>`;
+    return `<div class="page">${pageHead('我的紀錄', '點選任一日期，查看完整內容與對話紀錄', `<button type="button" class="btn" data-action="export-records">${icon('folder-down', 16)}<span>匯出月歸檔</span></button>`)}${filtersMarkup}<section class="panel mt-16"><div class="panel-body"><div class="timeline">${entries.length ? entries.map(renderRecordTimelineEntry).join('') : empty}</div></div></section></div>`;
   }
 
   function renderTasks() {
@@ -2189,9 +2315,8 @@
     const start = addDays(state.daily.date, -6);
     const weeklyActivities = state.activities.filter(item => item.type !== 'lessonprep' && item.date >= start && item.date <= state.daily.date);
     const structure = [
-      { label: '課業指導', track: 'academic' },
+      { label: '學科內（含班級經營）', track: 'academic' },
       { label: '特色課程', track: 'enrichment' },
-      { label: '班級／協作', track: 'supplemental' },
     ].map(item => ({ ...item, count: weeklyActivities.filter(activity => activityTrack(activity.type) === item.track).length })).filter(item => item.count);
     return `<div class="page">
       ${pageHead('管理總覽', `${state.context.department} · ${formatDate(state.daily.date)}`, `<button type="button" class="btn" data-action="manager-refresh">${icon('refresh-cw', 16)}<span>更新狀態</span></button>`)}
@@ -2355,15 +2480,15 @@
     const plans = state.lessonPlans.filter(plan => {
       const statusMatch = filters.status === 'all' || plan.status === filters.status;
       const teacherMatch = filters.teacher === 'all' || plan.teacher === filters.teacher;
-      const queryMatch = !query || `${plan.title} ${plan.className} ${plan.courseType} ${plan.teacher}`.toLowerCase().includes(query);
+      const queryMatch = !query || `${plan.title} ${plan.courseType} ${plan.teacher}`.toLowerCase().includes(query);
       return statusMatch && teacherMatch && queryMatch;
     });
     return `<div class="page">
       ${pageHead('教案審查', '教學流程、學習檢核與附件版本集中判讀', '')}
-      <div class="filter-bar"><div class="filter-field"><label for="plan-review-status">狀態</label><select id="plan-review-status" aria-label="教案審查狀態" data-change="view-filter" data-filter-group="planReview" data-filter-key="status"><option value="review" ${filters.status === 'review' ? 'selected' : ''}>待審查</option><option value="all" ${filters.status === 'all' ? 'selected' : ''}>全部</option><option value="approved" ${filters.status === 'approved' ? 'selected' : ''}>已核准</option><option value="changes" ${filters.status === 'changes' ? 'selected' : ''}>退回補件</option><option value="draft" ${filters.status === 'draft' ? 'selected' : ''}>草稿</option></select></div><div class="filter-field"><label for="plan-review-teacher">老師</label><select id="plan-review-teacher" aria-label="教案審查老師" data-change="view-filter" data-filter-group="planReview" data-filter-key="teacher"><option value="all">全部老師</option>${state.people.filter(item => item.role === 'teacher').map(item => `<option value="${esc(item.nickname)}" ${filters.teacher === item.nickname ? 'selected' : ''}>${esc(item.nickname)}</option>`).join('')}</select></div><div class="filter-field grow"><label for="plan-review-query">搜尋</label><input id="plan-review-query" value="${esc(filters.query)}" data-input="view-filter" data-filter-group="planReview" data-filter-key="query" placeholder="搜尋教案、班級或課程類型"></div></div>
+      <div class="filter-bar"><div class="filter-field"><label for="plan-review-status">狀態</label><select id="plan-review-status" aria-label="教案審查狀態" data-change="view-filter" data-filter-group="planReview" data-filter-key="status"><option value="review" ${filters.status === 'review' ? 'selected' : ''}>待審查</option><option value="all" ${filters.status === 'all' ? 'selected' : ''}>全部</option><option value="approved" ${filters.status === 'approved' ? 'selected' : ''}>已核准</option><option value="changes" ${filters.status === 'changes' ? 'selected' : ''}>退回補件</option><option value="draft" ${filters.status === 'draft' ? 'selected' : ''}>草稿</option></select></div><div class="filter-field"><label for="plan-review-teacher">老師</label><select id="plan-review-teacher" aria-label="教案審查老師" data-change="view-filter" data-filter-group="planReview" data-filter-key="teacher"><option value="all">全部老師</option>${state.people.filter(item => item.role === 'teacher').map(item => `<option value="${esc(item.nickname)}" ${filters.teacher === item.nickname ? 'selected' : ''}>${esc(item.nickname)}</option>`).join('')}</select></div><div class="filter-field grow"><label for="plan-review-query">搜尋</label><input id="plan-review-query" value="${esc(filters.query)}" data-input="view-filter" data-filter-group="planReview" data-filter-key="query" placeholder="搜尋教案或課程類型"></div></div>
       <section class="panel mt-16"><div class="panel-body flush"><div class="table-wrap"><table class="data-table"><thead><tr><th>教案</th><th>老師</th><th>流程時間</th><th>教材附件</th><th>完整度</th><th>狀態</th><th></th></tr></thead><tbody>${plans.map(plan => {
         const readiness = planReadiness(plan); const status = planStatus(plan); const total = (plan.flow || []).reduce((sum, item) => sum + Number(item.minutes || 0), 0);
-        return `<tr><td><div class="table-primary">${esc(plan.title)}</div><div class="table-secondary">${esc(plan.version)} · ${esc(plan.className)}</div></td><td>${esc(plan.teacher)}</td><td><span class="badge ${total === Number(plan.duration) ? 'green' : 'red'}">${total}/${plan.duration} 分</span></td><td>${(plan.materials || []).length} 份</td><td><div class="metric-row"><span class="metric-value">${readiness}</span><div class="progress-track"><div class="progress-fill ${readiness < 80 ? 'warn' : ''}" style="width:${readiness}%"></div></div></div></td><td><span class="badge ${status[1]}">${status[0]}</span></td><td><button type="button" class="btn btn-small" data-action="review-plan" data-plan-id="${plan.id}">審查</button></td></tr>`;
+        return `<tr><td><div class="table-primary">${esc(plan.title)}</div><div class="table-secondary">${esc(plan.courseType)}</div></td><td>${esc(plan.teacher)}</td><td><span class="badge ${total === Number(plan.duration) ? 'green' : 'red'}">${total}/${plan.duration} 分</span></td><td>${(plan.materials || []).length} 份</td><td><div class="metric-row"><span class="metric-value">${readiness}</span><div class="progress-track"><div class="progress-fill ${readiness < 80 ? 'warn' : ''}" style="width:${readiness}%"></div></div></div></td><td><span class="badge ${status[1]}">${status[0]}</span></td><td><button type="button" class="btn btn-small" data-action="review-plan" data-plan-id="${plan.id}">審查</button></td></tr>`;
       }).join('') || '<tr><td colspan="7" class="muted">沒有符合條件的教案</td></tr>'}</tbody></table></div></div></section>
     </div>`;
   }
@@ -2373,7 +2498,6 @@
     const tutoring = state.activities.filter(activity => activity.type === 'tutoring');
     const projects = state.activities.filter(activity => ['project', 'robotics', 'portfolio'].includes(activity.type));
     const classroomActivities = state.activities.filter(activity => ['sel', 'classroom'].includes(activity.type));
-    const support = state.activities.filter(activity => activity.type === 'support');
     const contacts = state.contacts || [];
     const operations = operationRecords().filter(operation => operation.confirmedAt);
     const rate = (items, predicate) => items.length ? Math.round(items.filter(predicate).length / items.length * 100) : null;
@@ -2385,7 +2509,6 @@
       { label: '專案課程', value: rate(projects, activityComplete), source: projects.length || state.lessonPlans.length ? `${projects.length} 筆工作 · ${state.lessonPlans.length} 份教案` : '尚無資料' },
       { label: '班級經營', value: classroomTotal ? Math.round(classroomComplete / classroomTotal * 100) : null, source: classroomTotal ? `${classroomActivities.length} 筆活動 · ${state.studentCases.length} 件學生追蹤` : '尚無資料' },
       { label: '親師溝通', value: rate(contacts, item => item.summary && item.nextAction), source: contacts.length ? `${contacts.length} 次聯繫 · ${contacts.filter(item => item.status !== 'closed').length} 項待追` : '尚無資料' },
-      { label: '態度與表現', value: rate(support, activityComplete), source: support.length ? `${support.length} 筆教室協作紀錄` : '尚無資料' },
       { label: '環境整潔', value: rate(operations, operation => operationsComplete(operation, false)), source: operations.length ? `${operations.length} 筆已送出班務` : '尚無資料' },
     ];
     const teamRows = teachers.map(person => {
@@ -2431,7 +2554,6 @@
   function syncPlanIdentityFromPrep(plan, activity) {
     if (!plan || !activity || activity.type !== 'lessonprep') return plan;
     plan.title = activity.title || plan.title;
-    plan.className = activity.className || plan.className;
     plan.courseType = prepCourseType(activity);
     plan.version = prepVersionCode(activity, plan.version);
     return plan;
@@ -2449,7 +2571,6 @@
       ...(sourceActivity ? {
         title: sourceActivity.title || value.title,
         courseType: prepCourseType(sourceActivity),
-        className: sourceActivity.className || value.className,
         version: prepVersionCode(sourceActivity, value.version),
       } : {}),
     };
@@ -2461,9 +2582,8 @@
     const basicFields = sourceActivity ? `
       <input type="hidden" name="title" value="${esc(planDraft.title)}">
       <input type="hidden" name="courseType" value="${esc(planDraft.courseType)}">
-      <input type="hidden" name="className" value="${esc(planDraft.className)}">
       <input type="hidden" name="version" value="${esc(planDraft.version)}">
-      <div class="prep-source-facts plan-linked-facts"><span><strong>備課檔案</strong>${esc(planDraft.title)}</span><span><strong>課程類型</strong>${esc(sourceActivity.details?.targetCourse || planDraft.courseType)}</span><span><strong>建立日期</strong>${formatDate(sourceActivity.date)}</span><span><strong>適用對象</strong>${esc(planDraft.className || '跨班適用')}</span></div>
+      <div class="prep-source-facts plan-linked-facts"><span><strong>備課檔案</strong>${esc(planDraft.title)}</span><span><strong>課程類型</strong>${esc(sourceActivity.details?.targetCourse || planDraft.courseType)}</span><span><strong>建立日期</strong>${formatDate(sourceActivity.date || state.daily.date)}</span></div>
       <div class="form-grid mt-16">
         <div class="form-field"><label class="form-label" for="plan-duration">總時數（分鐘） <span class="required">*</span></label><input id="plan-duration" type="number" min="10" step="5" name="duration" value="${Number(planDraft.duration || 60)}" required></div>
         <div class="form-field span-2"><label class="form-label" for="plan-context">學習者背景與先備能力 <span class="required">*</span></label><textarea id="plan-context" name="learnerContext" required>${esc(planDraft.learnerContext)}</textarea></div>
@@ -2471,7 +2591,6 @@
       </div>` : `<div class="form-grid mt-16">
         <div class="form-field span-2"><label class="form-label" for="plan-title">教學設計名稱 <span class="required">*</span></label><input id="plan-title" name="title" value="${esc(planDraft.title)}" required></div>
         <div class="form-field"><label class="form-label" for="plan-course">課程類型</label><select id="plan-course" name="courseType">${['安親輔導', '專案選修', '學習歷程', 'SEL 聊心室', '暑期營隊'].map(type => `<option ${planDraft.courseType === type ? 'selected' : ''}>${type}</option>`).join('')}</select></div>
-        <div class="form-field"><label class="form-label" for="plan-class">班級／對象 <span class="required">*</span></label><input id="plan-class" name="className" value="${esc(planDraft.className)}" required></div>
         <div class="form-field"><label class="form-label" for="plan-duration">總時數（分鐘） <span class="required">*</span></label><input id="plan-duration" type="number" min="10" step="5" name="duration" value="${Number(planDraft.duration || 60)}" required></div>
         <div class="form-field"><label class="form-label" for="plan-version">版本 <span class="required">*</span></label><input id="plan-version" name="version" value="${esc(planDraft.version)}" placeholder="例：v1.0" required></div>
         <div class="form-field span-2"><label class="form-label" for="plan-context">學習者背景與先備能力 <span class="required">*</span></label><textarea id="plan-context" name="learnerContext" required>${esc(planDraft.learnerContext)}</textarea></div>
@@ -2490,8 +2609,6 @@
       <div class="section-divider"></div>
       <div class="form-grid">
         <div class="form-field span-2"><label class="form-label" for="plan-assessment">學習檢核與達成標準 <span class="required">*</span></label><textarea id="plan-assessment" name="assessment" placeholder="寫出檢核方式、作品／表現與通過標準。" required>${esc(value.assessment)}</textarea></div>
-        <div class="form-field span-2"><label class="form-label" for="plan-diff">差異化與支持方式 <span class="required">*</span></label><textarea id="plan-diff" name="differentiation" placeholder="基礎支持、進階挑戰或個別調整。" required>${esc(value.differentiation)}</textarea></div>
-        <div class="form-field span-2"><label class="form-label" for="plan-safety">安全與隱私確認 <span class="required">*</span></label><textarea id="plan-safety" name="safetyPrivacy" placeholder="器材安全、影像使用與個資處理。" required>${esc(value.safetyPrivacy)}</textarea></div>
       </div>
       <div class="section-divider"></div>
       <div class="flex justify-between items-center gap-12"><div><h3 class="section-title mb-0">${icon('paperclip')}正式教材附件</h3><div class="section-copy mb-0">集中放置實際授課會使用的 PPT、學習單、教師指引與評量工具。</div></div><label class="btn btn-small" for="plan-material-file">${icon('upload', 14)}加入附件</label><input class="sr-only" id="plan-material-file" type="file" data-change="plan-material" multiple accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,image/*"></div>
@@ -2530,18 +2647,17 @@
     return `<div class="stack">
       <div class="notice-band ${readiness === 100 ? 'success' : 'info'}">${icon(readiness === 100 ? 'badge-check' : 'circle-alert', 19)}<div><div class="notice-title">教案內容完整度 ${readiness}%${managerMode ? ` · ${status[0]}` : ''}</div><div class="notice-copy">流程 ${totalMinutes}/${plan.duration} 分鐘 · ${(plan.materials || []).length} 份教材附件 · ${identityCopy}</div></div></div>
       <div class="detail-split">
-        <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('target')}課程設計</div><div class="panel-subtitle">${esc(plan.courseType)} · ${esc(plan.className)}</div></div></div><div class="panel-body">
+        <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('target')}課程設計</div><div class="panel-subtitle">${esc(plan.courseType)}</div></div></div><div class="panel-body">
           <h3 class="section-title">學習者背景</h3><div class="text-small">${nl2br(plan.learnerContext || '尚未填寫')}</div>
           <div class="section-divider"></div><h3 class="section-title">學習目標</h3><div class="text-small">${nl2br(plan.objectives || '尚未填寫')}</div>
           <div class="section-divider"></div><h3 class="section-title">檢核與標準</h3><div class="text-small">${nl2br(plan.assessment || '尚未填寫')}</div>
-          <div class="section-divider"></div><h3 class="section-title">差異化支持</h3><div class="text-small">${nl2br(plan.differentiation || '尚未填寫')}</div>
         </div></section>
         <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('list-checks')}歸檔條件</div></div></div><div class="panel-body"><div class="check-list">${criteria.map(item => `<div class="check-item ${item.done ? 'done' : 'pending'}"><span class="check-icon">${icon(item.done ? 'check' : 'minus', 12)}</span><span>${esc(item.label)}</span></div>`).join('')}</div></div></section>
       </div>
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('route')}教學流程</div></div></div><div class="panel-body flush"><div class="table-wrap"><table class="data-table"><thead><tr><th>階段</th><th>時間</th><th>老師行動</th><th>學生行動</th><th>檢核點</th></tr></thead><tbody>${(plan.flow || []).map(flow => `<tr><td><div class="table-primary">${esc(flow.stage)}</div></td><td>${flow.minutes} 分</td><td>${esc(flow.teacher)}</td><td>${esc(flow.student)}</td><td>${esc(flow.checkpoint)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">尚無流程</td></tr>'}</tbody></table></div></div></section>
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('files')}正式教材附件</div><div class="panel-subtitle">共 ${(plan.materials || []).length} 份</div></div></div><div class="panel-body"><div class="material-list">${renderMaterials(plan.materials, false)}</div></div></section>
       ${showThread ? renderFeedbackThread(threadKey) : ''}
-      ${managerMode ? `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}本次審查結論</div></div></div><div class="panel-body"><div class="review-checks">${['目標可被觀察與檢核', '流程時間合理且總和一致', '師生活動能支持目標', '評量標準具體', '教材內容與流程一致', '差異化與安全措施完整'].map((label, index) => `<label class="review-check"><input type="checkbox" data-review-check data-change="plan-review-check" ${index < 5 ? 'checked' : ''}><span>${label}</span></label>`).join('')}</div><div class="form-field mt-16"><label class="form-label" for="plan-review-feedback">核准說明或修改要求</label><textarea id="plan-review-feedback" placeholder="指出需修改的段落、附件或判準。"></textarea></div></div></section>` : ''}
+      ${managerMode ? `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}本次審查結論</div></div></div><div class="panel-body"><div class="review-checks">${['目標可被觀察與檢核', '流程時間合理且總和一致', '師生活動能支持目標', '評量標準具體', '教材內容與流程一致'].map(label => `<label class="review-check"><input type="checkbox" data-review-check data-change="plan-review-check"><span>${label}</span></label>`).join('')}</div><div class="form-field mt-16"><label class="form-label" for="plan-review-feedback">核准說明或修改要求</label><textarea id="plan-review-feedback" placeholder="指出需修改的段落、附件或判準。"></textarea></div></div></section>` : ''}
     </div>`;
   }
 
@@ -2676,14 +2792,23 @@
 
   function openActivityEditor(activityId, requestedTrack = '', requestedType = '') {
     const activity = activityId ? state.activities.find(item => item.id === activityId) : null;
-    const defaultType = requestedType && ACTIVITY_TYPES[requestedType] ? requestedType : requestedTrack === 'enrichment' ? 'project' : requestedTrack === 'supplemental' ? 'classroom' : 'tutoring';
+    const defaultType = requestedType && ACTIVITY_TYPES[requestedType] ? requestedType : requestedTrack === 'enrichment' ? 'project' : 'tutoring';
+    const formTrack = activity ? activityTrack(activity.type) : requestedTrack || activityTrack(defaultType);
     const key = drawerDraftKey('activity', activityId || '', activity?.type || defaultType);
     const saved = getOpenDraft(key);
     const base = activity || {
       id: '', type: defaultType, title: '', className: '', students: [], details: {}, prepSourceId: defaultPrepSourceId(defaultType), planId: '', objective: '', action: '', result: '', issue: '', nextAction: '', owner: state.context.teacher, dueDate: addDays(state.daily.date, 1), prepFeedback: { strengths: '', resonance: '', changes: '' }, prep: { summary: '', adjustment: '' }, prepEvidence: [], evidence: [],
     };
     if (!activity && defaultType === 'lessonprep') base.details = activityDetailDefaults('lessonprep');
-    showActivityEditor(saved?.kind === 'activity' && saved.payload ? saved.payload : base, { key, saved: saved?.kind === 'activity' ? saved : null });
+    const draft = clone(saved?.kind === 'activity' && saved.payload ? saved.payload : base);
+    if (!activity && defaultType !== 'lessonprep' && activityTrack(draft.type) !== formTrack) {
+      draft.type = defaultType;
+      draft.details = {};
+      draft.prepSourceId = defaultPrepSourceId(defaultType);
+      draft.planId = '';
+    }
+    draft.formTrack = formTrack;
+    showActivityEditor(draft, { key, saved: saved?.kind === 'activity' ? saved : null });
   }
 
   function openStudentCaseEditor(caseId) {
@@ -3039,7 +3164,7 @@
       id: String(data.get('id') || activityDraft.id || ''),
       type: 'lessonprep',
       title: String(data.get('title') || '').trim(),
-      className: String(data.get('className') || '').trim(),
+      className: '',
       students: [],
       details: { targetCourse: String(data.get('targetCourse') || '') },
       planId: String(data.get('planId') || activityDraft.planId || ''),
@@ -3106,7 +3231,7 @@
       teacher: existing?.teacher || state.context.teacher,
       type: 'lessonprep',
       title: String(data.get('title') || '').trim(),
-      className: String(data.get('className') || '').trim(),
+      className: '',
       students: [],
       details: { targetCourse: String(data.get('targetCourse') || '') },
       prepSourceId: '',
@@ -3144,7 +3269,12 @@
     const data = new FormData(form);
     const id = data.get('id') || uid('act');
     const existing = state.activities.find(item => item.id === id);
-    const type = data.get('type');
+    const type = String(data.get('type') || '');
+    const formTrack = form.dataset.activityTrack || activityTrack(type);
+    if (!ACTIVITY_TYPES[type] || activityTrack(type) !== formTrack || (ACTIVITY_TYPES[type].selectable === false && !existing)) {
+      toast('工作類型與目前入口不一致，請重新開啟表單', 'danger');
+      return;
+    }
     const prepSourceId = activityNeedsPrepSource(type) ? String(data.get('prepSourceId') || activityDraft?.prepSourceId || '') : '';
     const prepSource = prepSourceById(prepSourceId);
     const prepEvidence = type === 'lessonprep' ? clone(activityDraft?.prepEvidence || existing?.prepEvidence || []) : [];
@@ -3190,7 +3320,7 @@
     }
     if (type === 'lessonprep' && activity.details.stage === '授課版鎖定') {
       if (!directPlanReady(activity.planId)) {
-        toast('授課版鎖定前，教學設計與教材需完成八項門檻並至少送主管審查', 'danger');
+        toast('授課版鎖定前，教學設計與教材需完成六項門檻並至少送主管審查', 'danger');
         return;
       }
       if (!(activity.evidence || []).some(item => item.quality >= 80)) {
@@ -3439,11 +3569,11 @@
     Object.assign(planDraft, {
       id: data.get('id') || planDraft.id,
       teacher: planDraft.teacher || state.context.teacher,
-      title: String(data.get('title') || '').trim(), courseType: data.get('courseType'), className: String(data.get('className') || '').trim(),
+      title: String(data.get('title') || '').trim(), courseType: data.get('courseType'), className: planDraft.className || '',
       duration: Number(data.get('duration') || 0), version: String(data.get('version') || '').trim(), sourceActivityId: String(data.get('sourceActivityId') || planDraft.sourceActivityId || ''),
       learnerContext: String(data.get('learnerContext') || '').trim(), objectives: String(data.get('objectives') || '').trim(),
-      assessment: String(data.get('assessment') || '').trim(), differentiation: String(data.get('differentiation') || '').trim(),
-      safetyPrivacy: String(data.get('safetyPrivacy') || '').trim(), reflection: String(data.get('reflection') || '').trim(),
+      assessment: String(data.get('assessment') || '').trim(), differentiation: planDraft.differentiation || '',
+      safetyPrivacy: planDraft.safetyPrivacy || '', reflection: String(data.get('reflection') || '').trim(),
       updatedAt: state.daily.date,
     });
     planDraft.flow = $$('[data-flow-row]', form).map(row => {
@@ -3830,6 +3960,8 @@
   }
 
   function refreshActivityGuide(type) {
+    const formTrack = $('#activity-form')?.dataset.activityTrack;
+    if (formTrack && activityTrack(type) !== formTrack) return;
     const previousType = activityDraft?.type;
     if (previousType) captureActivityDetailFields(previousType);
     capturePrepFeedbackFields();
@@ -3979,8 +4111,7 @@
       state.operations.confirmedAt = '';
       const current = state.operations.evidenceByCheck[key];
       if (preview) {
-        preview.className = `operation-photo-preview ${dataUrl ? 'has-image' : ''}`;
-        preview.innerHTML = dataUrl ? `<img src="${dataUrl}" alt="${esc(OPERATION_CHECKS[key].label)}證據預覽"><div><strong id="operation-photo-name-${key}">${esc(file.name)}</strong><small>${esc(current.size)}</small></div>` : `<span>${icon('image', 28)}</span><div><strong id="operation-photo-name-${key}">${esc(file.name)}</strong><small>${esc(current.size)}</small></div>`;
+        preview.outerHTML = renderOperationPhoto(current, key, OPERATION_CHECKS[key].label);
       }
       const item = input.closest('.operation-proof-item');
       if (item) item.classList.add('has-proof');
@@ -4283,7 +4414,7 @@
     }
     else if (action === 'submit-plan-review') {
       const plan = state.lessonPlans.find(item => item.id === control.dataset.planId);
-      if (!plan || planReadiness(plan) < 100) toast('教案內容與教材尚未符合八項歸檔條件', 'danger');
+      if (!plan || planReadiness(plan) < 100) toast('教案內容與教材尚未符合六項歸檔條件', 'danger');
       else { plan.status = 'review'; closeDrawer(); persist(); renderApp(); toast('已送主管檢視；不影響這份完整備課檔案被授課紀錄選用', 'success'); }
     }
     else if (action === 'review-plan') openPlanReview(control.dataset.planId);
@@ -4325,7 +4456,8 @@
     }
     else if (action === 'confirm-delete') confirmDelete(control.dataset.kind, control.dataset.id, control.dataset.parentId);
     else if (action === 'print-weekly') window.print();
-    else if (action === 'export-records') exportRecords();
+    else if (action === 'export-records') openMonthlyExportDialog();
+    else if (action === 'export-monthly-archive') exportMonthlyArchive();
     else if (action === 'export-students') exportStudentCases();
     else if (action === 'manager-refresh') toast('狀態已更新', 'success');
   });
@@ -4341,6 +4473,10 @@
       persist(); renderApp();
     }
     if (change === 'activity-type') refreshActivityGuide(control.value);
+    if (change === 'archive-month') {
+      const path = $('#archive-folder-path');
+      if (path) path.textContent = archiveFolderPath(control.value);
+    }
     if (change === 'activity-plan') refreshActivityPlanStatus(control.value);
     if (change === 'activity-prep-source') refreshActivityPrepSource(control.value);
     if (change === 'crossday-schedule') refreshCrossDayTimeline();
