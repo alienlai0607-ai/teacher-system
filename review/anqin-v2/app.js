@@ -6,7 +6,7 @@
   const BACKUP_KEY = `${STORAGE_KEY}_safe_backup`;
   const DRAFT_KEY = `${STORAGE_KEY}_open_drafts`;
   const HEALTH_PROBE_KEY = `${STORAGE_KEY}_health_probe`;
-  const APP_VERSION = 13;
+  const APP_VERSION = 14;
   const MAX_EVIDENCE_FILES = 8;
   let loadStateIssue = '';
 
@@ -148,7 +148,61 @@
     environment: '環境異常／改善',
   };
 
-  const STUDENTS = ['陳品安', '林子晴', '王柏宇', '張語芯', '許宥辰', '黃可恩', '蔡承翰', '李昕妤'];
+  const STAFF_ROSTER = [
+    { nickname: '松鼠老師', department: '東橋教室', role: 'teacher', canTeach: true, initials: '松鼠', students: ['宥縈', '彥呈', '浩軒', '久珹', '荏苒', '宥銨', '宥熹', '梓涵', '芮語', '尊瑋'], note: '' },
+    { nickname: '紅豆老師', department: '東橋教室', role: 'teacher', canTeach: true, initials: '紅豆', students: ['佳揚', '沛杰', '紫瑀', '呈諺', '琝程', '米樂', '沐雅', '立喆', '雋翔'], note: '' },
+    { nickname: '羊羊老師', department: '東橋教室', role: 'teacher', canTeach: true, initials: '羊羊', students: ['琮諺', '唯恩', '知澈', '知牧', '浩宸', '軒婕'], note: '' },
+    { nickname: '酸酸主管', department: '東橋教室', role: 'manager', canTeach: true, initials: '酸酸', students: ['炳兆', '宸瑋', '羽芯', '丞澤', '詣壹', '亦辰', '采華', '靚芯', '萓臻'], note: '之後轉交新老師' },
+    { nickname: '江江老師', department: '北區教室', role: 'teacher', canTeach: true, initials: '江江', students: ['宥鈞', '翊辰', '恩弦', '偲芮', '士宸', '允樂', '岩真', '軒瑀', '秐菲'], note: '' },
+    { nickname: '小明老師', department: '北區教室', role: 'teacher', canTeach: true, initials: '小明', students: ['陳硯', '尹睿', '承叡', '宥騫', '登睿', '宇綸', '映竹', '秉融', '守博'], note: '' },
+    { nickname: '小魚主管', department: '北區教室', role: 'manager', canTeach: true, initials: '小魚', students: ['陳泱', '雨霏', '亭榛', '鎧宸', '芊妤', '沛豊', '宇翔', '宸熙', '寅熙', '浚宸', '奕瀚', '毓祥'], note: '未來轉交新老師' },
+  ];
+
+  const MANAGER_BY_DEPARTMENT = {
+    東橋教室: '酸酸主管',
+    北區教室: '小魚主管',
+  };
+
+  const ANQIN_KPI_STANDARDS = [
+    {
+      name: '課業指導', points: 20, icon: 'book-open-check', position: '主科紮實，與學校學科對接',
+      check: '每學期第 7、14 週作業抽查＋學生成績紀錄',
+      items: [['作業完成率與正確率檢查', 5], ['訂正執行與追蹤（查核訂正本）', 4], ['字體工整與作業整潔', 2], ['每日挑戰本／課業複習設計', 4], ['考試準備與個別弱點補強追蹤', 5]],
+    },
+    {
+      name: '專案課程', points: 20, icon: 'blocks', position: '教室特色，布拉克星球的識別度',
+      check: '每月一次正式觀課 20–30 分鐘',
+      items: [['教案與材料課前準備', 5], ['引導能力與學生互動狀況', 6], ['課程流程與節奏掌握', 4], ['專案進度掌握與成果產出', 5]],
+    },
+    {
+      name: '班級經營', points: 20, icon: 'users-round', position: '帶班基礎，穩定的學習環境',
+      check: '每月不定期巡班觀察',
+      items: [['作業時段秩序與學生專注度', 5], ['班級獎勵與規範執行', 5], ['班級氛圍與主動學習風氣', 5], ['學生情緒與衝突狀況處理', 5]],
+    },
+    {
+      name: '親師溝通', points: 20, icon: 'messages-square', position: '續班命脈，親師信任的關鍵',
+      check: '群組紀錄＋客訴紀錄＋接送觀察',
+      items: [['主動回饋學生狀況（每週至少 1 次，含學習／情緒／生活）', 5], ['溝通內容專業度與溫度（具體、有觀察、有建議）', 5], ['每日親自在接送時段進行親師互動與信任建立', 5], ['群組回覆＋課程紀錄上傳（每天都需上傳 app）', 5]],
+    },
+    {
+      name: '個人態度與表現', points: 12, icon: 'badge-check', position: '一切教學品質的基本盤',
+      check: '打卡紀錄＋每日工作日誌',
+      items: [['出勤準時（遲到為重點扣分，詳見出勤紀律）', 4], ['工作責任感與交辦事項完成度', 3], ['主動性與配合度', 2], ['每日課前備課是否落實', 3]],
+    },
+    {
+      name: '班級環境整潔', points: 8, icon: 'sparkles', position: '自班級經營獨立，確保每日落實',
+      check: '每日上傳系統照片佐證＋不定期檢查',
+      items: [['教室整潔：地板、桌椅、公共區域、廁所', 2], ['教具、教材與個人物品歸位', 2], ['每日環境整理確實完成', 2], ['每日上傳佐證照片', 2]],
+    },
+  ];
+
+  const ANQIN_BONUS_TIERS = [
+    { range: '95–100', grade: '卓越', bonus: 'NT$3,000', tone: 'green' },
+    { range: '88–94', grade: '優良', bonus: 'NT$2,000', tone: 'blue' },
+    { range: '82–87', grade: '達標', bonus: 'NT$1,000', tone: 'purple' },
+    { range: '75–81', grade: '基本合格', bonus: '無獎金', tone: 'outline' },
+    { range: '≤74', grade: '待改善', bonus: '無獎金，需改善追蹤回報', tone: 'red' },
+  ];
 
   const TEACHER_NAV = [
     { route: 'today', label: '今日紀錄', icon: 'clipboard-pen-line' },
@@ -157,6 +211,7 @@
     { route: 'records', label: '我的紀錄', icon: 'history' },
     { route: 'tasks', label: '追蹤事項', icon: 'list-checks', count: () => openTasks().length },
     { route: 'guide', label: '填寫指南', icon: 'circle-help' },
+    { route: 'scoring', label: '評分標準', icon: 'scale' },
   ];
 
   const MANAGER_NAV = [
@@ -167,6 +222,7 @@
     { route: 'students', label: '學生追蹤', icon: 'user-round-search', count: () => state.studentCases.filter(item => item.status !== 'closed').length },
     { route: 'plans-review', label: '教案審查', icon: 'file-check-2', count: () => state.lessonPlans.filter(item => item.status === 'review').length },
     { route: 'team', label: '團隊狀態', icon: 'users-round' },
+    { route: 'scoring', label: '評分標準', icon: 'scale' },
   ];
 
   const TODAY_TABS = [
@@ -218,6 +274,32 @@
   };
   const icon = (name, size = 18) => `<i data-lucide="${name}" width="${size}" height="${size}" aria-hidden="true"></i>`;
 
+  function teachingStaff() {
+    return state.people.filter(person => person.canTeach !== false && Array.isArray(person.students));
+  }
+
+  function staffMember(nickname) {
+    return state.people.find(person => person.nickname === nickname) || null;
+  }
+
+  function assignedStudents(teacher = state.context.teacher) {
+    const students = staffMember(teacher)?.students;
+    return Array.isArray(students) ? students : [];
+  }
+
+  function studentsForTeacher(teacher = state.context.teacher, selected = []) {
+    return [...new Set([...assignedStudents(teacher), ...(selected || []).filter(Boolean)])];
+  }
+
+  function renderStudentChoices(teacher, selected = []) {
+    const selectedSet = new Set(selected || []);
+    return studentsForTeacher(teacher, selected).map(student => `<label class="choice-chip"><input type="checkbox" name="students" value="${esc(student)}" ${selectedSet.has(student) ? 'checked' : ''}>${esc(student)}</label>`).join('');
+  }
+
+  function renderStudentOptions(teacher, selected = '') {
+    return studentsForTeacher(teacher, selected ? [selected] : []).map(student => `<option value="${esc(student)}" ${selected === student ? 'selected' : ''}>${esc(student)}</option>`).join('');
+  }
+
   function createSeed() {
     const today = todayIso();
     return {
@@ -233,13 +315,8 @@
           operationsReview: { status: 'open', owner: 'all' },
         },
       },
-      context: { department: '北區教室', teacher: '羊羊老師', manager: '小魚', reviewDate: today },
-      people: [
-        { nickname: '羊羊老師', department: '北區教室', role: 'teacher', initials: '羊羊' },
-        { nickname: '小明老師', department: '北區教室', role: 'teacher', initials: '小明' },
-        { nickname: '樂樂老師', department: '北區教室', role: 'teacher', initials: '樂樂' },
-        { nickname: '小魚', department: '北區教室', role: 'manager', initials: '小魚' },
-      ],
+      context: { department: '東橋教室', teacher: '羊羊老師', manager: '酸酸主管', reviewDate: today },
+      people: clone(STAFF_ROSTER),
       daily: {
         date: today, status: 'draft', submittedAt: '', parentStatus: '', noStudentFollowupConfirmed: false,
         summary: { keyResult: '', followup: '', tomorrowPriority: '', teacherNote: '' },
@@ -248,7 +325,7 @@
       studentCases: [],
       contacts: [],
       operations: {
-        id: 'op_today', date: today, room: '北區 2F 安親教室', dutyOwner: '羊羊老師', status: 'draft',
+        id: 'op_today', date: today, room: '東橋教室', dutyOwner: '羊羊老師', status: 'draft',
         checks: { classroom: true, tools: true, trash: true, toilet: true }, evidenceByCheck: {},
         exception: '', action: '', evidence: null, confirmedAt: '', reviewStatus: 'pending', managerFeedback: '', reviewedAt: '', reviewedBy: '',
       },
@@ -307,6 +384,19 @@
     ['people', 'activities', 'studentCases', 'contacts', 'lessonPlans', 'tasks', 'submissions', 'managerNotes'].forEach(key => {
       if (!Array.isArray(parsed[key])) parsed[key] = clone(seed[key] || []);
     });
+    const previousTeacher = parsed.context.teacher;
+    const previousDepartment = parsed.context.department;
+    const activeTeacher = STAFF_ROSTER.find(person => person.nickname === parsed.context.teacher && person.canTeach)
+      || STAFF_ROSTER.find(person => person.department === previousDepartment && person.role === 'teacher')
+      || STAFF_ROSTER.find(person => person.role === 'teacher');
+    parsed.people = clone(STAFF_ROSTER);
+    parsed.context.teacher = activeTeacher.nickname;
+    parsed.context.department = activeTeacher.department;
+    parsed.context.manager = MANAGER_BY_DEPARTMENT[activeTeacher.department];
+    if (parsed.operations.date === parsed.daily.date && !parsed.operations.confirmedAt && (parsed.operations.dutyOwner === previousTeacher || !STAFF_ROSTER.some(person => person.nickname === parsed.operations.dutyOwner))) {
+      parsed.operations.dutyOwner = activeTeacher.nickname;
+      parsed.operations.room = activeTeacher.department;
+    }
     parsed.feedbackThreads = parsed.feedbackThreads && typeof parsed.feedbackThreads === 'object' && !Array.isArray(parsed.feedbackThreads) ? parsed.feedbackThreads : {};
     Object.entries(parsed.feedbackThreads).forEach(([key, messages]) => {
       parsed.feedbackThreads[key] = (Array.isArray(messages) ? messages : []).filter(message => message && String(message.text || '').trim()).map(message => ({
@@ -429,7 +519,7 @@
       loadStateIssue = '主要資料與安全備份皆無法載入，已保留原資料並開啟空白審查頁。';
       return createSeed();
     }
-    if (![8, 9, 10, 11, 12, APP_VERSION].includes(parsed.version)) {
+    if (![8, 9, 10, 11, 12, 13, APP_VERSION].includes(parsed.version)) {
       loadStateIssue = '資料版本無法辨識，舊資料未被覆蓋；目前先開啟空白審查頁。';
       return createSeed();
     }
@@ -770,12 +860,17 @@
 
   function monthlyArchiveRows(month) {
     const teacher = state.context.teacher;
+    const person = staffMember(teacher);
+    const roster = assignedStudents(teacher);
     const inMonth = value => String(value || '').slice(0, 7) === month;
     const byDate = (a, b) => String(a.date || '').localeCompare(String(b.date || ''));
     const rows = [
       ['布拉克星球 KPI 系統｜安親部月歸檔'],
       ['老師', teacher],
+      ['教室', person?.department || state.context.department],
       ['月份', month],
+      ['負責學生', roster.join('、')],
+      ...(person?.note ? [['班級備註', person.note]] : []),
       ['建議雲端資料夾', archiveFolderPath(month, teacher)],
       ['匯出時間', new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false })],
       [],
@@ -1009,6 +1104,7 @@
       students: renderManagerStudents,
       'plans-review': renderPlanReviews,
       team: renderTeamStatus,
+      scoring: renderScoringStandards,
     } : {
       today: renderTeacherToday,
       weekly: renderWeekly,
@@ -1016,6 +1112,7 @@
       records: renderRecords,
       tasks: renderTasks,
       guide: renderTeacherGuide,
+      scoring: renderScoringStandards,
     };
     const renderer = routes[state.ui.route] || routes[defaultRoute(state.ui.role)];
     return renderer();
@@ -1023,7 +1120,7 @@
 
   function pageHead(title, subtitle, actions = '') {
     const mascotByRoute = {
-      today: 'mascot-blue', weekly: 'mascot-green', plans: 'mascot-coral', records: 'mascot-black', tasks: 'mascot-green', guide: 'mascot-blue',
+      today: 'mascot-blue', weekly: 'mascot-green', plans: 'mascot-coral', records: 'mascot-black', tasks: 'mascot-green', guide: 'mascot-blue', scoring: 'mascot-coral',
       dashboard: 'mascot-black', reviews: 'mascot-blue', evidence: 'mascot-black', students: 'mascot-green',
       'operations-review': 'mascot-green', 'plans-review': 'mascot-coral', team: 'mascot-blue',
     };
@@ -1560,7 +1657,7 @@
     const blockers = [];
     if (!tracks.academic.covered) blockers.push('新增至少 1 筆「學科內｜課業輔導」紀錄');
     if (!tracks.enrichment.covered) blockers.push('新增至少 1 筆「學科外｜當日特色課程」紀錄');
-    if (dailyRequiredTracksReady() && !status.activities) blockers.push('課程需選擇內容完整的備課檔案並完成課後回饋；班級經營與協作只需工作欄位及可判讀成果證據');
+    if (dailyRequiredTracksReady() && !status.activities) blockers.push('課程需選擇內容完整的備課檔案並完成課後回饋；班級經營只需工作欄位及可判讀成果證據');
     if (!status.students) blockers.push('新增學生追蹤，或確認今日無需個別追蹤');
     if (!status.parents) blockers.push('新增親師溝通，或確認今日無聯繫');
     if (!status.operations) blockers.push('今日值日班務尚未確認');
@@ -1620,7 +1717,7 @@
     const dailySteps = [
       ['1', '學科內', '從學科內入口新增；安親課業指導每天至少一筆，班級經營有實際事件時再記。'],
       ['2', '學科外', '從學科外入口新增；只會看到專案、機器人、學習歷程與 SEL。'],
-      ['3', '選取備課檔案並補成果', '課程帶入已完成的教案與教材；班級經營與協作不需要備課檔案。'],
+      ['3', '選取備課檔案並補成果', '課程帶入已完成的教案與教材；班級經營不需要備課檔案。'],
       ['4', '完成學生、親師與班務', '有狀況就留下追蹤；值日班務四項各拍一張，正常不寫說明，異常才補處理安排。'],
       ['5', '確認後送主管', '系統直接彙整成果、追蹤與待辦；主管提出意見後，老師可在同一筆資料接續回覆。'],
     ];
@@ -1628,6 +1725,7 @@
       ${pageHead('填寫指南', '說明與範例集中管理，不占用正式填寫畫面', `<button type="button" class="btn btn-primary" data-action="navigate" data-route="today">${icon('clipboard-pen-line', 16)}<span>開始今天的紀錄</span></button>`)}
       <section class="guide-start-band"><div><span class="guide-kicker">每日工作順序</span><h2>先完成兩項課程，再確認系統彙整</h2><p>以下是固定流程；詳細範例只留在本頁，工作表單只保留必要欄位。</p></div><div class="guide-day-flow">${dailySteps.map(([number, title, copy]) => `<div class="guide-day-step"><span>${number}</span><div><strong>${esc(title)}</strong><small>${esc(copy)}</small></div></div>`).join('')}</div></section>
       <div class="notice-band info">${icon('folder-down', 19)}<div><div class="notice-title">每月雲端歸檔</div><div class="notice-copy">到「我的紀錄」選擇匯出月份；系統會依老師、年份與月份命名，並把各日期紀錄及主管對話收進同一份月檔。</div></div></div>
+      <div class="notice-band info">${icon('scale', 19)}<div><div class="notice-title">隨時查閱評分標準</div><div class="notice-copy">手機請從底部「更多」進入；電腦請從左側選單開啟。正式填寫頁只保留工作欄位，不重複放制度說明。</div></div></div>
 
       <section class="panel guide-section">
         <div class="panel-head"><div><div class="panel-title">${icon('list-tree')}工作類型與欄位怎麼寫</div><div class="panel-subtitle">選一種類型查看專屬欄位及五個欄位的差異</div></div></div>
@@ -1646,6 +1744,57 @@
 
       <div class="notice-band info">${icon('split', 19)}<div><div class="notice-title">備課與授課紀錄分工</div><div class="notice-copy">備課檔案保存課前設計與教材；每日工作紀錄保存這堂課實際發生的結果、學生反應與下次調整。</div></div></div>
     </div>`;
+  }
+
+  function renderScoringStandards() {
+    const totalPoints = ANQIN_KPI_STANDARDS.reduce((sum, category) => sum + category.points, 0);
+    const architectureRows = ANQIN_KPI_STANDARDS.map(category =>
+      '<tr><td><div class="kpi-table-category">' + icon(category.icon, 16) + '<strong>' + esc(category.name) + '</strong></div></td><td><strong>' + category.points + '</strong></td><td>' + esc(category.position) + '</td></tr>'
+    ).join('');
+    const categoryCards = ANQIN_KPI_STANDARDS.map((category, categoryIndex) =>
+      '<article class="kpi-standard-card">' +
+        '<div class="kpi-standard-head"><span class="kpi-standard-icon">' + icon(category.icon, 19) + '</span><div><span class="kpi-standard-number">' + (categoryIndex + 1) + '</span><h3>' + esc(category.name) + '</h3><p>' + esc(category.position) + '</p></div><strong class="kpi-standard-points">' + category.points + ' 分</strong></div>' +
+        '<div class="kpi-standard-items">' + category.items.map(item => '<div class="kpi-standard-item"><span>' + esc(item[0]) + '</span><strong>' + item[1] + ' 分</strong></div>').join('') + '</div>' +
+        '<div class="kpi-check-method">' + icon('search-check', 15) + '<span><strong>查核方式</strong>' + esc(category.check) + '</span></div>' +
+      '</article>'
+    ).join('');
+    const bonusRows = ANQIN_BONUS_TIERS.map(tier =>
+      '<tr><td><strong>' + esc(tier.range) + '</strong></td><td>' + statusBadge(tier.grade, tier.tone) + '</td><td>' + esc(tier.bonus) + '</td></tr>'
+    ).join('');
+    const process = [
+      ['1', '教師自評', '對照當月工作與佐證先做自我檢視。'],
+      ['2', '主管評分', '依紀錄、觀課、巡班與實際成果綜合判斷。'],
+      ['3', '個別成長面談', '10–15 分鐘看見優點，並確認下一步調整方向。'],
+      ['4', '核發當月獎金', '依最終 KPI 總分對應級距核發。'],
+    ];
+    const processRows = process.map(item =>
+      '<div><span>' + item[0] + '</span><div><strong>' + esc(item[1]) + '</strong><small>' + esc(item[2]) + '</small></div></div>'
+    ).join('');
+    const evidenceMap = [
+      ['課業指導', '課業輔導、學生成果與訂正追蹤'],
+      ['專案課程', '備課教案、學科外課程、作品與觀課'],
+      ['班級經營', '班級經營紀錄、學生追蹤與巡班觀察'],
+      ['親師溝通', '親師聯繫、回饋內容與後續承諾'],
+      ['個人態度', '出勤、每日紀錄、交辦事項與備課落實狀況'],
+      ['環境整潔', '每日班務逐項照片與主管稽核'],
+    ].map(item => '<div><strong>' + esc(item[0]) + '</strong><span>' + esc(item[1]) + '</span></div>').join('');
+    return '<div class="page kpi-standards-page">' +
+      pageHead('安親部 KPI 評分標準', '115/9 修訂版 · 老師與主管共用的正式查閱頁', '') +
+      '<div class="notice-band info">' + icon('scale', 20) + '<div><div class="notice-title">資料完整度不是績效分數</div><div class="notice-copy">系統紀錄只是評分佐證；最終 KPI 由主管依實際成果、觀課、巡班、溝通與工作表現綜合評核。</div></div></div>' +
+      '<section class="kpi-overview" aria-label="制度摘要">' +
+        '<div><span>KPI 總分</span><strong>' + totalPoints + '</strong><small>每月評核</small></div>' +
+        '<div><span>評分類別</span><strong>' + ANQIN_KPI_STANDARDS.length + '</strong><small>六大類別</small></div>' +
+        '<div><span>月獎金門檻</span><strong>82</strong><small>82 分起</small></div>' +
+        '<div><span>OKR</span><strong>獨立</strong><small>不納入 KPI 100 分</small></div>' +
+      '</section>' +
+      '<section class="panel kpi-system-panel"><div class="panel-head"><div><div class="panel-title">' + icon('split') + '制度架構</div><div class="panel-subtitle">KPI 與 OKR 分開計算，不重複計分</div></div></div><div class="panel-body"><div class="kpi-dual-track"><div><span class="badge blue">KPI 月考核</span><strong>穩定日常工作品質</strong><p>每月一次，總分 100 分，作為月績效獎金依據。</p></div><div><span class="badge purple">OKR 學期成長</span><strong>推動專業成長與突破</strong><p>以學期為週期獨立評核，採獨立獎金制，不納入 KPI 的 100 分。</p></div></div></div></section>' +
+      '<section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">' + icon('table-properties') + '評分架構</div><div class="panel-subtitle">六大類別合計 ' + totalPoints + ' 分</div></div></div><div class="panel-body flush"><div class="table-wrap"><table class="data-table kpi-architecture-table"><thead><tr><th>KPI 項目</th><th>配分</th><th>定位說明</th></tr></thead><tbody>' + architectureRows + '<tr class="kpi-total-row"><td><strong>合計</strong></td><td><strong>' + totalPoints + '</strong></td><td>每月 KPI 總分</td></tr></tbody></table></div></div></section>' +
+      '<section class="kpi-detail-section"><div class="kpi-section-heading"><span class="kpi-section-kicker">逐項查閱</span><h2>KPI 各項評分標準</h2><p>每一類都列出評分內容、配分與查核方式。</p></div><div class="kpi-standard-grid">' + categoryCards + '</div></section>' +
+      '<div class="content-grid kpi-bottom-grid"><section class="panel"><div class="panel-head"><div><div class="panel-title">' + icon('badge-dollar-sign') + '月績效獎金級距</div><div class="panel-subtitle">KPI 82 分起開始有獎金</div></div></div><div class="panel-body flush"><div class="table-wrap"><table class="data-table"><thead><tr><th>KPI 分數</th><th>評等</th><th>績效獎金</th></tr></thead><tbody>' + bonusRows + '</tbody></table></div></div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">' + icon('list-ordered') + '每月評核流程</div><div class="panel-subtitle">完成評分後才進入獎金核發</div></div></div><div class="panel-body"><div class="kpi-process">' + processRows + '</div></div></section></div>' +
+      '<section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">' + icon('database') + '系統資料如何對應評分</div><div class="panel-subtitle">系統幫忙彙整證據，不會自動代替主管下分</div></div></div><div class="panel-body"><div class="kpi-evidence-map">' + evidenceMap + '</div></div></section>' +
+      '<section class="kpi-rule-band"><div>' + icon('clock-3', 19) + '<div><strong>出勤紀律</strong><p>當月遲到累計達 3 次（含）以上，自第 3 次起每次額外扣 5 分，或直接降一個獎金等級，系統取較重者。</p></div></div><div>' + icon('shield-alert', 19) + '<div><strong>例外與扣發</strong><p>如有重大教學事故、嚴重違反工作規範、家長投訴經查屬實，或教學品質未達要求，本期 KPI 獎金得延期或取消。</p></div></div></section>' +
+      '<p class="kpi-effective-note">KPI 自 115 年 7 月施行；OKR 自 115 年 9 月起生效。未盡事宜由教室管理團隊依實際情形補充公告。</p>' +
+    '</div>';
   }
 
   function activityDetailDefaults(type) {
@@ -1730,7 +1879,7 @@
     const plan = planById(planId);
     if (!plan) {
       const optionalTitle = type === 'lessonprep' ? '教案內容與教材尚未完成' : '此類工作可選擇關聯教學設計';
-      const optionalCopy = type === 'lessonprep' ? '可先儲存備課檔案；完成課程流程、檢核方式與至少一份正式教材後，即可供授課紀錄選用。' : '若本次是在製作或協作既有內容，可在此關聯。';
+    const optionalCopy = type === 'lessonprep' ? '可先儲存備課檔案；完成課程流程、檢核方式與至少一份正式教材後，即可供授課紀錄選用。' : '若本次是延續既有內容，可在此關聯。';
       const missing = config.requiresPlan || type === 'lessonprep';
       return `<div class="plan-link-status ${missing ? 'is-missing' : ''}">${icon(missing ? 'circle-alert' : 'info', 16)}<div><strong>${config.requiresPlan ? '此類工作必須連結教學設計與教材' : optionalTitle}</strong><small>${config.requiresPlan ? '請先選擇內容完整的備課檔案。' : optionalCopy}</small></div></div>`;
     }
@@ -1863,7 +2012,7 @@
         <div class="form-field"><label class="form-label" for="activity-type">${esc(typeLabel)} <span class="required">*</span></label><select id="activity-type" name="type" data-change="activity-type" required>${renderActivityTypeOptions(value.type, formTrack)}</select><div class="field-hint">${esc(typeHint)}</div></div>
         ${copy.hideClass ? '<input type="hidden" name="className" value="">' : `<div class="form-field"><label class="form-label" id="activity-class-label" for="activity-class">${esc(copy.classLabel)} <span class="required">*</span></label><input id="activity-class" name="className" value="${esc(value.className)}" placeholder="${esc(copy.classPlaceholder)}" required></div>`}
         <div class="form-field span-2"><label class="form-label" id="activity-title-label" for="activity-title">${esc(copy.titleLabel)} <span class="required">*</span></label><input id="activity-title" name="title" value="${esc(value.title)}" placeholder="${esc(copy.titlePlaceholder)}" required></div>
-        <div id="activity-students-field" class="form-field span-2" ${copy.hideStudents ? 'hidden' : ''}><div class="form-label">關聯學生</div><div class="chip-list">${STUDENTS.map(student => `<label class="choice-chip"><input type="checkbox" name="students" value="${esc(student)}" ${(value.students || []).includes(student) ? 'checked' : ''}>${esc(student)}</label>`).join('')}</div><div class="field-hint">全班共同活動可不勾；個別結果請選擇學生。</div></div>
+        <div id="activity-students-field" class="form-field span-2" ${copy.hideStudents ? 'hidden' : ''}><div class="form-label">關聯學生（本班 ${assignedStudents(value.teacher || state.context.teacher).length} 人）</div><div class="chip-list">${renderStudentChoices(value.teacher || state.context.teacher, value.students || [])}</div><div class="field-hint">全班共同活動可不勾；個別結果請選擇學生。</div></div>
       </div>
       <div id="activity-specific-fields">${renderActivitySpecificFields(value.type, value.details || {})}</div>
       ${renderActivityPreparationSection(value)}
@@ -1883,7 +2032,7 @@
   function renderStudentCaseForm(item) {
     const value = item || { id: '', student: '', category: 'learning', urgency: 'medium', observation: '', intervention: '', outcome: '', nextAction: '', dueDate: addDays(state.daily.date, 1), status: 'open', parentContacted: false };
     return `<form id="student-case-form" data-form="student-case" data-draft-form><input type="hidden" name="id" value="${esc(value.id)}"><div class="form-grid">
-      <div class="form-field"><label class="form-label" for="case-student">學生 <span class="required">*</span></label><select id="case-student" name="student" required><option value="">請選擇</option>${STUDENTS.map(student => `<option ${value.student === student ? 'selected' : ''}>${esc(student)}</option>`).join('')}</select></div>
+      <div class="form-field"><label class="form-label" for="case-student">學生 <span class="required">*</span></label><select id="case-student" name="student" required><option value="">請選擇</option>${renderStudentOptions(item?.teacher || state.context.teacher, value.student)}</select><div class="field-hint">目前顯示 ${assignedStudents(item?.teacher || state.context.teacher).length} 位負責學生。</div></div>
       <div class="form-field"><label class="form-label" for="case-category">類型 <span class="required">*</span></label><select id="case-category" name="category" required><option value="learning" ${value.category === 'learning' ? 'selected' : ''}>學習</option><option value="behavior" ${value.category === 'behavior' ? 'selected' : ''}>行為／情緒</option><option value="peer" ${value.category === 'peer' ? 'selected' : ''}>同儕互動</option><option value="attendance" ${value.category === 'attendance' ? 'selected' : ''}>出席</option><option value="health" ${value.category === 'health' ? 'selected' : ''}>健康</option></select></div>
       <div class="form-field"><label class="form-label" for="case-urgency">追蹤層級</label><select id="case-urgency" name="urgency"><option value="low" ${value.urgency === 'low' ? 'selected' : ''}>一般</option><option value="medium" ${value.urgency === 'medium' ? 'selected' : ''}>持續追蹤</option><option value="high" ${value.urgency === 'high' ? 'selected' : ''}>高優先</option></select></div>
       <div class="form-field"><label class="form-label" for="case-date">下次追蹤日</label><input id="case-date" type="date" name="dueDate" value="${esc(value.dueDate)}"></div>
@@ -1899,7 +2048,7 @@
   function renderContactForm(item) {
     const value = item || { id: '', student: '', channel: 'LINE', topic: '學習狀況', summary: '', decision: '', nextAction: '', dueDate: addDays(state.daily.date, 1), status: 'open' };
     return `<form id="contact-form" data-form="contact" data-draft-form><input type="hidden" name="id" value="${esc(value.id)}"><div class="form-grid">
-      <div class="form-field"><label class="form-label" for="contact-student">學生 <span class="required">*</span></label><select id="contact-student" name="student" required><option value="">請選擇</option>${STUDENTS.map(student => `<option ${value.student === student ? 'selected' : ''}>${esc(student)}</option>`).join('')}</select></div>
+      <div class="form-field"><label class="form-label" for="contact-student">學生 <span class="required">*</span></label><select id="contact-student" name="student" required><option value="">請選擇</option>${renderStudentOptions(item?.teacher || state.context.teacher, value.student)}</select><div class="field-hint">目前顯示 ${assignedStudents(item?.teacher || state.context.teacher).length} 位負責學生。</div></div>
       <div class="form-field"><label class="form-label" for="contact-channel">管道</label><select id="contact-channel" name="channel"><option ${value.channel === 'LINE' ? 'selected' : ''}>LINE</option><option ${value.channel === '電話' ? 'selected' : ''}>電話</option><option ${value.channel === '面談' ? 'selected' : ''}>面談</option><option ${value.channel === '聯絡簿' ? 'selected' : ''}>聯絡簿</option></select></div>
       <div class="form-field span-2"><label class="form-label" for="contact-topic">溝通主題 <span class="required">*</span></label><input id="contact-topic" name="topic" value="${esc(value.topic)}" placeholder="例：分數學習狀況" required></div>
       <div class="form-field span-2"><label class="form-label" for="contact-summary">必要摘要 <span class="required">*</span></label><textarea id="contact-summary" name="summary" placeholder="只記錄與學生支持有關的客觀內容。" required>${esc(value.summary)}</textarea></div>
@@ -2020,7 +2169,7 @@
         <div class="form-field span-2"><label class="form-label" for="evidence-title">${isCrossDay ? '本日產出標題' : '證據標題'} <span class="required">*</span></label><input id="evidence-title" name="title" value="${esc(value.title)}" placeholder="${isCrossDay ? '例：餐車課程教案與學習單 v1.2' : '例：三組菜單成本表與定價初稿'}" minlength="4" data-input="evidence-quality" required></div>
         <div class="form-field span-2"><div class="form-label">對應的工作結果</div><div class="evidence-linked-result">${esc(value.claim || activity.result || '請先回到工作紀錄完成實際結果')}</div><input id="evidence-claim" type="hidden" name="claim" value="${esc(value.claim || activity.result || '')}"><div class="field-hint">系統已從工作紀錄帶入，不必再寫一次；本頁只需標示主管要看照片或檔案的哪裡。</div></div>
         <div class="form-field span-2"><label class="form-label" for="evidence-observation">主管請看哪裡？ <span class="required">*</span></label><textarea id="evidence-observation" name="observation" placeholder="${isCrossDay ? '例：請核對教案第 2、3 段與簡報第 8–15 頁，以及檔名 v1.2。' : '例：請看左側兩組的完整三類成本，以及右側紅筆補上的耗材。'}" minlength="12" data-input="evidence-quality" required>${esc(value.observation)}</textarea><div class="field-hint">照片可直接點選關鍵位置，加上編號標記與說明；若不加標記，請至少寫 32 字。</div></div>
-        <div class="form-field span-2" ${isCrossDay ? 'hidden' : ''}><div class="form-label">關聯學生</div><div class="chip-list">${STUDENTS.map(student => `<label class="choice-chip"><input type="checkbox" name="students" value="${esc(student)}" ${(value.students || []).includes(student) ? 'checked' : ''}>${esc(student)}</label>`).join('')}</div></div>
+        <div class="form-field span-2" ${isCrossDay ? 'hidden' : ''}><div class="form-label">關聯學生（本班 ${assignedStudents(activity.teacher || state.context.teacher).length} 人）</div><div class="chip-list">${renderStudentChoices(activity.teacher || state.context.teacher, value.students || [])}</div></div>
         <div class="form-field span-2"><label class="choice-chip" for="evidence-privacy"><input id="evidence-privacy" type="checkbox" name="privacy" data-change="evidence-privacy" ${value.privacy ? 'checked' : ''} required>${icon('shield-check', 15)}已確認檔案不含無關姓名、聯絡資訊或不必要的正面影像 <span class="required">*</span></label></div>
       </div>
     </form>`;
@@ -2286,7 +2435,7 @@
     const pendingPlans = state.lessonPlans.filter(plan => plan.status === 'review');
     const evidenceAttention = allEvidence().filter(item => item.evidence.status !== 'accepted');
     const pendingOperations = operationRecords().filter(item => item.confirmedAt && item.reviewStatus !== 'accepted');
-    const teachers = state.people.filter(person => person.role === 'teacher');
+    const teachers = teachingStaff();
     const teacherRows = teachers.map(person => {
       const name = person.nickname;
       const activities = state.activities.filter(item => item.teacher === name && item.date === state.daily.date && item.type !== 'lessonprep');
@@ -2298,7 +2447,7 @@
         + evidenceAttention.filter(item => item.activity.teacher === name).length
         + pendingOperations.filter(item => item.dutyOwner === name).length;
       return {
-        name, department: person.department, quality, queue,
+        name, department: person.department, studentCount: (person.students || []).length, note: person.note || '', quality, queue,
         submit: submitted ? '已交' : activities.length ? '草稿' : '未開始',
         submitTone: submitted ? 'green' : activities.length ? 'yellow' : 'outline',
         cases: state.studentCases.filter(item => item.teacher === name && item.status !== 'closed').length,
@@ -2329,7 +2478,7 @@
       <div class="content-grid wide-aside">
         <div class="stack">
           <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('triangle-alert')}今日需處理</div><div class="panel-subtitle">只顯示真人送出的待處理資料</div></div><button type="button" class="btn btn-small" data-action="navigate" data-route="reviews">全部審查</button></div><div class="panel-body">${queueItems.length ? `<div class="risk-list">${queueItems.join('')}</div>` : '<div class="text-small muted">目前沒有待處理內容。</div>'}</div></section>
-          <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('users-round')}老師工作狀態</div><div class="panel-subtitle">尚無資料時不顯示推估分數</div></div></div><div class="panel-body flush"><div class="table-wrap"><table class="data-table"><thead><tr><th>老師</th><th>日報</th><th>資料完整度</th><th>學生追蹤</th><th>家長承諾</th><th>待審</th></tr></thead><tbody>${teacherRows.map(row => `<tr><td><div class="teacher-status"><span class="status-avatar">${esc(row.name.slice(0, 2))}</span><div><div class="table-primary">${esc(row.name)}</div><div class="table-secondary">${esc(row.department)}</div></div></div></td><td><span class="badge ${row.submitTone}">${row.submit}</span></td><td>${row.quality == null ? '—' : `<div class="metric-row"><span class="metric-value">${row.quality}</span><div class="progress-track"><div class="progress-fill ${row.quality < 70 ? 'danger' : row.quality < 85 ? 'warn' : ''}" style="width:${row.quality}%"></div></div></div>`}</td><td>${row.cases}</td><td>${row.contacts}</td><td>${row.queue ? `<span class="badge red">${row.queue}</span>` : '—'}</td></tr>`).join('')}</tbody></table></div></div></section>
+          <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('users-round')}老師工作狀態</div><div class="panel-subtitle">尚無資料時不顯示推估分數</div></div></div><div class="panel-body flush"><div class="table-wrap"><table class="data-table"><thead><tr><th>老師</th><th>日報</th><th>資料完整度</th><th>學生追蹤</th><th>家長承諾</th><th>待審</th></tr></thead><tbody>${teacherRows.map(row => `<tr><td><div class="teacher-status"><span class="status-avatar">${esc(row.name.slice(0, 2))}</span><div><div class="table-primary">${esc(row.name)}</div><div class="table-secondary">${esc(row.department)} · ${row.studentCount} 位學生${row.note ? ` · ${esc(row.note)}` : ''}</div></div></div></td><td><span class="badge ${row.submitTone}">${row.submit}</span></td><td>${row.quality == null ? '—' : `<div class="metric-row"><span class="metric-value">${row.quality}</span><div class="progress-track"><div class="progress-fill ${row.quality < 70 ? 'danger' : row.quality < 85 ? 'warn' : ''}" style="width:${row.quality}%"></div></div></div>`}</td><td>${row.cases}</td><td>${row.contacts}</td><td>${row.queue ? `<span class="badge red">${row.queue}</span>` : '—'}</td></tr>`).join('')}</tbody></table></div></div></section>
         </div>
         <aside class="stack">
           <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('calendar-clock')}即將到期</div></div></div><div class="panel-body">${dueTasks.length ? `<div class="timeline">${dueTasks.map(task => `<div class="timeline-item"><div class="timeline-date">${formatShortDate(task.dueDate)}</div><span class="timeline-dot"></span><div class="timeline-content"><div class="text-small text-strong">${esc(task.title)}</div><div class="text-tiny muted">${esc(task.owner)} · ${esc(task.source)}</div></div></div>`).join('')}</div>` : '<div class="text-small muted">目前沒有即將到期事項。</div>'}</div></section>
@@ -2365,7 +2514,7 @@
     }).sort((a, b) => String(b.submittedAt).localeCompare(String(a.submittedAt)));
     return `<div class="page">
       ${pageHead('日報審查', '先看風險、待辦與證據，再回到完整日報', '')}
-      <div class="filter-bar"><div class="filter-field"><label for="review-status">狀態</label><select id="review-status" aria-label="日報審查狀態" data-change="view-filter" data-filter-group="reviews" data-filter-key="status"><option value="open" ${filters.status === 'open' ? 'selected' : ''}>待處理</option><option value="all" ${filters.status === 'all' ? 'selected' : ''}>全部</option><option value="pending" ${filters.status === 'pending' ? 'selected' : ''}>待審查</option><option value="clarify" ${filters.status === 'clarify' ? 'selected' : ''}>待老師補充</option><option value="accepted" ${filters.status === 'accepted' ? 'selected' : ''}>已採認</option></select></div><div class="filter-field"><label for="review-teacher">老師</label><select id="review-teacher" aria-label="日報審查老師" data-change="view-filter" data-filter-group="reviews" data-filter-key="teacher"><option value="all">全部老師</option>${state.people.filter(item => item.role === 'teacher').map(item => `<option value="${esc(item.nickname)}" ${filters.teacher === item.nickname ? 'selected' : ''}>${esc(item.nickname)}</option>`).join('')}</select></div><div class="filter-field"><label for="review-date">日期</label><input id="review-date" aria-label="日報審查日期" type="date" value="${esc(filters.date)}" data-change="view-filter" data-filter-group="reviews" data-filter-key="date"></div><div class="filter-field grow"><label for="review-query">搜尋</label><input id="review-query" value="${esc(filters.query)}" data-input="view-filter" data-filter-group="reviews" data-filter-key="query" placeholder="搜尋學生、課程或關鍵字"></div></div>
+      <div class="filter-bar"><div class="filter-field"><label for="review-status">狀態</label><select id="review-status" aria-label="日報審查狀態" data-change="view-filter" data-filter-group="reviews" data-filter-key="status"><option value="open" ${filters.status === 'open' ? 'selected' : ''}>待處理</option><option value="all" ${filters.status === 'all' ? 'selected' : ''}>全部</option><option value="pending" ${filters.status === 'pending' ? 'selected' : ''}>待審查</option><option value="clarify" ${filters.status === 'clarify' ? 'selected' : ''}>待老師補充</option><option value="accepted" ${filters.status === 'accepted' ? 'selected' : ''}>已採認</option></select></div><div class="filter-field"><label for="review-teacher">老師</label><select id="review-teacher" aria-label="日報審查老師" data-change="view-filter" data-filter-group="reviews" data-filter-key="teacher"><option value="all">全部老師</option>${teachingStaff().map(item => `<option value="${esc(item.nickname)}" ${filters.teacher === item.nickname ? 'selected' : ''}>${esc(item.nickname)}</option>`).join('')}</select></div><div class="filter-field"><label for="review-date">日期</label><input id="review-date" aria-label="日報審查日期" type="date" value="${esc(filters.date)}" data-change="view-filter" data-filter-group="reviews" data-filter-key="date"></div><div class="filter-field grow"><label for="review-query">搜尋</label><input id="review-query" value="${esc(filters.query)}" data-input="view-filter" data-filter-group="reviews" data-filter-key="query" placeholder="搜尋學生、課程或關鍵字"></div></div>
       <section class="panel mt-16"><div class="panel-body flush"><div class="table-wrap"><table class="data-table"><thead><tr><th>老師／日期</th><th>關鍵成果</th><th>風險與追蹤</th><th>證據</th><th>狀態</th><th></th></tr></thead><tbody>${submissions.map(submission => {
         const activityCount = submission.activityIds.length || (submission.activitySnapshots || []).length;
         const submissionActivities = submission.activityIds.map(id => state.activities.find(item => item.id === id)).filter(Boolean);
@@ -2485,7 +2634,7 @@
     });
     return `<div class="page">
       ${pageHead('教案審查', '教學流程、學習檢核與附件版本集中判讀', '')}
-      <div class="filter-bar"><div class="filter-field"><label for="plan-review-status">狀態</label><select id="plan-review-status" aria-label="教案審查狀態" data-change="view-filter" data-filter-group="planReview" data-filter-key="status"><option value="review" ${filters.status === 'review' ? 'selected' : ''}>待審查</option><option value="all" ${filters.status === 'all' ? 'selected' : ''}>全部</option><option value="approved" ${filters.status === 'approved' ? 'selected' : ''}>已核准</option><option value="changes" ${filters.status === 'changes' ? 'selected' : ''}>退回補件</option><option value="draft" ${filters.status === 'draft' ? 'selected' : ''}>草稿</option></select></div><div class="filter-field"><label for="plan-review-teacher">老師</label><select id="plan-review-teacher" aria-label="教案審查老師" data-change="view-filter" data-filter-group="planReview" data-filter-key="teacher"><option value="all">全部老師</option>${state.people.filter(item => item.role === 'teacher').map(item => `<option value="${esc(item.nickname)}" ${filters.teacher === item.nickname ? 'selected' : ''}>${esc(item.nickname)}</option>`).join('')}</select></div><div class="filter-field grow"><label for="plan-review-query">搜尋</label><input id="plan-review-query" value="${esc(filters.query)}" data-input="view-filter" data-filter-group="planReview" data-filter-key="query" placeholder="搜尋教案或課程類型"></div></div>
+      <div class="filter-bar"><div class="filter-field"><label for="plan-review-status">狀態</label><select id="plan-review-status" aria-label="教案審查狀態" data-change="view-filter" data-filter-group="planReview" data-filter-key="status"><option value="review" ${filters.status === 'review' ? 'selected' : ''}>待審查</option><option value="all" ${filters.status === 'all' ? 'selected' : ''}>全部</option><option value="approved" ${filters.status === 'approved' ? 'selected' : ''}>已核准</option><option value="changes" ${filters.status === 'changes' ? 'selected' : ''}>退回補件</option><option value="draft" ${filters.status === 'draft' ? 'selected' : ''}>草稿</option></select></div><div class="filter-field"><label for="plan-review-teacher">老師</label><select id="plan-review-teacher" aria-label="教案審查老師" data-change="view-filter" data-filter-group="planReview" data-filter-key="teacher"><option value="all">全部老師</option>${teachingStaff().map(item => `<option value="${esc(item.nickname)}" ${filters.teacher === item.nickname ? 'selected' : ''}>${esc(item.nickname)}</option>`).join('')}</select></div><div class="filter-field grow"><label for="plan-review-query">搜尋</label><input id="plan-review-query" value="${esc(filters.query)}" data-input="view-filter" data-filter-group="planReview" data-filter-key="query" placeholder="搜尋教案或課程類型"></div></div>
       <section class="panel mt-16"><div class="panel-body flush"><div class="table-wrap"><table class="data-table"><thead><tr><th>教案</th><th>老師</th><th>流程時間</th><th>教材附件</th><th>完整度</th><th>狀態</th><th></th></tr></thead><tbody>${plans.map(plan => {
         const readiness = planReadiness(plan); const status = planStatus(plan); const total = (plan.flow || []).reduce((sum, item) => sum + Number(item.minutes || 0), 0);
         return `<tr><td><div class="table-primary">${esc(plan.title)}</div><div class="table-secondary">${esc(plan.courseType)}</div></td><td>${esc(plan.teacher)}</td><td><span class="badge ${total === Number(plan.duration) ? 'green' : 'red'}">${total}/${plan.duration} 分</span></td><td>${(plan.materials || []).length} 份</td><td><div class="metric-row"><span class="metric-value">${readiness}</span><div class="progress-track"><div class="progress-fill ${readiness < 80 ? 'warn' : ''}" style="width:${readiness}%"></div></div></div></td><td><span class="badge ${status[1]}">${status[0]}</span></td><td><button type="button" class="btn btn-small" data-action="review-plan" data-plan-id="${plan.id}">審查</button></td></tr>`;
@@ -2493,8 +2642,20 @@
     </div>`;
   }
 
+  function renderTeamRosterTable(teachers) {
+    const totalStudents = teachers.reduce((sum, person) => sum + (person.students || []).length, 0);
+    const rows = teachers.map(person =>
+      '<tr><td><span class="badge outline">' + esc(person.department) + '</span></td>' +
+      '<td><div class="teacher-status"><span class="status-avatar">' + esc(person.initials || person.nickname.slice(0, 2)) + '</span><div><div class="table-primary">' + esc(person.nickname) + '</div><div class="table-secondary">' + (person.role === 'manager' ? '主管兼帶班' : '安親老師') + '</div></div></div></td>' +
+      '<td><strong>' + (person.students || []).length + '</strong></td>' +
+      '<td><div class="roster-student-list">' + (person.students || []).map(student => '<span>' + esc(student) + '</span>').join('') + '</div></td>' +
+      '<td>' + (person.note ? '<span class="badge yellow">' + esc(person.note) + '</span>' : '<span class="muted">—</span>') + '</td></tr>'
+    ).join('');
+    return '<section class="panel team-roster-panel"><div class="panel-head"><div><div class="panel-title">' + icon('contact-round') + '班級與學生名單</div><div class="panel-subtitle">' + teachers.length + ' 位帶班人員 · ' + totalStudents + ' 位學生；名單會帶入老師的工作、學生追蹤與親師溝通選項</div></div></div><div class="panel-body flush"><div class="table-wrap"><table class="data-table roster-table"><thead><tr><th>教室</th><th>老師</th><th>學生人數</th><th>學生名單</th><th>備註</th></tr></thead><tbody>' + rows + '</tbody></table></div></div></section>';
+  }
+
   function renderTeamStatus() {
-    const teachers = state.people.filter(person => person.role === 'teacher');
+    const teachers = teachingStaff();
     const tutoring = state.activities.filter(activity => activity.type === 'tutoring');
     const projects = state.activities.filter(activity => ['project', 'robotics', 'portfolio'].includes(activity.type));
     const classroomActivities = state.activities.filter(activity => ['sel', 'classroom'].includes(activity.type));
@@ -2515,6 +2676,10 @@
       const activities = state.activities.filter(activity => activity.teacher === person.nickname && activity.type !== 'lessonprep');
       return {
         name: person.nickname,
+        department: person.department,
+        studentCount: (person.students || []).length,
+        students: person.students || [],
+        note: person.note || '',
         activities: activities.length,
         cases: state.studentCases.filter(item => item.teacher === person.nickname && item.status !== 'closed').length,
         tasks: state.tasks.filter(item => item.owner === person.nickname && item.status !== 'done').length,
@@ -2531,6 +2696,7 @@
     return `<div class="page">
       ${pageHead('團隊狀態', '完成率、資料品質與績效判斷分開呈現', `<span class="badge outline">${icon('calendar-range', 15)}<span>${state.daily.date.slice(0, 4)} 年 ${Number(state.daily.date.slice(5, 7))} 月</span></span>`)}
       <div class="notice-band info">${icon('scale', 19)}<div><div class="notice-title">資料完整度不是績效分數</div><div class="notice-copy">系統只提示證據是否足以判讀；最終 KPI 由主管依成果、影響與持續性做專業評核。</div></div></div>
+      ${renderTeamRosterTable(teachers)}
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('chart-no-axes-combined')}部門評核準備度</div><div class="panel-subtitle">來源筆數可追溯至原始事件與主管觀察</div></div></div><div class="panel-body"><div class="score-matrix">${scoreRows.map(item => `<div class="score-cell"><div class="score-label">${esc(item.label)}</div><div class="score-main">${item.value === null ? '—' : item.value}</div><div class="score-source">${esc(item.source)}</div></div>`).join('')}</div></div></section>
       <div class="content-grid mt-16"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('gauge')}團隊工作量</div></div></div><div class="panel-body flush"><div class="table-wrap"><table class="data-table"><thead><tr><th>老師</th><th>工作事件</th><th>學生案件</th><th>待辦</th><th>教案</th><th>資料品質</th></tr></thead><tbody>${teamRows.map(row => `<tr><td><div class="table-primary">${esc(row.name)}</div></td><td>${row.activities}</td><td>${row.cases}</td><td>${row.tasks}</td><td>${row.plans}</td><td>${row.quality === null ? '—' : `<div class="metric-row"><span class="metric-value">${row.quality}</span><div class="progress-track"><div class="progress-fill ${row.quality < 70 ? 'danger' : row.quality < 85 ? 'warn' : ''}" style="width:${row.quality}%"></div></div></div>`}</td></tr>`).join('')}</tbody></table></div></div></section><aside class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}待完成事項</div></div></div><div class="panel-body">${pendingItems.length ? `<div class="check-list">${pendingItems.map((item, index) => `<div class="check-item pending"><span class="check-icon">${index + 1}</span><span>${esc(item.title)}${item.dueDate ? ` · ${formatShortDate(item.dueDate)}` : ''}</span></div>`).join('')}</div>` : '<div class="text-small muted">目前沒有待完成事項。</div>'}</div></aside></div>
     </div>`;
