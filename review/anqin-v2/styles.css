@@ -11,8 +11,8 @@
   --line: #e3ddd3;
   --line-strong: #cfc4b7;
   --surface: #ffffff;
-  --surface-soft: #faf8f3;
-  --canvas: #f3f6f5;
+  --surface-soft: #fffaf2;
+  --canvas: #fff6e7;
   --blue: #2f82b2;
   --blue-soft: #e9f5fb;
   --green: #3c8b52;
@@ -1195,6 +1195,10 @@ button.weekly-coverage-row:hover { border-color: var(--line-strong); background:
 @keyframes toast-in { from { transform: translateY(8px); opacity: 0; } }
 
 /* Blak Planet V2: playful brand cues around a quiet work surface. */
+html[data-visual-theme="playful"] body {
+  background: #fff6e7;
+}
+
 .review-ribbon {
   color: #65430c;
   background: #fff0ad;
@@ -1293,7 +1297,8 @@ button.weekly-coverage-row:hover { border-color: var(--line-strong); background:
 }
 
 .app-main {
-  background-image: linear-gradient(rgba(255,255,255,0.44) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.44) 1px, transparent 1px);
+  background-color: #fff6e7;
+  background-image: linear-gradient(rgba(240, 195, 116, 0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(240, 195, 116, 0.18) 1px, transparent 1px);
   background-size: 24px 24px;
 }
 

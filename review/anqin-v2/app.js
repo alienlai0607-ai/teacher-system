@@ -223,7 +223,7 @@
     return {
       version: APP_VERSION,
       ui: {
-        role: 'teacher', route: 'today', todayTab: 'activities', lastSavedAt: null, guideType: 'tutoring', guidePromptDismissed: false, evidenceStandardsSeen: false, visualTheme: 'calm',
+        role: 'teacher', route: 'today', todayTab: 'activities', lastSavedAt: null, guideType: 'tutoring', guidePromptDismissed: false, evidenceStandardsSeen: false, visualTheme: 'playful',
         filters: {
           plans: { status: 'all' }, tasks: { status: 'open' }, records: { period: '30d', status: 'all', query: '' },
           reviews: { status: 'open', teacher: 'all', date: '', query: '' },
@@ -365,7 +365,7 @@
       migrateLegacyFeedback(`operation:${operation.id}`, operation.managerFeedback, operation.reviewedAt || operation.confirmedAt, operation.reviewedBy || parsed.context.manager);
     });
     parsed.managerNotes.forEach(note => migrateLegacyFeedback(`case:${note.caseId}`, note.note, note.createdAt, note.author || parsed.context.manager));
-    if (!['calm', 'playful'].includes(parsed.ui.visualTheme)) parsed.ui.visualTheme = 'calm';
+    if (!['calm', 'playful'].includes(parsed.ui.visualTheme)) parsed.ui.visualTheme = 'playful';
     parsed.version = APP_VERSION;
     return parsed;
   }
@@ -513,7 +513,7 @@
   }
 
   function currentVisualTheme() {
-    return state.ui.visualTheme === 'playful' ? 'playful' : 'calm';
+    return state.ui.visualTheme === 'calm' ? 'calm' : 'playful';
   }
 
   function applyVisualTheme() {
@@ -2987,7 +2987,7 @@
     const visualTheme = currentVisualTheme();
     openDialog({
       title: '使用者與介面',
-      body: `<div class="teacher-status"><span class="status-avatar">${esc(person.initials || person.nickname.slice(0, 2))}</span><div><div class="table-primary">${esc(person.nickname)}</div><div class="table-secondary">${esc(person.department)} · ${state.ui.role === 'manager' ? '主管' : '安親老師'}</div></div></div><div class="section-divider"></div><section class="visual-mode-setting" aria-labelledby="visual-mode-title"><div class="visual-mode-heading"><div><strong id="visual-mode-title">介面風格</strong><small>只調整外觀，工作紀錄與上傳資料不會改變</small></div><span class="badge outline">可隨時切換</span></div><div class="theme-choice-group" role="group" aria-label="選擇介面風格"><button type="button" class="theme-choice ${visualTheme === 'calm' ? 'active' : ''}" data-action="set-visual-theme" data-theme="calm" aria-pressed="${visualTheme === 'calm'}"><span class="theme-choice-icon">${icon('align-justify', 18)}</span><span><strong>清爽版</strong><small>減少色彩、框線與標籤，適合每天填寫</small></span><span class="theme-choice-check">${visualTheme === 'calm' ? icon('check', 15) : ''}</span></button><button type="button" class="theme-choice ${visualTheme === 'playful' ? 'active' : ''}" data-action="set-visual-theme" data-theme="playful" aria-pressed="${visualTheme === 'playful'}"><span class="theme-choice-icon playful">${icon('sparkles', 18)}</span><span><strong>童趣版 V8</strong><small>保留原本較多品牌色、圖案與立體按鈕</small></span><span class="theme-choice-check">${visualTheme === 'playful' ? icon('check', 15) : ''}</span></button></div></section><div class="section-divider"></div><div class="notice-band info">${icon('database', 19)}<div><div class="notice-title">審查資料已與正式系統隔離</div><div class="notice-copy">這裡的新增、修改、上傳與審查只保存在本機瀏覽器。</div></div></div>`,
+      body: `<div class="teacher-status"><span class="status-avatar">${esc(person.initials || person.nickname.slice(0, 2))}</span><div><div class="table-primary">${esc(person.nickname)}</div><div class="table-secondary">${esc(person.department)} · ${state.ui.role === 'manager' ? '主管' : '安親老師'}</div></div></div><div class="section-divider"></div><section class="visual-mode-setting" aria-labelledby="visual-mode-title"><div class="visual-mode-heading"><div><strong id="visual-mode-title">介面風格</strong><small>只調整外觀，工作紀錄與上傳資料不會改變</small></div><span class="badge outline">可隨時切換</span></div><div class="theme-choice-group" role="group" aria-label="選擇介面風格"><button type="button" class="theme-choice ${visualTheme === 'playful' ? 'active' : ''}" data-action="set-visual-theme" data-theme="playful" aria-pressed="${visualTheme === 'playful'}"><span class="theme-choice-icon playful">${icon('sparkles', 18)}</span><span><strong>布拉克可愛版</strong><small>暖色背景、角色圖案與清楚的品牌色按鈕</small></span><span class="theme-choice-check">${visualTheme === 'playful' ? icon('check', 15) : ''}</span></button><button type="button" class="theme-choice ${visualTheme === 'calm' ? 'active' : ''}" data-action="set-visual-theme" data-theme="calm" aria-pressed="${visualTheme === 'calm'}"><span class="theme-choice-icon">${icon('align-justify', 18)}</span><span><strong>清爽版</strong><small>減少色彩與裝飾，適合偏好簡潔的老師</small></span><span class="theme-choice-check">${visualTheme === 'calm' ? icon('check', 15) : ''}</span></button></div></section><div class="section-divider"></div><div class="notice-band info">${icon('database', 19)}<div><div class="notice-title">審查資料已與正式系統隔離</div><div class="notice-copy">這裡的新增、修改、上傳與審查只保存在本機瀏覽器。</div></div></div>`,
       footer: `<button type="button" class="btn btn-danger" data-action="reset-demo">${icon('rotate-ccw', 15)}清空審查資料</button><button type="button" class="btn" data-action="open-health">${icon('activity', 15)}健康檢查</button><button type="button" class="btn" data-action="close-dialog">關閉</button>`,
     });
   }
@@ -4307,7 +4307,7 @@
       persist('介面風格已儲存');
       renderApp();
       openProfileDialog();
-      toast(theme === 'calm' ? '已切換為清爽版' : '已切換為童趣版 V8', 'success');
+      toast(theme === 'calm' ? '已切換為清爽版' : '已切換為布拉克可愛版', 'success');
     }
     else if (action === 'open-more-nav') openMoreNav();
     else if (action === 'reset-demo') {
