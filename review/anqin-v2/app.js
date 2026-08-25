@@ -2159,6 +2159,12 @@
 
   function activityFormCopy(type) {
     const isCrossDay = type === 'lessonprep';
+    const classFieldCopy = {
+      project: { label: '專案選修課程名稱', placeholder: '例：布拉克餐車計畫' },
+      robotics: { label: '機器人／STEAM 課程名稱', placeholder: '例：循線機器人挑戰' },
+      portfolio: { label: '學習歷程主題', placeholder: '例：橋梁作品成長紀錄' },
+      sel: { label: 'SEL 活動名稱', placeholder: '例：衝突時怎麼說' },
+    }[type] || { label: '班級／對象', placeholder: '例：四年級 A 班' };
     return isCrossDay ? {
       classLabel: '', classPlaceholder: '', hideClass: true,
       titleLabel: '備課檔案名稱', titlePlaceholder: '例：餐車計畫｜菜單成本教學', hideStudents: true,
@@ -2169,7 +2175,7 @@
       resultTitle: '備課內容', resultSubtitle: '集中整理教案與教材', resultBadge: '備課檔案',
       ownerLabel: '備課老師', dueLabel: '更新日期',
     } : {
-      classLabel: '班級／對象', classPlaceholder: '例：四年級 A 班', hideClass: false,
+      classLabel: classFieldCopy.label, classPlaceholder: classFieldCopy.placeholder, hideClass: false,
       titleLabel: '紀錄標題', titlePlaceholder: '例：數學｜異分母分數加減', hideStudents: false,
       prepTitle: '本堂採用的備課檔案', prepSubtitle: '由內容完整的教案與教材帶入', prepBadge: '授課前選取',
       prepSummaryLabel: '', prepSummaryPlaceholder: '',
