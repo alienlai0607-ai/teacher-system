@@ -32,6 +32,11 @@ function pdfEsc_(s) {
     .replace(/"/g, '&quot;').replace(/\n/g, '<br>');
 }
 
+function pdfSafeUrl_(value) {
+  const url = String(value || '').trim();
+  return /^https:\/\/[^\s"'<>]+$/i.test(url) ? pdfEsc_(url) : '';
+}
+
 /** 取縮圖 dataURI（lh3 縮到 w360 控制檔案大小；失敗回空字串跳過該圖） */
 function pdfPhotoUri_(fileId) {
   if (!fileId) return '';
@@ -64,7 +69,8 @@ function pdfLogCard_(l) {
   const k5 = parseJsonField(l.kpi5_data) || {};
   const k6 = parseJsonField(l.kpi6_data) || {};
   const atts = parseJsonField(l.attachments);
-  const photos = Array.isArray(atts) ? atts.filter(a => a && a.type === 'photo' && a.fileId) : [];
+  const attachments = Array.isArray(atts) ? atts.filter(a => a && typeof a === 'object') : [];
+  const photos = attachments.filter(a => a.type === 'photo' && a.fileId);
 
   const submitted = l.submitted_at
     ? '<span style="background:#EDF5E3; color:#4E7A28; padding:2px 10px; border-radius:10px; font-size:11px; font-weight:bold;">✅ 已提交</span>'
@@ -137,6 +143,19 @@ function pdfLogCard_(l) {
     });
     h += '</tr></table>';
   }
+
+  const linkedAttachments = attachments.filter(a => pdfSafeUrl_(a.url));
+  if (linkedAttachments.length) {
+    h += '<div style="margin-top:8px;"><span style="color:#C77A12; font-weight:bold;">🔗 成果附件（' + linkedAttachments.length + '）</span></div>';
+    h += '<ul style="margin:4px 0 0 18px; padding:0;">';
+    linkedAttachments.forEach(function (a, index) {
+      const url = pdfSafeUrl_(a.url);
+      const label = String(a.fileName || a.description || (a.type === 'photo' ? '成果照片 ' + (index + 1) : '成果附件 ' + (index + 1)));
+      const note = a.description && String(a.description) !== label ? '｜' + pdfEsc_(a.description) : '';
+      h += '<li style="margin:3px 0;"><a href="' + url + '" style="color:#2A7FA8;">' + pdfEsc_(label) + '</a>' + note + '</li>';
+    });
+    h += '</ul>';
+  }
   h += '</div>';
   return h;
 }
@@ -170,12 +189,12 @@ function buildDailyKpiHtml_(dateStr) {
      + '</td></tr></table>';
 
   // 部門分組
-  const deptOrder = ['永康教室', '北區教室', '才藝部門'];
-  const depts = deptOrder.concat(users.map(u => u.department).filter(d => d && deptOrder.indexOf(d) < 0));
+  const deptOrder = ['東橋教室', '北區教室', '才藝部門'];
+  const depts = deptOrder.concat(users.map(u => normalizeDepartment_(u.department)).filter(d => d && deptOrder.indexOf(d) < 0));
   const seen = {};
   depts.forEach(d => {
     if (!d || seen[d]) return; seen[d] = true;
-    const deptLogs = logs.filter(l => l.department === d);
+    const deptLogs = logs.filter(l => sameDepartment_(l.department, d));
     if (!deptLogs.length) return;
     h += '<div style="font-size:16px; font-weight:bold; color:#2C3E50; border-bottom:2.5px solid #E89B3C; padding-bottom:4px; margin:16px 0 4px;">🏫 ' + pdfEsc_(d) + '</div>';
     deptLogs.sort((a, b) => (a.role === 'manager' ? -1 : 1) - (b.role === 'manager' ? -1 : 1));
@@ -221,11 +240,24 @@ function kpiPdfMsg_(dateStr, r) {
   return t;
 }
 
-/** 老闆名單：所有 active admin ＋ 小魚（另一位老闆；LINE 收全部人、App 通知維持部門制不動） */
+/** 全體日報收件人：所有 active admin ＋ 可跨教室查看的小魚。 */
 function bossUsers_() {
   return sheetToObjects(SHEET_NAMES.USERS).filter(x =>
-    x.status === 'active' && (x.role === 'admin' || x.nickname === '小魚')
+    x.status === 'active' && (x.role === 'admin' || isGlobalManager_(x))
   );
+}
+
+/** 單一老師送出時：同教室主管、跨教室主管小魚，以及所有管理員。 */
+function reportRecipientUsers_(log) {
+  const seen = {};
+  return sheetToObjects(SHEET_NAMES.USERS).filter(function (user) {
+    if (!user || user.status !== 'active') return false;
+    const included = user.role === 'admin' || isGlobalManager_(user) ||
+      (user.role === 'manager' && sameDepartment_(user.department, log.department));
+    if (!included || seen[user.nickname]) return false;
+    seen[user.nickname] = true;
+    return true;
+  });
 }
 
 /** 單人日報 PDF（老師送出當下即時生成） */
@@ -256,8 +288,8 @@ function generatePersonKpiPdf_(nickname, dateStr) {
 }
 
 /**
- * 老師正式送出後，前端背景呼叫：生成單人 PDF → LINE 分別傳給老闆們（柏翰＋小魚）
- * 同一份日誌只發一次（重複呼叫/更新日報不重發）
+ * 老師正式送出後，生成單人 PDF，並以 APP／LINE 通知同教室主管、小魚與管理員。
+ * 每位收件人同一版本只需任一管道成功一次；失敗者可單獨重試，不重複打擾已送達者。
  */
 function sendSubmitPdf(params) {
   const nickname = params.nickname;
@@ -265,26 +297,78 @@ function sendSubmitPdf(params) {
   if (!nickname || !dateStr) return { ok: false, error: 'missing nickname/date' };
   const log_id = 'LOG-' + dateStr.replace(/-/g, '') + '-' + nickname;
   const props = PropertiesService.getScriptProperties();
-  const dedupeKey = 'SENTPDF_' + log_id;
-  if (props.getProperty(dedupeKey)) return { ok: true, skipped: 'already_sent' };
-  const r = generatePersonKpiPdf_(nickname, dateStr);
-  if (!r) return { ok: false, error: 'log not found' };
-  if (!r.log.submitted_at) return { ok: false, error: 'not submitted' };
-  props.setProperty(dedupeKey, nowIso());
+  const log = findObject(SHEET_NAMES.LOGS, 'log_id', log_id);
+  if (!log) return { ok: false, error: 'log not found' };
+  if (!log.submitted_at) return { ok: false, error: 'not submitted' };
+  const version = String(log.updated_at || log.submitted_at || nowIso());
+  const pdfVersionKey = 'PERSONPDF_VERSION_' + log_id;
+  const pdfUrlKey = 'PERSONPDF_URL_' + log_id;
+  const cachedPdfVersion = props.getProperty(pdfVersionKey) || '';
+  const cachedPdfUrl = props.getProperty(pdfUrlKey) || '';
+  let r = cachedPdfVersion >= version && cachedPdfUrl
+    ? { url: cachedPdfUrl, log: log }
+    : generatePersonKpiPdf_(nickname, dateStr);
+  if (!r) return { ok: false, error: 'pdf generation failed' };
+  if (!(cachedPdfVersion >= version && cachedPdfUrl)) {
+    props.setProperty(pdfVersionKey, version);
+    props.setProperty(pdfUrlKey, r.url);
+  }
 
   const md = dateStr.slice(5).replace('-', '/');
-  let msg = '📄 ' + nickname + ' ' + md + ' 已繳交';
+  let msg = '📄 ' + nickname + ' ' + md + ' KPI 日報已送出';
   if (r.log.is_makeup === true) msg += '（補繳）';
   if (r.log.help_needed === true) msg += '\n🚨 有求助：' + String(r.log.help_content || '').slice(0, 100);
   msg += '\n完整日報（含照片）👇\n' + r.url;
 
-  const sent = [];
-  bossUsers_().forEach(b => {
-    if (b.nickname === nickname) return;   // 自己不用收自己的
-    if (b.line_user_id) { pushLine_(b.line_user_id, msg); sent.push(b.nickname); }
+  const deliveries = [];
+  reportRecipientUsers_(log).forEach(function (recipient) {
+    if (recipient.nickname === nickname) return;
+    const recipientKey = 'SENTPDF_USER_' + log_id + '_' + recipient.nickname;
+    const lineKey = 'SENTPDF_LINE_' + log_id + '_' + recipient.nickname;
+    const appKey = 'SENTPDF_APP_' + log_id + '_' + recipient.nickname;
+    const lineBound = Boolean(recipient.line_user_id);
+    const appBound = Boolean(recipient.push_subscription_id);
+    const lineAlreadySent = lineBound && (props.getProperty(lineKey) || '') >= version;
+    const appAlreadySent = appBound && (props.getProperty(appKey) || '') >= version;
+    const previouslyReached = Boolean(lineAlreadySent || appAlreadySent || (props.getProperty(recipientKey) || '') >= version);
+    const lineSent = lineBound && !lineAlreadySent && pushLine_(recipient.line_user_id, msg);
+    const appSent = appBound && !appAlreadySent && pushOneSignal_(recipient.nickname, nickname + ' 已送出 KPI 日報', md + ' 的紀錄與成果證據已可查看');
+    if (lineSent) props.setProperty(lineKey, version);
+    if (appSent) props.setProperty(appKey, version);
+    const lineReached = Boolean(lineAlreadySent || lineSent);
+    const appReached = Boolean(appAlreadySent || appSent);
+    const reached = Boolean(previouslyReached || lineReached || appReached);
+    const channelsComplete = Boolean((lineBound || appBound) && (!lineBound || lineReached) && (!appBound || appReached));
+    if (reached) props.setProperty(recipientKey, version);
+    deliveries.push({
+      nickname: recipient.nickname,
+      lineBound: lineBound,
+      appBound: appBound,
+      lineSent: Boolean(lineSent),
+      appSent: Boolean(appSent),
+      lineReached: lineReached,
+      appReached: appReached,
+      alreadySent: Boolean(previouslyReached && !lineSent && !appSent),
+      reached: reached,
+      channelsComplete: channelsComplete,
+    });
   });
-  logSystem('system', 'pdf_person', log_id, { sent: sent });
-  return { ok: true, url: r.url, sent: sent };
+  const pending = deliveries.filter(item => !item.reached).map(item => item.nickname);
+  const partial = deliveries.filter(item => item.reached && !item.channelsComplete).map(item => item.nickname);
+  const newlyReached = deliveries.filter(item => item.lineSent || item.appSent).map(item => item.nickname);
+  const allReached = deliveries.length > 0 && pending.length === 0;
+  if (allReached) props.setProperty('SENTPDF_' + log_id, version);
+  const notification = {
+    recipientCount: deliveries.length,
+    reachedCount: deliveries.filter(item => item.reached).length,
+    allReached: allReached,
+    allChannelsReached: deliveries.length > 0 && deliveries.every(item => item.channelsComplete),
+    pending: pending,
+    partial: partial,
+    deliveries: deliveries,
+  };
+  logSystem('system', 'pdf_person', log_id, { sent: newlyReached, notification: notification });
+  return { ok: true, url: r.url, sent: newlyReached, notification: notification };
 }
 
 /** API：手動生成＋推播給所有 admin（?action=sendDailyKpiPdf&operator=柏翰&date=…） */
@@ -296,7 +380,7 @@ function sendDailyKpiPdf(params) {
   const msg = kpiPdfMsg_(dateStr, r);
   bossUsers_().forEach(a => {
     if (a.line_user_id) pushLine_(a.line_user_id, msg);
-    if (a.role === 'admin') pushOneSignal_(a.nickname, '📄 KPI 日報 ' + dateStr, '已提交 ' + r.summary.submitted + '/' + r.summary.total + '，點開看完整報告');
+    pushOneSignal_(a.nickname, '📄 KPI 日報 ' + dateStr, '已提交 ' + r.summary.submitted + '/' + r.summary.total + '，點開看完整報告');
   });
   logSystem(params.operator, 'kpi_pdf', dateStr, r.summary);
   return { ok: true, url: r.url, summary: r.summary };
@@ -309,7 +393,7 @@ function sendDailyKpiReportAuto() {
   const msg = kpiPdfMsg_(dateStr, r);
   bossUsers_().forEach(a => {
     if (a.line_user_id) pushLine_(a.line_user_id, msg);
-    if (a.role === 'admin') pushOneSignal_(a.nickname, '📄 KPI 日報 ' + dateStr, '已提交 ' + r.summary.submitted + '/' + r.summary.total + '，點開看完整報告');
+    pushOneSignal_(a.nickname, '📄 KPI 日報 ' + dateStr, '已提交 ' + r.summary.submitted + '/' + r.summary.total + '，點開看完整報告');
   });
   logSystem('system', 'kpi_pdf_auto', dateStr, r.summary);
 }

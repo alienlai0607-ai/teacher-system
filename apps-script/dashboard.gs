@@ -12,7 +12,7 @@ function getMyKpiPreview(params) {
   if (!user) return { ok: false, error: 'user not found' };
 
   const ym = yearMonth();
-  const ev = getEvalEvidence({ nickname, year_month: ym });
+  const ev = getEvalEvidence({ nickname, year_month: ym, viewer: nickname });
   if (!ev.ok) return ev;
 
   const suggestion = ev.suggestion;
@@ -31,7 +31,7 @@ function getMyKpiPreview(params) {
     ok: true,
     year_month: ym,
     role: user.role,
-    department: user.department,
+    department: normalizeDepartment_(user.department),
     is_anqin: isAnqinUser(user),
     suggestion,
     kpi_total: kpiTotal,
@@ -60,11 +60,12 @@ function getDashboard(params) {
   }
 
   if (user.role === 'manager') {
-    const deptTeachers = users.filter(u => u.department === user.department && u.role === 'teacher');
+    const globalScope = isGlobalManager_(user);
+    const deptTeachers = users.filter(u => u.role === 'teacher' && (globalScope || sameDepartment_(u.department, user.department)));
     // 部門成員（含行政美編行銷，皆需每日填報）
-    const deptMembers = users.filter(u => u.department === user.department && (u.role === 'teacher' || u.role === 'admin_staff'));
+    const deptMembers = users.filter(u => (u.role === 'teacher' || u.role === 'admin_staff') && (globalScope || sameDepartment_(u.department, user.department)));
     const todayLogs = sheetToObjects(SHEET_NAMES.LOGS)
-      .filter(l => l.date === today && l.department === user.department);
+      .filter(l => l.date === today && (globalScope || sameDepartment_(l.department, user.department)));
     const status = deptMembers.map(t => {
       const log = todayLogs.find(l => l.nickname === t.nickname);
       return {
@@ -88,7 +89,7 @@ function getDashboard(params) {
     return {
       ok: true,
       role: 'manager',
-      department: user.department,
+      department: globalScope ? '全教室' : normalizeDepartment_(user.department),
       date: today,
       teachers_count: deptMembers.length,
       submitted_count: submittedCount,
@@ -101,10 +102,10 @@ function getDashboard(params) {
 
   if (user.role === 'admin') {
     const deptStats = DEPARTMENTS.filter(d => d !== '總部').map(dept => {
-      const teachers = users.filter(u => u.department === dept && u.role === 'teacher');
-      const manager = users.find(u => u.department === dept && u.role === 'manager');
+      const teachers = users.filter(u => sameDepartment_(u.department, dept) && u.role === 'teacher');
+      const manager = users.find(u => sameDepartment_(u.department, dept) && u.role === 'manager');
       const todayLogs = sheetToObjects(SHEET_NAMES.LOGS)
-        .filter(l => l.date === today && l.department === dept);
+        .filter(l => l.date === today && sameDepartment_(l.department, dept));
       const monthEvals = sheetToObjects(SHEET_NAMES.TEACHER_EVAL)
         .filter(e => e.year_month === ym && teachers.map(t => t.nickname).includes(e.nickname));
       const avg = monthEvals.length > 0

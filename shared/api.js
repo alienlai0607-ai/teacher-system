@@ -1,9 +1,28 @@
 // Apps Script API 包裝
 window.API = (function () {
   const URL = window.APP_CONFIG.API_URL;
+  let authRedirectScheduled = false;
+
+  function handleAuthFailure(action, data) {
+    if (action === 'whoami' || !/^AUTH_/.test(String(data?.code || '')) || authRedirectScheduled) return;
+    authRedirectScheduled = true;
+    window.AUTH?.clearSession?.();
+    window.setTimeout(() => {
+      const root = window.AUTH?.relativeRoot?.() || new URL('./', window.location.href).href;
+      const rootUrl = new URL(root, window.location.href);
+      const current = new URL(window.location.href);
+      let returnPath = '';
+      if (current.origin === rootUrl.origin && current.pathname.startsWith(rootUrl.pathname)) {
+        returnPath = current.pathname.slice(rootUrl.pathname.length) + current.search + current.hash;
+      }
+      window.location.replace(rootUrl.href + 'index.html' + (returnPath ? `?return=${encodeURIComponent(returnPath)}` : ''));
+    }, 500);
+  }
 
   async function call(action, params = {}) {
     const payload = { action, ...params };
+    const sessionToken = window.AUTH?.getSession?.()?.session_token || '';
+    if (sessionToken && !payload.session_token) payload.session_token = sessionToken;
     try {
       const res = await fetch(URL, {
         method: 'POST',
@@ -13,6 +32,7 @@ window.API = (function () {
       const data = await res.json();
       if (!data.ok) {
         console.warn('[API]', action, 'failed:', data.error);
+        handleAuthFailure(action, data);
       }
       return data;
     } catch (err) {
@@ -23,9 +43,7 @@ window.API = (function () {
 
   return {
     ping: () => call('ping'),
-    whoami: (email) => call('whoami', { email }),
-    listAvailableNicknames: () => call('listAvailableNicknames'),
-    claimNickname: (email, nickname) => call('claimNickname', { email, nickname }),
+    whoami: (email, credential = '') => call('whoami', { email, credential }),
 
     listUsers: (operator) => call('listUsers', { operator: operator || window.AUTH?.getSession?.()?.nickname || '' }),
     addUser: (data) => call('addUser', data),
@@ -92,6 +110,11 @@ window.API = (function () {
     getMyKpiPreview: (nickname) => call('getMyKpiPreview', { nickname }),
 
     sendSubmitPdf: (nickname, date) => call('sendSubmitPdf', { nickname, date }),
+    listArchivedKpiFiles: (params = {}) => call('listArchivedKpiFiles', {
+      ...params,
+      viewer: params.viewer || window.AUTH?.getSession?.()?.nickname || '',
+    }),
+    archiveMonthlyCsv: (data) => call('archiveMonthlyCsv', data),
     saveCoursePrep: (data) => call('saveCoursePrep', data),
     listCoursePreps: (params) => call('listCoursePreps', params),
     deleteCoursePrep: (prepId, operator) => call('deleteCoursePrep', { prep_id: prepId, operator }),
@@ -99,6 +122,9 @@ window.API = (function () {
     getSystemReadiness: (operator) => call('getSystemReadiness', { operator }),
     setupSystemAutomation: (operator) => call('setupSystemAutomation', { operator }),
     testMyNotifications: (operator) => call('testMyNotifications', { operator }),
+    registerPushSubscription: (subscriptionId) => call('registerPushSubscription', { subscription_id: subscriptionId }),
+    unregisterPushSubscription: () => call('unregisterPushSubscription'),
+    getLineBindingCode: () => call('getLineBindingCode'),
     debugPush: (nickname) => call('debugPush', { nickname }),
     adminBroadcast: (data) => call('adminBroadcast', data),
 

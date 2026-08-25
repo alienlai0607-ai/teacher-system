@@ -10,10 +10,10 @@ function addFeedback(params) {
   const fromU = findUserByNickname(from_nickname);
   const toU = findUserByNickname(to_nickname);
   if (!fromU || !toU || fromU.status !== 'active' || toU.status !== 'active') return { ok: false, error: '對話帳號不存在或未啟用' };
-  if (fromU.role === 'teacher' && !(toU.role === 'manager' && toU.department === fromU.department) && toU.role !== 'admin') {
+  if (fromU.role === 'teacher' && !(toU.role === 'manager' && (sameDepartment_(toU.department, fromU.department) || isGlobalManager_(toU))) && toU.role !== 'admin') {
     return { ok: false, error: '老師只能回覆同部門主管或管理員' };
   }
-  if (fromU.role === 'manager' && toU.role !== 'admin' && toU.department !== fromU.department) {
+  if (fromU.role === 'manager' && !isGlobalManager_(fromU) && toU.role !== 'admin' && !sameDepartment_(toU.department, fromU.department)) {
     return { ok: false, error: '主管只能回覆自己部門' };
   }
   // 主管/老闆發的算「回饋」；老師發的算「回覆」（回覆不需 tag）
@@ -113,7 +113,7 @@ function addPost(params) {
     post_id: Utilities.getUuid(),
     date: date || todayStr(),
     nickname,
-    department: user.department,
+    department: normalizeDepartment_(user.department),
     platform,
     url: url || '',
     screenshot: screenshot || '',

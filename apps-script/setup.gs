@@ -8,7 +8,7 @@ function setupSheets() {
   const schemas = {
     [SHEET_NAMES.USERS]: [
       'nickname', 'email', 'role', 'department', 'status',
-      'phone', 'joined_at', 'last_login', 'notes', 'subtype', 'line_user_id'
+      'phone', 'joined_at', 'last_login', 'notes', 'subtype', 'line_user_id', 'push_subscription_id'
     ],
     [SHEET_NAMES.LOGS]: [
       'log_id', 'date', 'nickname', 'department', 'role',
@@ -53,7 +53,7 @@ function setupSheets() {
     ],
     [SHEET_NAMES.EVIDENCE]: [
       'evidence_id', 'log_id', 'nickname', 'date', 'kpi_category',
-      'type', 'url', 'description', 'created_at'
+      'type', 'url', 'description', 'source_type', 'created_at'
     ],
     [SHEET_NAMES.OBSERVATION]: [
       'obs_id', 'date', 'observer', 'observed', 'type',
@@ -97,6 +97,8 @@ function setupSheets() {
     ensureHeaders(sheet, headers);  // 自動補缺欄（含舊表新增的 subtype 等）
   });
 
+  migrateLegacyDepartmentNames_();
+
   // 預填初始使用者
   const usersSheet = ss.getSheetByName(SHEET_NAMES.USERS);
   if (usersSheet.getLastRow() === 1) {
@@ -108,11 +110,71 @@ function setupSheets() {
     usersSheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
   }
 
+  const seededStudents = seedInitialStudents_();
+
   // 預填 KPI 規則
   seedKpiConfig();
 
-  Logger.log('Setup completed');
-  return { ok: true };
+  Logger.log('Setup completed; seeded students: ' + seededStudents);
+  return { ok: true, seeded_students: seededStudents };
+}
+
+/**
+ * 補入首批學生名單，但不覆蓋既有學生的老師或狀態。
+ * 轉班後重跑 setupSheets() 也不會被初始名單改回去。
+ */
+function seedInitialStudents_() {
+  const sheet = getSheet(SHEET_NAMES.STUDENTS);
+  const headers = getHeaders(sheet);
+  const existingNames = new Set(sheetToObjects(SHEET_NAMES.STUDENTS).map(row => String(row.name || '').trim()).filter(Boolean));
+  const now = nowIso();
+  const records = [];
+  INITIAL_STUDENT_ROSTER.forEach(group => {
+    group.students.forEach(name => {
+      if (existingNames.has(name)) return;
+      existingNames.add(name);
+      records.push({
+        student_id: Utilities.getUuid(),
+        name,
+        teacher: group.teacher,
+        department: normalizeDepartment_(group.department),
+        status: 'active',
+        notes: '',
+        created_at: now,
+        updated_at: now,
+      });
+    });
+  });
+  if (!records.length) return 0;
+  const values = records.map(record => headers.map(header => record[header] === undefined ? '' : record[header]));
+  sheet.getRange(sheet.getLastRow() + 1, 1, values.length, headers.length).setValues(values);
+  return records.length;
+}
+
+/** 將舊稱「永康教室」一次轉成正式名稱「東橋教室」，保留既有紀錄關聯。 */
+function migrateLegacyDepartmentNames_() {
+  const ss = getSS();
+  [
+    SHEET_NAMES.USERS, SHEET_NAMES.LOGS, SHEET_NAMES.WEEKLY, SHEET_NAMES.STUDENTS,
+    SHEET_NAMES.TASKS, SHEET_NAMES.COURSE_PREP, SHEET_NAMES.POSTS,
+  ].forEach(name => {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet || sheet.getLastRow() <= 1) return;
+    const headers = getHeaders(sheet);
+    const column = headers.indexOf('department') + 1;
+    if (!column) return;
+    const range = sheet.getRange(2, column, sheet.getLastRow() - 1, 1);
+    const values = range.getValues();
+    let changed = false;
+    values.forEach(row => {
+      const normalized = normalizeDepartment_(row[0]);
+      if (normalized && normalized !== String(row[0] || '').trim()) {
+        row[0] = normalized;
+        changed = true;
+      }
+    });
+    if (changed) range.setValues(values);
+  });
 }
 
 /**

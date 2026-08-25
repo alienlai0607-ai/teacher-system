@@ -55,7 +55,7 @@ function saveCoursePrep(params) {
   upsertRow(SHEET_NAMES.COURSE_PREP, 'prep_id', {
     prep_id: prep.id,
     nickname: nickname,
-    department: user.department,
+    department: normalizeDepartment_(user.department),
     title: String(prep.title || '').trim(),
     course_type: String(prep.details && prep.details.targetCourse || ''),
     created_date: String(prep.date || todayStr()).slice(0, 10),
@@ -76,8 +76,8 @@ function listCoursePreps(params) {
   let rows = sheetToObjects(SHEET_NAMES.COURSE_PREP);
   if (viewerUser.role === 'teacher' || viewerUser.role === 'admin_staff') {
     rows = rows.filter(row => row.nickname === viewer);
-  } else if (viewerUser.role === 'manager') {
-    rows = rows.filter(row => row.department === viewerUser.department || row.nickname === viewer);
+  } else if (viewerUser.role === 'manager' && !isGlobalManager_(viewerUser)) {
+    rows = rows.filter(row => sameDepartment_(row.department, viewerUser.department) || row.nickname === viewer);
   }
   if (params.nickname) rows = rows.filter(row => row.nickname === String(params.nickname));
   rows.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));

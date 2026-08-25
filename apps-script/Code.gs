@@ -33,12 +33,19 @@ function handleRequest(e, method) {
 
     const action = params.action || '';
 
+    // 除了健康檢查與 Google 登入交換之外，所有 API 都必須帶後端簽發的工作階段。
+    // 權限不可只靠前端傳來的 nickname / viewer / operator，否則改寫請求即可冒用他人。
+    if (action !== 'ping' && action !== 'whoami') {
+      const authResult = authenticateApiRequest_(params);
+      if (!authResult.ok) return jsonOut(authResult);
+      params.__actor = authResult.user;
+      authorizeApiAction_(action, params, authResult.user);
+    }
+
     const ROUTES = {
       // 認證
       'ping': () => ({ ok: true, time: new Date().toISOString() }),
       'whoami': () => whoami(params),
-      'claimNickname': () => claimNickname(params),
-      'listAvailableNicknames': () => listAvailableNicknames(),
 
       // 使用者管理（admin）
       'listUsers': () => listUsers(params),
@@ -60,6 +67,8 @@ function handleRequest(e, method) {
       'adminBroadcast': () => adminBroadcast(params),
       'sendDailyKpiPdf': () => sendDailyKpiPdf(params),
       'sendSubmitPdf': () => sendSubmitPdf(params),
+      'listArchivedKpiFiles': () => listArchivedKpiFiles(params),
+      'archiveMonthlyCsv': () => archiveMonthlyCsv(params),
 
       // 安親 V2 備課教案建檔
       'saveCoursePrep': () => saveCoursePrep(params),
@@ -102,6 +111,9 @@ function handleRequest(e, method) {
       'getSystemReadiness': () => getSystemReadiness(params),
       'setupSystemAutomation': () => setupSystemAutomation(params),
       'testMyNotifications': () => testMyNotifications(params),
+      'registerPushSubscription': () => registerPushSubscription(params),
+      'unregisterPushSubscription': () => unregisterPushSubscription(params),
+      'getLineBindingCode': () => getLineBindingCode(params),
       'debugPush': () => debugPush(params),
       'addTask': () => addTask(params),
       'saveSelfTask': () => saveSelfTask(params),
@@ -131,7 +143,8 @@ function handleRequest(e, method) {
     const result = ROUTES[action]();
     return jsonOut(result);
   } catch (err) {
-    return jsonOut({ ok: false, error: err.message, stack: err.stack });
+    try { console.error(err && err.stack ? err.stack : err); } catch (ignore) {}
+    return jsonOut({ ok: false, error: err && err.message ? err.message : '系統處理失敗' });
   }
 }
 
@@ -160,27 +173,37 @@ const SHEET_NAMES = {
   COURSE_PREP: 'CoursePrep',
 };
 
-const DEPARTMENTS = ['永康教室', '北區教室', '才藝部門', '總部'];
+const DEPARTMENTS = ['東橋教室', '北區教室', '才藝部門', '總部'];
 // 安親部門：這些部門的「老師」改用 100 分制（才藝部門老師與所有主管維持舊制）
-const ANQIN_DEPARTMENTS = ['永康教室', '北區教室'];
+const ANQIN_DEPARTMENTS = ['東橋教室', '北區教室'];
 const ROLES = ['admin', 'manager', 'teacher', 'admin_staff'];
 // admin_staff 子類型：'general'（行政總務）/ 'marketing'（行政宣傳）
 const ADMIN_STAFF_SUBTYPES = ['general', 'marketing'];
 
 const INITIAL_USERS = [
   { nickname: '柏翰',     role: 'admin',       department: '總部',     status: 'active' },
-  { nickname: '酸酸',     role: 'manager',     department: '永康教室', status: 'active' },
+  { nickname: '酸酸',     role: 'manager',     department: '東橋教室', status: 'active' },
   { nickname: '小魚',     role: 'manager',     department: '北區教室', status: 'active' },
   { nickname: '柳丁',     role: 'manager',     department: '才藝部門', status: 'active' },
-  { nickname: '松鼠',     role: 'teacher',     department: '永康教室', status: 'active' },
-  { nickname: '羊羊',     role: 'teacher',     department: '永康教室', status: 'active' },
-  { nickname: '紅豆',     role: 'teacher',     department: '永康教室', status: 'active' },
+  { nickname: '松鼠',     role: 'teacher',     department: '東橋教室', status: 'active' },
+  { nickname: '羊羊',     role: 'teacher',     department: '東橋教室', status: 'active' },
+  { nickname: '紅豆',     role: 'teacher',     department: '東橋教室', status: 'active' },
   { nickname: '江江',     role: 'teacher',     department: '北區教室', status: 'active' },
   { nickname: '小明',     role: 'teacher',     department: '北區教室', status: 'active' },
   { nickname: '浩浩',     role: 'teacher',     department: '才藝部門', status: 'active' },
   { nickname: '毛毛',     role: 'teacher',     department: '才藝部門', status: 'active' },
   // 行政美編行銷（歸北區教室，由小魚評核）
   { nickname: '皮皮老師', role: 'admin_staff', department: '北區教室', status: 'active', subtype: 'marketing' },
+];
+
+const INITIAL_STUDENT_ROSTER = [
+  { teacher: '松鼠', department: '東橋教室', students: ['宥縈', '彥呈', '浩軒', '久珹', '荏苒', '宥銨', '宥熹', '梓涵', '芮語', '尊瑋'] },
+  { teacher: '紅豆', department: '東橋教室', students: ['佳揚', '沛杰', '紫瑀', '呈諺', '琝程', '米樂', '沐雅', '立喆', '雋翔'] },
+  { teacher: '羊羊', department: '東橋教室', students: ['琮諺', '唯恩', '知澈', '知牧', '浩宸', '軒婕'] },
+  { teacher: '酸酸', department: '東橋教室', students: ['炳兆', '宸瑋', '羽芯', '丞澤', '詣壹', '亦辰', '采華', '靚芯', '萓臻'] },
+  { teacher: '江江', department: '北區教室', students: ['宥鈞', '翊辰', '恩弦', '偲芮', '士宸', '允樂', '岩真', '軒瑀', '秐菲'] },
+  { teacher: '小明', department: '北區教室', students: ['陳硯', '尹睿', '承叡', '宥騫', '登睿', '宇綸', '映竹', '秉融', '守博'] },
+  { teacher: '小魚', department: '北區教室', students: ['陳泱', '雨霏', '亭榛', '鎧宸', '芊妤', '沛豊', '宇翔', '宸熙', '寅熙', '浚宸', '奕瀚', '毓祥'] },
 ];
 
 // ============ 獎金級距 ============
@@ -212,7 +235,17 @@ const BONUS_ANQIN = [
 // 是否為安親老師（teacher 且部門屬安親）
 function isAnqinUser(user) {
   return !!user && user.role === 'teacher'
-    && ANQIN_DEPARTMENTS.indexOf(user.department) >= 0;
+    && ANQIN_DEPARTMENTS.indexOf(normalizeDepartment_(user.department)) >= 0;
+}
+
+/** 舊資料的「永康教室」等同目前正式名稱「東橋教室」。 */
+function normalizeDepartment_(department) {
+  const value = String(department || '').trim();
+  return value === '永康教室' ? '東橋教室' : value;
+}
+
+function sameDepartment_(left, right) {
+  return normalizeDepartment_(left) === normalizeDepartment_(right);
 }
 
 // 依使用者選正確的獎金級距並計等第（安親看 100 分、其餘看 70 分）

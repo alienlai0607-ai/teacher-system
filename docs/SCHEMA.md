@@ -1,207 +1,109 @@
-# Google Sheet Schema — KPI 系統
+# Google Sheet Schema
 
-> 觸發詞：`kpi系統` ｜ 共 11 個分頁。Apps Script `setupSheet()` 會自動建立。
+Apps Script `setupSheets()` 會建立或補齊 15 個資料表。它不刪除既有欄位與資料，並把舊部門名稱「永康教室」轉為「東橋教室」。
 
----
+## 1. Users
 
-## 1️⃣ Users 使用者
-| 欄位 | 型別 | 說明 |
-|---|---|---|
-| nickname | string | 暱稱（PK，初始由 admin 預建） |
-| email | string | Google Gmail（首次登入綁定，admin 可空著） |
-| role | enum | `admin` / `manager` / `teacher` |
-| department | enum | `永康教室` / `北區教室` / `才藝部門` / `總部` |
-| status | enum | `active` / `pending` / `suspended` |
-| phone | string | 選填 |
-| joined_at | datetime | 建立時間 |
-| last_login | datetime | 最後登入時間 |
-| notes | string | admin 備註 |
+`nickname, email, role, department, status, phone, joined_at, last_login, notes, subtype, line_user_id, push_subscription_id`
 
-**初始資料：**
-```
-柏翰    | admin   | 總部     | active
-酸酸    | manager | 永康教室 | active
-小魚    | manager | 北區教室 | active
-柳丁    | manager | 才藝部門 | active
-松鼠    | teacher | 永康教室 | active
-羊羊    | teacher | 永康教室 | active
-紅豆    | teacher | 永康教室 | active
-江江    | teacher | 北區教室 | active
-小明    | teacher | 北區教室 | active
-浩浩    | teacher | 才藝部門 | active
-毛毛    | teacher | 才藝部門 | active
-```
+- `nickname`：系統主識別名稱。
+- `email`：由管理員預先綁定的 Google Email，不提供自助認領。
+- `role`：`admin`、`manager`、`teacher`、`admin_staff`。
+- `department`：`東橋教室`、`北區教室`、`才藝部門`、`總部`。
+- `status`：`active`、`pending`、`suspended`。
+- `subtype`：行政子類型 `general` 或 `marketing`。
+- 通知識別碼只由已登入帳號的綁定流程寫入。
 
----
+## 2. DailyLogs
 
-## 2️⃣ DailyLogs 每日工作日誌（核心）
-| 欄位 | 型別 | 說明 |
-|---|---|---|
-| log_id | string | `LOG-YYYYMMDD-暱稱` |
-| date | date | 日期 |
-| nickname | string | FK→Users |
-| department | string | 部門（冗餘存，方便查） |
-| role | string | teacher / manager（決定欄位類別） |
-| checkin_at | datetime | 到班時間 |
-| checkout_at | datetime | 離班時間 |
-| **— 老師欄位 / 主管欄位（依 role）—** | | |
-| kpi1_data | json | 課業指導 / 團隊領導 |
-| kpi2_data | json | 班級經營 / 教學品質監督 |
-| kpi3_data | json | 專案課程 / 部門特色發展 |
-| kpi4_data | json | 群組經營 / 招生續班+發文 |
-| kpi5_data | json | 親師溝通 / 客訴處理 |
-| kpi6_data | json | 個人態度（共用） |
-| reflection | string | 今日心得（自由文字） |
-| help_needed | boolean | 是否求助主管 |
-| help_content | string | 求助內容 |
-| attachments | json | 附件連結陣列 [{type, url, kpi}] |
-| created_at | datetime | |
-| updated_at | datetime | |
-| locked | boolean | 24h 後鎖定（防事後造假） |
+`log_id, date, nickname, department, role, checkin_at, checkout_at, kpi1_data...kpi6_data, reflection, help_needed, help_content, attachments, created_at, updated_at, locked, is_makeup, submitted_at`
 
----
+- `log_id`：`LOG-YYYYMMDD-暱稱`，同一老師同一天固定一筆。
+- 安親 V2 的完整結構化快照存於 `kpi6_data.v2_snapshot`，舊欄位同時保留主管報表需要的摘要。
+- `attachments`：照片與檔案陣列，包含 `type, url, fileId, fileName, kpi, description, forType`。
+- 草稿沒有 `submitted_at`；正式送出後才納入主管待審與 PDF 通知。
 
-## 3️⃣ OKR_Goals 學期目標
-| 欄位 | 說明 |
-|---|---|
-| okr_id | UUID |
-| semester | `2026-上` / `2026-下` |
-| nickname | FK |
-| objective_no | 1 or 2 |
-| objective_type | 五大類型 |
-| objective_text | O 描述 |
-| kr1_text / kr2_text / kr3_text | KR 描述 |
-| kr1_progress / kr2_progress / kr3_progress | 0-100% |
-| month_check (1-6) | 每月進度更新 |
-| status | active / completed / cancelled |
+## 3. OKR_Goals
 
----
+`okr_id, semester, nickname, objective_no, objective_type, objective_text, kr1_text...kr3_text, kr1_progress...kr3_progress, month1...month6, status, created_at, updated_at`
 
-## 4️⃣ TeacherEval 老師月度評核
-| 欄位 | 說明 |
-|---|---|
-| eval_id | `EVAL-YYYY-MM-暱稱` |
-| year_month | `2026-05` |
-| nickname | 被評核老師 |
-| evaluator | 主管暱稱 |
-| self_score_k1-k6 | 老師自評 |
-| self_summary | 老師自評說明 |
-| score_k1-k6 | 主管評分 |
-| score_okr | OKR 分數（0-30） |
-| total_score | KPI+OKR |
-| grade | 卓越/優良/達標/合格/待改善 |
-| bonus | 獎金金額 |
-| manager_comment | 主管評語 |
-| interview_notes | 面談紀錄 |
-| status | draft / submitted / confirmed |
-| created_at / updated_at | |
+## 4. TeacherEval
 
----
+`eval_id, year_month, nickname, evaluator, self_k1...self_k6, self_summary, score_k1...score_k6, score_okr, total_score, grade, bonus, score_late_count, late_penalty, makeup_count, makeup_penalty, bonus_granted, manager_comment, interview_notes, status, created_at, updated_at`
 
-## 5️⃣ ManagerEval 主管月度評核
-| 欄位 | 說明 |
-|---|---|
-| eval_id | `MEVAL-YYYY-MM-暱稱` |
-| year_month | |
-| nickname | 被評核主管 |
-| evaluator | `柏翰`（固定） |
-| self_score_m1-m6 | 主管自評 |
-| score_m1-m6 | 柏翰評分 |
-| score_okr | |
-| total_score | |
-| grade / bonus | |
-| dept_avg_score | 部門老師平均（自動帶入，連坐判斷） |
-| bonus_okr / bonus_recruit / bonus_dept | 加碼項 |
-| final_bonus | 最終獎金 |
-| boss_comment | |
-| interview_notes | |
-| status | |
+- 安親老師使用 100 分制；後端限制各構面上限並重新計算總分、等第與獎金。
+- 教師只能查看自己；同教室主管可評核，酸酸不跨北區，小魚可跨教室。
 
----
+## 5. ManagerEval
 
-## 6️⃣ Feedback 即時主管回饋
-| 欄位 | 說明 |
-|---|---|
-| feedback_id | UUID |
-| log_id | FK→DailyLogs |
-| from_nickname | 主管暱稱 |
-| to_nickname | 老師暱稱 |
-| content | 回饋內容 |
-| tag | `優秀表現` / `已知悉` / `需改進` / `求助回應` |
-| created_at | |
-| read_at | 老師讀取時間 |
+`eval_id, year_month, nickname, evaluator, self_m1...self_m6, self_summary, score_m1...score_m6, score_okr, total_score, grade, bonus, bonus_granted, makeup_count, makeup_penalty, dept_avg_score, bonus_okr, bonus_recruit, bonus_dept, final_bonus, boss_comment, interview_notes, status, created_at, updated_at`
 
----
+## 6. Feedback
 
-## 7️⃣ Evidence 證據附件索引
-| 欄位 | 說明 |
-|---|---|
-| evidence_id | UUID |
-| log_id | FK |
-| nickname | |
-| date | |
-| kpi_category | 1-6 |
-| type | photo / link / file |
-| url | Google Drive / 外連 |
-| description | |
+`feedback_id, log_id, from_nickname, to_nickname, content, tag, created_at, read_at`
 
----
+同一 `log_id` 形成主管與老師的對話串。老師可回覆同教室主管、全域主管或管理員，無關人員不可讀取。
 
-## 8️⃣ Observation 觀課/巡班紀錄
-| 欄位 | 說明 |
-|---|---|
-| obs_id | UUID |
-| date | |
-| observer | 主管暱稱 |
-| observed | 老師暱稱 |
-| type | `observe` 正式觀課 / `patrol` 巡班 |
-| duration_min | |
-| score | 0-5 |
-| notes | |
-| photos | json |
+## 7. Evidence
 
----
+`evidence_id, log_id, nickname, date, kpi_category, type, url, description, source_type, created_at`
 
-## 9️⃣ Posts 社群發文紀錄（主管 KPI④ 證據）
-| 欄位 | 說明 |
-|---|---|
-| post_id | UUID |
-| date | |
-| nickname | 主管暱稱 |
-| department | |
-| platform | `FB` / `IG` |
-| url | 貼文連結 |
-| screenshot | 截圖 URL |
-| content_type | 教學日常/招生/活動/理念/其他 |
-| week_of | 屬於哪一週（用於每週 3 篇計算） |
+提供舊版與管理報表的附件索引；`source_type` 用來區分新版直接 KPI 編號與歷史日報編號，安親 V2 主要附件也保存在 `DailyLogs.attachments`。
 
----
+## 8. Observation
 
-## 🔟 KPI_Config 評分規則設定
-| 欄位 | 說明 |
-|---|---|
-| version | 版本號 |
-| role | teacher / manager |
-| kpi_no | 1-6 |
-| max_score | 滿分 |
-| sub_items | json 子項目與配分 |
-| grade_rules | json 評分原則 |
-| effective_from | 生效日 |
+`obs_id, date, observer, observed, type, duration_min, score, notes, photos, created_at`
 
----
+## 9. Posts
 
-## 1️⃣1️⃣ Logs_System 系統紀錄（debug/audit）
-| 欄位 | 說明 |
-|---|---|
-| timestamp | |
-| nickname | 操作者 |
-| action | 動作類型 |
-| target | 對象 |
-| detail | json |
-| ip | |
+`post_id, date, nickname, department, platform, url, screenshot, content_type, week_of, created_at`
 
----
+## 10. KPI_Config
 
-## 索引與效能
-- DailyLogs 應建立 `nickname + date` 複合篩選
-- 大量資料時可考慮每月歸檔到獨立分頁
+`config_id, version, role, kpi_no, max_score, sub_items, grade_rules, effective_from`
+
+系統內「更多／評分標準」應與此設定及安親 V2 顯示同步更新。
+
+## 11. Logs_System
+
+`timestamp, nickname, action, target, detail, ip`
+
+保存登入、寫入、通知、匯出與維運操作摘要，不存 Google ID token 或工作階段密鑰。
+
+## 12. WeeklyReports
+
+`week_id, week_of, nickname, department, role, teaching_reflection, student_observation, tool_needs, course_improvement, created_at, updated_at`
+
+週整理應從每日結構化紀錄彙整，不再要求重寫每天發生的內容。
+
+## 13. Students
+
+`student_id, name, teacher, department, status, notes, created_at, updated_at`
+
+老師只能取得自己名冊；同教室主管管理教室名冊；小魚與管理員可跨教室。轉交班級時更新 `teacher`，不刪歷史日誌。
+
+## 14. Tasks
+
+`task_id, title, detail, assignee, department, due_date, status, created_by, created_at, updated_at, done_at`
+
+主管可建立與管理權限範圍內的追蹤事項；老師可更新自己的事項狀態。
+
+## 15. CoursePrep
+
+`prep_id, nickname, department, title, course_type, created_date, status, data_json, created_at, updated_at`
+
+- 備課教案建檔與當日工作類型分離，可先建立、未來授課再選用。
+- `data_json` 保存教案流程、目標、教材與版本內容；不要求預計授課日、送審日、鎖定日或適用班級。
+- 只有本人或管理員可改寫、刪除；主管從教案審查讀取並提出意見。
+
+## Drive 輸出
+
+- 個人與全體 PDF：`KPI日報PDF / YYYY-MM`。
+- 月歸檔 CSV：`KPI月歸檔 / 教室 / 老師 / YYYY-MM`。
+- 舊 PDF 只作歷史查閱，不寫回 `DailyLogs`。
+
+## 相容與索引
+
+- 主要查詢鍵：`DailyLogs.nickname + date`、`TeacherEval.nickname + year_month`、`CoursePrep.nickname + created_date`。
+- 舊「永康教室」讀取時等同「東橋教室」，更新部署後由 `setupSheets()` 寫回正式名稱。
+- 新欄位只追加到表頭右側；不要用刪表重建方式升級正式資料庫。

@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>今日工作日報</title>
 <link rel="stylesheet" href="../shared/style.css?v=20260624k">
-<script src="../shared/config.js?v=20260825-release-1"></script>
-<script src="../shared/auth.js?v=20260825-release-1"></script>
-<script src="../shared/api.js?v=20260825-release-1"></script>
-<script src="../shared/ui.js?v=20260825-release-1"></script>
-<script src="../shared/pwa.js?v=20260825-release-1"></script>
-<script src="../shared/push.js?v=20260825-release-1"></script>
+<script src="../shared/config.js?v=20260825-production-audit-2"></script>
+<script src="../shared/auth.js?v=20260825-production-audit-2"></script>
+<script src="../shared/api.js?v=20260825-production-audit-2"></script>
+<script src="../shared/ui.js?v=20260825-production-audit-2"></script>
+<script src="../shared/pwa.js?v=20260825-production-audit-2"></script>
+<script src="../shared/push.js?v=20260825-production-audit-2"></script>
 <style>
   body { padding-bottom: 90px; }
   .step-title {
@@ -291,7 +291,7 @@ const session = AUTH.requireRole(['teacher', 'manager', 'admin_staff', 'admin'])
 
 // 工作類型分組（依部門/角色顯示不同清單）
 const WORK_TYPE_GROUPS = {
-  // 安親組：永康教室 / 北區教室
+  // 安親組：東橋教室 / 北區教室（保留舊稱相容）
   care: [
     { key: '安親輔導', icon: '📖', block: 'tutoring', kpi: 1 },
     { key: '專案選修', icon: '🎯', block: 'course', kpi: 3, options: [
@@ -317,7 +317,7 @@ const WORK_TYPE_GROUPS = {
     { key: '行政工作', icon: '🗂', block: 'admin', kpi: 6 },
   ],
 };
-const CARE_DEPTS = ['永康教室', '北區教室'];
+const CARE_DEPTS = ['東橋教室', '永康教室', '北區教室'];
 function pickWorkTypes(s) {
   if (s.role === 'admin_staff') return WORK_TYPE_GROUPS.admin;
   return CARE_DEPTS.includes(s.department) ? WORK_TYPE_GROUPS.care : WORK_TYPE_GROUPS.talent;
@@ -964,22 +964,23 @@ async function submitLog() {
   const data = collectFormData();
   const payload = {
     nickname: session.nickname, date: currentDateStr(),
-    submitted: true, is_makeup: !!makeupDate,   // submitted=正式提交 → 後端即時通知主管+老闆
+    submitted: true, is_makeup: !!makeupDate,
     ...data,
   };
   UI.loading(true);
   const res = await API.saveLog(payload);
+  if (!res.ok) {
+    UI.loading(false);
+    UI.toast('送出失敗：' + (res.error || ''), 'danger');
+    return;
+  }
+  const pdfResult = await API.sendSubmitPdf(session.nickname, currentDateStr());
   UI.loading(false);
-  if (!res.ok) { UI.toast('送出失敗：' + (res.error || ''), 'danger'); return; }
-  // 背景通知老闆（單人 PDF）：keepalive 讓請求離開頁面也能送達；後端會自動去重
-  try {
-    fetch(APP_CONFIG.API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'sendSubmitPdf', nickname: session.nickname, date: currentDateStr() }),
-      keepalive: true,
-    }).catch(() => {});
-  } catch (e) {}
+  if (!pdfResult?.ok) {
+    UI.toast('日誌已儲存，但 PDF／主管通知尚未完成：' + (pdfResult?.error || '請稍後重試'), 'warn');
+  } else if (pdfResult.notification && !pdfResult.notification.allReached) {
+    UI.toast('日誌與 PDF 已完成；尚未通知：' + (pdfResult.notification.pending || []).join('、'), 'warn');
+  }
   if (makeupDate) {
     sessionStorage.removeItem(MK_KEY);
     if (res.is_makeup) {   // 後端實際判定為補繳才顯示扣分訊息（24h 內修改不算補繳）

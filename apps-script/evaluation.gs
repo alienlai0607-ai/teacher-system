@@ -20,7 +20,8 @@ function getEvalEvidence(params) {
   const viewerUser = findUserByNickname(viewer);
   const canReview = viewerUser && viewerUser.status === 'active' && (
     viewerUser.role === 'admin' ||
-    (viewerUser.role === 'manager' && viewerUser.department === user.department)
+    (viewerUser.role === 'manager' && (isGlobalManager_(viewerUser) || sameDepartment_(viewerUser.department, user.department))) ||
+    (['teacher', 'admin_staff'].includes(viewerUser.role) && viewerUser.nickname === user.nickname)
   );
   if (!canReview) return { ok: false, error: '無評核資料讀取權限' };
 
@@ -31,24 +32,20 @@ function getEvalEvidence(params) {
   // 2. 附件證據（依 KPI 分類）
   const evidence = sheetToObjects(SHEET_NAMES.EVIDENCE)
     .filter(e => e.nickname === nickname && String(e.date) >= from && String(e.date) <= to);
-  // 安親新制 KPI 項目順序與舊日報的 kpi_category 編號不同，需對應
-  // 舊日報：1課業 2班級(含環境照) 3課程/專案 4群組 5親師 6態度
-  // 安親新制：1課業 2專案 3班級 4親師 5態度 6班級環境整潔
+  // 新版直接保存 100 分制 KPI 編號；沒有 source_type 的歷史資料仍套用舊編號。
   const anqinUser = isAnqinUser(user);
-  const ANQIN_EVIDENCE_MAP = { 1: 1, 2: 6, 3: 2, 4: 4, 5: 4, 6: 5 };
   const evidenceByKpi = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
   evidence.forEach(e => {
-    let k = Number(e.kpi_category);
-    if (anqinUser && ANQIN_EVIDENCE_MAP[k]) k = ANQIN_EVIDENCE_MAP[k];
+    const k = normalizeEvalEvidenceKpi_(user, e);
     if (k >= 1 && k <= 6) evidenceByKpi[k].push(e);
   });
   // 證據以「天」計：環境整潔(KPI2)、教案歸檔(KPI3) 各算有幾天執行（同一天多張只算 1）
   const _evDay = {};
   evidence.forEach(e => {
-    const k = Number(e.kpi_category), d = String(e.date);
+    const k = normalizeEvalEvidenceKpi_(user, e), d = String(e.date);
     _evDay[d] = _evDay[d] || { env: false, lesson: false };
-    if (k === 2) _evDay[d].env = true;
-    if (k === 3) _evDay[d].lesson = true;
+    if (k === (anqinUser ? 6 : 2)) _evDay[d].env = true;
+    if (k === (anqinUser ? 2 : 3)) _evDay[d].lesson = true;
   });
   const env_days = Object.values(_evDay).filter(x => x.env).length;
   const lesson_days = Object.values(_evDay).filter(x => x.lesson).length;
@@ -85,7 +82,7 @@ function getEvalEvidence(params) {
     nickname,
     year_month,
     role: user.role,
-    department: user.department,
+    department: normalizeDepartment_(user.department),
     summary: {
       log_count: logs.length,
       makeup_count: logs.filter(l => l.is_makeup === true).length,
@@ -109,6 +106,19 @@ function getEvalEvidence(params) {
 }
 
 /**
+ * 安親 V2 的 source_type 表示 kpi_category 已是 100 分制正式編號。
+ * 舊資料沒有此欄，維持舊日報編號轉換，避免歷史證據跑到錯誤 KPI。
+ */
+function normalizeEvalEvidenceKpi_(user, evidence) {
+  const kpi = Number(evidence && evidence.kpi_category);
+  if (!isAnqinUser(user)) return kpi;
+  const sourceType = String((evidence && evidence.source_type) || '');
+  if (/^(v2-|env_)/.test(sourceType)) return kpi;
+  const legacyMap = { 1: 1, 2: 6, 3: 2, 4: 4, 5: 4, 6: 5 };
+  return legacyMap[kpi] || kpi;
+}
+
+/**
  * 自動建議分數（依日誌頻率、證據數量、回饋標籤）
  */
 function suggestKpiScores(user, logs, evidence, feedback, observations, postsByWeek) {
@@ -129,7 +139,7 @@ function suggestKpiScores(user, logs, evidence, feedback, observations, postsByW
   const engagement = Math.min(1, (logs.length || 0) / TARGET_DAYS);
 
   for (let k = 1; k <= 6; k++) {
-    const kEvidence = evidence.filter(e => Number(e.kpi_category) === k).length;
+    const kEvidence = evidence.filter(e => normalizeEvalEvidenceKpi_(user, e) === k).length;
     // 從 0 起算：投入比例×滿分 ＋ 證據加成（封頂 15%）＋ 回饋調整
     let score = max[k] * engagement + Math.min(max[k] * 0.15, kEvidence) + positive - negative * 2;
     score = Math.max(0, Math.min(max[k], Math.round(score)));
@@ -153,12 +163,16 @@ function saveEval(params) {
   if (!nickname || !year_month || !evaluator) {
     return { ok: false, error: 'missing required fields' };
   }
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(year_month))) {
+    return { ok: false, error: '評核月份格式錯誤' };
+  }
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
   const evaluatorUser = findUserByNickname(evaluator);
   const canEvaluate = evaluatorUser && evaluatorUser.status === 'active' && (
     evaluatorUser.role === 'admin' ||
-    (evaluatorUser.role === 'manager' && user.role === 'teacher' && evaluatorUser.department === user.department)
+    (evaluatorUser.role === 'manager' && ['teacher', 'admin_staff'].includes(user.role) &&
+      (isGlobalManager_(evaluatorUser) || sameDepartment_(evaluatorUser.department, user.department)))
   );
   if (!canEvaluate) return { ok: false, error: '無評核儲存權限' };
 
@@ -169,15 +183,32 @@ function saveEval(params) {
   const existing = findObject(sheetName, 'eval_id', eval_id);
 
   const prefixK = isManager ? 'm' : 'k';
+  const anqin = isAnqinUser(user);
+  const scoreMaximums = anqin && !isManager ? [20, 20, 20, 20, 12, 8] : [15, 15, 10, 10, 15, 5];
+  const scoreValues = [];
   let kpiTotal = 0;
   for (let i = 1; i <= 6; i++) {
-    const v = Number(params[`score_${prefixK}${i}`] || 0);
+    const raw = params[`score_${prefixK}${i}`];
+    const v = raw === undefined || raw === '' ? 0 : Number(raw);
+    const max = scoreMaximums[i - 1];
+    if (!Number.isFinite(v) || v < 0 || v > max) {
+      return { ok: false, error: `第 ${i} 項分數需介於 0–${max} 分` };
+    }
+    scoreValues.push(v);
     kpiTotal += v;
   }
 
-  const anqin = isAnqinUser(user);
   // 安親：KPI 滿分 100、OKR 獨立另計（不納入總分）；其餘：KPI 70 + OKR 30
   const okrScore = anqin ? 0 : Number(params.score_okr || 0);
+  if (!anqin && (!Number.isFinite(okrScore) || okrScore < 0 || okrScore > 30)) {
+    return { ok: false, error: 'OKR 分數需介於 0–30 分' };
+  }
+  const status = params.status || 'draft';
+  if (!['draft', 'submitted'].includes(status)) return { ok: false, error: '評核狀態錯誤' };
+  const managerComment = String(params.manager_comment || params.boss_comment || '').trim();
+  if (anqin && !isManager && status === 'submitted' && managerComment.length < 8) {
+    return { ok: false, error: '完成評核前，主管評語至少需要 8 字' };
+  }
 
   // ===== 日報補繳扣分：每次補繳扣 2 分（依當月日誌 is_makeup 自動統計，不吃前端參數）=====
   const makeupCount = sheetToObjects(SHEET_NAMES.LOGS).filter(l =>
@@ -195,6 +226,9 @@ function saveEval(params) {
   let lateCount = 0, latePenalty = 0;
   if (anqin) {
     lateCount = Number(params.score_late_count || 0);
+    if (!Number.isInteger(lateCount) || lateCount < 0) {
+      return { ok: false, error: '遲到次數需為 0 以上的整數' };
+    }
     if (lateCount >= 3) {
       const penaltyPoints = (lateCount - 2) * 5; // 第 3 次起才扣，每次 5 分
       const tierByPoints = calcBonusForUser(Math.max(0, kpiEffective - penaltyPoints), user); // 方案A：扣分
@@ -219,16 +253,16 @@ function saveEval(params) {
     makeup_count: makeupCount,
     makeup_penalty: makeupPenalty,
     bonus_granted: bonusGranted,
-    manager_comment: params.manager_comment || params.boss_comment || '',
+    manager_comment: managerComment,
     interview_notes: params.interview_notes || '',
-    status: params.status || 'draft',
+    status,
     updated_at: nowIso()
   };
 
   // 自評與評分欄位
   for (let i = 1; i <= 6; i++) {
     if (params[`self_${prefixK}${i}`] !== undefined) data[`self_${prefixK}${i}`] = params[`self_${prefixK}${i}`];
-    if (params[`score_${prefixK}${i}`] !== undefined) data[`score_${prefixK}${i}`] = params[`score_${prefixK}${i}`];
+    data[`score_${prefixK}${i}`] = scoreValues[i - 1];
   }
   if (params.self_summary !== undefined) data.self_summary = params.self_summary;
 
@@ -265,8 +299,8 @@ function getEval(params) {
   const viewerUser = findUserByNickname(viewer);
   if (!viewerUser || viewerUser.status !== 'active') return { ok: false, error: '無評核讀取權限' };
   const canRead = viewerUser.role === 'admin' ||
-    (viewerUser.role === 'manager' && viewerUser.department === user.department) ||
-    (viewerUser.role === 'teacher' && viewerUser.nickname === user.nickname);
+    (viewerUser.role === 'manager' && (isGlobalManager_(viewerUser) || sameDepartment_(viewerUser.department, user.department))) ||
+    (['teacher', 'admin_staff'].includes(viewerUser.role) && viewerUser.nickname === user.nickname);
   if (!canRead) return { ok: false, error: '無評核讀取權限' };
   const isManager = user.role === 'manager';
   const sheetName = isManager ? SHEET_NAMES.MANAGER_EVAL : SHEET_NAMES.TEACHER_EVAL;
@@ -287,9 +321,9 @@ function listEvals(params) {
   }
   const sheetName = role === 'manager' ? SHEET_NAMES.MANAGER_EVAL : SHEET_NAMES.TEACHER_EVAL;
   let list = sheetToObjects(sheetName);
-  if (viewerUser.role === 'manager') {
+  if (viewerUser.role === 'manager' && !isGlobalManager_(viewerUser)) {
     const allowed = sheetToObjects(SHEET_NAMES.USERS)
-      .filter(user => user.department === viewerUser.department)
+      .filter(user => sameDepartment_(user.department, viewerUser.department))
       .map(user => user.nickname);
     list = list.filter(item => allowed.includes(item.nickname));
   }
@@ -302,7 +336,7 @@ function calcDeptAvg(department, year_month) {
   const evals = sheetToObjects(SHEET_NAMES.TEACHER_EVAL)
     .filter(e => e.year_month === year_month);
   const users = sheetToObjects(SHEET_NAMES.USERS);
-  const deptTeachers = users.filter(u => u.department === department && u.role === 'teacher').map(u => u.nickname);
+  const deptTeachers = users.filter(u => sameDepartment_(u.department, department) && u.role === 'teacher').map(u => u.nickname);
   const deptEvals = evals.filter(e => deptTeachers.includes(e.nickname));
   if (deptEvals.length === 0) return 0;
   const sum = deptEvals.reduce((s, e) => s + Number(e.total_score || 0), 0);

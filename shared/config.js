@@ -11,7 +11,7 @@ window.APP_CONFIG = {
 
   // 系統設定
   APP_NAME: '布拉克星球 KPI 系統',
-  DEPARTMENTS: ['永康教室', '北區教室', '才藝部門'],
+  DEPARTMENTS: ['東橋教室', '北區教室', '才藝部門'],
 
   // KPI 類別
   TEACHER_KPI: [
@@ -34,7 +34,7 @@ window.APP_CONFIG = {
 
   // 安親部門老師專用 KPI（115/9 修訂版：KPI 總分 100，OKR 獨立另計、不納入 100）
   // 適用對象：role==='teacher' 且 department ∈ ANQIN_DEPARTMENTS（才藝部門老師與所有主管維持舊制）
-  ANQIN_DEPARTMENTS: ['永康教室', '北區教室'],
+  ANQIN_DEPARTMENTS: ['東橋教室', '北區教室'],
   ANQIN_KPI: [
     { no: 1, name: '課業指導',       max: 20, icon: '📚' },
     { no: 2, name: '專案課程',       max: 20, icon: '🎯' },
@@ -51,9 +51,13 @@ window.APP_CONFIG = {
 
 // ===== 計分模型判定（前端共用）=====
 // 安親老師：teacher 且部門屬安親 → 100 分制；其餘 → 舊 70+30 制
+window.normalizeKpiDepartment = function (department) {
+  const value = String(department || '').trim();
+  return value === '永康教室' ? '東橋教室' : value;
+};
 window.isAnqinUser = function (user) {
   return !!user && user.role === 'teacher'
-    && (APP_CONFIG.ANQIN_DEPARTMENTS || []).indexOf(user.department) >= 0;
+    && (APP_CONFIG.ANQIN_DEPARTMENTS || []).indexOf(window.normalizeKpiDepartment(user.department)) >= 0;
 };
 // 依使用者回傳該套用的 KPI 定義（安親 100 分 or 老師 70 分）
 window.getTeacherKpiDef = function (user) {

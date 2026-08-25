@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>人員管理</title>
 <link rel="stylesheet" href="../shared/style.css?v=20260624k">
-<script src="../shared/config.js?v=20260825-release-1"></script>
-<script src="../shared/auth.js?v=20260825-release-1"></script>
-<script src="../shared/api.js?v=20260825-release-1"></script>
-<script src="../shared/ui.js?v=20260825-release-1"></script>
-<script src="../shared/pwa.js?v=20260825-release-1"></script>
-<script src="../shared/push.js?v=20260825-release-1"></script>
+<script src="../shared/config.js?v=20260825-production-audit-2"></script>
+<script src="../shared/auth.js?v=20260825-production-audit-2"></script>
+<script src="../shared/api.js?v=20260825-production-audit-2"></script>
+<script src="../shared/ui.js?v=20260825-production-audit-2"></script>
+<script src="../shared/pwa.js?v=20260825-production-audit-2"></script>
+<script src="../shared/push.js?v=20260825-production-audit-2"></script>
 <style>
   /* 桌面版：用表格 / 手機版：用卡片 */
   .users-table { width: 100%; }
@@ -42,8 +42,8 @@
   <div class="card">
     <div class="card-title">+ 新增人員</div>
     <div class="form-grid">
-      <div class="form-row"><label>暱稱</label><input id="n-nickname" placeholder="例：松鼠"></div>
-      <div class="form-row"><label>Email（選填）</label><input id="n-email" placeholder="可空，等老師自己綁定"></div>
+      <div class="form-row"><label>暱稱 <span style="color:#c43d32">*</span></label><input id="n-nickname" placeholder="例：松鼠" required></div>
+      <div class="form-row"><label>Google Email <span style="color:#c43d32">*</span></label><input id="n-email" type="email" inputmode="email" autocomplete="off" placeholder="老師登入使用的 Email" required></div>
       <div class="form-row">
         <label>角色</label>
         <select id="n-role" onchange="toggleSubtype()">
@@ -63,7 +63,7 @@
       <div class="form-row">
         <label>部門</label>
         <select id="n-dept">
-          <option>永康教室</option>
+          <option>東橋教室</option>
           <option>北區教室</option>
           <option>才藝部門</option>
           <option>總部</option>
@@ -176,8 +176,8 @@ async function addUser() {
     operator: session.nickname,
   };
   if (role === 'admin_staff') payload.subtype = document.getElementById('n-subtype').value;
-  if (!payload.nickname) {
-    UI.toast('請填寫暱稱', 'warn');
+  if (!payload.nickname || !payload.email) {
+    UI.toast('請填寫暱稱與 Google Email', 'warn');
     return;
   }
   UI.loading(true);
@@ -197,11 +197,14 @@ async function editUser(nickname) {
   if (!u) return;
   const newRole = prompt('角色（teacher/manager/admin_staff/admin）：', u.role);
   if (!newRole) return;
-  const newDept = prompt('部門（永康教室/北區教室/才藝部門/總部）：', u.department);
+  const newDept = prompt('部門（東橋教室/北區教室/才藝部門/總部）：', window.normalizeKpiDepartment ? window.normalizeKpiDepartment(u.department) : u.department);
   if (!newDept) return;
   const newStatus = prompt('狀態（active/suspended）：', u.status);
+  if (!newStatus) return;
+  const newEmail = prompt('Google Email：', u.email || '');
+  if (newEmail === null) return;
   const payload = {
-    nickname, role: newRole, department: newDept, status: newStatus,
+    nickname, role: newRole, department: newDept, status: newStatus, email: newEmail.trim(),
     operator: session.nickname
   };
   if (newRole === 'admin_staff') {
@@ -231,13 +234,13 @@ async function setStatus(nickname, status) {
 }
 
 async function clearEmail(nickname) {
-  const ok = await UI.confirmDialog(`確定要解除 ${nickname} 的 Email 綁定？\n（之後此人可重新登入並認領暱稱）`);
+  const ok = await UI.confirmDialog(`確定要解除 ${nickname} 的 Email 綁定？\n帳號會同時停用；設定新 Email 後才能重新啟用。`);
   if (!ok) return;
   UI.loading(true);
-  const res = await API.updateUser({ nickname, email: '', operator: session.nickname });
+  const res = await API.updateUser({ nickname, email: '', status: 'suspended', operator: session.nickname });
   UI.loading(false);
   if (!res.ok) { UI.toast(res.error, 'danger'); return; }
-  UI.toast('已解除綁定', 'success');
+  UI.toast('已解除 Google 綁定並停用帳號', 'success');
   loadUsers();
 }
 

@@ -1,8 +1,8 @@
 /**
- * 布拉克星球 KPI 系統 - 合併版（All-in-One v3，已填 SHEET_ID）
+ * 布拉克星球 KPI 系統 - 合併版（All-in-One v4）
  * 觸發詞：kpi系統
- * Sheet ID 已自動填入，直接貼上後執行 setupSheets() 即可
- * 合併日期：2026-05-21
+ * 此檔由 apps-script 各模組機械式合併，請勿單獨修改。
+ * 合併日期：2026-08-25
  */
 
 
@@ -45,12 +45,19 @@ function handleRequest(e, method) {
 
     const action = params.action || '';
 
+    // 除了健康檢查與 Google 登入交換之外，所有 API 都必須帶後端簽發的工作階段。
+    // 權限不可只靠前端傳來的 nickname / viewer / operator，否則改寫請求即可冒用他人。
+    if (action !== 'ping' && action !== 'whoami') {
+      const authResult = authenticateApiRequest_(params);
+      if (!authResult.ok) return jsonOut(authResult);
+      params.__actor = authResult.user;
+      authorizeApiAction_(action, params, authResult.user);
+    }
+
     const ROUTES = {
       // 認證
       'ping': () => ({ ok: true, time: new Date().toISOString() }),
       'whoami': () => whoami(params),
-      'claimNickname': () => claimNickname(params),
-      'listAvailableNicknames': () => listAvailableNicknames(),
 
       // 使用者管理（admin）
       'listUsers': () => listUsers(params),
@@ -72,6 +79,8 @@ function handleRequest(e, method) {
       'adminBroadcast': () => adminBroadcast(params),
       'sendDailyKpiPdf': () => sendDailyKpiPdf(params),
       'sendSubmitPdf': () => sendSubmitPdf(params),
+      'listArchivedKpiFiles': () => listArchivedKpiFiles(params),
+      'archiveMonthlyCsv': () => archiveMonthlyCsv(params),
 
       // 安親 V2 備課教案建檔
       'saveCoursePrep': () => saveCoursePrep(params),
@@ -114,6 +123,9 @@ function handleRequest(e, method) {
       'getSystemReadiness': () => getSystemReadiness(params),
       'setupSystemAutomation': () => setupSystemAutomation(params),
       'testMyNotifications': () => testMyNotifications(params),
+      'registerPushSubscription': () => registerPushSubscription(params),
+      'unregisterPushSubscription': () => unregisterPushSubscription(params),
+      'getLineBindingCode': () => getLineBindingCode(params),
       'debugPush': () => debugPush(params),
       'addTask': () => addTask(params),
       'saveSelfTask': () => saveSelfTask(params),
@@ -143,7 +155,8 @@ function handleRequest(e, method) {
     const result = ROUTES[action]();
     return jsonOut(result);
   } catch (err) {
-    return jsonOut({ ok: false, error: err.message, stack: err.stack });
+    try { console.error(err && err.stack ? err.stack : err); } catch (ignore) {}
+    return jsonOut({ ok: false, error: err && err.message ? err.message : '系統處理失敗' });
   }
 }
 
@@ -172,26 +185,37 @@ const SHEET_NAMES = {
   COURSE_PREP: 'CoursePrep',
 };
 
-const DEPARTMENTS = ['永康教室', '北區教室', '才藝部門', '總部'];
+const DEPARTMENTS = ['東橋教室', '北區教室', '才藝部門', '總部'];
 // 安親部門：這些部門的「老師」改用 100 分制（才藝部門老師與所有主管維持舊制）
-const ANQIN_DEPARTMENTS = ['永康教室', '北區教室'];
+const ANQIN_DEPARTMENTS = ['東橋教室', '北區教室'];
 const ROLES = ['admin', 'manager', 'teacher', 'admin_staff'];
+// admin_staff 子類型：'general'（行政總務）/ 'marketing'（行政宣傳）
 const ADMIN_STAFF_SUBTYPES = ['general', 'marketing'];
 
 const INITIAL_USERS = [
   { nickname: '柏翰',     role: 'admin',       department: '總部',     status: 'active' },
-  { nickname: '酸酸',     role: 'manager',     department: '永康教室', status: 'active' },
+  { nickname: '酸酸',     role: 'manager',     department: '東橋教室', status: 'active' },
   { nickname: '小魚',     role: 'manager',     department: '北區教室', status: 'active' },
   { nickname: '柳丁',     role: 'manager',     department: '才藝部門', status: 'active' },
-  { nickname: '松鼠',     role: 'teacher',     department: '永康教室', status: 'active' },
-  { nickname: '羊羊',     role: 'teacher',     department: '永康教室', status: 'active' },
-  { nickname: '紅豆',     role: 'teacher',     department: '永康教室', status: 'active' },
+  { nickname: '松鼠',     role: 'teacher',     department: '東橋教室', status: 'active' },
+  { nickname: '羊羊',     role: 'teacher',     department: '東橋教室', status: 'active' },
+  { nickname: '紅豆',     role: 'teacher',     department: '東橋教室', status: 'active' },
   { nickname: '江江',     role: 'teacher',     department: '北區教室', status: 'active' },
   { nickname: '小明',     role: 'teacher',     department: '北區教室', status: 'active' },
   { nickname: '浩浩',     role: 'teacher',     department: '才藝部門', status: 'active' },
   { nickname: '毛毛',     role: 'teacher',     department: '才藝部門', status: 'active' },
   // 行政美編行銷（歸北區教室，由小魚評核）
   { nickname: '皮皮老師', role: 'admin_staff', department: '北區教室', status: 'active', subtype: 'marketing' },
+];
+
+const INITIAL_STUDENT_ROSTER = [
+  { teacher: '松鼠', department: '東橋教室', students: ['宥縈', '彥呈', '浩軒', '久珹', '荏苒', '宥銨', '宥熹', '梓涵', '芮語', '尊瑋'] },
+  { teacher: '紅豆', department: '東橋教室', students: ['佳揚', '沛杰', '紫瑀', '呈諺', '琝程', '米樂', '沐雅', '立喆', '雋翔'] },
+  { teacher: '羊羊', department: '東橋教室', students: ['琮諺', '唯恩', '知澈', '知牧', '浩宸', '軒婕'] },
+  { teacher: '酸酸', department: '東橋教室', students: ['炳兆', '宸瑋', '羽芯', '丞澤', '詣壹', '亦辰', '采華', '靚芯', '萓臻'] },
+  { teacher: '江江', department: '北區教室', students: ['宥鈞', '翊辰', '恩弦', '偲芮', '士宸', '允樂', '岩真', '軒瑀', '秐菲'] },
+  { teacher: '小明', department: '北區教室', students: ['陳硯', '尹睿', '承叡', '宥騫', '登睿', '宇綸', '映竹', '秉融', '守博'] },
+  { teacher: '小魚', department: '北區教室', students: ['陳泱', '雨霏', '亭榛', '鎧宸', '芊妤', '沛豊', '宇翔', '宸熙', '寅熙', '浚宸', '奕瀚', '毓祥'] },
 ];
 
 // ============ 獎金級距 ============
@@ -223,7 +247,17 @@ const BONUS_ANQIN = [
 // 是否為安親老師（teacher 且部門屬安親）
 function isAnqinUser(user) {
   return !!user && user.role === 'teacher'
-    && ANQIN_DEPARTMENTS.indexOf(user.department) >= 0;
+    && ANQIN_DEPARTMENTS.indexOf(normalizeDepartment_(user.department)) >= 0;
+}
+
+/** 舊資料的「永康教室」等同目前正式名稱「東橋教室」。 */
+function normalizeDepartment_(department) {
+  const value = String(department || '').trim();
+  return value === '永康教室' ? '東橋教室' : value;
+}
+
+function sameDepartment_(left, right) {
+  return normalizeDepartment_(left) === normalizeDepartment_(right);
 }
 
 // 依使用者選正確的獎金級距並計等第（安親看 100 分、其餘看 70 分）
@@ -233,6 +267,12 @@ function calcBonusForUser(kpiScore, user) {
     return tier || { grade: '未評等', bonus: 0 };
   }
   return calcBonus(kpiScore, user.role);
+}
+
+// 取得某等第在指定級距表的索引（用於遲到「降一級」計算）
+function bonusTierIndex(grade, user) {
+  const table = isAnqinUser(user) ? BONUS_ANQIN : (user.role === 'manager' ? BONUS_MANAGER : BONUS_TEACHER);
+  return table.findIndex(t => t.grade === grade);
 }
 
 // 降 n 個獎金等級後的獎金（不低於最低級）
@@ -251,7 +291,6 @@ function calcBonus(kpiScore, role) {
   return tier || { grade: '未評等', bonus: 0 };
 }
 
-
 // ════════════════════════════════════════════════════════════
 //  setup.gs
 // ════════════════════════════════════════════════════════════
@@ -266,7 +305,7 @@ function setupSheets() {
   const schemas = {
     [SHEET_NAMES.USERS]: [
       'nickname', 'email', 'role', 'department', 'status',
-      'phone', 'joined_at', 'last_login', 'notes', 'subtype', 'line_user_id'
+      'phone', 'joined_at', 'last_login', 'notes', 'subtype', 'line_user_id', 'push_subscription_id'
     ],
     [SHEET_NAMES.LOGS]: [
       'log_id', 'date', 'nickname', 'department', 'role',
@@ -311,7 +350,7 @@ function setupSheets() {
     ],
     [SHEET_NAMES.EVIDENCE]: [
       'evidence_id', 'log_id', 'nickname', 'date', 'kpi_category',
-      'type', 'url', 'description', 'created_at'
+      'type', 'url', 'description', 'source_type', 'created_at'
     ],
     [SHEET_NAMES.OBSERVATION]: [
       'obs_id', 'date', 'observer', 'observed', 'type',
@@ -355,6 +394,8 @@ function setupSheets() {
     ensureHeaders(sheet, headers);  // 自動補缺欄（含舊表新增的 subtype 等）
   });
 
+  migrateLegacyDepartmentNames_();
+
   // 預填初始使用者
   const usersSheet = ss.getSheetByName(SHEET_NAMES.USERS);
   if (usersSheet.getLastRow() === 1) {
@@ -366,11 +407,71 @@ function setupSheets() {
     usersSheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
   }
 
+  const seededStudents = seedInitialStudents_();
+
   // 預填 KPI 規則
   seedKpiConfig();
 
-  Logger.log('Setup completed');
-  return { ok: true };
+  Logger.log('Setup completed; seeded students: ' + seededStudents);
+  return { ok: true, seeded_students: seededStudents };
+}
+
+/**
+ * 補入首批學生名單，但不覆蓋既有學生的老師或狀態。
+ * 轉班後重跑 setupSheets() 也不會被初始名單改回去。
+ */
+function seedInitialStudents_() {
+  const sheet = getSheet(SHEET_NAMES.STUDENTS);
+  const headers = getHeaders(sheet);
+  const existingNames = new Set(sheetToObjects(SHEET_NAMES.STUDENTS).map(row => String(row.name || '').trim()).filter(Boolean));
+  const now = nowIso();
+  const records = [];
+  INITIAL_STUDENT_ROSTER.forEach(group => {
+    group.students.forEach(name => {
+      if (existingNames.has(name)) return;
+      existingNames.add(name);
+      records.push({
+        student_id: Utilities.getUuid(),
+        name,
+        teacher: group.teacher,
+        department: normalizeDepartment_(group.department),
+        status: 'active',
+        notes: '',
+        created_at: now,
+        updated_at: now,
+      });
+    });
+  });
+  if (!records.length) return 0;
+  const values = records.map(record => headers.map(header => record[header] === undefined ? '' : record[header]));
+  sheet.getRange(sheet.getLastRow() + 1, 1, values.length, headers.length).setValues(values);
+  return records.length;
+}
+
+/** 將舊稱「永康教室」一次轉成正式名稱「東橋教室」，保留既有紀錄關聯。 */
+function migrateLegacyDepartmentNames_() {
+  const ss = getSS();
+  [
+    SHEET_NAMES.USERS, SHEET_NAMES.LOGS, SHEET_NAMES.WEEKLY, SHEET_NAMES.STUDENTS,
+    SHEET_NAMES.TASKS, SHEET_NAMES.COURSE_PREP, SHEET_NAMES.POSTS,
+  ].forEach(name => {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet || sheet.getLastRow() <= 1) return;
+    const headers = getHeaders(sheet);
+    const column = headers.indexOf('department') + 1;
+    if (!column) return;
+    const range = sheet.getRange(2, column, sheet.getLastRow() - 1, 1);
+    const values = range.getValues();
+    let changed = false;
+    values.forEach(row => {
+      const normalized = normalizeDepartment_(row[0]);
+      if (normalized && normalized !== String(row[0] || '').trim()) {
+        row[0] = normalized;
+        changed = true;
+      }
+    });
+    if (changed) range.setValues(values);
+  });
 }
 
 /**
@@ -625,7 +726,6 @@ function getGradeRules(role, kpi, max) {
   return [];
 }
 
-
 // ════════════════════════════════════════════════════════════
 //  utils.gs
 // ════════════════════════════════════════════════════════════
@@ -758,11 +858,6 @@ function updateRow(name, rowNum, obj) {
   sheet.getRange(rowNum, 1, 1, headers.length).setValues([newRow]);
 }
 
-function deleteRow(name, rowNum) {
-  if (rowNum <= 1) return; // 不刪表頭
-  getSheet(name).deleteRow(rowNum);
-}
-
 function upsertRow(name, key, obj) {
   const existing = findRow(name, key, obj[key]);
   if (existing > 0) {
@@ -772,6 +867,11 @@ function upsertRow(name, key, obj) {
     const row = appendRow(name, obj);
     return { row, created: true };
   }
+}
+
+function deleteRow(name, rowNum) {
+  if (rowNum <= 1) return; // 不刪表頭
+  getSheet(name).deleteRow(rowNum);
 }
 
 function nowIso() {
@@ -816,7 +916,6 @@ function logSystem(nickname, action, target, detail) {
   }
 }
 
-
 // ════════════════════════════════════════════════════════════
 //  auth.gs
 // ════════════════════════════════════════════════════════════
@@ -825,15 +924,19 @@ function logSystem(nickname, action, target, detail) {
  * 認證與使用者管理
  *
  * 流程：
- * 1. 前端用 Google Identity Services 取得 email
- * 2. 呼叫 whoami(email) 拿到使用者資料
- * 3. 若 email 沒對應，前端引導去「自我認領暱稱」頁面
- * 4. claimNickname(email, nickname) 把 email 寫入該暱稱
+ * 1. 前端用 Google Identity Services 取得 ID token
+ * 2. 後端向 Google 驗證 ID token，再依 email 查使用者
+ * 3. 後端簽發 12 小時工作階段；其餘 API 每次都驗簽與重新核對帳號狀態
+ * 4. 新人由管理員預先建立 email 綁定，避免未綁定暱稱被陌生帳號認領
  */
 
+const GOOGLE_OAUTH_CLIENT_ID_ = '110974418283-75a7ifti599cauhptkcd0jsqshfrupbf.apps.googleusercontent.com';
+const API_SESSION_TTL_MS_ = 12 * 60 * 60 * 1000;
+
 function whoami(params) {
-  const email = (params.email || '').toLowerCase().trim();
-  if (!email) return { ok: false, error: 'missing email' };
+  const identity = verifyLoginIdentity_(params || {});
+  if (!identity.ok) return identity;
+  const email = identity.email;
 
   const user = findUserByEmail(email);
   if (!user) {
@@ -841,7 +944,7 @@ function whoami(params) {
       ok: true,
       registered: false,
       email,
-      msg: '此 Email 尚未綁定暱稱，請選擇您的暱稱'
+      msg: '此 Email 尚未開通，請管理員先建立帳號並綁定 Email'
     };
   }
 
@@ -855,10 +958,370 @@ function whoami(params) {
       nickname: user.nickname,
       email: user.email,
       role: user.role,
-      department: user.department,
+      department: normalizeDepartment_(user.department),
       status: user.status
-    }
+    },
+    session_token: user.status === 'active' ? issueSessionToken_(user) : ''
   };
+}
+
+/** 驗證首次 Google 登入，或用尚未過期的後端工作階段重新核對身分。 */
+function verifyLoginIdentity_(params) {
+  const requestedEmail = String(params.email || '').toLowerCase().trim();
+  if (params.credential) return verifyGoogleCredential_(String(params.credential), requestedEmail);
+  if (params.session_token) {
+    const session = verifySessionToken_(String(params.session_token));
+    if (!session.ok) return session;
+    if (requestedEmail && requestedEmail !== String(session.user.email || '').toLowerCase()) {
+      return { ok: false, error: '登入身分不一致', code: 'AUTH_INVALID' };
+    }
+    return { ok: true, email: String(session.user.email || '').toLowerCase(), user: session.user };
+  }
+  return { ok: false, error: '請重新使用 Google 登入', code: 'AUTH_REQUIRED' };
+}
+
+/** Google ID token 必須由後端驗證，不能只相信前端 decode 出來的 email。 */
+function verifyGoogleCredential_(credential, requestedEmail) {
+  if (!credential) return { ok: false, error: '缺少 Google 登入憑證', code: 'AUTH_REQUIRED' };
+  try {
+    const response = UrlFetchApp.fetch(
+      'https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(credential),
+      { muteHttpExceptions: true }
+    );
+    if (response.getResponseCode() !== 200) {
+      return { ok: false, error: 'Google 登入憑證無效，請重新登入', code: 'AUTH_INVALID' };
+    }
+    const profile = JSON.parse(response.getContentText() || '{}');
+    const expectedClientId = PropertiesService.getScriptProperties().getProperty('GOOGLE_CLIENT_ID') || GOOGLE_OAUTH_CLIENT_ID_;
+    const email = String(profile.email || '').toLowerCase().trim();
+    const issuer = String(profile.iss || '');
+    const expiresAt = Number(profile.exp || 0) * 1000;
+    if (!email || String(profile.aud || '') !== expectedClientId ||
+        !['accounts.google.com', 'https://accounts.google.com'].includes(issuer) ||
+        String(profile.email_verified || '') !== 'true' || expiresAt <= Date.now()) {
+      return { ok: false, error: 'Google 登入驗證失敗，請重新登入', code: 'AUTH_INVALID' };
+    }
+    if (requestedEmail && requestedEmail !== email) {
+      return { ok: false, error: 'Google 帳號與登入資料不一致', code: 'AUTH_INVALID' };
+    }
+    return { ok: true, email: email };
+  } catch (error) {
+    return { ok: false, error: '暫時無法驗證 Google 登入，請稍後重試', code: 'AUTH_UNAVAILABLE' };
+  }
+}
+
+function apiSessionSecret_() {
+  const props = PropertiesService.getScriptProperties();
+  let secret = props.getProperty('API_SESSION_SECRET');
+  if (!secret) {
+    secret = Utilities.getUuid() + Utilities.getUuid() + Utilities.getUuid();
+    props.setProperty('API_SESSION_SECRET', secret);
+  }
+  return secret;
+}
+
+function base64UrlText_(text) {
+  return Utilities.base64EncodeWebSafe(String(text), Utilities.Charset.UTF_8).replace(/=+$/g, '');
+}
+
+function sessionSignature_(encodedPayload) {
+  const bytes = Utilities.computeHmacSha256Signature(
+    String(encodedPayload), apiSessionSecret_(), Utilities.Charset.UTF_8
+  );
+  return Utilities.base64EncodeWebSafe(bytes).replace(/=+$/g, '');
+}
+
+function constantTimeTextEqual_(left, right) {
+  left = String(left || '');
+  right = String(right || '');
+  if (left.length !== right.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < left.length; i++) mismatch |= left.charCodeAt(i) ^ right.charCodeAt(i);
+  return mismatch === 0;
+}
+
+function issueSessionToken_(user) {
+  const now = Date.now();
+  const payload = base64UrlText_(JSON.stringify({
+    v: 1,
+    nickname: String(user.nickname || ''),
+    email: String(user.email || '').toLowerCase(),
+    role: String(user.role || ''),
+    department: String(user.department || ''),
+    issued_at: now,
+    expires_at: now + API_SESSION_TTL_MS_,
+  }));
+  return payload + '.' + sessionSignature_(payload);
+}
+
+function verifySessionToken_(token) {
+  const parts = String(token || '').split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1] ||
+      !constantTimeTextEqual_(parts[1], sessionSignature_(parts[0]))) {
+    return { ok: false, error: '登入工作階段無效，請重新登入', code: 'AUTH_INVALID' };
+  }
+  let payload;
+  try {
+    payload = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString());
+  } catch (error) {
+    return { ok: false, error: '登入工作階段無效，請重新登入', code: 'AUTH_INVALID' };
+  }
+  if (payload.v !== 1 || Number(payload.expires_at || 0) <= Date.now()) {
+    return { ok: false, error: '登入已逾時，請重新登入', code: 'AUTH_EXPIRED' };
+  }
+  const user = findUserByNickname(String(payload.nickname || ''));
+  if (!user || user.status !== 'active' ||
+      String(user.email || '').toLowerCase() !== String(payload.email || '').toLowerCase() ||
+      String(user.role || '') !== String(payload.role || '') ||
+      String(user.department || '') !== String(payload.department || '')) {
+    return { ok: false, error: '帳號權限已變更，請重新登入', code: 'AUTH_INVALID' };
+  }
+  return { ok: true, user: user };
+}
+
+function authenticateApiRequest_(params) {
+  if (!params || !params.session_token) {
+    return { ok: false, error: '請先登入再操作', code: 'AUTH_REQUIRED' };
+  }
+  return verifySessionToken_(String(params.session_token));
+}
+
+function actorCanAccessUser_(actor, target) {
+  if (!actor || !target || actor.status !== 'active') return false;
+  if (actor.role === 'admin' || isGlobalManager_(actor)) return true;
+  if (actor.nickname === target.nickname) return true;
+  return actor.role === 'manager' && sameDepartment_(actor.department, target.department);
+}
+
+function requireApiRole_(actor, allowedRoles) {
+  if (!actor || allowedRoles.indexOf(actor.role) < 0) throw new Error('權限不足');
+}
+
+function requireApiUserScope_(actor, nickname) {
+  const target = nickname ? findUserByNickname(String(nickname)) : null;
+  if (!target || !actorCanAccessUser_(actor, target)) throw new Error('無權存取此人員資料');
+  return target;
+}
+
+function authorizeTaskResource_(actor, taskId, deleting) {
+  const task = taskId ? findObject(SHEET_NAMES.TASKS, 'task_id', taskId) : null;
+  if (!task) return;
+  const assignee = findUserByNickname(String(task.assignee || ''));
+  const scopedManager = actor.role === 'manager' && assignee && actorCanAccessUser_(actor, assignee);
+  const own = task.assignee === actor.nickname || task.created_by === actor.nickname;
+  if (actor.role !== 'admin' && !scopedManager && !own) throw new Error('無權操作此事項');
+  if (deleting && actor.role !== 'admin' && !scopedManager && task.created_by !== actor.nickname) {
+    throw new Error('只有建立者或主管可以刪除事項');
+  }
+}
+
+/**
+ * 每個 HTTP API 的單一權限入口。這裡會以已驗簽 actor 覆蓋前端傳入的
+ * viewer / operator / evaluator，並對資料對象再次做部門範圍判斷。
+ */
+function authorizeApiAction_(action, params, actor) {
+  const adminOnly = [
+    'addUser', 'updateUser', 'approveUser', 'setConfig', 'setupSystemAutomation',
+    'cleanupDuplicateEvidence', 'adminStampSubmitted', 'adminBroadcast',
+    'sendDailyKpiPdf', 'setupSheets', 'purgeTestData'
+  ];
+  if (adminOnly.indexOf(action) >= 0) {
+    requireApiRole_(actor, ['admin']);
+    params.operator = actor.nickname;
+    return;
+  }
+
+  if (action === 'listUsers') {
+    requireApiRole_(actor, ['admin', 'manager', 'admin_staff']);
+    params.operator = actor.nickname;
+    return;
+  }
+  if (action === 'getSystemReadiness') {
+    requireApiRole_(actor, ['admin', 'manager']);
+    params.operator = actor.nickname;
+    return;
+  }
+  if (action === 'testMyNotifications' || action === 'debugPush') {
+    params.operator = actor.nickname;
+    params.nickname = actor.nickname;
+    return;
+  }
+  if (action === 'registerPushSubscription' || action === 'unregisterPushSubscription' || action === 'getLineBindingCode') {
+    params.operator = actor.nickname;
+    params.nickname = actor.nickname;
+    return;
+  }
+
+  const viewerActions = [
+    'listLogs', 'getEvidenceLog', 'listWeekly', 'listCoursePreps',
+    'listArchivedKpiFiles', 'getEvalEvidence', 'getEval', 'listEvals',
+    'listTasks', 'getDashboard'
+  ];
+  if (viewerActions.indexOf(action) >= 0) params.viewer = actor.nickname;
+
+  const ownContentActions = [
+    'saveLog', 'uploadPhoto', 'uploadFile', 'saveWeekly', 'saveCoursePrep',
+    'saveSelfTask', 'deleteSelfTask', 'addPost', 'saveOKR'
+  ];
+  if (ownContentActions.indexOf(action) >= 0) {
+    const target = requireApiUserScope_(actor, params.nickname || actor.nickname);
+    params.nickname = target.nickname;
+    if (actor.role !== 'admin' && target.nickname !== actor.nickname) throw new Error('只能修改自己的資料');
+    return;
+  }
+
+  // 匯出與通知不改寫老師原始紀錄，主管可在既有查閱範圍內代為重建。
+  if (['sendSubmitPdf', 'archiveMonthlyCsv'].indexOf(action) >= 0) {
+    const target = requireApiUserScope_(actor, params.nickname || actor.nickname);
+    params.nickname = target.nickname;
+    return;
+  }
+
+  if (['getTodayLog', 'getMakeupQuota', 'getWeekly', 'getOKR', 'getMyKpiPreview', 'getWeekPostCount'].indexOf(action) >= 0) {
+    const target = requireApiUserScope_(actor, params.nickname || actor.nickname);
+    params.nickname = target.nickname;
+    params.viewer = actor.nickname;
+    return;
+  }
+
+  if (action === 'getLog') {
+    let nickname = params.nickname || '';
+    if (!nickname && params.log_id) {
+      const log = findObject(SHEET_NAMES.LOGS, 'log_id', params.log_id);
+      nickname = log ? log.nickname : '';
+    }
+    if (nickname) requireApiUserScope_(actor, nickname);
+    params.viewer = actor.nickname;
+    return;
+  }
+
+  if (action === 'saveEval') {
+    requireApiRole_(actor, ['admin', 'manager']);
+    requireApiUserScope_(actor, params.nickname);
+    params.evaluator = actor.nickname;
+    return;
+  }
+  if (action === 'getEvalEvidence' || action === 'getEval') {
+    requireApiUserScope_(actor, params.nickname);
+    return;
+  }
+  if (action === 'listEvals') {
+    requireApiRole_(actor, ['admin', 'manager']);
+    return;
+  }
+
+  if (action === 'addFeedback') {
+    const target = requireApiUserScope_(actor, params.to_nickname);
+    if (actor.role === 'teacher' || actor.role === 'admin_staff') {
+      if (!(target.role === 'admin' || (target.role === 'manager' && (sameDepartment_(target.department, actor.department) || isGlobalManager_(target))))) {
+        throw new Error('只能回覆主管或管理員');
+      }
+    }
+    params.from_nickname = actor.nickname;
+    return;
+  }
+  if (action === 'listFeedback') {
+    if (actor.role !== 'admin') params.nickname = actor.nickname;
+    else if (params.nickname) requireApiUserScope_(actor, params.nickname);
+    params.viewer = actor.nickname;
+    return;
+  }
+  if (action === 'listFeedbackThread') {
+    const messages = sheetToObjects(SHEET_NAMES.FEEDBACK).filter(item => item.log_id === params.log_id);
+    if (messages.length && actor.role !== 'admin') {
+      const allowed = messages.some(item => item.from_nickname === actor.nickname || item.to_nickname === actor.nickname ||
+        actorCanAccessUser_(actor, findUserByNickname(item.from_nickname)) || actorCanAccessUser_(actor, findUserByNickname(item.to_nickname)));
+      if (!allowed) throw new Error('無權讀取此對話');
+    }
+    params.viewer = actor.nickname;
+    return;
+  }
+  if (action === 'markFeedbackRead') {
+    const item = findObject(SHEET_NAMES.FEEDBACK, 'feedback_id', params.feedback_id);
+    if (item && actor.role !== 'admin' && item.to_nickname !== actor.nickname) throw new Error('無權更新此訊息');
+    params.reader = actor.nickname;
+    return;
+  }
+
+  if (action === 'addObservation') {
+    requireApiRole_(actor, ['admin', 'manager']);
+    requireApiUserScope_(actor, params.observed);
+    params.observer = actor.nickname;
+    return;
+  }
+  if (action === 'listObservations') {
+    if (params.observed) requireApiUserScope_(actor, params.observed);
+    if (actor.role === 'teacher' || actor.role === 'admin_staff') params.observed = actor.nickname;
+    else if (actor.role === 'manager' && !params.observed) params.observer = actor.nickname;
+    params.viewer = actor.nickname;
+    return;
+  }
+  if (action === 'listPosts') {
+    if (params.nickname) requireApiUserScope_(actor, params.nickname);
+    if (actor.role !== 'admin' && !params.nickname) params.nickname = actor.nickname;
+    params.viewer = actor.nickname;
+    return;
+  }
+
+  if (action === 'updateOKRProgress') {
+    const okr = findObject(SHEET_NAMES.OKR, 'okr_id', params.okr_id);
+    if (okr && actor.role !== 'admin' && okr.nickname !== actor.nickname) throw new Error('只能更新自己的 OKR');
+    params.operator = actor.nickname;
+    return;
+  }
+
+  if (action === 'addTask') {
+    requireApiRole_(actor, ['admin', 'manager', 'admin_staff']);
+    let assignees = params.assignees;
+    if (typeof assignees === 'string') assignees = assignees.split(',').map(item => item.trim()).filter(Boolean);
+    (assignees || []).forEach(nickname => requireApiUserScope_(actor, nickname));
+    params.created_by = actor.nickname;
+    return;
+  }
+  if (action === 'updateTaskStatus' || action === 'deleteTask') {
+    authorizeTaskResource_(actor, params.task_id, action === 'deleteTask');
+    params.operator = actor.nickname;
+    return;
+  }
+
+  if (action === 'listStudents') {
+    if (actor.role === 'teacher' || actor.role === 'admin_staff') {
+      params.teacher = actor.nickname;
+      params.department = '';
+    } else if (actor.role === 'manager' && !isGlobalManager_(actor)) {
+      if (params.teacher) requireApiUserScope_(actor, params.teacher);
+      params.department = actor.department;
+    } else if (params.teacher) requireApiUserScope_(actor, params.teacher);
+    params.viewer = actor.nickname;
+    return;
+  }
+  if (action === 'addStudent' || action === 'updateStudent' || action === 'deleteStudent') {
+    requireApiRole_(actor, ['admin', 'manager']);
+    if (action === 'addStudent') requireApiUserScope_(actor, params.teacher);
+    else {
+      const student = findObject(SHEET_NAMES.STUDENTS, 'student_id', params.student_id);
+      if (student) requireApiUserScope_(actor, student.teacher);
+      if (params.teacher) requireApiUserScope_(actor, params.teacher);
+    }
+    params.operator = actor.nickname;
+    return;
+  }
+
+  if (['deleteCoursePrep'].indexOf(action) >= 0) {
+    params.operator = actor.nickname;
+    const prep = findObject(SHEET_NAMES.COURSE_PREP, 'prep_id', params.prep_id);
+    if (prep) {
+      requireApiUserScope_(actor, prep.nickname);
+      if (actor.role !== 'admin' && prep.nickname !== actor.nickname) throw new Error('只能刪除自己的備課檔案');
+    }
+    return;
+  }
+
+  // 已在前面覆蓋 viewer，個別函式仍會依角色/部門過濾。
+  if (['listLogs', 'getEvidenceLog', 'listWeekly', 'listCoursePreps',
+       'listArchivedKpiFiles', 'listTasks', 'getDashboard'].indexOf(action) >= 0) return;
+
+  throw new Error('此功能尚未設定安全權限');
 }
 
 function findUserByEmail(email) {
@@ -881,55 +1344,14 @@ function findUserByNickname(nickname) {
  * 列出尚未綁定 email 的暱稱（給首次登入者選）
  */
 function listAvailableNicknames() {
-  const users = sheetToObjects(SHEET_NAMES.USERS);
-  const available = users
-    .filter(u => !u.email || String(u.email).trim() === '')
-    .filter(u => u.status === 'active' || u.status === 'pending')
-    .map(u => ({
-      nickname: u.nickname,
-      role: u.role,
-      department: u.department
-    }));
-  return { ok: true, nicknames: available };
+  return { ok: false, error: '新人請由管理員先建立帳號並綁定 Email' };
 }
 
 /**
  * 老師認領暱稱：把 email 寫入該暱稱
  */
 function claimNickname(params) {
-  const email = (params.email || '').toLowerCase().trim();
-  const nickname = (params.nickname || '').trim();
-  if (!email || !nickname) return { ok: false, error: 'missing email or nickname' };
-
-  // 檢查暱稱是否存在且未被綁定
-  const user = findUserByNickname(nickname);
-  if (!user) return { ok: false, error: '此暱稱不存在' };
-  if (user.email && String(user.email).trim() !== '') {
-    return { ok: false, error: '此暱稱已被綁定其他帳號' };
-  }
-
-  // 檢查 email 是否已綁定其他暱稱
-  const existing = findUserByEmail(email);
-  if (existing) return { ok: false, error: '此 Email 已綁定暱稱：' + existing.nickname };
-
-  // 寫入 email
-  updateRow(SHEET_NAMES.USERS, user._row, {
-    email,
-    last_login: nowIso()
-  });
-  logSystem(nickname, 'claim_nickname', email, { nickname });
-
-  return {
-    ok: true,
-    msg: '綁定成功',
-    user: {
-      nickname: user.nickname,
-      email,
-      role: user.role,
-      department: user.department,
-      status: user.status
-    }
-  };
+  return { ok: false, error: '自助認領已停用，請由管理員先綁定 Email' };
 }
 
 /**
@@ -941,7 +1363,9 @@ function listUsers(params) {
     return { ok: false, error: '無查看人員權限' };
   }
   let users = sheetToObjects(SHEET_NAMES.USERS);
-  if (operator.role !== 'admin') users = users.filter(user => user.department === operator.department || user.nickname === operator.nickname);
+  if (operator.role !== 'admin' && !isGlobalManager_(operator)) {
+    users = users.filter(user => sameDepartment_(user.department, operator.department) || user.nickname === operator.nickname);
+  }
   return { ok: true, users };
 }
 
@@ -952,11 +1376,14 @@ function addUser(params) {
   const operator = params && params.operator ? findUserByNickname(params.operator) : null;
   if (!operator || operator.role !== 'admin' || operator.status !== 'active') return { ok: false, error: '需 admin 權限' };
   const { nickname, role, department, email, phone, notes } = params;
-  if (!nickname || !role || !department) {
-    return { ok: false, error: 'missing required fields' };
+  const normalizedEmail = String(email || '').toLowerCase().trim();
+  const normalizedDepartment = normalizeDepartment_(department);
+  if (!nickname || !role || !department || !normalizedEmail) {
+    return { ok: false, error: '暱稱、Google Email、角色與部門皆為必填' };
   }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) return { ok: false, error: 'Google Email 格式不正確' };
   if (!ROLES.includes(role)) return { ok: false, error: 'invalid role' };
-  if (!DEPARTMENTS.includes(department)) return { ok: false, error: 'invalid department' };
+  if (!DEPARTMENTS.includes(normalizedDepartment)) return { ok: false, error: 'invalid department' };
 
   // 行政美編行銷必須有 subtype（general/marketing），否則 KPI_Config 查不到
   const subtype = role === 'admin_staff'
@@ -968,15 +1395,15 @@ function addUser(params) {
     return { ok: false, error: '暱稱已存在' };
   }
   // 檢查 email 重複
-  if (email && findUserByEmail(email)) {
+  if (findUserByEmail(normalizedEmail)) {
     return { ok: false, error: 'Email 已綁定其他暱稱' };
   }
 
   appendRow(SHEET_NAMES.USERS, {
     nickname,
-    email: email || '',
+    email: normalizedEmail,
     role,
-    department,
+    department: normalizedDepartment,
     status: 'active',
     phone: phone || '',
     joined_at: nowIso(),
@@ -1004,6 +1431,22 @@ function updateUser(params) {
   ['email', 'line_user_id', 'role', 'department', 'status', 'phone', 'notes', 'subtype'].forEach(k => {
     if (params[k] !== undefined) updates[k] = params[k];
   });
+  if (updates.email !== undefined) {
+    updates.email = String(updates.email || '').toLowerCase().trim();
+    if (updates.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(updates.email)) return { ok: false, error: 'Google Email 格式不正確' };
+    const duplicate = updates.email ? findUserByEmail(updates.email) : null;
+    if (duplicate && duplicate.nickname !== nickname) return { ok: false, error: 'Email 已綁定其他暱稱' };
+  }
+  if (updates.role !== undefined && !ROLES.includes(updates.role)) return { ok: false, error: 'invalid role' };
+  if (updates.department !== undefined) {
+    updates.department = normalizeDepartment_(updates.department);
+    if (!DEPARTMENTS.includes(updates.department)) return { ok: false, error: 'invalid department' };
+  }
+  if (updates.status !== undefined && !['active', 'pending', 'suspended'].includes(updates.status)) return { ok: false, error: 'invalid status' };
+  if (updates.subtype !== undefined && updates.subtype && !ADMIN_STAFF_SUBTYPES.includes(updates.subtype)) return { ok: false, error: 'invalid subtype' };
+  const resultingStatus = updates.status !== undefined ? updates.status : user.status;
+  const resultingEmail = updates.email !== undefined ? updates.email : String(user.email || '').trim();
+  if (resultingStatus === 'active' && !resultingEmail) return { ok: false, error: '啟用帳號前必須先綁定 Google Email' };
   updateRow(SHEET_NAMES.USERS, user._row, updates);
   logSystem(params.operator || 'system', 'update_user', nickname, updates);
 
@@ -1026,6 +1469,15 @@ function requireRole(nickname, allowedRoles) {
   return user;
 }
 
+/** 小魚主管需跨校區支援；其他主管仍只看自己的校區。 */
+function isGlobalManager_(user) {
+  return !!user && user.role === 'manager' && String(user.nickname || '').trim() === '小魚';
+}
+
+function canViewDepartment_(user, department) {
+  return !!user && (user.role === 'admin' || isGlobalManager_(user) ||
+    (user.role === 'manager' && sameDepartment_(user.department, department)));
+}
 
 // ════════════════════════════════════════════════════════════
 //  logs.gs
@@ -1087,7 +1539,7 @@ function saveLog(params) {
     log_id,
     date,
     nickname,
-    department: user.department,
+    department: normalizeDepartment_(user.department),
     role: user.role,
     checkin_at: params.checkin_at || (existing ? existing.checkin_at : ''),
     checkout_at: params.checkout_at || (existing ? existing.checkout_at : ''),
@@ -1107,7 +1559,8 @@ function saveLog(params) {
     submitted_at: (existing && existing.submitted_at) || ''
   };
 
-  // 正式提交（非草稿自動存）：首次提交蓋時間戳並通知主管+老闆
+  // 正式提交（非草稿自動存）：首次提交蓋時間戳。
+  // PDF 與主管通知由前端在 saveLog 成功後呼叫 sendSubmitPdf，避免同次送出收到兩則通知。
   const firstSubmit = params.submitted === true && !data.submitted_at;
   if (firstSubmit) data.submitted_at = nowIso();
 
@@ -1117,9 +1570,6 @@ function saveLog(params) {
   } else {
     updateRow(SHEET_NAMES.LOGS, existing._row, data);
   }
-
-  if (firstSubmit) notifyLogSubmitted_(user, String(date), isMakeup === true, data.help_needed);
-  else if (params.submitted === true && existing && existing.submitted_at) notifyLogUpdated_(user, String(date));
 
   // 附件 → Evidence：只在「正式提交」時寫入，且整份取代
   // （舊版每次草稿自動存都 append 一次，一天可灌出上百筆重複證據）
@@ -1204,30 +1654,6 @@ function getMakeupQuota(params) {
   return { ok: true, year_month: ym, used: used, limit: 3, remaining: Math.max(0, 3 - used) };
 }
 
-/** 日報正式提交 → 即時推播給部門主管 + admin（LINE + OneSignal） */
-function notifyLogSubmitted_(user, date, isMakeup, helpNeeded) {
-  try {
-    const recipients = sheetToObjects(SHEET_NAMES.USERS).filter(u =>
-      u.status === 'active' && u.nickname !== user.nickname &&
-      (u.role === 'admin' || (u.role === 'manager' && u.department === user.department)));
-    const title = '📥 ' + user.nickname + ' 已提交日報' + (isMakeup ? '（補繳）' : '');
-    const body = (user.department || '') + '｜' + date + (helpNeeded ? '\n⚠️ 需要主管協助' : '');
-    recipients.forEach(r => { try { notifyUser_(r, title, body); } catch (e) { /* 單人推播失敗不影響其他人 */ } });
-  } catch (e) { /* 通知失敗不影響日誌儲存 */ }
-}
-
-/** 已送出日報再次更新 → 通知同部門主管與管理員重新查看。 */
-function notifyLogUpdated_(user, date) {
-  try {
-    const recipients = sheetToObjects(SHEET_NAMES.USERS).filter(u =>
-      u.status === 'active' && u.nickname !== user.nickname &&
-      (u.role === 'admin' || (u.role === 'manager' && u.department === user.department)));
-    const title = '📝 ' + user.nickname + ' 已更新日報';
-    const body = (user.department || '') + '｜' + date + '｜請查看最新內容';
-    recipients.forEach(r => { try { notifyUser_(r, title, body); } catch (e) { /* 單人失敗不影響儲存 */ } });
-  } catch (e) { /* 通知失敗不影響日誌儲存 */ }
-}
-
 function getLog(params) {
   const { log_id, nickname, date } = params;
   let log;
@@ -1267,14 +1693,14 @@ function listLogs(params) {
   // 權限過濾
   if (viewerUser.role === 'teacher' || viewerUser.role === 'admin_staff') {
     logs = logs.filter(l => l.nickname === viewer);
-  } else if (viewerUser.role === 'manager') {
-    logs = logs.filter(l => l.department === viewerUser.department || l.nickname === viewer);
+  } else if (viewerUser.role === 'manager' && !isGlobalManager_(viewerUser)) {
+    logs = logs.filter(l => sameDepartment_(l.department, viewerUser.department) || l.nickname === viewer);
   }
   // admin 看全部
 
   // 條件過濾
   if (nickname) logs = logs.filter(l => l.nickname === nickname);
-  if (department) logs = logs.filter(l => l.department === department);
+  if (department) logs = logs.filter(l => sameDepartment_(l.department, department));
   if (from) logs = logs.filter(l => String(l.date) >= from);
   if (to) logs = logs.filter(l => String(l.date) <= to);
 
@@ -1355,9 +1781,63 @@ function saveEvidenceFromLog(log_id, nickname, date, attachmentsRaw) {
       type: att.type || 'link',
       url: att.url,
       description: att.description || '',
+      source_type: att.forType || '',
       created_at: nowIso()
     });
   });
+}
+
+/**
+ * 證據紀錄（以天計）— 老師看自己、主管看部門、admin 全部
+ * 分類：KPI2=環境整潔(env)、KPI3=教案歸檔(lesson)
+ */
+function getEvidenceLog(params) {
+  const { viewer, year_month, nickname } = params || {};
+  if (!viewer || !year_month) return { ok: false, error: 'missing viewer/year_month' };
+  const vu = findUserByNickname(viewer);
+  if (!vu) return { ok: false, error: 'viewer not found' };
+  const users = sheetToObjects(SHEET_NAMES.USERS);
+
+  let scope;
+  if (vu.role === 'admin') scope = users.map(u => u.nickname);
+  else if (vu.role === 'manager') scope = users.filter(u => isGlobalManager_(vu) || sameDepartment_(u.department, vu.department)).map(u => u.nickname);
+  else scope = [viewer];
+  if (nickname) {
+    if (scope.indexOf(nickname) < 0) return { ok: false, error: 'no permission' };
+    scope = [nickname];
+  }
+
+  const evAll = sheetToObjects(SHEET_NAMES.EVIDENCE)
+    .filter(e => String(e.date).slice(0, 7) === year_month && scope.indexOf(e.nickname) >= 0);
+
+  const usersMap = {}; users.forEach(u => usersMap[u.nickname] = u);
+  const byPerson = {};
+  evAll.forEach(e => {
+    const nk = e.nickname, d = String(e.date);
+    const person = usersMap[nk] || null;
+    const k = normalizeEvalEvidenceKpi_(person, e);
+    const environmentKpi = isAnqinUser(person) ? 6 : 2;
+    const lessonKpi = isAnqinUser(person) ? 2 : 3;
+    if (k !== environmentKpi && k !== lessonKpi) return;
+    byPerson[nk] = byPerson[nk] || {};
+    byPerson[nk][d] = byPerson[nk][d] || { date: d, env: 0, lesson: 0, urls: [] };
+    if (k === environmentKpi) byPerson[nk][d].env++;
+    if (k === lessonKpi) byPerson[nk][d].lesson++;
+    if (e.url) byPerson[nk][d].urls.push(e.url);
+  });
+
+  const people = Object.keys(byPerson).map(nk => {
+    const days = Object.values(byPerson[nk]).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    return {
+      nickname: nk,
+      department: (usersMap[nk] || {}).department || '',
+      env_days: days.filter(d => d.env > 0).length,
+      lesson_days: days.filter(d => d.lesson > 0).length,
+      days: days
+    };
+  }).sort((a, b) => String(a.nickname).localeCompare(String(b.nickname)));
+
+  return { ok: true, year_month, people };
 }
 
 /**
@@ -1442,7 +1922,7 @@ function uploadPhoto(params) {
 
   // 資料夾：KPI證據 / 部門 / 暱稱 / 年月
   const root = getEvidenceRootFolder_();
-  const deptF = getOrCreateChildFolder_(root, user.department || '未分部門');
+  const deptF = getOrCreateChildFolder_(root, normalizeDepartment_(user.department) || '未分部門');
   const userF = getOrCreateChildFolder_(deptF, nickname);
   const ymF = getOrCreateChildFolder_(userF, ym);
 
@@ -1486,7 +1966,7 @@ function uploadFile(params) {
   const blob = Utilities.newBlob(bytes, mimeType || 'application/octet-stream', uniqueName);
 
   const root = getMaterialRootFolder_();
-  const deptF = getOrCreateChildFolder_(root, user.department || '未分部門');
+  const deptF = getOrCreateChildFolder_(root, normalizeDepartment_(user.department) || '未分部門');
   const userF = getOrCreateChildFolder_(deptF, nickname);
   const ymF = getOrCreateChildFolder_(userF, ym);
   const file = ymF.createFile(blob);
@@ -1548,7 +2028,7 @@ function saveWeekly(params) {
   const week_id = 'WK-' + week_of + '-' + nickname;
   const existing = findObject(SHEET_NAMES.WEEKLY, 'week_id', week_id);
   const data = {
-    week_id, week_of, nickname, department: user.department, role: user.role,
+    week_id, week_of, nickname, department: normalizeDepartment_(user.department), role: user.role,
     teaching_reflection: params.teaching_reflection || '',
     student_observation: params.student_observation || '',
     tool_needs: params.tool_needs || '',
@@ -1582,8 +2062,8 @@ function listWeekly(params) {
   let list = sheetToObjects(SHEET_NAMES.WEEKLY);
   if (viewerUser.role === 'teacher' || viewerUser.role === 'admin_staff') {
     list = list.filter(w => w.nickname === viewer);
-  } else if (viewerUser.role === 'manager') {
-    list = list.filter(w => w.department === viewerUser.department || w.nickname === viewer);
+  } else if (viewerUser.role === 'manager' && !isGlobalManager_(viewerUser)) {
+    list = list.filter(w => sameDepartment_(w.department, viewerUser.department) || w.nickname === viewer);
   }
   // admin 看全部
   if (nickname) list = list.filter(w => w.nickname === nickname);
@@ -1591,7 +2071,6 @@ function listWeekly(params) {
   list.sort((a, b) => String(b.week_of).localeCompare(String(a.week_of)));
   return { ok: true, weeklies: list };
 }
-
 
 // ════════════════════════════════════════════════════════════
 //  feedback.gs
@@ -1609,10 +2088,10 @@ function addFeedback(params) {
   const fromU = findUserByNickname(from_nickname);
   const toU = findUserByNickname(to_nickname);
   if (!fromU || !toU || fromU.status !== 'active' || toU.status !== 'active') return { ok: false, error: '對話帳號不存在或未啟用' };
-  if (fromU.role === 'teacher' && !(toU.role === 'manager' && toU.department === fromU.department) && toU.role !== 'admin') {
+  if (fromU.role === 'teacher' && !(toU.role === 'manager' && (sameDepartment_(toU.department, fromU.department) || isGlobalManager_(toU))) && toU.role !== 'admin') {
     return { ok: false, error: '老師只能回覆同部門主管或管理員' };
   }
-  if (fromU.role === 'manager' && toU.role !== 'admin' && toU.department !== fromU.department) {
+  if (fromU.role === 'manager' && !isGlobalManager_(fromU) && toU.role !== 'admin' && !sameDepartment_(toU.department, fromU.department)) {
     return { ok: false, error: '主管只能回覆自己部門' };
   }
   // 主管/老闆發的算「回饋」；老師發的算「回覆」（回覆不需 tag）
@@ -1651,7 +2130,6 @@ function listFeedbackThread(params) {
     .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   return { ok: true, thread: list };
 }
-
 
 function listFeedback(params) {
   const { nickname, log_id, unread_only } = params;
@@ -1713,7 +2191,7 @@ function addPost(params) {
     post_id: Utilities.getUuid(),
     date: date || todayStr(),
     nickname,
-    department: user.department,
+    department: normalizeDepartment_(user.department),
     platform,
     url: url || '',
     screenshot: screenshot || '',
@@ -1734,7 +2212,6 @@ function listPosts(params) {
   list.sort((a, b) => String(b.date).localeCompare(String(a.date)));
   return { ok: true, posts: list };
 }
-
 
 // ════════════════════════════════════════════════════════════
 //  okr.gs
@@ -1801,7 +2278,6 @@ function updateOKRProgress(params) {
   return { ok: true };
 }
 
-
 // ════════════════════════════════════════════════════════════
 //  evaluation.gs
 // ════════════════════════════════════════════════════════════
@@ -1828,7 +2304,8 @@ function getEvalEvidence(params) {
   const viewerUser = findUserByNickname(viewer);
   const canReview = viewerUser && viewerUser.status === 'active' && (
     viewerUser.role === 'admin' ||
-    (viewerUser.role === 'manager' && viewerUser.department === user.department)
+    (viewerUser.role === 'manager' && (isGlobalManager_(viewerUser) || sameDepartment_(viewerUser.department, user.department))) ||
+    (['teacher', 'admin_staff'].includes(viewerUser.role) && viewerUser.nickname === user.nickname)
   );
   if (!canReview) return { ok: false, error: '無評核資料讀取權限' };
 
@@ -1839,24 +2316,20 @@ function getEvalEvidence(params) {
   // 2. 附件證據（依 KPI 分類）
   const evidence = sheetToObjects(SHEET_NAMES.EVIDENCE)
     .filter(e => e.nickname === nickname && String(e.date) >= from && String(e.date) <= to);
-  // 安親新制 KPI 項目順序與舊日報的 kpi_category 編號不同，需對應
-  // 舊日報：1課業 2班級(含環境照) 3課程/專案 4群組 5親師 6態度
-  // 安親新制：1課業 2專案 3班級 4親師 5態度 6班級環境整潔
+  // 新版直接保存 100 分制 KPI 編號；沒有 source_type 的歷史資料仍套用舊編號。
   const anqinUser = isAnqinUser(user);
-  const ANQIN_EVIDENCE_MAP = { 1: 1, 2: 6, 3: 2, 4: 4, 5: 4, 6: 5 };
   const evidenceByKpi = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
   evidence.forEach(e => {
-    let k = Number(e.kpi_category);
-    if (anqinUser && ANQIN_EVIDENCE_MAP[k]) k = ANQIN_EVIDENCE_MAP[k];
+    const k = normalizeEvalEvidenceKpi_(user, e);
     if (k >= 1 && k <= 6) evidenceByKpi[k].push(e);
   });
   // 證據以「天」計：環境整潔(KPI2)、教案歸檔(KPI3) 各算有幾天執行（同一天多張只算 1）
   const _evDay = {};
   evidence.forEach(e => {
-    const k = Number(e.kpi_category), d = String(e.date);
+    const k = normalizeEvalEvidenceKpi_(user, e), d = String(e.date);
     _evDay[d] = _evDay[d] || { env: false, lesson: false };
-    if (k === 2) _evDay[d].env = true;
-    if (k === 3) _evDay[d].lesson = true;
+    if (k === (anqinUser ? 6 : 2)) _evDay[d].env = true;
+    if (k === (anqinUser ? 2 : 3)) _evDay[d].lesson = true;
   });
   const env_days = Object.values(_evDay).filter(x => x.env).length;
   const lesson_days = Object.values(_evDay).filter(x => x.lesson).length;
@@ -1893,7 +2366,7 @@ function getEvalEvidence(params) {
     nickname,
     year_month,
     role: user.role,
-    department: user.department,
+    department: normalizeDepartment_(user.department),
     summary: {
       log_count: logs.length,
       makeup_count: logs.filter(l => l.is_makeup === true).length,
@@ -1917,6 +2390,19 @@ function getEvalEvidence(params) {
 }
 
 /**
+ * 安親 V2 的 source_type 表示 kpi_category 已是 100 分制正式編號。
+ * 舊資料沒有此欄，維持舊日報編號轉換，避免歷史證據跑到錯誤 KPI。
+ */
+function normalizeEvalEvidenceKpi_(user, evidence) {
+  const kpi = Number(evidence && evidence.kpi_category);
+  if (!isAnqinUser(user)) return kpi;
+  const sourceType = String((evidence && evidence.source_type) || '');
+  if (/^(v2-|env_)/.test(sourceType)) return kpi;
+  const legacyMap = { 1: 1, 2: 6, 3: 2, 4: 4, 5: 4, 6: 5 };
+  return legacyMap[kpi] || kpi;
+}
+
+/**
  * 自動建議分數（依日誌頻率、證據數量、回饋標籤）
  */
 function suggestKpiScores(user, logs, evidence, feedback, observations, postsByWeek) {
@@ -1937,7 +2423,7 @@ function suggestKpiScores(user, logs, evidence, feedback, observations, postsByW
   const engagement = Math.min(1, (logs.length || 0) / TARGET_DAYS);
 
   for (let k = 1; k <= 6; k++) {
-    const kEvidence = evidence.filter(e => Number(e.kpi_category) === k).length;
+    const kEvidence = evidence.filter(e => normalizeEvalEvidenceKpi_(user, e) === k).length;
     // 從 0 起算：投入比例×滿分 ＋ 證據加成（封頂 15%）＋ 回饋調整
     let score = max[k] * engagement + Math.min(max[k] * 0.15, kEvidence) + positive - negative * 2;
     score = Math.max(0, Math.min(max[k], Math.round(score)));
@@ -1961,12 +2447,16 @@ function saveEval(params) {
   if (!nickname || !year_month || !evaluator) {
     return { ok: false, error: 'missing required fields' };
   }
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(year_month))) {
+    return { ok: false, error: '評核月份格式錯誤' };
+  }
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
   const evaluatorUser = findUserByNickname(evaluator);
   const canEvaluate = evaluatorUser && evaluatorUser.status === 'active' && (
     evaluatorUser.role === 'admin' ||
-    (evaluatorUser.role === 'manager' && user.role === 'teacher' && evaluatorUser.department === user.department)
+    (evaluatorUser.role === 'manager' && ['teacher', 'admin_staff'].includes(user.role) &&
+      (isGlobalManager_(evaluatorUser) || sameDepartment_(evaluatorUser.department, user.department)))
   );
   if (!canEvaluate) return { ok: false, error: '無評核儲存權限' };
 
@@ -1977,14 +2467,32 @@ function saveEval(params) {
   const existing = findObject(sheetName, 'eval_id', eval_id);
 
   const prefixK = isManager ? 'm' : 'k';
+  const anqin = isAnqinUser(user);
+  const scoreMaximums = anqin && !isManager ? [20, 20, 20, 20, 12, 8] : [15, 15, 10, 10, 15, 5];
+  const scoreValues = [];
   let kpiTotal = 0;
   for (let i = 1; i <= 6; i++) {
-    const v = Number(params[`score_${prefixK}${i}`] || 0);
+    const raw = params[`score_${prefixK}${i}`];
+    const v = raw === undefined || raw === '' ? 0 : Number(raw);
+    const max = scoreMaximums[i - 1];
+    if (!Number.isFinite(v) || v < 0 || v > max) {
+      return { ok: false, error: `第 ${i} 項分數需介於 0–${max} 分` };
+    }
+    scoreValues.push(v);
     kpiTotal += v;
   }
-  const anqin = isAnqinUser(user);
+
   // 安親：KPI 滿分 100、OKR 獨立另計（不納入總分）；其餘：KPI 70 + OKR 30
   const okrScore = anqin ? 0 : Number(params.score_okr || 0);
+  if (!anqin && (!Number.isFinite(okrScore) || okrScore < 0 || okrScore > 30)) {
+    return { ok: false, error: 'OKR 分數需介於 0–30 分' };
+  }
+  const status = params.status || 'draft';
+  if (!['draft', 'submitted'].includes(status)) return { ok: false, error: '評核狀態錯誤' };
+  const managerComment = String(params.manager_comment || params.boss_comment || '').trim();
+  if (anqin && !isManager && status === 'submitted' && managerComment.length < 8) {
+    return { ok: false, error: '完成評核前，主管評語至少需要 8 字' };
+  }
 
   // ===== 日報補繳扣分：每次補繳扣 2 分（依當月日誌 is_makeup 自動統計，不吃前端參數）=====
   const makeupCount = sheetToObjects(SHEET_NAMES.LOGS).filter(l =>
@@ -2002,6 +2510,9 @@ function saveEval(params) {
   let lateCount = 0, latePenalty = 0;
   if (anqin) {
     lateCount = Number(params.score_late_count || 0);
+    if (!Number.isInteger(lateCount) || lateCount < 0) {
+      return { ok: false, error: '遲到次數需為 0 以上的整數' };
+    }
     if (lateCount >= 3) {
       const penaltyPoints = (lateCount - 2) * 5; // 第 3 次起才扣，每次 5 分
       const tierByPoints = calcBonusForUser(Math.max(0, kpiEffective - penaltyPoints), user); // 方案A：扣分
@@ -2026,16 +2537,16 @@ function saveEval(params) {
     makeup_count: makeupCount,
     makeup_penalty: makeupPenalty,
     bonus_granted: bonusGranted,
-    manager_comment: params.manager_comment || params.boss_comment || '',
+    manager_comment: managerComment,
     interview_notes: params.interview_notes || '',
-    status: params.status || 'draft',
+    status,
     updated_at: nowIso()
   };
 
   // 自評與評分欄位
   for (let i = 1; i <= 6; i++) {
     if (params[`self_${prefixK}${i}`] !== undefined) data[`self_${prefixK}${i}`] = params[`self_${prefixK}${i}`];
-    if (params[`score_${prefixK}${i}`] !== undefined) data[`score_${prefixK}${i}`] = params[`score_${prefixK}${i}`];
+    data[`score_${prefixK}${i}`] = scoreValues[i - 1];
   }
   if (params.self_summary !== undefined) data.self_summary = params.self_summary;
 
@@ -2072,8 +2583,8 @@ function getEval(params) {
   const viewerUser = findUserByNickname(viewer);
   if (!viewerUser || viewerUser.status !== 'active') return { ok: false, error: '無評核讀取權限' };
   const canRead = viewerUser.role === 'admin' ||
-    (viewerUser.role === 'manager' && viewerUser.department === user.department) ||
-    (viewerUser.role === 'teacher' && viewerUser.nickname === user.nickname);
+    (viewerUser.role === 'manager' && (isGlobalManager_(viewerUser) || sameDepartment_(viewerUser.department, user.department))) ||
+    (['teacher', 'admin_staff'].includes(viewerUser.role) && viewerUser.nickname === user.nickname);
   if (!canRead) return { ok: false, error: '無評核讀取權限' };
   const isManager = user.role === 'manager';
   const sheetName = isManager ? SHEET_NAMES.MANAGER_EVAL : SHEET_NAMES.TEACHER_EVAL;
@@ -2094,9 +2605,9 @@ function listEvals(params) {
   }
   const sheetName = role === 'manager' ? SHEET_NAMES.MANAGER_EVAL : SHEET_NAMES.TEACHER_EVAL;
   let list = sheetToObjects(sheetName);
-  if (viewerUser.role === 'manager') {
+  if (viewerUser.role === 'manager' && !isGlobalManager_(viewerUser)) {
     const allowed = sheetToObjects(SHEET_NAMES.USERS)
-      .filter(user => user.department === viewerUser.department)
+      .filter(user => sameDepartment_(user.department, viewerUser.department))
       .map(user => user.nickname);
     list = list.filter(item => allowed.includes(item.nickname));
   }
@@ -2109,7 +2620,7 @@ function calcDeptAvg(department, year_month) {
   const evals = sheetToObjects(SHEET_NAMES.TEACHER_EVAL)
     .filter(e => e.year_month === year_month);
   const users = sheetToObjects(SHEET_NAMES.USERS);
-  const deptTeachers = users.filter(u => u.department === department && u.role === 'teacher').map(u => u.nickname);
+  const deptTeachers = users.filter(u => sameDepartment_(u.department, department) && u.role === 'teacher').map(u => u.nickname);
   const deptEvals = evals.filter(e => deptTeachers.includes(e.nickname));
   if (deptEvals.length === 0) return 0;
   const sum = deptEvals.reduce((s, e) => s + Number(e.total_score || 0), 0);
@@ -2146,7 +2657,6 @@ function purgeTestData(params) {
   return { ok: true, cleared };
 }
 
-
 // ════════════════════════════════════════════════════════════
 //  dashboard.gs
 // ════════════════════════════════════════════════════════════
@@ -2165,7 +2675,7 @@ function getMyKpiPreview(params) {
   if (!user) return { ok: false, error: 'user not found' };
 
   const ym = yearMonth();
-  const ev = getEvalEvidence({ nickname, year_month: ym });
+  const ev = getEvalEvidence({ nickname, year_month: ym, viewer: nickname });
   if (!ev.ok) return ev;
 
   const suggestion = ev.suggestion;
@@ -2184,7 +2694,7 @@ function getMyKpiPreview(params) {
     ok: true,
     year_month: ym,
     role: user.role,
-    department: user.department,
+    department: normalizeDepartment_(user.department),
     is_anqin: isAnqinUser(user),
     suggestion,
     kpi_total: kpiTotal,
@@ -2213,11 +2723,12 @@ function getDashboard(params) {
   }
 
   if (user.role === 'manager') {
-    const deptTeachers = users.filter(u => u.department === user.department && u.role === 'teacher');
+    const globalScope = isGlobalManager_(user);
+    const deptTeachers = users.filter(u => u.role === 'teacher' && (globalScope || sameDepartment_(u.department, user.department)));
     // 部門成員（含行政美編行銷，皆需每日填報）
-    const deptMembers = users.filter(u => u.department === user.department && (u.role === 'teacher' || u.role === 'admin_staff'));
+    const deptMembers = users.filter(u => (u.role === 'teacher' || u.role === 'admin_staff') && (globalScope || sameDepartment_(u.department, user.department)));
     const todayLogs = sheetToObjects(SHEET_NAMES.LOGS)
-      .filter(l => l.date === today && l.department === user.department);
+      .filter(l => l.date === today && (globalScope || sameDepartment_(l.department, user.department)));
     const status = deptMembers.map(t => {
       const log = todayLogs.find(l => l.nickname === t.nickname);
       return {
@@ -2241,7 +2752,7 @@ function getDashboard(params) {
     return {
       ok: true,
       role: 'manager',
-      department: user.department,
+      department: globalScope ? '全教室' : normalizeDepartment_(user.department),
       date: today,
       teachers_count: deptMembers.length,
       submitted_count: submittedCount,
@@ -2250,13 +2761,14 @@ function getDashboard(params) {
       month_avg: avg
     };
   }
+  // 注意：teachers_count 改用 deptMembers（見上方）；month_avg 仍只算 teacher
 
   if (user.role === 'admin') {
     const deptStats = DEPARTMENTS.filter(d => d !== '總部').map(dept => {
-      const teachers = users.filter(u => u.department === dept && u.role === 'teacher');
-      const manager = users.find(u => u.department === dept && u.role === 'manager');
+      const teachers = users.filter(u => sameDepartment_(u.department, dept) && u.role === 'teacher');
+      const manager = users.find(u => sameDepartment_(u.department, dept) && u.role === 'manager');
       const todayLogs = sheetToObjects(SHEET_NAMES.LOGS)
-        .filter(l => l.date === today && l.department === dept);
+        .filter(l => l.date === today && sameDepartment_(l.department, dept));
       const monthEvals = sheetToObjects(SHEET_NAMES.TEACHER_EVAL)
         .filter(e => e.year_month === ym && teachers.map(t => t.nickname).includes(e.nickname));
       const avg = monthEvals.length > 0
@@ -2283,14 +2795,19 @@ function getDashboard(params) {
 }
 
 // ════════════════════════════════════════════════════════════
-//  students.gs — 學生名冊（後台統一建，每位老師自己的班）
+//  students.gs
 // ════════════════════════════════════════════════════════════
+
+/**
+ * 學生名冊（後台統一建，每位老師自己的班）
+ * Students schema: student_id, name, teacher, department, status, notes, created_at, updated_at
+ */
 
 function listStudents(params) {
   const { teacher, department, includeInactive } = params || {};
   let list = sheetToObjects(SHEET_NAMES.STUDENTS);
   if (teacher) list = list.filter(s => s.teacher === teacher);
-  if (department) list = list.filter(s => s.department === department);
+  if (department) list = list.filter(s => sameDepartment_(s.department, department));
   if (!includeInactive) list = list.filter(s => s.status !== 'inactive');
   list.sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-Hant'));
   return { ok: true, students: list };
@@ -2301,6 +2818,7 @@ function addStudent(params) {
   if (!name || !teacher) return { ok: false, error: '缺少姓名或老師' };
   const t = findUserByNickname(teacher);
   if (!t) return { ok: false, error: '老師不存在：' + teacher };
+  // 同老師班內姓名重複檢查
   const dup = sheetToObjects(SHEET_NAMES.STUDENTS)
     .some(s => s.teacher === teacher && s.name === name && s.status !== 'inactive');
   if (dup) return { ok: false, error: '此老師班上已有同名學生' };
@@ -2309,7 +2827,7 @@ function addStudent(params) {
     student_id: Utilities.getUuid(),
     name: String(name).trim(),
     teacher,
-    department: t.department,
+    department: normalizeDepartment_(t.department),
     status: 'active',
     notes: params.notes || '',
     created_at: nowIso(),
@@ -2329,9 +2847,12 @@ function updateStudent(params) {
   ['name', 'teacher', 'department', 'status', 'notes'].forEach(k => {
     if (params[k] !== undefined) updates[k] = params[k];
   });
+  // 換老師時連帶更新所屬部門
   if (params.teacher) {
     const t = findUserByNickname(params.teacher);
-    if (t) updates.department = t.department;
+    if (t) updates.department = normalizeDepartment_(t.department);
+  } else if (updates.department !== undefined) {
+    updates.department = normalizeDepartment_(updates.department);
   }
   updates.updated_at = nowIso();
   updateRow(SHEET_NAMES.STUDENTS, rowNum, updates);
@@ -2349,55 +2870,17 @@ function deleteStudent(params) {
   return { ok: true, msg: '已刪除' };
 }
 
+// ════════════════════════════════════════════════════════════
+//  tasks.gs
+// ════════════════════════════════════════════════════════════
 
 /**
- * 證據紀錄（以天計）— 老師看自己、主管看部門、admin 全部
- * 分類：KPI2=環境整潔(env)、KPI3=教案歸檔(lesson)
+ * 事項系統 + LINE 推播
+ * Tasks schema: task_id, title, detail, assignee, department, due_date, status(open/done), created_by, created_at, updated_at, done_at
+ * Users 需有 line_user_id 欄
+ * Script Property: LINE_TOKEN（LINE Messaging API channel access token）
  */
-function getEvidenceLog(params) {
-  const { viewer, year_month, nickname } = params || {};
-  if (!viewer || !year_month) return { ok: false, error: 'missing viewer/year_month' };
-  const vu = findUserByNickname(viewer);
-  if (!vu) return { ok: false, error: 'viewer not found' };
-  const users = sheetToObjects(SHEET_NAMES.USERS);
 
-  let scope;
-  if (vu.role === 'admin') scope = users.map(u => u.nickname);
-  else if (vu.role === 'manager') scope = users.filter(u => u.department === vu.department).map(u => u.nickname);
-  else scope = [viewer];
-  if (nickname) {
-    if (scope.indexOf(nickname) < 0) return { ok: false, error: 'no permission' };
-    scope = [nickname];
-  }
-
-  const evAll = sheetToObjects(SHEET_NAMES.EVIDENCE)
-    .filter(e => String(e.date).slice(0, 7) === year_month && scope.indexOf(e.nickname) >= 0);
-
-  const usersMap = {}; users.forEach(u => usersMap[u.nickname] = u);
-  const byPerson = {};
-  evAll.forEach(e => {
-    const nk = e.nickname, d = String(e.date), k = Number(e.kpi_category);
-    if (k !== 2 && k !== 3) return;
-    byPerson[nk] = byPerson[nk] || {};
-    byPerson[nk][d] = byPerson[nk][d] || { date: d, env: 0, lesson: 0, urls: [] };
-    if (k === 2) byPerson[nk][d].env++;
-    if (k === 3) byPerson[nk][d].lesson++;
-    if (e.url) byPerson[nk][d].urls.push(e.url);
-  });
-
-  const people = Object.keys(byPerson).map(nk => {
-    const days = Object.values(byPerson[nk]).sort((a, b) => String(b.date).localeCompare(String(a.date)));
-    return {
-      nickname: nk,
-      department: (usersMap[nk] || {}).department || '',
-      env_days: days.filter(d => d.env > 0).length,
-      lesson_days: days.filter(d => d.lesson > 0).length,
-      days: days
-    };
-  }).sort((a, b) => String(a.nickname).localeCompare(String(b.nickname)));
-
-  return { ok: true, year_month, people };
-}
 function canCreateTask_(role) {
   return role === 'admin' || role === 'manager' || role === 'admin_staff';
 }
@@ -2469,6 +2952,70 @@ function testMyNotifications(params) {
   return { ok: true, lineBound: lineBound, lineSent: lineSent, appSent: appSent };
 }
 
+/** 經登入驗證後，把這台裝置的 OneSignal subscription ID 綁到目前帳號。 */
+function registerPushSubscription(params) {
+  ensureHeaders(getSheet(SHEET_NAMES.USERS), [
+    'nickname', 'email', 'role', 'department', 'status', 'phone', 'joined_at',
+    'last_login', 'notes', 'subtype', 'line_user_id', 'push_subscription_id'
+  ]);
+  const user = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!user || user.status !== 'active') return { ok: false, error: '找不到可用帳號' };
+  const subscriptionId = String(params.subscription_id || '').trim();
+  if (!/^[A-Za-z0-9_-]{8,256}$/.test(subscriptionId)) return { ok: false, error: 'APP 訂閱識別碼無效' };
+
+  // 同一台裝置只能綁一個帳號；切換使用者時清除舊帳號的裝置綁定。
+  sheetToObjects(SHEET_NAMES.USERS).forEach((item, index) => {
+    if (item.nickname !== user.nickname && String(item.push_subscription_id || '') === subscriptionId) {
+      updateRow(SHEET_NAMES.USERS, index + 2, { push_subscription_id: '' });
+    }
+  });
+  updateRow(SHEET_NAMES.USERS, user._row, { push_subscription_id: subscriptionId });
+  logSystem(user.nickname, 'register_push_subscription', subscriptionId.slice(0, 12), {});
+  return { ok: true, subscription_id: subscriptionId };
+}
+
+function unregisterPushSubscription(params) {
+  const user = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!user || user.status !== 'active') return { ok: false, error: '找不到可用帳號' };
+  updateRow(SHEET_NAMES.USERS, user._row, { push_subscription_id: '' });
+  logSystem(user.nickname, 'unregister_push_subscription', '', {});
+  return { ok: true };
+}
+
+function issueLineBindingCode_(user) {
+  const payload = base64UrlText_(JSON.stringify({
+    v: 1,
+    n: String(user.nickname || ''),
+    x: Date.now() + 10 * 60 * 1000,
+    nonce: Utilities.getUuid().slice(0, 8),
+  }));
+  return payload + '.' + sessionSignature_('line-binding:' + payload);
+}
+
+function verifyLineBindingCode_(code) {
+  const parts = String(code || '').split('.');
+  if (parts.length !== 2 || !constantTimeTextEqual_(parts[1], sessionSignature_('line-binding:' + parts[0]))) {
+    return { ok: false, error: '綁定指令無效' };
+  }
+  try {
+    const payload = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString());
+    if (payload.v !== 1 || Number(payload.x || 0) <= Date.now()) return { ok: false, error: '綁定指令已逾時' };
+    const user = findUserByNickname(String(payload.n || ''));
+    if (!user || user.status !== 'active' || !user.email) return { ok: false, error: '帳號尚未啟用' };
+    return { ok: true, user: user };
+  } catch (error) {
+    return { ok: false, error: '綁定指令無效' };
+  }
+}
+
+/** 產生 10 分鐘有效、只能綁目前登入帳號的 LINE 指令。 */
+function getLineBindingCode(params) {
+  const user = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!user || user.status !== 'active' || !user.email) return { ok: false, error: '請先完成 Google 帳號綁定' };
+  const code = issueLineBindingCode_(user);
+  return { ok: true, command: '綁定 ' + code, expires_in_seconds: 600 };
+}
+
 function addTask(params) {
   const { title, created_by } = params;
   if (!title) return { ok: false, error: '缺少事項標題' };
@@ -2490,7 +3037,7 @@ function addTask(params) {
       title: String(title).trim(),
       detail: params.detail || '',
       assignee: nk,
-      department: u.department,
+      department: normalizeDepartment_(u.department),
       due_date: due,
       status: 'open',
       created_by: created_by,
@@ -2520,7 +3067,7 @@ function saveSelfTask(params) {
     title: String(task.title || '').trim(),
     detail: String(task.source || task.detail || ''),
     assignee: nickname,
-    department: user.department,
+    department: normalizeDepartment_(user.department),
     due_date: String(task.dueDate || todayStr()).slice(0, 10),
     status: task.status === 'done' ? 'done' : 'open',
     created_by: existing ? existing.created_by : nickname,
@@ -2551,8 +3098,8 @@ function listTasks(params) {
   list.forEach(t => { t.due_date = taskDateStr_(t.due_date); });   // 正規化日期
   if (vu.role === 'admin') {
     // 全部
-  } else if (vu.role === 'manager') {
-    list = list.filter(t => t.department === vu.department || t.assignee === viewer || t.created_by === viewer);
+  } else if (vu.role === 'manager' && !isGlobalManager_(vu)) {
+    list = list.filter(t => sameDepartment_(t.department, vu.department) || t.assignee === viewer || t.created_by === viewer);
   } else {
     list = list.filter(t => t.assignee === viewer || t.created_by === viewer);
   }
@@ -2595,33 +3142,36 @@ function pushLine_(userId, text) {
   const token = getLineToken_();
   if (!token || !userId) return false;
   try {
-    UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
+    const response = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
       method: 'post',
       contentType: 'application/json',
       headers: { Authorization: 'Bearer ' + token },
       payload: JSON.stringify({ to: userId, messages: [{ type: 'text', text: String(text) }] }),
       muteHttpExceptions: true
     });
-    return true;
+    const code = response.getResponseCode();
+    return code >= 200 && code < 300;
   } catch (e) { return false; }
 }
 
-// OneSignal Web Push（用暱稱當 external_id）。自動嘗試新版/舊版格式。
-function oneSignalAttempts_(appId, key, externalId, title, message) {
+// OneSignal Web Push：只使用經登入驗證後登記的 subscription ID，不再相信前端自填 external_id。
+function oneSignalAttempts_(appId, key, subscriptionId, title, message) {
   const link = 'https://teacher.blockplanetcamp.com/review/anqin-v2/index.html?notify=1';
   return [
     { url: 'https://api.onesignal.com/notifications', auth: 'Key ' + key,
-      body: { app_id: appId, target_channel: 'push', include_aliases: { external_id: [String(externalId)] }, headings: { en: title }, contents: { en: message }, url: link } },
+      body: { app_id: appId, target_channel: 'push', include_subscription_ids: [String(subscriptionId)], headings: { en: title }, contents: { en: message }, url: link } },
     { url: 'https://onesignal.com/api/v1/notifications', auth: 'Basic ' + key,
-      body: { app_id: appId, include_external_user_ids: [String(externalId)], headings: { en: title }, contents: { en: message }, url: link } }
+      body: { app_id: appId, include_player_ids: [String(subscriptionId)], headings: { en: title }, contents: { en: message }, url: link } }
   ];
 }
 function pushOneSignal_(externalId, title, message) {
   const props = PropertiesService.getScriptProperties();
   const appId = props.getProperty('ONESIGNAL_APP_ID');
   const key = props.getProperty('ONESIGNAL_REST_KEY');
-  if (!appId || !key || !externalId) return false;
-  const attempts = oneSignalAttempts_(appId, key, externalId, title, message);
+  const user = externalId ? findUserByNickname(String(externalId)) : null;
+  const subscriptionId = user ? String(user.push_subscription_id || '') : '';
+  if (!appId || !key || !subscriptionId) return false;
+  const attempts = oneSignalAttempts_(appId, key, subscriptionId, title, message);
   for (let i = 0; i < attempts.length; i++) {
     try {
       const r = UrlFetchApp.fetch(attempts[i].url, {
@@ -2642,7 +3192,10 @@ function debugPush(params) {
   const key = props.getProperty('ONESIGNAL_REST_KEY');
   if (!appId || !key) return { ok: false, hasApp: !!appId, hasKey: !!key };
   const ext = String((params && params.nickname) || '柏翰');
-  const attempts = oneSignalAttempts_(appId, key, ext, 'debug', 'debug push');
+  const user = findUserByNickname(ext);
+  const subscriptionId = user ? String(user.push_subscription_id || '') : '';
+  if (!subscriptionId) return { ok: false, error: '目前帳號尚未登記 APP 訂閱' };
+  const attempts = oneSignalAttempts_(appId, key, subscriptionId, 'debug', 'debug push');
   const results = attempts.map(a => {
     try {
       const r = UrlFetchApp.fetch(a.url, { method: 'post', contentType: 'application/json', headers: { Authorization: a.auth }, payload: JSON.stringify(a.body), muteHttpExceptions: true });
@@ -2735,23 +3288,24 @@ function handleLineWebhook_(body) {
       const m = text.match(/^綁定\s*(.+)$/);
       let reply;
       if (m) {
-        const nk = m[1].trim();
-        const u = findUserByNickname(nk);
-        if (!u) {
-          reply = '找不到暱稱「' + nk + '」，請確認後再試。';
-        } else if (u.status !== 'active') {
-          reply = '此帳號目前未啟用，請聯絡管理員。';
-        } else if (!u.email) {
-          reply = '請先用 Google 登入 KPI 系統完成身分綁定，再回來輸入相同指令。';
+        const verified = verifyLineBindingCode_(m[1].trim());
+        const u = verified.user;
+        if (!verified.ok || !u) {
+          const legacyUser = findUserByNickname(m[1].trim());
+          if (legacyUser && String(legacyUser.line_user_id || '') === String(userId)) {
+            reply = '✅ ' + legacyUser.nickname + ' 已完成綁定。';
+          } else {
+            reply = '此綁定指令無效或已逾時。請先登入 KPI 系統，在「更多 → 帳號與通知」重新取得綁定指令。';
+          }
         } else if (u.line_user_id && String(u.line_user_id) !== String(userId)) {
-          reply = '此暱稱已綁定其他 LINE，請由管理員先解除舊綁定。';
+          reply = '此帳號已綁定其他 LINE，請由管理員先解除舊綁定。';
         } else {
-          const sameLineUser = sheetToObjects(SHEET_NAMES.USERS).find(item => item.line_user_id && String(item.line_user_id) === String(userId) && item.nickname !== nk);
+          const sameLineUser = sheetToObjects(SHEET_NAMES.USERS).find(item => item.line_user_id && String(item.line_user_id) === String(userId) && item.nickname !== u.nickname);
           if (sameLineUser) {
             reply = '這個 LINE 已綁定「' + sameLineUser.nickname + '」，請由管理員先解除舊綁定。';
           } else {
             updateRow(SHEET_NAMES.USERS, u._row, { line_user_id: userId });
-            reply = u.line_user_id ? '✅ ' + nk + ' 已完成綁定。' : '✅ ' + nk + ' 綁定成功！之後事項提醒會推播到這裡。';
+            reply = u.line_user_id ? '✅ ' + u.nickname + ' 已完成綁定。' : '✅ ' + u.nickname + ' 綁定成功！之後事項提醒會推播到這裡。';
           }
         }
       } else if (/^kpi/i.test(text)) {
@@ -2761,7 +3315,7 @@ function handleLineWebhook_(body) {
         catch (e) { pushLine_(userId, '❌ 日報生成失敗：' + e.message); }
         return;
       } else {
-        reply = '請輸入「綁定 你的暱稱」來接收事項提醒，例如：綁定 松鼠\n（老闆可輸入「kpi」取得今日日報 PDF）';
+        reply = '請先登入 KPI 系統，在「更多 → 帳號與通知」取得 LINE 綁定指令。\n（老闆可輸入「kpi」取得今日日報 PDF）';
       }
       if (ev.replyToken) replyLine_(ev.replyToken, reply);
     }
@@ -2793,6 +3347,160 @@ function setupTaskReminderTrigger() {
   ScriptApp.newTrigger('sendMorningReminders').timeBased().everyDays(1).atHour(7).nearMinute(30).create();
   return { ok: true, msg: '已建立：晚上 20:00 預告隔天 + 早上 07:30 提醒當天' };
 }
+
+// ════════════════════════════════════════════════════════════
+//  archivefiles.gs
+// ════════════════════════════════════════════════════════════
+
+/**
+ * 列出既有 KPI PDF 歸檔。舊資料只以檔案供查閱，不匯入安親 V2 紀錄。
+ */
+function listArchivedKpiFiles(params) {
+  const viewer = params && params.viewer ? findUserByNickname(params.viewer) : null;
+  if (!viewer || viewer.status !== 'active') return { ok: false, error: '找不到可用帳號' };
+
+  const requestedMonth = /^\d{4}-\d{2}$/.test(String(params.month || '')) ? String(params.month) : '';
+  const limit = Math.max(1, Math.min(Number(params.limit) || 300, 500));
+  const props = PropertiesService.getScriptProperties();
+  let root = null;
+  const cached = props.getProperty('KPI_PDF_FOLDER_ID');
+  if (cached) {
+    try { root = DriveApp.getFolderById(cached); } catch (e) {}
+  }
+  if (!root) {
+    const roots = DriveApp.getFoldersByName('KPI日報PDF');
+    if (roots.hasNext()) root = roots.next();
+  }
+  if (!root) return { ok: true, files: [], months: [] };
+
+  const users = sheetToObjects(SHEET_NAMES.USERS).filter(user => user.status === 'active');
+  let allowedNicknames = [];
+  if (viewer.role === 'admin') {
+    allowedNicknames = users.map(user => String(user.nickname || '')).filter(Boolean);
+  } else if (isGlobalManager_(viewer)) {
+    allowedNicknames = users.map(user => String(user.nickname || '')).filter(Boolean);
+  } else if (viewer.role === 'manager') {
+    allowedNicknames = users
+      .filter(user => sameDepartment_(user.department, viewer.department) || user.nickname === viewer.nickname)
+      .map(user => String(user.nickname || ''))
+      .filter(Boolean);
+  } else {
+    allowedNicknames = [String(viewer.nickname || '')];
+  }
+
+  const files = [];
+  const months = {};
+  let scanned = 0;
+
+  function addFile(file, monthHint) {
+    if (scanned >= 1500) return;
+    scanned += 1;
+    const fileName = String(file.getName() || '');
+    if (!/\.pdf$/i.test(fileName)) return;
+
+    const personMatch = /^KPI_(.+)_(\d{4}-\d{2}-\d{2})\.pdf$/i.exec(fileName);
+    const dailyMatch = /^KPI日報_(\d{4}-\d{2}-\d{2})\.pdf$/i.exec(fileName);
+    let nickname = '';
+    let date = '';
+    let kind = '';
+
+    if (personMatch) {
+      nickname = personMatch[1];
+      date = personMatch[2];
+      kind = 'person';
+      if (viewer.role !== 'admin' && allowedNicknames.indexOf(nickname) < 0) return;
+    } else if (dailyMatch && viewer.role === 'admin') {
+      date = dailyMatch[1];
+      kind = 'daily';
+    } else {
+      const embeddedDate = fileName.match(/\d{4}-\d{2}-\d{2}/);
+      const matchedNickname = allowedNicknames.find(name => name && fileName.indexOf(name) >= 0);
+      if (!embeddedDate || (!matchedNickname && viewer.role !== 'admin')) return;
+      date = embeddedDate[0];
+      nickname = matchedNickname || '';
+      kind = nickname ? 'person' : 'other';
+    }
+
+    const month = date ? date.slice(0, 7) : monthHint;
+    if (requestedMonth && month !== requestedMonth) return;
+    if (month) months[month] = true;
+    files.push({
+      id: file.getId(),
+      fileName: fileName,
+      nickname: nickname,
+      date: date,
+      month: month || '',
+      kind: kind,
+      url: file.getUrl(),
+      updatedAt: Utilities.formatDate(file.getLastUpdated(), Session.getScriptTimeZone() || 'Asia/Taipei', "yyyy-MM-dd'T'HH:mm:ssXXX"),
+    });
+  }
+
+  function scanFiles(folder, monthHint) {
+    const iterator = folder.getFiles();
+    while (iterator.hasNext() && scanned < 1500) addFile(iterator.next(), monthHint);
+  }
+
+  scanFiles(root, '');
+  if (requestedMonth) {
+    const matchingFolders = root.getFoldersByName(requestedMonth);
+    while (matchingFolders.hasNext() && scanned < 1500) scanFiles(matchingFolders.next(), requestedMonth);
+  } else {
+    const folders = root.getFolders();
+    while (folders.hasNext() && scanned < 1500) {
+      const folder = folders.next();
+      scanFiles(folder, /^\d{4}-\d{2}$/.test(folder.getName()) ? folder.getName() : '');
+    }
+  }
+
+  files.sort((a, b) => String(b.date || b.updatedAt).localeCompare(String(a.date || a.updatedAt)) || a.fileName.localeCompare(b.fileName));
+  return {
+    ok: true,
+    files: files.slice(0, limit),
+    months: Object.keys(months).sort().reverse(),
+  };
+}
+
+/**
+ * 將老師匯出的月歸檔 CSV 同步存入 Drive。
+ * 路徑：KPI月歸檔 / 部門 / 暱稱 / YYYY-MM / YYYY-MM_暱稱_安親KPI月歸檔.csv
+ */
+function archiveMonthlyCsv(params) {
+  const nickname = String(params.nickname || '').trim();
+  const month = String(params.month || '').trim();
+  const csv = String(params.csv || '');
+  if (!nickname || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !csv) {
+    return { ok: false, error: '月歸檔資料不完整' };
+  }
+  if (csv.length > 5 * 1024 * 1024) return { ok: false, error: '月歸檔超過 5 MB 上限' };
+  const user = findUserByNickname(nickname);
+  if (!user || user.status !== 'active') return { ok: false, error: '找不到可用帳號' };
+
+  const roots = DriveApp.getFoldersByName('KPI月歸檔');
+  const root = roots.hasNext() ? roots.next() : DriveApp.createFolder('KPI月歸檔');
+  const department = normalizeDepartment_(user.department) || '未分部門';
+  const departmentFolder = getOrCreateChildFolder_(root, department);
+  const userFolder = getOrCreateChildFolder_(departmentFolder, nickname);
+  const monthFolder = getOrCreateChildFolder_(userFolder, month);
+  const safeNickname = nickname.replace(/[\\/:*?"<>|]/g, '-');
+  const fileName = month + '_' + safeNickname + '_安親KPI月歸檔.csv';
+  const existing = monthFolder.getFilesByName(fileName);
+  while (existing.hasNext()) existing.next().setTrashed(true);
+  const file = monthFolder.createFile(Utilities.newBlob(csv, 'text/csv;charset=utf-8', fileName));
+  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (error) {}
+  const url = 'https://drive.google.com/file/d/' + file.getId() + '/view';
+  logSystem(nickname, 'archive_monthly_csv', month, { fileName: fileName });
+  return {
+    ok: true,
+    url: url,
+    fileName: fileName,
+    folderPath: ['KPI月歸檔', department, nickname, month].join(' / '),
+  };
+}
+
+// ════════════════════════════════════════════════════════════
+//  pdfreport.gs
+// ════════════════════════════════════════════════════════════
 
 /**
  * KPI 日報 PDF：每晚自動生成全員日報（含照片）→ 存 Drive → LINE 推連結給老闆
@@ -2828,6 +3536,11 @@ function pdfEsc_(s) {
     .replace(/"/g, '&quot;').replace(/\n/g, '<br>');
 }
 
+function pdfSafeUrl_(value) {
+  const url = String(value || '').trim();
+  return /^https:\/\/[^\s"'<>]+$/i.test(url) ? pdfEsc_(url) : '';
+}
+
 /** 取縮圖 dataURI（lh3 縮到 w360 控制檔案大小；失敗回空字串跳過該圖） */
 function pdfPhotoUri_(fileId) {
   if (!fileId) return '';
@@ -2860,7 +3573,8 @@ function pdfLogCard_(l) {
   const k5 = parseJsonField(l.kpi5_data) || {};
   const k6 = parseJsonField(l.kpi6_data) || {};
   const atts = parseJsonField(l.attachments);
-  const photos = Array.isArray(atts) ? atts.filter(a => a && a.type === 'photo' && a.fileId) : [];
+  const attachments = Array.isArray(atts) ? atts.filter(a => a && typeof a === 'object') : [];
+  const photos = attachments.filter(a => a.type === 'photo' && a.fileId);
 
   const submitted = l.submitted_at
     ? '<span style="background:#EDF5E3; color:#4E7A28; padding:2px 10px; border-radius:10px; font-size:11px; font-weight:bold;">✅ 已提交</span>'
@@ -2933,6 +3647,19 @@ function pdfLogCard_(l) {
     });
     h += '</tr></table>';
   }
+
+  const linkedAttachments = attachments.filter(a => pdfSafeUrl_(a.url));
+  if (linkedAttachments.length) {
+    h += '<div style="margin-top:8px;"><span style="color:#C77A12; font-weight:bold;">🔗 成果附件（' + linkedAttachments.length + '）</span></div>';
+    h += '<ul style="margin:4px 0 0 18px; padding:0;">';
+    linkedAttachments.forEach(function (a, index) {
+      const url = pdfSafeUrl_(a.url);
+      const label = String(a.fileName || a.description || (a.type === 'photo' ? '成果照片 ' + (index + 1) : '成果附件 ' + (index + 1)));
+      const note = a.description && String(a.description) !== label ? '｜' + pdfEsc_(a.description) : '';
+      h += '<li style="margin:3px 0;"><a href="' + url + '" style="color:#2A7FA8;">' + pdfEsc_(label) + '</a>' + note + '</li>';
+    });
+    h += '</ul>';
+  }
   h += '</div>';
   return h;
 }
@@ -2966,12 +3693,12 @@ function buildDailyKpiHtml_(dateStr) {
      + '</td></tr></table>';
 
   // 部門分組
-  const deptOrder = ['永康教室', '北區教室', '才藝部門'];
-  const depts = deptOrder.concat(users.map(u => u.department).filter(d => d && deptOrder.indexOf(d) < 0));
+  const deptOrder = ['東橋教室', '北區教室', '才藝部門'];
+  const depts = deptOrder.concat(users.map(u => normalizeDepartment_(u.department)).filter(d => d && deptOrder.indexOf(d) < 0));
   const seen = {};
   depts.forEach(d => {
     if (!d || seen[d]) return; seen[d] = true;
-    const deptLogs = logs.filter(l => l.department === d);
+    const deptLogs = logs.filter(l => sameDepartment_(l.department, d));
     if (!deptLogs.length) return;
     h += '<div style="font-size:16px; font-weight:bold; color:#2C3E50; border-bottom:2.5px solid #E89B3C; padding-bottom:4px; margin:16px 0 4px;">🏫 ' + pdfEsc_(d) + '</div>';
     deptLogs.sort((a, b) => (a.role === 'manager' ? -1 : 1) - (b.role === 'manager' ? -1 : 1));
@@ -3017,11 +3744,24 @@ function kpiPdfMsg_(dateStr, r) {
   return t;
 }
 
-/** 老闆名單：所有 active admin ＋ 小魚（另一位老闆；LINE 收全部人、App 通知維持部門制不動） */
+/** 全體日報收件人：所有 active admin ＋ 可跨教室查看的小魚。 */
 function bossUsers_() {
   return sheetToObjects(SHEET_NAMES.USERS).filter(x =>
-    x.status === 'active' && (x.role === 'admin' || x.nickname === '小魚')
+    x.status === 'active' && (x.role === 'admin' || isGlobalManager_(x))
   );
+}
+
+/** 單一老師送出時：同教室主管、跨教室主管小魚，以及所有管理員。 */
+function reportRecipientUsers_(log) {
+  const seen = {};
+  return sheetToObjects(SHEET_NAMES.USERS).filter(function (user) {
+    if (!user || user.status !== 'active') return false;
+    const included = user.role === 'admin' || isGlobalManager_(user) ||
+      (user.role === 'manager' && sameDepartment_(user.department, log.department));
+    if (!included || seen[user.nickname]) return false;
+    seen[user.nickname] = true;
+    return true;
+  });
 }
 
 /** 單人日報 PDF（老師送出當下即時生成） */
@@ -3052,8 +3792,8 @@ function generatePersonKpiPdf_(nickname, dateStr) {
 }
 
 /**
- * 老師正式送出後，前端背景呼叫：生成單人 PDF → LINE 分別傳給老闆們（柏翰＋小魚）
- * 同一版本只發一次；老師更新日報後會重建最新 PDF 並再次通知。
+ * 老師正式送出後，生成單人 PDF，並以 APP／LINE 通知同教室主管、小魚與管理員。
+ * 每位收件人同一版本只需任一管道成功一次；失敗者可單獨重試，不重複打擾已送達者。
  */
 function sendSubmitPdf(params) {
   const nickname = params.nickname;
@@ -3061,29 +3801,78 @@ function sendSubmitPdf(params) {
   if (!nickname || !dateStr) return { ok: false, error: 'missing nickname/date' };
   const log_id = 'LOG-' + dateStr.replace(/-/g, '') + '-' + nickname;
   const props = PropertiesService.getScriptProperties();
-  const dedupeKey = 'SENTPDF_' + log_id;
   const log = findObject(SHEET_NAMES.LOGS, 'log_id', log_id);
   if (!log) return { ok: false, error: 'log not found' };
   if (!log.submitted_at) return { ok: false, error: 'not submitted' };
-  const lastSentAt = props.getProperty(dedupeKey) || '';
-  if (lastSentAt && lastSentAt >= String(log.updated_at || '')) return { ok: true, skipped: 'already_current' };
-  const r = generatePersonKpiPdf_(nickname, dateStr);
+  const version = String(log.updated_at || log.submitted_at || nowIso());
+  const pdfVersionKey = 'PERSONPDF_VERSION_' + log_id;
+  const pdfUrlKey = 'PERSONPDF_URL_' + log_id;
+  const cachedPdfVersion = props.getProperty(pdfVersionKey) || '';
+  const cachedPdfUrl = props.getProperty(pdfUrlKey) || '';
+  let r = cachedPdfVersion >= version && cachedPdfUrl
+    ? { url: cachedPdfUrl, log: log }
+    : generatePersonKpiPdf_(nickname, dateStr);
   if (!r) return { ok: false, error: 'pdf generation failed' };
-  props.setProperty(dedupeKey, nowIso());
+  if (!(cachedPdfVersion >= version && cachedPdfUrl)) {
+    props.setProperty(pdfVersionKey, version);
+    props.setProperty(pdfUrlKey, r.url);
+  }
 
   const md = dateStr.slice(5).replace('-', '/');
-  let msg = '📄 ' + nickname + ' ' + md + (lastSentAt ? ' 日報已更新' : ' 已繳交');
+  let msg = '📄 ' + nickname + ' ' + md + ' KPI 日報已送出';
   if (r.log.is_makeup === true) msg += '（補繳）';
   if (r.log.help_needed === true) msg += '\n🚨 有求助：' + String(r.log.help_content || '').slice(0, 100);
   msg += '\n完整日報（含照片）👇\n' + r.url;
 
-  const sent = [];
-  bossUsers_().forEach(b => {
-    if (b.nickname === nickname) return;   // 自己不用收自己的
-    if (b.line_user_id) { pushLine_(b.line_user_id, msg); sent.push(b.nickname); }
+  const deliveries = [];
+  reportRecipientUsers_(log).forEach(function (recipient) {
+    if (recipient.nickname === nickname) return;
+    const recipientKey = 'SENTPDF_USER_' + log_id + '_' + recipient.nickname;
+    const lineKey = 'SENTPDF_LINE_' + log_id + '_' + recipient.nickname;
+    const appKey = 'SENTPDF_APP_' + log_id + '_' + recipient.nickname;
+    const lineBound = Boolean(recipient.line_user_id);
+    const appBound = Boolean(recipient.push_subscription_id);
+    const lineAlreadySent = lineBound && (props.getProperty(lineKey) || '') >= version;
+    const appAlreadySent = appBound && (props.getProperty(appKey) || '') >= version;
+    const previouslyReached = Boolean(lineAlreadySent || appAlreadySent || (props.getProperty(recipientKey) || '') >= version);
+    const lineSent = lineBound && !lineAlreadySent && pushLine_(recipient.line_user_id, msg);
+    const appSent = appBound && !appAlreadySent && pushOneSignal_(recipient.nickname, nickname + ' 已送出 KPI 日報', md + ' 的紀錄與成果證據已可查看');
+    if (lineSent) props.setProperty(lineKey, version);
+    if (appSent) props.setProperty(appKey, version);
+    const lineReached = Boolean(lineAlreadySent || lineSent);
+    const appReached = Boolean(appAlreadySent || appSent);
+    const reached = Boolean(previouslyReached || lineReached || appReached);
+    const channelsComplete = Boolean((lineBound || appBound) && (!lineBound || lineReached) && (!appBound || appReached));
+    if (reached) props.setProperty(recipientKey, version);
+    deliveries.push({
+      nickname: recipient.nickname,
+      lineBound: lineBound,
+      appBound: appBound,
+      lineSent: Boolean(lineSent),
+      appSent: Boolean(appSent),
+      lineReached: lineReached,
+      appReached: appReached,
+      alreadySent: Boolean(previouslyReached && !lineSent && !appSent),
+      reached: reached,
+      channelsComplete: channelsComplete,
+    });
   });
-  logSystem('system', 'pdf_person', log_id, { sent: sent });
-  return { ok: true, url: r.url, sent: sent };
+  const pending = deliveries.filter(item => !item.reached).map(item => item.nickname);
+  const partial = deliveries.filter(item => item.reached && !item.channelsComplete).map(item => item.nickname);
+  const newlyReached = deliveries.filter(item => item.lineSent || item.appSent).map(item => item.nickname);
+  const allReached = deliveries.length > 0 && pending.length === 0;
+  if (allReached) props.setProperty('SENTPDF_' + log_id, version);
+  const notification = {
+    recipientCount: deliveries.length,
+    reachedCount: deliveries.filter(item => item.reached).length,
+    allReached: allReached,
+    allChannelsReached: deliveries.length > 0 && deliveries.every(item => item.channelsComplete),
+    pending: pending,
+    partial: partial,
+    deliveries: deliveries,
+  };
+  logSystem('system', 'pdf_person', log_id, { sent: newlyReached, notification: notification });
+  return { ok: true, url: r.url, sent: newlyReached, notification: notification };
 }
 
 /** API：手動生成＋推播給所有 admin（?action=sendDailyKpiPdf&operator=柏翰&date=…） */
@@ -3095,7 +3884,7 @@ function sendDailyKpiPdf(params) {
   const msg = kpiPdfMsg_(dateStr, r);
   bossUsers_().forEach(a => {
     if (a.line_user_id) pushLine_(a.line_user_id, msg);
-    if (a.role === 'admin') pushOneSignal_(a.nickname, '📄 KPI 日報 ' + dateStr, '已提交 ' + r.summary.submitted + '/' + r.summary.total + '，點開看完整報告');
+    pushOneSignal_(a.nickname, '📄 KPI 日報 ' + dateStr, '已提交 ' + r.summary.submitted + '/' + r.summary.total + '，點開看完整報告');
   });
   logSystem(params.operator, 'kpi_pdf', dateStr, r.summary);
   return { ok: true, url: r.url, summary: r.summary };
@@ -3108,7 +3897,7 @@ function sendDailyKpiReportAuto() {
   const msg = kpiPdfMsg_(dateStr, r);
   bossUsers_().forEach(a => {
     if (a.line_user_id) pushLine_(a.line_user_id, msg);
-    if (a.role === 'admin') pushOneSignal_(a.nickname, '📄 KPI 日報 ' + dateStr, '已提交 ' + r.summary.submitted + '/' + r.summary.total + '，點開看完整報告');
+    pushOneSignal_(a.nickname, '📄 KPI 日報 ' + dateStr, '已提交 ' + r.summary.submitted + '/' + r.summary.total + '，點開看完整報告');
   });
   logSystem('system', 'kpi_pdf_auto', dateStr, r.summary);
 }
@@ -3135,7 +3924,15 @@ function handleKpiLineCommand_(lineUserId, text) {
   return kpiPdfMsg_(dateStr, r);
 }
 
-// ===== 安親 V2 備課教案建檔 =====
+// ════════════════════════════════════════════════════════════
+//  courseprep.gs
+// ════════════════════════════════════════════════════════════
+
+/**
+ * 安親 V2 備課教案建檔。
+ * 教材原檔存放在 Drive；此表只保存可跨裝置還原的備課、教案與檔案連結。
+ */
+
 function ensureCoursePrepSheet_() {
   const ss = getSS();
   let sheet = ss.getSheetByName(SHEET_NAMES.COURSE_PREP);
@@ -3176,8 +3973,10 @@ function saveCoursePrep(params) {
     return { ok: false, error: '備課檔案資料不完整' };
   }
   const now = nowIso();
-  ensureCoursePrepSheet_();
-  const existing = findObject(SHEET_NAMES.COURSE_PREP, 'prep_id', prep.id);
+  const existing = (() => {
+    ensureCoursePrepSheet_();
+    return findObject(SHEET_NAMES.COURSE_PREP, 'prep_id', prep.id);
+  })();
   if (existing && existing.nickname !== nickname && user.role !== 'admin') {
     return { ok: false, error: '不可覆蓋其他老師的備課檔案' };
   }
@@ -3186,7 +3985,7 @@ function saveCoursePrep(params) {
   upsertRow(SHEET_NAMES.COURSE_PREP, 'prep_id', {
     prep_id: prep.id,
     nickname: nickname,
-    department: user.department,
+    department: normalizeDepartment_(user.department),
     title: String(prep.title || '').trim(),
     course_type: String(prep.details && prep.details.targetCourse || ''),
     created_date: String(prep.date || todayStr()).slice(0, 10),
@@ -3207,8 +4006,8 @@ function listCoursePreps(params) {
   let rows = sheetToObjects(SHEET_NAMES.COURSE_PREP);
   if (viewerUser.role === 'teacher' || viewerUser.role === 'admin_staff') {
     rows = rows.filter(row => row.nickname === viewer);
-  } else if (viewerUser.role === 'manager') {
-    rows = rows.filter(row => row.department === viewerUser.department || row.nickname === viewer);
+  } else if (viewerUser.role === 'manager' && !isGlobalManager_(viewerUser)) {
+    rows = rows.filter(row => sameDepartment_(row.department, viewerUser.department) || row.nickname === viewer);
   }
   if (params.nickname) rows = rows.filter(row => row.nickname === String(params.nickname));
   rows.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));

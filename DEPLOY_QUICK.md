@@ -1,234 +1,101 @@
-# 🚀 KPI 系統 - 快速部署指南
+# KPI 系統部署與更新
 
-> 預計時間：30 分鐘（首次）｜難度：跟著做就會
+本文件適用於正式站 `https://teacher.blockplanetcamp.com/`。既有資料庫更新時不要刪除工作表，也不要重新建立空白試算表。
 
----
+## 1. 更新 Apps Script
 
-## 🎯 你要完成的 4 件事
+1. 開啟 KPI 系統的 Apps Script 專案。
+2. 將 `apps-script/_all_in_one.gs` 的完整內容更新到專案程式碼。
+3. 儲存後手動執行 `setupSheets()`。
+4. 確認共 15 個資料表，並確認舊「永康教室」已轉為「東橋教室」。
+5. 執行 `setupSystemAutomation()`，確認排程與提醒均建立成功。
+6. 「部署 → 管理部署作業 → 編輯 → 新版本 → 部署」。
+7. 保持執行身分為擁有者、存取權限為任何人；資料 API 仍由系統簽章工作階段保護。
 
-```
-1️⃣ 建 Google Sheet + 貼後端程式碼（10 分鐘）
-2️⃣ 部署 Apps Script 為 Web App（5 分鐘）
-3️⃣ 設定 Google OAuth Client ID（10 分鐘）
-4️⃣ 填前端 config + 推 GitHub Pages（5 分鐘）
-```
+首次建立時可在 Google Sheet 的「擴充功能 → Apps Script」貼上同一份合併檔，再依上述步驟執行。初始化只預建人員暱稱，不會替使用者填入 Email。
 
----
+## 2. 首位管理員與新人
 
-## 1️⃣ 建 Google Sheet 後端（10 分鐘）
+系統不允許使用者自行認領暱稱。
 
-### Step 1.1 開新 Sheet
-1. 開 [sheets.new](https://sheets.new) 建立一份新 Sheet
-2. 重新命名為 **`KPI系統資料庫`**
-3. **記下這份 Sheet 的網址**，之後 admin 也會用到
+1. 首次安裝後，在 `Users` 表手動填入柏翰的 Google Email。
+2. 柏翰登入後，到人員管理替每位新人建立或更新：暱稱、Email、角色、教室、狀態。
+3. 新人使用完全相同的 Google Email 登入。
+4. 若人員離職，改為 `suspended`；不要刪除，避免歷史紀錄失去關聯。
 
-### Step 1.2 開 Apps Script
-1. 上方選單點「**擴充功能 → Apps Script**」
-2. 會打開新分頁，看到預設的 `Code.gs` 編輯器
-3. 把預設那幾行 `function myFunction()` 全部刪掉（Ctrl+A 全選 → Delete）
+## 3. 必要設定
 
-### Step 1.3 貼後端程式碼
-1. ✨ **合併版已自動複製到你的剪貼簿**（剛剛幫你做好了）
-2. 在剛清空的 Code.gs 直接按 **Cmd+V** 貼上
-3. 按 **Cmd+S** 存檔（會跳「請輸入專案名稱」→ 填 `KPI系統`）
-
-> 💡 如果剪貼簿被你後來覆蓋了，用這指令重新複製：
-> ```bash
-> cat "/Users/laibaihan/Desktop/claude project gogo/teacherlog/apps-script/_all_in_one.gs" | pbcopy
-> ```
-
-### Step 1.4 初始化 Sheet
-1. 編輯器上方有個下拉選單，點開選 **`setupSheets`**
-2. 點右邊「**▶ 執行**」按鈕
-3. 第一次會跳授權視窗：
-   - 點「**檢閱權限**」
-   - 選你的 Google 帳號
-   - 出現「Google 尚未驗證這個應用程式」→ 點「**進階 → 前往 KPI系統（不安全）**」
-   - 接受權限
-4. 等個 10 秒，下方執行記錄顯示「**已順利完成執行作業**」
-5. 切回 Google Sheet → **應該看到 11 個分頁**（Users / DailyLogs / OKR_Goals ... 等等）
-6. 打開 `Users` 分頁，確認看到 11 位預填人員（柏翰 / 酸酸 / 小魚 / 柳丁 / 松鼠...）
-
-✅ **後端完成！**
-
----
-
-## 2️⃣ 部署 Web App（5 分鐘）
-
-### Step 2.1 部署
-1. 回到 Apps Script 編輯器
-2. 右上角點「**部署 → 新增部署作業**」
-3. 點齒輪 ⚙️ → 選「**網頁應用程式**」
-4. 設定：
-   - **說明**：`KPI v1`
-   - **執行身分**：選「**我（你的 Gmail）**」
-   - **誰可以存取**：選「**任何人**」
-5. 點「**部署**」
-6. 又會跳授權 → 接受
-
-### Step 2.2 複製 Web App URL
-部署成功後會顯示一個網址：
-```
-https://script.google.com/macros/s/AKfy.....xxxxx/exec
-```
-**把這個網址複製起來**（等下要貼到前端）
-
-> ⚠️ 注意：**不要關掉這個視窗**，這網址只會出現一次，沒抄到要重新部署
-
-✅ **Web App URL 拿到！**
-
----
-
-## 3️⃣ Google OAuth Client ID（10 分鐘）
-
-### Step 3.1 開 Google Cloud Console
-1. 打開 [Google Cloud Console - 憑證](https://console.cloud.google.com/apis/credentials)
-2. 第一次用會要建立專案：點上方「**選取專案 → 新增專案**」
-   - 專案名稱：`布拉克星球`
-   - 點建立 → 等 30 秒 → 切換到該專案
-
-### Step 3.2 設定 OAuth 同意畫面
-1. 左側選單「**OAuth 同意畫面**」
-2. 使用者類型：選「**外部**」→ 建立
-3. 填：
-   - 應用程式名稱：`布拉克星球 KPI 系統`
-   - 使用者支援電子郵件：你的 Gmail
-   - 開發人員聯絡資訊：你的 Gmail
-4. 一路按「儲存並繼續」直到完成
-5. 「測試使用者」步驟可以加你跟團隊成員的 Gmail（或先空著）
-
-### Step 3.3 建立 OAuth Client ID
-1. 回到「**憑證**」分頁
-2. 點上方「**+ 建立憑證 → OAuth 用戶端 ID**」
-3. 應用程式類型：**網頁應用程式**
-4. 名稱：`KPI 前端`
-5. **授權的 JavaScript 來源**加入：
-   ```
-   https://teacher.blockplanetcamp.com
-   http://localhost:5500
-   http://127.0.0.1:5500
-   ```
-6. 「授權的重新導向 URI」不用填
-7. 點「**建立**」
-
-### Step 3.4 複製 Client ID
-跳出一個視窗顯示「Client ID」，類似：
-```
-1234567890-abcdefghijk.apps.googleusercontent.com
-```
-**複製這個 Client ID**
-
-✅ **Client ID 拿到！**
-
----
-
-## 4️⃣ 設定前端 + 推 GitHub Pages（5 分鐘）
-
-### Step 4.1 填 config.js
-打開 `teacherlog/shared/config.js`，把兩個 `REPLACE_ME` 換掉：
+`shared/config.js`：
 
 ```js
-API_URL: '貼上 Step 2.2 的 Web App URL',
-GOOGLE_CLIENT_ID: '貼上 Step 3.4 的 Client ID',
+API_URL: 'Apps Script Web App /exec 網址',
+GOOGLE_CLIENT_ID: 'Google OAuth 網頁用戶端 ID',
 ```
 
-> 💡 用這指令快速打開：
-> ```bash
-> open -a "Visual Studio Code" "/Users/laibaihan/Desktop/claude project gogo/teacherlog/shared/config.js"
-> ```
+Google OAuth 的 JavaScript 來源至少包含：
 
-### Step 4.2 推到 GitHub
-（沿用你 camp2026 的部署模式）
-```bash
-cd "/Users/laibaihan/Desktop/claude project gogo/teacherlog"
-git init
-git add .
-git commit -m "init KPI 系統"
-git branch -M main
-git remote add origin git@github.com:alienlai0607-ai/teacherlog.git
-git push -u origin main
+```text
+https://teacher.blockplanetcamp.com
+http://127.0.0.1:8788
 ```
 
-> 💡 還沒建 Repo？先到 [github.com/new](https://github.com/new) 建一個 `teacherlog`（Private 或 Public 都可以）
+Apps Script「指令碼屬性」需視功能設定：
 
-### Step 4.3 啟用 Pages + 綁網域
-1. GitHub Repo → **Settings → Pages**
-2. Source: **Deploy from a branch** → branch `main` / `(root)`
-3. Custom domain: `teacher.blockplanetcamp.com`
-4. 勾選「**Enforce HTTPS**」（要等 SSL 生效，可能 10 分鐘）
+| 屬性 | 用途 |
+|---|---|
+| `GOOGLE_CLIENT_ID` | 後端核對 Google ID token 的 audience |
+| `LINE_TOKEN` | LINE Messaging API push token |
+| `ONESIGNAL_APP_ID` | OneSignal Web Push App ID |
+| `ONESIGNAL_REST_KEY` | OneSignal REST API key |
+| `LINE_CHANNEL_SECRET` | LINE webhook 維運識別（若部署環境可取得簽章標頭） |
 
-### Step 4.4 設定 DNS
-進你的網域 DNS 管理（你 camp2026 在哪設的就在同個地方）：
-```
-類型: CNAME
-名稱: teacher
-值: alienlai0607-ai.github.io
-```
+`API_SESSION_SECRET`、PDF 資料夾 ID 等值由後端在需要時建立，不要公開到前端。
 
-✅ **全部完成！**
+## 4. 發布前端
 
----
+1. 更新所有修改過的 JS/CSS 查詢版本號，避免 iPhone 或 LINE 內建瀏覽器沿用舊檔。
+2. 推送 `main` 到正式 GitHub Pages 儲存庫。
+3. 等待 Pages 發布完成。
+4. 用無痕視窗與手機重新開啟正式入口，不要只測已登入分頁。
 
-## 🧪 部署後第一次測試（5 分鐘）
+## 5. 上線檢查
 
-1. 打開 `https://teacher.blockplanetcamp.com`
-2. 看到登入頁 → 用**你（柏翰）的 Gmail** 登入
-3. 出現「請選擇您的身份」→ 點「**柏翰**」
-4. 跳到 admin/dashboard → 看到三部門卡片 ✅
-5. 點上方選單「人員管理」→ 看到 11 位預填人員 ✅
-6. 點「評核主管」→ 可選柳丁/小魚/酸酸 ✅
+- `ping` 回傳 `ok: true`。
+- 柏翰登入顯示管理員本人，不沿用酸酸或其他代看身分。
+- 酸酸只能看東橋；小魚可看東橋與北區；老師只能看與改自己的資料。
+- 老師能建立草稿、關閉後重開、正式送出、重開已送出紀錄。
+- 學科內與學科外選項不互相混入，必填欄位都有紅色星號。
+- 多張照片可一次選取，非圖片檔案可上傳，失敗時本機草稿仍保留。
+- 班務四項各有照片，控制保持精簡。
+- 課程可選備課教案檔案；班級經營不要求備課檔案。
+- 正式送出後 PDF 建立，主管 APP／LINE 回應顯示真實送達狀態。
+- 老師能查看主管評分、主管建議並在同一對話串回覆。
+- 月歸檔路徑為 `KPI月歸檔 / 教室 / 老師 / YYYY-MM`。
+- 舊 PDF 可查閱，但不轉成新版日誌。
+- 桌面與 390px 手機寬度無橫向溢位、按鈕可點、文字不重疊。
 
-如果都正常，叫主管們也用自己 Gmail 登入認領暱稱。
+## 6. 故障判斷
 
----
+### 登入後仍是舊介面
 
-## ❓ 常見問題
+先確認 HTML 引用的查詢版本號已更新，再開無痕視窗測試。登入入口會清除代看狀態並向後端重新核對真實帳號；若仍錯誤，檢查 `Users.email` 是否綁錯人。
 
-### Q1: setupSheets 跑不起來，說「未授權」
-重新跑一次，第一次會跳授權視窗，要按「進階 → 前往（不安全）」。
-這是因為 Apps Script 還沒過 Google 驗證，但你是擁有者，安全沒問題。
+### 白畫面或資料載入失敗
 
-### Q2: 前端登入頁顯示空白
-打開瀏覽器 Console（F12），看錯誤訊息。最常見：
-- `API_URL` 沒換掉 `REPLACE_ME`
-- `GOOGLE_CLIENT_ID` 沒換掉 `REPLACE_ME`
-- Google OAuth 沒加 `teacher.blockplanetcamp.com` 到授權來源
+查看瀏覽器 Console 與 Network，確認 JS/CSS 沒有 404、Apps Script 部署仍有效、`API_URL` 為最新 `/exec`。本機草稿不應因 API 失敗被清除。
 
-### Q3: 登入後跳「此 Email 尚未綁定暱稱」但沒有可選的暱稱
-代表 Users 分頁沒預填成功。回 Apps Script 編輯器重跑 `setupSheets()`。
+### APP／LINE 測試失敗
 
-### Q4: 主管登入卻沒看到部門老師
-檢查 Users 分頁的 `department` 欄位是否正確（永康教室 / 北區教室 / 才藝部門，不能有空白）。
+到「帳號與通知」分別檢查 APP 訂閱與 LINE 綁定。瀏覽器封鎖通知時需從網站設定改為允許；LINE 指令必須使用系統產生、10 分鐘有效的專屬綁定碼。
 
-### Q5: 想清除全部資料重來
-直接到 Google Sheet 把所有分頁刪掉，再執行 `setupSheets()` 一次。
+### 新人無法登入
 
----
+在管理介面確認 Email 完全一致、角色與教室正確、狀態為 `active`。系統不提供自助認領。
 
-## 📞 開發者後門
+## 7. 禁止的維運操作
 
-如果出狀況需要進 Apps Script 看記錄：
-- 編輯器左側「**執行作業**」可以看每次呼叫的紀錄
-- `Logs_System` 分頁有所有重要操作紀錄
-
-修改規則時：
-- 修改獎金金額 → 改 `Code.gs` 的 `BONUS_TEACHER` / `BONUS_MANAGER`
-- 修改 KPI 評分項目 → 改 `setup.gs` 的 `TEACHER_KPI` / `MANAGER_KPI`，重跑 `setupSheets()` 前先刪 `KPI_Config` 分頁
-- 新增/移除人員 → 直接在 admin/users.html 操作
-
----
-
-## 🎉 部署完成 Checklist
-
-- [ ] Google Sheet 11 個分頁建立
-- [ ] Users 分頁有 11 位預填人員
-- [ ] Apps Script Web App 部署
-- [ ] OAuth Client ID 建立
-- [ ] config.js 兩個值都填了
-- [ ] GitHub Pages 啟用
-- [ ] DNS CNAME 設定
-- [ ] SSL 啟用（藍色鎖頭）
-- [ ] 你能登入並看到 admin/dashboard
-- [ ] 主管們也都能登入
-
-完成！🪐
+- 不要為了重跑初始化而刪除所有工作表。
+- 不要直接刪除離職者或舊日誌。
+- 不要把測試帳號綁到正式老師 Email。
+- 不要只改前端角色判斷而省略後端授權。
+- 不要宣稱通知成功，除非 API 回傳該收件人至少一個管道送達。

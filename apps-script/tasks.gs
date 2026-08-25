@@ -76,6 +76,70 @@ function testMyNotifications(params) {
   return { ok: true, lineBound: lineBound, lineSent: lineSent, appSent: appSent };
 }
 
+/** 經登入驗證後，把這台裝置的 OneSignal subscription ID 綁到目前帳號。 */
+function registerPushSubscription(params) {
+  ensureHeaders(getSheet(SHEET_NAMES.USERS), [
+    'nickname', 'email', 'role', 'department', 'status', 'phone', 'joined_at',
+    'last_login', 'notes', 'subtype', 'line_user_id', 'push_subscription_id'
+  ]);
+  const user = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!user || user.status !== 'active') return { ok: false, error: '找不到可用帳號' };
+  const subscriptionId = String(params.subscription_id || '').trim();
+  if (!/^[A-Za-z0-9_-]{8,256}$/.test(subscriptionId)) return { ok: false, error: 'APP 訂閱識別碼無效' };
+
+  // 同一台裝置只能綁一個帳號；切換使用者時清除舊帳號的裝置綁定。
+  sheetToObjects(SHEET_NAMES.USERS).forEach((item, index) => {
+    if (item.nickname !== user.nickname && String(item.push_subscription_id || '') === subscriptionId) {
+      updateRow(SHEET_NAMES.USERS, index + 2, { push_subscription_id: '' });
+    }
+  });
+  updateRow(SHEET_NAMES.USERS, user._row, { push_subscription_id: subscriptionId });
+  logSystem(user.nickname, 'register_push_subscription', subscriptionId.slice(0, 12), {});
+  return { ok: true, subscription_id: subscriptionId };
+}
+
+function unregisterPushSubscription(params) {
+  const user = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!user || user.status !== 'active') return { ok: false, error: '找不到可用帳號' };
+  updateRow(SHEET_NAMES.USERS, user._row, { push_subscription_id: '' });
+  logSystem(user.nickname, 'unregister_push_subscription', '', {});
+  return { ok: true };
+}
+
+function issueLineBindingCode_(user) {
+  const payload = base64UrlText_(JSON.stringify({
+    v: 1,
+    n: String(user.nickname || ''),
+    x: Date.now() + 10 * 60 * 1000,
+    nonce: Utilities.getUuid().slice(0, 8),
+  }));
+  return payload + '.' + sessionSignature_('line-binding:' + payload);
+}
+
+function verifyLineBindingCode_(code) {
+  const parts = String(code || '').split('.');
+  if (parts.length !== 2 || !constantTimeTextEqual_(parts[1], sessionSignature_('line-binding:' + parts[0]))) {
+    return { ok: false, error: '綁定指令無效' };
+  }
+  try {
+    const payload = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString());
+    if (payload.v !== 1 || Number(payload.x || 0) <= Date.now()) return { ok: false, error: '綁定指令已逾時' };
+    const user = findUserByNickname(String(payload.n || ''));
+    if (!user || user.status !== 'active' || !user.email) return { ok: false, error: '帳號尚未啟用' };
+    return { ok: true, user: user };
+  } catch (error) {
+    return { ok: false, error: '綁定指令無效' };
+  }
+}
+
+/** 產生 10 分鐘有效、只能綁目前登入帳號的 LINE 指令。 */
+function getLineBindingCode(params) {
+  const user = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (!user || user.status !== 'active' || !user.email) return { ok: false, error: '請先完成 Google 帳號綁定' };
+  const code = issueLineBindingCode_(user);
+  return { ok: true, command: '綁定 ' + code, expires_in_seconds: 600 };
+}
+
 function addTask(params) {
   const { title, created_by } = params;
   if (!title) return { ok: false, error: '缺少事項標題' };
@@ -97,7 +161,7 @@ function addTask(params) {
       title: String(title).trim(),
       detail: params.detail || '',
       assignee: nk,
-      department: u.department,
+      department: normalizeDepartment_(u.department),
       due_date: due,
       status: 'open',
       created_by: created_by,
@@ -127,7 +191,7 @@ function saveSelfTask(params) {
     title: String(task.title || '').trim(),
     detail: String(task.source || task.detail || ''),
     assignee: nickname,
-    department: user.department,
+    department: normalizeDepartment_(user.department),
     due_date: String(task.dueDate || todayStr()).slice(0, 10),
     status: task.status === 'done' ? 'done' : 'open',
     created_by: existing ? existing.created_by : nickname,
@@ -158,8 +222,8 @@ function listTasks(params) {
   list.forEach(t => { t.due_date = taskDateStr_(t.due_date); });   // 正規化日期
   if (vu.role === 'admin') {
     // 全部
-  } else if (vu.role === 'manager') {
-    list = list.filter(t => t.department === vu.department || t.assignee === viewer || t.created_by === viewer);
+  } else if (vu.role === 'manager' && !isGlobalManager_(vu)) {
+    list = list.filter(t => sameDepartment_(t.department, vu.department) || t.assignee === viewer || t.created_by === viewer);
   } else {
     list = list.filter(t => t.assignee === viewer || t.created_by === viewer);
   }
@@ -202,33 +266,36 @@ function pushLine_(userId, text) {
   const token = getLineToken_();
   if (!token || !userId) return false;
   try {
-    UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
+    const response = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
       method: 'post',
       contentType: 'application/json',
       headers: { Authorization: 'Bearer ' + token },
       payload: JSON.stringify({ to: userId, messages: [{ type: 'text', text: String(text) }] }),
       muteHttpExceptions: true
     });
-    return true;
+    const code = response.getResponseCode();
+    return code >= 200 && code < 300;
   } catch (e) { return false; }
 }
 
-// OneSignal Web Push（用暱稱當 external_id）。自動嘗試新版/舊版格式。
-function oneSignalAttempts_(appId, key, externalId, title, message) {
+// OneSignal Web Push：只使用經登入驗證後登記的 subscription ID，不再相信前端自填 external_id。
+function oneSignalAttempts_(appId, key, subscriptionId, title, message) {
   const link = 'https://teacher.blockplanetcamp.com/review/anqin-v2/index.html?notify=1';
   return [
     { url: 'https://api.onesignal.com/notifications', auth: 'Key ' + key,
-      body: { app_id: appId, target_channel: 'push', include_aliases: { external_id: [String(externalId)] }, headings: { en: title }, contents: { en: message }, url: link } },
+      body: { app_id: appId, target_channel: 'push', include_subscription_ids: [String(subscriptionId)], headings: { en: title }, contents: { en: message }, url: link } },
     { url: 'https://onesignal.com/api/v1/notifications', auth: 'Basic ' + key,
-      body: { app_id: appId, include_external_user_ids: [String(externalId)], headings: { en: title }, contents: { en: message }, url: link } }
+      body: { app_id: appId, include_player_ids: [String(subscriptionId)], headings: { en: title }, contents: { en: message }, url: link } }
   ];
 }
 function pushOneSignal_(externalId, title, message) {
   const props = PropertiesService.getScriptProperties();
   const appId = props.getProperty('ONESIGNAL_APP_ID');
   const key = props.getProperty('ONESIGNAL_REST_KEY');
-  if (!appId || !key || !externalId) return false;
-  const attempts = oneSignalAttempts_(appId, key, externalId, title, message);
+  const user = externalId ? findUserByNickname(String(externalId)) : null;
+  const subscriptionId = user ? String(user.push_subscription_id || '') : '';
+  if (!appId || !key || !subscriptionId) return false;
+  const attempts = oneSignalAttempts_(appId, key, subscriptionId, title, message);
   for (let i = 0; i < attempts.length; i++) {
     try {
       const r = UrlFetchApp.fetch(attempts[i].url, {
@@ -249,7 +316,10 @@ function debugPush(params) {
   const key = props.getProperty('ONESIGNAL_REST_KEY');
   if (!appId || !key) return { ok: false, hasApp: !!appId, hasKey: !!key };
   const ext = String((params && params.nickname) || '柏翰');
-  const attempts = oneSignalAttempts_(appId, key, ext, 'debug', 'debug push');
+  const user = findUserByNickname(ext);
+  const subscriptionId = user ? String(user.push_subscription_id || '') : '';
+  if (!subscriptionId) return { ok: false, error: '目前帳號尚未登記 APP 訂閱' };
+  const attempts = oneSignalAttempts_(appId, key, subscriptionId, 'debug', 'debug push');
   const results = attempts.map(a => {
     try {
       const r = UrlFetchApp.fetch(a.url, { method: 'post', contentType: 'application/json', headers: { Authorization: a.auth }, payload: JSON.stringify(a.body), muteHttpExceptions: true });
@@ -342,23 +412,24 @@ function handleLineWebhook_(body) {
       const m = text.match(/^綁定\s*(.+)$/);
       let reply;
       if (m) {
-        const nk = m[1].trim();
-        const u = findUserByNickname(nk);
-        if (!u) {
-          reply = '找不到暱稱「' + nk + '」，請確認後再試。';
-        } else if (u.status !== 'active') {
-          reply = '此帳號目前未啟用，請聯絡管理員。';
-        } else if (!u.email) {
-          reply = '請先用 Google 登入 KPI 系統完成身分綁定，再回來輸入相同指令。';
+        const verified = verifyLineBindingCode_(m[1].trim());
+        const u = verified.user;
+        if (!verified.ok || !u) {
+          const legacyUser = findUserByNickname(m[1].trim());
+          if (legacyUser && String(legacyUser.line_user_id || '') === String(userId)) {
+            reply = '✅ ' + legacyUser.nickname + ' 已完成綁定。';
+          } else {
+            reply = '此綁定指令無效或已逾時。請先登入 KPI 系統，在「更多 → 帳號與通知」重新取得綁定指令。';
+          }
         } else if (u.line_user_id && String(u.line_user_id) !== String(userId)) {
-          reply = '此暱稱已綁定其他 LINE，請由管理員先解除舊綁定。';
+          reply = '此帳號已綁定其他 LINE，請由管理員先解除舊綁定。';
         } else {
-          const sameLineUser = sheetToObjects(SHEET_NAMES.USERS).find(item => item.line_user_id && String(item.line_user_id) === String(userId) && item.nickname !== nk);
+          const sameLineUser = sheetToObjects(SHEET_NAMES.USERS).find(item => item.line_user_id && String(item.line_user_id) === String(userId) && item.nickname !== u.nickname);
           if (sameLineUser) {
             reply = '這個 LINE 已綁定「' + sameLineUser.nickname + '」，請由管理員先解除舊綁定。';
           } else {
             updateRow(SHEET_NAMES.USERS, u._row, { line_user_id: userId });
-            reply = u.line_user_id ? '✅ ' + nk + ' 已完成綁定。' : '✅ ' + nk + ' 綁定成功！之後事項提醒會推播到這裡。';
+            reply = u.line_user_id ? '✅ ' + u.nickname + ' 已完成綁定。' : '✅ ' + u.nickname + ' 綁定成功！之後事項提醒會推播到這裡。';
           }
         }
       } else if (/^kpi/i.test(text)) {
@@ -368,7 +439,7 @@ function handleLineWebhook_(body) {
         catch (e) { pushLine_(userId, '❌ 日報生成失敗：' + e.message); }
         return;
       } else {
-        reply = '請輸入「綁定 你的暱稱」來接收事項提醒，例如：綁定 松鼠\n（老闆可輸入「kpi」取得今日日報 PDF）';
+        reply = '請先登入 KPI 系統，在「更多 → 帳號與通知」取得 LINE 綁定指令。\n（老闆可輸入「kpi」取得今日日報 PDF）';
       }
       if (ev.replyToken) replyLine_(ev.replyToken, reply);
     }

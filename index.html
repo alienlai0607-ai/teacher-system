@@ -6,12 +6,12 @@
 <title>布拉克星球 KPI 系統</title>
 <link rel="stylesheet" href="shared/style.css?v=20260624k">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="shared/config.js?v=20260825-release-1"></script>
-<script src="shared/auth.js?v=20260825-login-route-3"></script>
-<script src="shared/api.js?v=20260825-release-1"></script>
-<script src="shared/ui.js?v=20260825-release-1"></script>
-<script src="shared/pwa.js?v=20260825-release-1"></script>
-<script src="shared/push.js?v=20260825-release-1"></script>
+<script src="shared/config.js?v=20260825-production-audit-2"></script>
+<script src="shared/auth.js?v=20260825-production-audit-2"></script>
+<script src="shared/api.js?v=20260825-production-audit-2"></script>
+<script src="shared/ui.js?v=20260825-production-audit-2"></script>
+<script src="shared/pwa.js?v=20260825-production-audit-2"></script>
+<script src="shared/push.js?v=20260825-production-audit-2"></script>
 </head>
 <body class="login-page">
 
@@ -21,12 +21,6 @@
   <div class="login-subtitle">老師工作日誌 × KPI 評核</div>
 
   <div id="g-signin-btn"></div>
-
-  <div id="claim-section" style="display:none; margin-top: 20px;">
-    <hr style="border:none; border-top:1px solid var(--border); margin: 20px 0;">
-    <div class="text-sm muted mb-2">尚未綁定暱稱，請選擇您的身份：</div>
-    <div id="nickname-list" style="text-align: left; max-height: 280px; overflow-y: auto;"></div>
-  </div>
 
   <div id="status-msg" class="mt-2 text-sm muted"></div>
 </div>
@@ -46,18 +40,46 @@ function routeAfterLogin(user) {
   else AUTH.routeByRole(user.role, user);
 }
 
-window.addEventListener('load', () => {
-  // 若已有 session 直接跳轉
-  const s = AUTH.getSession();
+window.addEventListener('load', async () => {
+  // 登入入口永遠回到真實帳號，避免上次代看身分殘留到下一次登入。
+  let s = AUTH.getSession();
+  if (s?.impersonate === true) {
+    AUTH.exitImpersonate();
+    s = AUTH.getSession();
+    if (s?.impersonate === true) {
+      AUTH.clearSession();
+      s = null;
+    }
+  }
+  // 手機可能保留舊身分；每次從入口進入都先向後端核對再導向。
   if (s) {
     if (s.status === 'suspended') {
       AUTH.clearSession();
       setStatus('此帳號目前未啟用，請聯絡管理員');
+      initGoogleSignIn();
       return;
     }
-    setStatus('已登入為 ' + s.nickname + '，導向中...');
-    setTimeout(() => routeAfterLogin(s), 500);
-    return;
+    if (s.email) {
+      setStatus('正在確認登入身分...');
+      const res = await API.whoami(String(s.email).toLowerCase());
+      if (res.ok && res.registered && res.user?.status === 'active') {
+        AUTH.setSession({ ...res.user, session_token: res.session_token });
+        setStatus('已確認為 ' + res.user.nickname + '，導向中...');
+        setTimeout(() => routeAfterLogin(res.user), 300);
+        return;
+      }
+      if (res.ok) {
+        AUTH.clearSession();
+        setStatus(res.user?.status === 'suspended' ? '此帳號目前未啟用，請聯絡管理員' : '原登入資料已失效，請重新登入');
+      } else {
+        AUTH.clearSession();
+        setStatus('暫時無法驗證登入身分，請確認網路後重新登入');
+      }
+      initGoogleSignIn();
+      return;
+    }
+    AUTH.clearSession();
+    setStatus('請重新登入以確認使用者身分');
   }
   initGoogleSignIn();
 });
@@ -88,7 +110,7 @@ async function onGoogleSignIn(response) {
   setStatus('驗證中...（' + currentEmail + '）');
   UI.loading(true);
 
-  const res = await API.whoami(currentEmail);
+  const res = await API.whoami(currentEmail, response.credential);
   UI.loading(false);
 
   if (!res.ok) {
@@ -101,50 +123,12 @@ async function onGoogleSignIn(response) {
       setStatus('此帳號目前未啟用，請聯絡管理員');
       return;
     }
-    AUTH.setSession(res.user);
+    AUTH.setSession({ ...res.user, session_token: res.session_token });
     setStatus('歡迎 ' + res.user.nickname + '！導向中...');
     setTimeout(() => routeAfterLogin(res.user), 600);
   } else {
-    setStatus('此 Email 尚未綁定暱稱');
-    await showNicknameClaimUI();
+    setStatus('此 Email 尚未開通，請管理員先在帳號設定建立人員並綁定 Email');
   }
-}
-
-async function showNicknameClaimUI() {
-  document.getElementById('claim-section').style.display = 'block';
-  UI.loading(true);
-  const res = await API.listAvailableNicknames();
-  UI.loading(false);
-
-  const list = document.getElementById('nickname-list');
-  if (!res.ok || !res.nicknames || res.nicknames.length === 0) {
-    list.innerHTML = '<div class="text-sm muted">目前沒有可認領的暱稱，請聯絡管理員（柏翰）</div>';
-    return;
-  }
-  list.innerHTML = res.nicknames.map(n => `
-    <button class="btn" style="width:100%; margin-bottom:6px; display:flex; justify-content:space-between;"
-            onclick="claimNickname('${n.nickname}')">
-      <span style="font-weight:700">${n.nickname}</span>
-      <span class="muted text-sm">${n.department} · ${UI.roleLabel(n.role)}</span>
-    </button>
-  `).join('');
-}
-
-async function claimNickname(nickname) {
-  const ok = await UI.confirmDialog(`確認以「${nickname}」身份登入？\n綁定後此暱稱僅能由 ${currentEmail} 登入。`);
-  if (!ok) return;
-
-  UI.loading(true);
-  const res = await API.claimNickname(currentEmail, nickname);
-  UI.loading(false);
-
-  if (!res.ok) {
-    UI.toast(res.error, 'danger');
-    return;
-  }
-  AUTH.setSession(res.user);
-  UI.toast('綁定成功！', 'success');
-  setTimeout(() => routeAfterLogin(res.user), 800);
 }
 
 function setStatus(msg) {

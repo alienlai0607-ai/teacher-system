@@ -54,7 +54,7 @@ function saveLog(params) {
     log_id,
     date,
     nickname,
-    department: user.department,
+    department: normalizeDepartment_(user.department),
     role: user.role,
     checkin_at: params.checkin_at || (existing ? existing.checkin_at : ''),
     checkout_at: params.checkout_at || (existing ? existing.checkout_at : ''),
@@ -74,7 +74,8 @@ function saveLog(params) {
     submitted_at: (existing && existing.submitted_at) || ''
   };
 
-  // 正式提交（非草稿自動存）：首次提交蓋時間戳並通知主管+老闆
+  // 正式提交（非草稿自動存）：首次提交蓋時間戳。
+  // PDF 與主管通知由前端在 saveLog 成功後呼叫 sendSubmitPdf，避免同次送出收到兩則通知。
   const firstSubmit = params.submitted === true && !data.submitted_at;
   if (firstSubmit) data.submitted_at = nowIso();
 
@@ -84,9 +85,6 @@ function saveLog(params) {
   } else {
     updateRow(SHEET_NAMES.LOGS, existing._row, data);
   }
-
-  if (firstSubmit) notifyLogSubmitted_(user, String(date), isMakeup === true, data.help_needed);
-  else if (params.submitted === true && existing && existing.submitted_at) notifyLogUpdated_(user, String(date));
 
   // 附件 → Evidence：只在「正式提交」時寫入，且整份取代
   // （舊版每次草稿自動存都 append 一次，一天可灌出上百筆重複證據）
@@ -171,30 +169,6 @@ function getMakeupQuota(params) {
   return { ok: true, year_month: ym, used: used, limit: 3, remaining: Math.max(0, 3 - used) };
 }
 
-/** 日報正式提交 → 即時推播給部門主管 + admin（LINE + OneSignal） */
-function notifyLogSubmitted_(user, date, isMakeup, helpNeeded) {
-  try {
-    const recipients = sheetToObjects(SHEET_NAMES.USERS).filter(u =>
-      u.status === 'active' && u.nickname !== user.nickname &&
-      (u.role === 'admin' || (u.role === 'manager' && u.department === user.department)));
-    const title = '📥 ' + user.nickname + ' 已提交日報' + (isMakeup ? '（補繳）' : '');
-    const body = (user.department || '') + '｜' + date + (helpNeeded ? '\n⚠️ 需要主管協助' : '');
-    recipients.forEach(r => { try { notifyUser_(r, title, body); } catch (e) { /* 單人推播失敗不影響其他人 */ } });
-  } catch (e) { /* 通知失敗不影響日誌儲存 */ }
-}
-
-/** 已送出日報再次更新 → 通知同部門主管與管理員重新查看。 */
-function notifyLogUpdated_(user, date) {
-  try {
-    const recipients = sheetToObjects(SHEET_NAMES.USERS).filter(u =>
-      u.status === 'active' && u.nickname !== user.nickname &&
-      (u.role === 'admin' || (u.role === 'manager' && u.department === user.department)));
-    const title = '📝 ' + user.nickname + ' 已更新日報';
-    const body = (user.department || '') + '｜' + date + '｜請查看最新內容';
-    recipients.forEach(r => { try { notifyUser_(r, title, body); } catch (e) { /* 單人失敗不影響儲存 */ } });
-  } catch (e) { /* 通知失敗不影響日誌儲存 */ }
-}
-
 function getLog(params) {
   const { log_id, nickname, date } = params;
   let log;
@@ -234,14 +208,14 @@ function listLogs(params) {
   // 權限過濾
   if (viewerUser.role === 'teacher' || viewerUser.role === 'admin_staff') {
     logs = logs.filter(l => l.nickname === viewer);
-  } else if (viewerUser.role === 'manager') {
-    logs = logs.filter(l => l.department === viewerUser.department || l.nickname === viewer);
+  } else if (viewerUser.role === 'manager' && !isGlobalManager_(viewerUser)) {
+    logs = logs.filter(l => sameDepartment_(l.department, viewerUser.department) || l.nickname === viewer);
   }
   // admin 看全部
 
   // 條件過濾
   if (nickname) logs = logs.filter(l => l.nickname === nickname);
-  if (department) logs = logs.filter(l => l.department === department);
+  if (department) logs = logs.filter(l => sameDepartment_(l.department, department));
   if (from) logs = logs.filter(l => String(l.date) >= from);
   if (to) logs = logs.filter(l => String(l.date) <= to);
 
@@ -322,6 +296,7 @@ function saveEvidenceFromLog(log_id, nickname, date, attachmentsRaw) {
       type: att.type || 'link',
       url: att.url,
       description: att.description || '',
+      source_type: att.forType || '',
       created_at: nowIso()
     });
   });
@@ -340,7 +315,7 @@ function getEvidenceLog(params) {
 
   let scope;
   if (vu.role === 'admin') scope = users.map(u => u.nickname);
-  else if (vu.role === 'manager') scope = users.filter(u => u.department === vu.department).map(u => u.nickname);
+  else if (vu.role === 'manager') scope = users.filter(u => isGlobalManager_(vu) || sameDepartment_(u.department, vu.department)).map(u => u.nickname);
   else scope = [viewer];
   if (nickname) {
     if (scope.indexOf(nickname) < 0) return { ok: false, error: 'no permission' };
@@ -353,12 +328,16 @@ function getEvidenceLog(params) {
   const usersMap = {}; users.forEach(u => usersMap[u.nickname] = u);
   const byPerson = {};
   evAll.forEach(e => {
-    const nk = e.nickname, d = String(e.date), k = Number(e.kpi_category);
-    if (k !== 2 && k !== 3) return;
+    const nk = e.nickname, d = String(e.date);
+    const person = usersMap[nk] || null;
+    const k = normalizeEvalEvidenceKpi_(person, e);
+    const environmentKpi = isAnqinUser(person) ? 6 : 2;
+    const lessonKpi = isAnqinUser(person) ? 2 : 3;
+    if (k !== environmentKpi && k !== lessonKpi) return;
     byPerson[nk] = byPerson[nk] || {};
     byPerson[nk][d] = byPerson[nk][d] || { date: d, env: 0, lesson: 0, urls: [] };
-    if (k === 2) byPerson[nk][d].env++;
-    if (k === 3) byPerson[nk][d].lesson++;
+    if (k === environmentKpi) byPerson[nk][d].env++;
+    if (k === lessonKpi) byPerson[nk][d].lesson++;
     if (e.url) byPerson[nk][d].urls.push(e.url);
   });
 
@@ -458,7 +437,7 @@ function uploadPhoto(params) {
 
   // 資料夾：KPI證據 / 部門 / 暱稱 / 年月
   const root = getEvidenceRootFolder_();
-  const deptF = getOrCreateChildFolder_(root, user.department || '未分部門');
+  const deptF = getOrCreateChildFolder_(root, normalizeDepartment_(user.department) || '未分部門');
   const userF = getOrCreateChildFolder_(deptF, nickname);
   const ymF = getOrCreateChildFolder_(userF, ym);
 
@@ -502,7 +481,7 @@ function uploadFile(params) {
   const blob = Utilities.newBlob(bytes, mimeType || 'application/octet-stream', uniqueName);
 
   const root = getMaterialRootFolder_();
-  const deptF = getOrCreateChildFolder_(root, user.department || '未分部門');
+  const deptF = getOrCreateChildFolder_(root, normalizeDepartment_(user.department) || '未分部門');
   const userF = getOrCreateChildFolder_(deptF, nickname);
   const ymF = getOrCreateChildFolder_(userF, ym);
   const file = ymF.createFile(blob);
@@ -564,7 +543,7 @@ function saveWeekly(params) {
   const week_id = 'WK-' + week_of + '-' + nickname;
   const existing = findObject(SHEET_NAMES.WEEKLY, 'week_id', week_id);
   const data = {
-    week_id, week_of, nickname, department: user.department, role: user.role,
+    week_id, week_of, nickname, department: normalizeDepartment_(user.department), role: user.role,
     teaching_reflection: params.teaching_reflection || '',
     student_observation: params.student_observation || '',
     tool_needs: params.tool_needs || '',
@@ -598,8 +577,8 @@ function listWeekly(params) {
   let list = sheetToObjects(SHEET_NAMES.WEEKLY);
   if (viewerUser.role === 'teacher' || viewerUser.role === 'admin_staff') {
     list = list.filter(w => w.nickname === viewer);
-  } else if (viewerUser.role === 'manager') {
-    list = list.filter(w => w.department === viewerUser.department || w.nickname === viewer);
+  } else if (viewerUser.role === 'manager' && !isGlobalManager_(viewerUser)) {
+    list = list.filter(w => sameDepartment_(w.department, viewerUser.department) || w.nickname === viewer);
   }
   // admin 看全部
   if (nickname) list = list.filter(w => w.nickname === nickname);

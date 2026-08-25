@@ -7,7 +7,7 @@ function listStudents(params) {
   const { teacher, department, includeInactive } = params || {};
   let list = sheetToObjects(SHEET_NAMES.STUDENTS);
   if (teacher) list = list.filter(s => s.teacher === teacher);
-  if (department) list = list.filter(s => s.department === department);
+  if (department) list = list.filter(s => sameDepartment_(s.department, department));
   if (!includeInactive) list = list.filter(s => s.status !== 'inactive');
   list.sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-Hant'));
   return { ok: true, students: list };
@@ -27,7 +27,7 @@ function addStudent(params) {
     student_id: Utilities.getUuid(),
     name: String(name).trim(),
     teacher,
-    department: t.department,
+    department: normalizeDepartment_(t.department),
     status: 'active',
     notes: params.notes || '',
     created_at: nowIso(),
@@ -50,7 +50,9 @@ function updateStudent(params) {
   // 換老師時連帶更新所屬部門
   if (params.teacher) {
     const t = findUserByNickname(params.teacher);
-    if (t) updates.department = t.department;
+    if (t) updates.department = normalizeDepartment_(t.department);
+  } else if (updates.department !== undefined) {
+    updates.department = normalizeDepartment_(updates.department);
   }
   updates.updated_at = nowIso();
   updateRow(SHEET_NAMES.STUDENTS, rowNum, updates);

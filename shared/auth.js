@@ -2,12 +2,35 @@
 window.AUTH = (function () {
   const SESSION_KEY = 'kpi_session';
   const REAL_SESSION_KEY = 'kpi_real_session'; // 切換身份時保留真實 admin session
+  const ROOT_URL = (() => {
+    try {
+      const scriptUrl = document.currentScript?.src
+        || Array.from(document.scripts).map(script => script.src).find(src => /\/shared\/auth\.js(?:\?|$)/.test(src));
+      if (scriptUrl) return new URL('../', scriptUrl).href;
+    } catch (e) { /* fall through */ }
+    return new URL('./', window.location.href).href;
+  })();
 
   function getSession() {
     try {
       const raw = localStorage.getItem(SESSION_KEY);
       if (!raw) return null;
       const s = JSON.parse(raw);
+      if (s.impersonate && Date.now() - s.t > 30 * 60 * 1000) {
+        const realRaw = localStorage.getItem(REAL_SESSION_KEY);
+        localStorage.removeItem(REAL_SESSION_KEY);
+        if (!realRaw) {
+          localStorage.removeItem(SESSION_KEY);
+          return null;
+        }
+        const real = JSON.parse(realRaw);
+        if (Date.now() - Number(real.t || 0) > 12 * 3600 * 1000) {
+          localStorage.removeItem(SESSION_KEY);
+          return null;
+        }
+        localStorage.setItem(SESSION_KEY, JSON.stringify(real));
+        return real;
+      }
       // 覆蓋完整工作日，避免老師上午登入、晚間送出前被迫重新登入。
       if (!s.impersonate && Date.now() - s.t > 12 * 3600 * 1000) {
         localStorage.removeItem(SESSION_KEY);
@@ -37,7 +60,8 @@ window.AUTH = (function () {
     if (real.role === 'admin') {
       // OK，無限制
     } else if (real.role === 'manager') {
-      const sameDept = targetUser.department === real.department;
+      const normalizeDepartment = value => String(value || '').trim() === '永康教室' ? '東橋教室' : String(value || '').trim();
+      const sameDept = normalizeDepartment(targetUser.department) === normalizeDepartment(real.department);
       const okRole = targetUser.role === 'teacher' || targetUser.role === 'admin_staff';
       if (!sameDept || !okRole) {
         throw new Error('主管只能切換成自己部門的老師或行政');
@@ -49,7 +73,13 @@ window.AUTH = (function () {
     if (!localStorage.getItem(REAL_SESSION_KEY)) {
       localStorage.setItem(REAL_SESSION_KEY, JSON.stringify(real));
     }
-    setSession({ ...targetUser, impersonate: true });
+    // API 永遠以已驗簽的真實主管／管理員權限判斷；切換身份只改變前端檢視對象。
+    setSession({
+      ...targetUser,
+      session_token: real.session_token || '',
+      impersonate: true,
+      impersonated_by: real.nickname,
+    });
   }
 
   /**
@@ -68,7 +98,11 @@ window.AUTH = (function () {
    */
   function exitImpersonate() {
     const raw = localStorage.getItem(REAL_SESSION_KEY);
-    if (!raw) return;
+    if (!raw) {
+      const current = getSession();
+      if (current?.impersonate) localStorage.removeItem(SESSION_KEY);
+      return;
+    }
     localStorage.setItem(SESSION_KEY, raw);
     localStorage.removeItem(REAL_SESSION_KEY);
   }
@@ -93,15 +127,18 @@ window.AUTH = (function () {
   }
 
   function relativeRoot() {
-    // 計算相對根路徑（依當前頁面深度）
-    const path = window.location.pathname;
-    const segs = path.split('/').filter(Boolean);
-    // 若在 /teacher/today.html 之類，要回退 1 層
-    if (path.endsWith('.html') && segs.length >= 2) return '../';
-    return './';
+    return ROOT_URL;
   }
 
-  function logout() {
+  async function logout() {
+    try {
+      if (window.API?.unregisterPushSubscription && getSession()?.session_token) {
+        await Promise.race([
+          window.API.unregisterPushSubscription(),
+          new Promise(resolve => window.setTimeout(resolve, 1200)),
+        ]);
+      }
+    } catch (e) { /* 登出仍須繼續 */ }
     clearSession();
     if (window.google && google.accounts && google.accounts.id) {
       google.accounts.id.disableAutoSelect();
@@ -125,7 +162,7 @@ window.AUTH = (function () {
     const anqinDepartments = ['東橋教室', '永康教室', '北區教室'];
     const usesAnqinWorkspace = role === 'admin'
       || (['manager', 'teacher'].includes(role) && anqinDepartments.includes(session.department));
-    if (usesAnqinWorkspace) window.location.href = root + 'review/anqin-v2/index.html?v=20260825-login-route-3';
+    if (usesAnqinWorkspace) window.location.href = root + 'review/anqin-v2/index.html?v=20260825-production-audit-2';
     else if (role === 'manager') window.location.href = root + 'manager/dashboard.html';
     else window.location.href = root + 'teacher/today.html';
   }
