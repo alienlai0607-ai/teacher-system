@@ -357,7 +357,7 @@
     return {
       version: APP_VERSION,
       ui: {
-        role: 'teacher', route: 'today', todayTab: 'activities', lastSavedAt: null, guideType: 'tutoring', guidePromptDismissed: false, evidenceStandardsSeen: false, visualTheme: 'playful',
+        role: 'teacher', route: 'today', todayTab: 'activities', lastSavedAt: null, guideType: 'tutoring', guidePromptDismissed: false, evidenceStandardsSeen: false, pushPermissionReminderSeen: false, visualTheme: 'playful',
         filters: {
           plans: { status: 'all' }, tasks: { status: 'open' }, records: { period: '30d', status: 'all', query: '' },
           reviews: { status: 'open', teacher: 'all', date: '', query: '' },
@@ -711,6 +711,19 @@
     if (Notification.permission === 'granted') return { label: '已允許', tone: 'green' };
     if (Notification.permission === 'denied') return { label: '已封鎖', tone: 'red' };
     return { label: '尚未允許', tone: 'yellow' };
+  }
+
+  function maybeShowPushPermissionReminder() {
+    const session = legacySession();
+    if (session?.role !== 'teacher' || session.status === 'suspended') return;
+    if (state.ui.pushPermissionReminderSeen || !('Notification' in window) || Notification.permission !== 'default') return;
+    state.ui.pushPermissionReminderSeen = true;
+    persist();
+    openDialog({
+      title: '開啟 APP 通知',
+      body: `<div class="notice-band info">${icon('bell-ring', 19)}<div><div class="notice-title">即時收到主管回覆與追蹤提醒</div><div class="notice-copy">只有按下「開啟通知」後，瀏覽器才會詢問是否允許。稍後也能到「帳號與通知」開啟。</div></div></div>`,
+      footer: `<button type="button" class="btn" data-action="close-dialog">稍後</button><button type="button" class="btn btn-primary" data-action="enable-push" data-source="login-reminder">${icon('bell-plus', 16)}開啟通知</button>`,
+    });
   }
 
   function sessionCanInspectAccounts(session = legacySession()) {
@@ -5766,6 +5779,7 @@
         toast('APP 通知服務尚未載入，請重新整理後再試', 'danger');
       } else {
         window.promptPush();
+        if (control.dataset.source === 'login-reminder') closeDialog();
         toast('請在瀏覽器提示中允許通知', 'success');
         window.setTimeout(() => { if (state.ui.route === 'settings') renderApp(); }, 1400);
       }
@@ -6019,6 +6033,7 @@
   if (openedFromNotification && initialSession?.role === 'teacher') state.ui.route = 'records';
   if (openedFromNotification && ['manager', 'admin'].includes(initialSession?.role)) state.ui.route = 'dashboard';
   renderApp();
+  window.setTimeout(maybeShowPushPermissionReminder, 350);
   if (openedFromNotification && initialSession?.role === 'teacher') window.setTimeout(syncTeacherCloudData, 0);
   if (openedFromNotification && ['manager', 'admin'].includes(initialSession?.role)) window.setTimeout(syncManagerCloudData, 0);
 })();
