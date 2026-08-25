@@ -310,14 +310,24 @@
 
   function managerScopeDepartment() {
     if (state.ui.role !== 'manager') return '';
-    return legacySession()?.role === 'admin' ? '' : state.context.department;
+    return legacySession()?.role === 'admin' ? '' : normalizeDepartmentScope(state.context.department);
+  }
+
+  function normalizeDepartmentScope(department = '') {
+    return String(department || '').trim() === '永康教室' ? '東橋教室' : String(department || '').trim();
   }
 
   function managerScopeMatches(teacher = '', department = '') {
     const scope = managerScopeDepartment();
     if (!scope) return true;
-    const resolvedDepartment = department || staffMember(teacher)?.department || '';
+    const resolvedDepartment = normalizeDepartmentScope(department || staffMember(teacher)?.department || '');
     return resolvedDepartment === scope;
+  }
+
+  function ensureManagerScope(teacher = '', department = '') {
+    if (state.ui.role !== 'manager' || managerScopeMatches(teacher, department)) return true;
+    toast('沒有查看其他教室資料的權限', 'danger');
+    return false;
   }
 
   function staffMember(nickname) {
@@ -358,7 +368,7 @@
         },
       },
       integration: {
-        cloudSyncEnabled: !IS_REVIEW_BUILD || Boolean(INITIAL_AUTH_SESSION?.role === 'teacher' && INITIAL_AUTH_SESSION?.status !== 'suspended'),
+        cloudSyncEnabled: !IS_REVIEW_BUILD || Boolean(INITIAL_AUTH_SESSION && INITIAL_AUTH_SESSION.status !== 'suspended' && ['admin', 'manager', 'teacher'].includes(INITIAL_AUTH_SESSION.role)),
         pdfOnSubmit: true,
         lastCloudSaveAt: '',
       },
@@ -659,7 +669,10 @@
     const session = legacySession();
     const person = personForSession(session);
     if (!session) return;
+    state.integration.cloudSyncEnabled = session.status !== 'suspended' && ['admin', 'manager', 'teacher'].includes(session.role);
     if (session.role === 'admin') {
+      state.context.department = '全教室';
+      state.context.manager = session.nickname || '柏翰';
       state.ui.role = 'manager';
       if (!MANAGER_NAV.some(item => item.route === state.ui.route)) state.ui.route = 'dashboard';
       return;
@@ -791,6 +804,7 @@
     if (!session || !context) return { ok: false, error: '找不到正式登入身分或對話資料' };
     const teacherNickname = backendNickname(context.teacher);
     if (session.role === 'teacher' && session.nickname !== teacherNickname) return { ok: false, error: '只能回覆自己的資料' };
+    if (session.role === 'manager' && !managerScopeMatches(context.teacher, context.department)) return { ok: false, error: '沒有回覆其他教室資料的權限' };
     if (!['teacher', 'manager', 'admin'].includes(session.role)) return { ok: false, error: '目前身分無法送出回覆' };
     const toNickname = session.role === 'teacher' ? backendNickname(MANAGER_BY_DEPARTMENT[context.department] || state.context.manager) : teacherNickname;
     return API.addFeedback({
@@ -1173,7 +1187,10 @@
 
   function exportStudentCases() {
     const rows = [['日期', '學生', '老師', '類別', '優先度', '客觀觀察', '已採取介入', '可觀察結果', '下一步', '期限', '狀態', '已同步家長', '主管與老師對話']];
-    state.studentCases.forEach(item => rows.push([
+    const visibleCases = state.ui.role === 'manager'
+      ? state.studentCases.filter(item => managerScopeMatches(item.teacher))
+      : state.studentCases.filter(item => item.teacher === state.context.teacher);
+    visibleCases.forEach(item => rows.push([
       item.date, item.student, item.teacher, item.category, item.urgency, item.observation, item.intervention,
       item.outcome, item.nextAction, item.dueDate, item.status === 'closed' ? '已結案' : '追蹤中', item.parentContacted ? '是' : '否', feedbackThreadExport(feedbackThreadKey('case', item.id)),
     ]));
@@ -1235,6 +1252,10 @@
   }
 
   function currentPerson() {
+    const session = legacySession();
+    if (session?.role === 'admin') {
+      return { nickname: session.nickname || '柏翰', department: '管理員 · 全教室', initials: String(session.nickname || '柏翰').slice(0, 2) };
+    }
     const nickname = state.ui.role === 'manager' ? state.context.manager : state.context.teacher;
     return state.people.find(person => person.nickname === nickname) || state.people[0];
   }
@@ -1247,6 +1268,7 @@
     const nav = roleNav();
     const session = legacySession();
     const canSwitchReviewRole = IS_REVIEW_BUILD && !session;
+    const workspaceLabel = session?.role === 'admin' ? '管理員工作區' : state.ui.role === 'manager' ? '主管工作區' : '老師工作區';
     app.innerHTML = `
       <header class="topbar">
         <div class="brand-block">
@@ -1275,7 +1297,7 @@
       </header>
 
       <aside class="sidebar">
-        <div class="nav-group-label">${state.ui.role === 'manager' ? '主管工作區' : '老師工作區'}</div>
+        <div class="nav-group-label">${workspaceLabel}</div>
         <nav class="side-nav" aria-label="主要導覽">
           ${nav.map(item => renderNavButton(item)).join('')}
         </nav>
@@ -2684,6 +2706,7 @@
 
   function renderIntegrationSettings() {
     const session = legacySession();
+    const formalSession = Boolean(session && session.status !== 'suspended' && ['admin', 'manager', 'teacher'].includes(session.role));
     const formalTeacherSession = Boolean(session?.role === 'teacher' && session?.status !== 'suspended');
     const notification = browserNotificationStatus();
     const rows = integrationAccountRows();
@@ -2730,11 +2753,11 @@
             <div class="panel-head"><div><div class="panel-title">${icon('cloud')}正式送出</div></div>${statusBadge(state.integration.cloudSyncEnabled ? '已啟用' : '審查模式', state.integration.cloudSyncEnabled ? 'green' : 'yellow')}</div>
             <div class="panel-body">
               <div class="integration-toggle-list">
-                <label class="integration-toggle-row"><span><strong>雲端送出</strong><small>${formalTeacherSession ? '正式老師帳號固定送至雲端，避免只留在目前裝置。' : '登入老師帳號後，正式資料會固定送至雲端。'}</small></span><input type="checkbox" data-change="cloud-sync-enabled" ${state.integration.cloudSyncEnabled ? 'checked' : ''} ${formalTeacherSession ? 'disabled' : ''}></label>
+                <label class="integration-toggle-row"><span><strong>雲端送出</strong><small>${formalTeacherSession ? '正式老師帳號固定送至雲端，避免只留在目前裝置。' : formalSession ? '正式管理帳號已啟用雲端讀取與審核。' : '登入老師帳號後，正式資料會固定送至雲端。'}</small></span><input type="checkbox" data-change="cloud-sync-enabled" ${state.integration.cloudSyncEnabled ? 'checked' : ''} ${formalSession ? 'disabled' : ''}></label>
                 <label class="integration-toggle-row is-required"><span><strong>送出後通知主管</strong><small>正式提交固定觸發主管與管理員的 APP／LINE 通知。</small></span><input type="checkbox" checked disabled></label>
                 <label class="integration-toggle-row"><span><strong>產生日報 PDF</strong><small>PDF 依月份歸檔，檔名包含老師與日期。</small></span><input type="checkbox" data-change="pdf-on-submit" ${state.integration.pdfOnSubmit ? 'checked' : ''} ${state.integration.cloudSyncEnabled ? '' : 'disabled'}></label>
               </div>
-              ${state.integration.cloudSyncEnabled && !cloudIdentityReady() ? `<div class="notice-band danger mt-16">${icon('shield-alert', 19)}<div><div class="notice-title">尚未取得老師正式身分</div><div class="notice-copy">${esc(formalIdentityMessage())}。正式送出前請登入該老師帳號。</div></div></div>` : ''}
+              ${state.ui.role === 'teacher' && state.integration.cloudSyncEnabled && !cloudIdentityReady() ? `<div class="notice-band danger mt-16">${icon('shield-alert', 19)}<div><div class="notice-title">尚未取得老師正式身分</div><div class="notice-copy">${esc(formalIdentityMessage())}。正式送出前請登入該老師帳號。</div></div></div>` : ''}
             </div>
           </section>
 
@@ -2859,7 +2882,10 @@
     const result = await API.listCoursePreps({ viewer: session.nickname, nickname: session.role === 'teacher' ? session.nickname : '' });
     if (!result?.ok) return { ok: false, imported: 0, error: result?.error || '備課檔案讀取失敗' };
     let imported = 0;
-    (result.records || []).forEach(record => { if (importCloudCoursePrep(record)) imported += 1; });
+    (result.records || []).filter(record => {
+      const teacher = displayNameForBackend(record.nickname || record.prep?.teacher || '');
+      return session.role === 'admin' || session.role === 'teacher' || managerScopeMatches(teacher, record.department);
+    }).forEach(record => { if (importCloudCoursePrep(record)) imported += 1; });
     return { ok: true, imported };
   }
 
@@ -3042,6 +3068,7 @@
     let imported = 0;
     (result.logs || []).forEach(log => {
       const snapshot = log?.kpi6_data?.v2_snapshot;
+      if (snapshot?.submission && !managerScopeMatches(snapshot.submission.teacher, snapshot.submission.department || log.department)) return;
       if (importCloudSnapshot(snapshot)) imported += 1;
     });
     const prepSync = await syncCoursePrepsFromCloud(session);
@@ -3703,11 +3730,15 @@
   function openEvidenceList(activityId) {
     const activity = state.activities.find(item => item.id === activityId);
     if (!activity) return;
+    if (!ensureManagerScope(activity.teacher)) return;
     const isCoursePrep = activity.type === 'lessonprep';
+    const canEdit = state.ui.role === 'teacher' && activity.teacher === state.context.teacher;
     openDrawer({
       title: isCoursePrep ? '備課檔案內容' : '工作證據', subtitle: activity.title,
       body: renderActivityEvidenceOverview(activity),
-      footer: isCoursePrep
+      footer: !canEdit
+        ? `<button type="button" class="btn" data-action="close-drawer">關閉</button>`
+        : isCoursePrep
         ? `<button type="button" class="btn" data-action="close-drawer">關閉</button><button type="button" class="btn btn-primary" data-action="edit-activity" data-activity-id="${activity.id}">${icon('file-pen-line', 16)}編輯備課檔案</button>`
         : `<button type="button" class="btn" data-action="close-drawer">關閉</button><button type="button" class="btn btn-primary" data-action="new-evidence" data-activity-id="${activity.id}">${icon('camera', 16)}上傳新的成果</button>`,
     });
@@ -3762,17 +3793,20 @@
   function openPlanDetail(planId) {
     const plan = state.lessonPlans.find(item => item.id === planId);
     if (!plan) return;
+    if (!ensureManagerScope(plan.teacher)) return;
     const readiness = planReadiness(plan);
     const sourceActivity = prepActivityForPlan(plan);
+    const canEdit = state.ui.role === 'teacher' && plan.teacher === state.context.teacher;
     openDrawer({
       title: plan.title, subtitle: sourceActivity ? `${formatDate(sourceActivity.date)} 建立 · ${plan.teacher}` : `${plan.version} · ${plan.teacher}`, body: renderPlanDetail(plan, false), wide: true,
-      footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button><button type="button" class="btn" data-action="edit-plan" data-plan-id="${plan.id}">${icon('pencil', 16)}編輯</button><button type="button" class="btn btn-primary" data-action="submit-plan-review" data-plan-id="${plan.id}" ${readiness < 100 || plan.status === 'review' ? 'disabled' : ''}>${icon('send', 16)}${plan.status === 'review' ? '已送主管檢視' : '送主管檢視（選填）'}</button>`,
+      footer: canEdit ? `<button type="button" class="btn" data-action="close-drawer">關閉</button><button type="button" class="btn" data-action="edit-plan" data-plan-id="${plan.id}">${icon('pencil', 16)}編輯</button><button type="button" class="btn btn-primary" data-action="submit-plan-review" data-plan-id="${plan.id}" ${readiness < 100 || plan.status === 'review' ? 'disabled' : ''}>${icon('send', 16)}${plan.status === 'review' ? '已送主管檢視' : '送主管檢視（選填）'}</button>` : `<button type="button" class="btn" data-action="close-drawer">關閉</button>`,
     });
   }
 
   function openPlanReview(planId) {
     const plan = state.lessonPlans.find(item => item.id === planId);
     if (!plan) return;
+    if (!ensureManagerScope(plan.teacher)) return;
     openDrawer({
       title: '教案審查', subtitle: `${plan.teacher} · ${plan.title}`, body: renderPlanDetail(plan, true), wide: true,
       footer: `<button type="button" class="btn" data-action="close-drawer">稍後處理</button><button type="button" class="btn" data-action="request-plan-changes" data-plan-id="${plan.id}">${icon('undo-2', 16)}退回補件</button><button type="button" id="approve-plan-button" class="btn btn-primary" data-action="approve-plan" data-plan-id="${plan.id}" disabled>${icon('badge-check', 16)}核准教案</button>`,
@@ -3782,6 +3816,7 @@
   function openSubmissionReview(submissionId, readOnly = false) {
     const submission = state.submissions.find(item => item.id === submissionId);
     if (!submission) return;
+    if (!ensureManagerScope(submission.teacher, submission.department)) return;
     openDrawer({
       title: readOnly ? '送出紀錄' : '日報審查', subtitle: `${submission.teacher} · ${formatDate(submission.date)}`, body: renderSubmissionReview(submission, readOnly), wide: true,
       footer: readOnly ? `<button type="button" class="btn" data-action="close-drawer">關閉</button>` : `<button type="button" class="btn" data-action="close-drawer">稍後處理</button><button type="button" class="btn" data-action="request-submission-clarify" data-submission-id="${submission.id}">${icon('message-square-warning', 16)}要求補充</button><button type="button" class="btn btn-primary" data-action="accept-submission" data-submission-id="${submission.id}">${icon('check-check', 16)}完成審查</button>`,
@@ -3794,6 +3829,7 @@
       toast('找不到這筆工作紀錄，請從「我的紀錄」開啟送出快照', 'danger');
       return;
     }
+    if (!ensureManagerScope(activity.teacher)) return;
     const canEdit = activity.teacher === state.context.teacher && state.ui.role === 'teacher';
     openDrawer({
       title: activity.title,
@@ -3811,6 +3847,7 @@
       toast('這筆送出內容目前無法讀取', 'danger');
       return;
     }
+    if (!ensureManagerScope(submission.teacher, submission.department)) return;
     openDrawer({
       title: activity.title,
       subtitle: `${formatDate(submission.date)} 送出快照 · ${submission.teacher}`,
@@ -3824,6 +3861,7 @@
     const activity = state.activities.find(item => item.id === activityId);
     const evidence = activity && (activity.evidence || []).find(item => item.id === evidenceId);
     if (!activity || !evidence) return;
+    if (!ensureManagerScope(activity.teacher)) return;
     const managerMode = state.ui.role === 'manager';
     openDrawer({
       title: evidence.title, subtitle: `${activity.teacher} · ${activity.title}`, body: renderEvidenceDetail(activity, evidence), wide: true,
@@ -3834,6 +3872,7 @@
   function openOperationReview(operationId) {
     const operation = operationRecordById(operationId);
     if (!operation || !operation.confirmedAt) return;
+    if (!ensureManagerScope(operation.dutyOwner, operation.room)) return;
     openDrawer({
       title: '班務稽核', subtitle: `${operation.dutyOwner} · ${formatDate(operation.date)} · ${operation.room}`, body: renderOperationReview(operation), wide: true,
       footer: `<button type="button" class="btn" data-action="close-drawer">稍後處理</button><button type="button" class="btn" data-action="request-operation-clarify" data-operation-id="${operation.id}">${icon('message-square-warning', 16)}要求補充</button><button type="button" class="btn btn-primary" data-action="accept-operation" data-operation-id="${operation.id}">${icon('badge-check', 16)}通過稽核</button>`,
@@ -3843,6 +3882,7 @@
   function openCaseDetail(caseId) {
     const item = state.studentCases.find(entry => entry.id === caseId);
     if (!item) return;
+    if (!ensureManagerScope(item.teacher)) return;
     openDrawer({ title: '學生追蹤詳情', subtitle: `${item.student} · ${item.teacher}`, body: renderCaseDetail(item), footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button>` });
   }
 
@@ -3932,14 +3972,15 @@
 
   function openProfileDialog() {
     const person = currentPerson();
+    const session = legacySession();
     const visualTheme = currentVisualTheme();
     const storageNotice = state.integration.cloudSyncEnabled
       ? `<div class="notice-band success">${icon('cloud', 19)}<div><div class="notice-title">正式雲端送出已啟用</div><div class="notice-copy">送出時會核對登入身分，並將照片與日報存入雲端。</div></div></div>`
       : `<div class="notice-band info">${icon('database', 19)}<div><div class="notice-title">目前為審查模式</div><div class="notice-copy">資料保存在這台裝置，不會通知真人主管。</div></div></div>`;
     openDialog({
       title: '使用者與介面',
-      body: `<div class="teacher-status"><span class="status-avatar">${esc(person.initials || person.nickname.slice(0, 2))}</span><div><div class="table-primary">${esc(person.nickname)}</div><div class="table-secondary">${esc(person.department)} · ${state.ui.role === 'manager' ? '主管' : '安親老師'}</div></div></div><div class="section-divider"></div><section class="visual-mode-setting" aria-labelledby="visual-mode-title"><div class="visual-mode-heading"><div><strong id="visual-mode-title">介面風格</strong><small>只調整外觀，工作紀錄與上傳資料不會改變</small></div><span class="badge outline">可隨時切換</span></div><div class="theme-choice-group" role="group" aria-label="選擇介面風格"><button type="button" class="theme-choice ${visualTheme === 'playful' ? 'active' : ''}" data-action="set-visual-theme" data-theme="playful" aria-pressed="${visualTheme === 'playful'}"><span class="theme-choice-icon playful">${icon('sparkles', 18)}</span><span><strong>布拉克可愛版</strong><small>暖色背景、角色圖案與清楚的品牌色按鈕</small></span><span class="theme-choice-check">${visualTheme === 'playful' ? icon('check', 15) : ''}</span></button><button type="button" class="theme-choice ${visualTheme === 'calm' ? 'active' : ''}" data-action="set-visual-theme" data-theme="calm" aria-pressed="${visualTheme === 'calm'}"><span class="theme-choice-icon">${icon('align-justify', 18)}</span><span><strong>清爽版</strong><small>減少色彩與裝飾，適合偏好簡潔的老師</small></span><span class="theme-choice-check">${visualTheme === 'calm' ? icon('check', 15) : ''}</span></button></div></section><div class="section-divider"></div>${storageNotice}`,
-      footer: `<button type="button" class="btn btn-danger" data-action="reset-demo">${icon('rotate-ccw', 15)}清空審查資料</button><button type="button" class="btn" data-action="open-health">${icon('activity', 15)}健康檢查</button><button type="button" class="btn" data-action="close-dialog">關閉</button>`,
+      body: `<div class="teacher-status"><span class="status-avatar">${esc(person.initials || person.nickname.slice(0, 2))}</span><div><div class="table-primary">${esc(person.nickname)}</div><div class="table-secondary">${esc(person.department)} · ${esc(sessionRoleLabel(session?.role || (state.ui.role === 'manager' ? 'manager' : 'teacher')))}</div></div></div><div class="section-divider"></div><section class="visual-mode-setting" aria-labelledby="visual-mode-title"><div class="visual-mode-heading"><div><strong id="visual-mode-title">介面風格</strong><small>只調整外觀，工作紀錄與上傳資料不會改變</small></div><span class="badge outline">可隨時切換</span></div><div class="theme-choice-group" role="group" aria-label="選擇介面風格"><button type="button" class="theme-choice ${visualTheme === 'playful' ? 'active' : ''}" data-action="set-visual-theme" data-theme="playful" aria-pressed="${visualTheme === 'playful'}"><span class="theme-choice-icon playful">${icon('sparkles', 18)}</span><span><strong>布拉克可愛版</strong><small>暖色背景、角色圖案與清楚的品牌色按鈕</small></span><span class="theme-choice-check">${visualTheme === 'playful' ? icon('check', 15) : ''}</span></button><button type="button" class="theme-choice ${visualTheme === 'calm' ? 'active' : ''}" data-action="set-visual-theme" data-theme="calm" aria-pressed="${visualTheme === 'calm'}"><span class="theme-choice-icon">${icon('align-justify', 18)}</span><span><strong>清爽版</strong><small>減少色彩與裝飾，適合偏好簡潔的老師</small></span><span class="theme-choice-check">${visualTheme === 'calm' ? icon('check', 15) : ''}</span></button></div></section><div class="section-divider"></div>${storageNotice}`,
+      footer: `${session ? '' : `<button type="button" class="btn btn-danger" data-action="reset-demo">${icon('rotate-ccw', 15)}清空審查資料</button>`}<button type="button" class="btn" data-action="open-health">${icon('activity', 15)}健康檢查</button><button type="button" class="btn" data-action="close-dialog">關閉</button>`,
     });
   }
 
@@ -5370,6 +5411,7 @@
     if (kind === 'submission-accept' || kind === 'submission-clarify') {
       const submission = state.submissions.find(item => item.id === id);
       if (!submission) return;
+      if (!ensureManagerScope(submission.teacher, submission.department)) return;
       const feedback = String($('#submission-feedback')?.value || '').trim();
       if (kind === 'submission-clarify' && !feedback) {
         toast('請先寫明需要補充的內容', 'danger');
@@ -5393,6 +5435,7 @@
       const activity = state.activities.find(item => item.id === id);
       const evidence = activity && (activity.evidence || []).find(item => item.id === secondaryId);
       if (!evidence) return;
+      if (!ensureManagerScope(activity.teacher)) return;
       const feedback = String($('#evidence-feedback')?.value || '').trim();
       if (kind === 'evidence-clarify' && !feedback) {
         toast('請先寫明需要補充的判讀資訊', 'danger');
@@ -5413,6 +5456,7 @@
     if (kind === 'plan-approve' || kind === 'plan-changes') {
       const plan = state.lessonPlans.find(item => item.id === id);
       if (!plan) return;
+      if (!ensureManagerScope(plan.teacher)) return;
       const feedback = String($('#plan-review-feedback')?.value || '').trim();
       if (kind === 'plan-changes' && !feedback) {
         toast('請先寫明教案需修改的內容', 'danger');
@@ -5433,6 +5477,7 @@
     if (kind === 'operation-accept' || kind === 'operation-clarify') {
       const operation = operationRecordById(id);
       if (!operation || !operation.confirmedAt) return;
+      if (!ensureManagerScope(operation.dutyOwner, operation.room)) return;
       if (!operationsComplete(operation, false)) {
         toast('此筆班務仍缺逐項照片、結果判定或異常處理，無法完成稽核', 'danger');
         return;
