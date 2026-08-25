@@ -2,7 +2,7 @@
   "name": "布拉克星球 KPI 系統",
   "short_name": "KPI 系統",
   "description": "布拉克星球老師工作日誌與 KPI 評核系統",
-  "start_url": "/index.html",
+  "start_url": "/index.html?v=20260825-login-route-1",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",

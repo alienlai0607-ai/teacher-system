@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="shared/style.css?v=20260624k">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="shared/config.js?v=20260825-release-1"></script>
-<script src="shared/auth.js?v=20260825-release-1"></script>
+<script src="shared/auth.js?v=20260825-login-route-1"></script>
 <script src="shared/api.js?v=20260825-release-1"></script>
 <script src="shared/ui.js?v=20260825-release-1"></script>
 <script src="shared/pwa.js?v=20260825-release-1"></script>
@@ -40,10 +40,10 @@ function requestedReturnPath() {
   return value;
 }
 
-function routeAfterLogin(role) {
+function routeAfterLogin(user) {
   const target = requestedReturnPath();
   if (target) window.location.href = target;
-  else AUTH.routeByRole(role);
+  else AUTH.routeByRole(user.role, user);
 }
 
 window.addEventListener('load', () => {
@@ -56,7 +56,7 @@ window.addEventListener('load', () => {
       return;
     }
     setStatus('已登入為 ' + s.nickname + '，導向中...');
-    setTimeout(() => routeAfterLogin(s.role), 500);
+    setTimeout(() => routeAfterLogin(s), 500);
     return;
   }
   initGoogleSignIn();
@@ -103,7 +103,7 @@ async function onGoogleSignIn(response) {
     }
     AUTH.setSession(res.user);
     setStatus('歡迎 ' + res.user.nickname + '！導向中...');
-    setTimeout(() => routeAfterLogin(res.user.role), 600);
+    setTimeout(() => routeAfterLogin(res.user), 600);
   } else {
     setStatus('此 Email 尚未綁定暱稱');
     await showNicknameClaimUI();
@@ -144,7 +144,7 @@ async function claimNickname(nickname) {
   }
   AUTH.setSession(res.user);
   UI.toast('綁定成功！', 'success');
-  setTimeout(() => routeAfterLogin(res.user.role), 800);
+  setTimeout(() => routeAfterLogin(res.user), 800);
 }
 
 function setStatus(msg) {
