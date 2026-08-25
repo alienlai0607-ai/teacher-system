@@ -6327,13 +6327,13 @@
     else if (action === 'logout') {
       persistCurrentDrawerDraft(true);
       if (window.AUTH?.logout) window.AUTH.logout();
-      else window.location.href = '../../index.html?v=20260825-production-audit-2';
+      else window.location.href = '../../index.html?v=20260825-profile-fix-3';
     }
     else if (action === 'exit-impersonation') {
       persistCurrentDrawerDraft(true);
       window.AUTH?.exitImpersonate?.();
       const root = window.AUTH?.relativeRoot?.() || '../../';
-      window.location.href = `${root}index.html?v=20260825-production-audit-2`;
+      window.location.href = `${root}index.html?v=20260825-profile-fix-3`;
     }
     else if (action === 'open-health' || action === 'run-health-check') openHealthDialog();
     else if (action === 'check-integrations') await checkIntegrations();

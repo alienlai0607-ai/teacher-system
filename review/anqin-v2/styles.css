@@ -247,8 +247,8 @@ img { max-width: 100%; display: block; }
 }
 
 .profile-text { min-width: 0; flex: 1; text-align: left; }
-.profile-name { overflow: hidden; font-size: 13px; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
-.profile-meta { color: var(--muted); font-size: 11px; }
+.profile-name { display: block; overflow: hidden; font-size: 13px; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
+.profile-meta { display: block; color: var(--muted); font-size: 11px; white-space: nowrap; }
 
 .sidebar {
   position: fixed;
@@ -2113,16 +2113,25 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--brand); }
 @media (max-width: 820px) {
   :root { --topbar: 60px; --ribbon: 0px; }
   .review-ribbon { justify-content: flex-start; overflow: hidden; white-space: nowrap; }
-  .topbar { grid-template-columns: minmax(0, 1fr) auto; }
+  .topbar { grid-template-columns: minmax(0, 1fr) minmax(144px, auto); }
   .brand-block { border-right: 0; padding: 0 14px; }
   .brand-logo { width: 34px; height: 34px; flex-basis: 34px; }
   .brand-product { display: none; }
   .topbar-center { display: none; }
-  .topbar-actions { padding-right: 12px; gap: 7px; }
+  .topbar-actions { min-width: 0; padding-right: 10px; gap: 6px; }
+  .topbar-help { display: none; }
   .role-switch { width: 130px; }
   .role-switch button { min-height: 32px; padding: 4px 7px; font-size: 12px; }
-  .profile-button { width: 38px; min-width: 0; min-height: 38px; border: 0; background: transparent; }
-  .profile-text, .profile-button > .lucide-chevron-down { display: none; }
+  .profile-button {
+    width: auto;
+    min-width: 144px;
+    max-width: 170px;
+    min-height: 40px;
+    gap: 7px;
+    padding: 4px 7px;
+  }
+  .profile-text { display: block; }
+  .profile-button > .lucide-chevron-down { display: block; flex: 0 0 auto; }
   .avatar { width: 31px; height: 31px; flex-basis: 31px; }
   .sidebar { display: none; }
   .app-main { padding: calc(var(--ribbon) + var(--topbar) + 18px) 14px calc(84px + env(safe-area-inset-bottom)); }
@@ -2369,6 +2378,10 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--brand); }
   .brand-logo { width: 30px; height: 30px; flex-basis: 30px; }
   .brand-name { font-size: 11px; white-space: nowrap; }
   .topbar-help { display: none; }
+  .profile-button { min-width: 128px; max-width: 144px; gap: 6px; padding: 4px 6px; }
+  .profile-button > .lucide-chevron-down { display: none; }
+  .profile-name { font-size: 12px; }
+  .profile-meta { font-size: 9px; }
   .role-switch { width: 120px; }
   .page-heading { gap: 8px; }
   .mascot-peek { width: 46px; height: 46px; flex-basis: 46px; }
@@ -2384,8 +2397,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--brand); }
   .brand-name { font-size: 11px; }
   .role-switch { width: 112px; }
   .topbar-actions { gap: 4px; padding-right: 6px; }
-  .profile-button { width: 32px; min-height: 32px; }
-  .avatar { width: 28px; height: 28px; flex-basis: 28px; }
+  .profile-button { width: auto; min-width: 104px; max-width: 116px; min-height: 34px; gap: 5px; padding: 3px 4px; }
+  .profile-meta { display: none; }
+  .avatar { width: 28px; height: 28px; flex-basis: 28px; font-size: 10px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
