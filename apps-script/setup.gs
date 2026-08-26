@@ -144,7 +144,7 @@ function migrateTalentUserProfiles_() {
     { nickname: '皮皮老師', employment_type: 'pt', work_assignments: ['talent-pt'], schedule_json: [{ weekday: 4, label: '週四', time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }] },
     { nickname: '紅豆', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'], schedule_json: [1, 3, 4, 5].map(function (weekday) { return { weekday: weekday, label: '週' + ['日', '一', '二', '三', '四', '五', '六'][weekday], time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }; }) },
     { nickname: '小明', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'], schedule_json: [{ weekday: 3, label: '週三', time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }] },
-    { nickname: '黑豹', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'pt', work_assignments: ['talent-pt'], schedule_json: [1, 3].map(function (weekday) { return { weekday: weekday, label: weekday === 1 ? '週一' : '週三', time: '依善化課表（1.5 小時）', siteType: 'partner', site: '善化合作校' }; }) },
+    { nickname: '黑豹', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'pt', work_assignments: ['talent-pt'], schedule_json: [1, 4].map(function (weekday) { return { weekday: weekday, label: weekday === 1 ? '週一' : '週四', time: '19:00–20:30', siteType: 'partner', site: '善化合作校' }; }) },
   ];
   const now = nowIso();
   const sheet = getSheet(SHEET_NAMES.USERS);

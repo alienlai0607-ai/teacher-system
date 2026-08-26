@@ -71,6 +71,7 @@ const setupSource = fs.readFileSync(path.join(root, 'apps-script/setup.gs'), 'ut
 const taskSource = fs.readFileSync(path.join(root, 'apps-script/tasks.gs'), 'utf8');
 const codeSource = fs.readFileSync(path.join(root, 'apps-script/Code.gs'), 'utf8');
 const adminUsersSource = fs.readFileSync(path.join(root, 'admin/users.html'), 'utf8');
+const adminDashboardSource = fs.readFileSync(path.join(root, 'admin/dashboard.html'), 'utf8');
 const apiSource = fs.readFileSync(path.join(root, 'shared/api.js'), 'utf8');
 const talentUiSource = fs.readFileSync(path.join(root, 'review/talent-v2/app.js'), 'utf8');
 const anqinUiSource = fs.readFileSync(path.join(root, 'review/anqin-v2/app.js'), 'utf8');
@@ -79,10 +80,14 @@ assert.match(archiveSource, /item\.removeViewer\(/, '應移除已失效的舊查
 assert.match(archiveSource, /item\.removeEditor\(/, '主管只能查看，不保留舊編輯權限');
 assert.match(archiveSource, /function revokeKpiDriveUserAccess_\(/, '刪除員工時必須立即收回雲端檔案權限');
 assert.match(archiveSource, /\['active', 'suspended', 'deleted'\]/, '雲端日報需保留離職人員歷史索引');
-assert.match(archiveSource, /isActive \? getOrCreateChildFolder_/, '離職人員不可再建立空白雲端資料夾');
+const folderListSource = archiveSource.slice(archiveSource.indexOf('function listTeacherReportFolders('), archiveSource.indexOf('/**', archiveSource.indexOf('function listTeacherReportFolders(')));
+assert.doesNotMatch(folderListSource, /getOrCreateChildFolder_/, '開啟雲端清單不得建立空白資料夾或拖慢頁面');
+assert.match(folderListSource, /canOpenTeacherRoot \? teacherFolder : workFolder/, '全域管理員應開啟老師根資料夾，區域主管只開工作區資料夾');
+assert.doesNotMatch(folderListSource, /secureKpiReportPath_/, '雲端清單讀取不得同步重掃整批 Drive 權限');
 assert.match(setupSource, /'deleted_at', 'deleted_by'/, '使用者資料表需保存刪除稽核欄位');
 assert.match(setupSource, /mergedAssignments\.indexOf\(assignment\) < 0/, '既有安親身分必須合併才藝工作身分，不能覆蓋或漏加');
 assert.match(setupSource, /function migrateTalentUserProfiles\(\)/, '才藝帳號遷移需可獨立執行，避免完整初始化逾時');
+assert.match(setupSource, /nickname: '黑豹'.*schedule_json: \[1, 4\].*19:00–20:30/s, '黑豹固定班表需為週一、週四 19:00–20:30');
 assert.doesNotMatch(setupSource, /findUserByNickname\(profile\.nickname\)/, '才藝帳號遷移不得逐人重讀整張使用者表');
 assert.match(setupSource, /createTextFinder\('永康教室'\)/, '舊部門名稱遷移不得掃描並重寫整欄大量資料');
 assert.match(taskSource, /function systemMaintenanceUser_\(params\)/, '排程設定需支援 Apps Script 編輯器直接執行');
@@ -96,10 +101,14 @@ assert.match(backendSource, /status: 'deleted'/);
 assert.match(backendSource, /push_subscription_id: ''/, '刪除時必須清除 APP 綁定');
 assert.match(backendSource, /target\.status !== 'active'.*不能新增或修改才藝資料/s, '刪除後不得再寫入才藝資料');
 assert.match(apiSource, /deleteUser: \(nickname, confirmNickname\)/);
+assert.match(apiSource, /READ_ONLY_TEST_VIEW/, '切換老師視角時 API 必須全面禁止寫入');
+assert.match(apiSource, /IMPERSONATION_READ_ACTIONS/, '測試視角只能呼叫明確允許的讀取 API');
 assert.match(adminUsersSource, /顯示已刪除人員/);
 assert.match(adminUsersSource, /刪除員工/);
 assert.match(adminUsersSource, /歷史日報、薪資與評分會保留/);
 assert.match(talentUiSource, /route: 'cloud-reports', label: '雲端日報'/);
+assert.match(talentUiSource, /pending_users/, '主管人員頁需顯示待開通的黑豹');
+assert.match(backendSource, /function talentCanAccessPendingUser_\(/, '待開通才藝人員只能由授權主管查看');
 assert.match(talentUiSource, /function settlementStaff\(/, '離職人員只應在有歷史資料的月份出現在月結');
 assert.match(talentUiSource, /person\.status === 'deleted'.*deleted_at/s, 'PT 月結排課應在刪除日期截止');
 assert.match(talentUiSource, /isActiveTalentTeacher\(item\.teacher\)/, '離職老師的未完成備課不可留在主管待辦');
@@ -107,5 +116,7 @@ assert.match(backendSource, /talentCanAccessHistoricalUser_\(actor, user\)/, '�
 assert.match(talentUiSource, /離職保留/);
 assert.match(anqinUiSource, /route: 'cloud-reports', label: '雲端日報'/);
 assert.match(talentUiSource, /type="file"[^>]*multiple/);
+assert.match(adminDashboardSource, /測試老師視角（唯讀）/);
+assert.match(adminDashboardSource, /KPI_WORKSPACES\.hrefFor\(workspaceId\)/, '測試入口需導向老師真正使用的新版工作區');
 
 console.log('PASS talent rules, schedules, attachments, employee deletion, historical payroll, cloud-report access, and multi-file controls');

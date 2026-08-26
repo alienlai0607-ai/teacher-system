@@ -6,8 +6,9 @@
 <title>全機構總覽</title>
 <link rel="stylesheet" href="../shared/style.css?v=20260624k">
 <script src="../shared/config.js?v=20260825-production-audit-2"></script>
-<script src="../shared/auth.js?v=20260825-production-audit-2"></script>
-<script src="../shared/api.js?v=20260825-production-audit-2"></script>
+<script src="../shared/auth.js?v=20260826-test-view-1"></script>
+<script src="../shared/workspaces.js?v=20260826-test-view-1"></script>
+<script src="../shared/api.js?v=20260826-test-view-1"></script>
 <script src="../shared/ui.js?v=20260825-production-audit-2"></script>
 <script src="../shared/pwa.js?v=20260825-production-audit-2"></script>
 <script src="../shared/push.js?v=20260825-production-audit-2"></script>
@@ -24,6 +25,16 @@
   .dept-name { font-size: 18px; font-weight: 700; color: var(--primary); margin-bottom: 8px; }
   .dept-stat { font-size: 14px; margin: 4px 0; }
   .dept-score { font-size: 32px; font-weight: 800; color: var(--accent); }
+  .test-view-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .test-user { border:1px solid var(--border); border-radius:10px; padding:14px; background:#fff; }
+  .test-user-head { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; margin-bottom:10px; }
+  .test-user-head strong { display:block; }
+  .test-user-head small { color:var(--muted); }
+  .test-status { font-size:12px; border-radius:999px; padding:3px 8px; background:#e8f6ed; color:#256b3d; white-space:nowrap; }
+  .test-status.pending { background:#fff1c9; color:#795100; }
+  .test-workspaces { display:flex; flex-wrap:wrap; gap:7px; }
+  .test-workspaces .btn { margin:0; }
+  @media (max-width: 680px) { .test-view-grid { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
@@ -71,9 +82,9 @@
     <ul id="todos" style="margin:0; padding-left:20px;"></ul>
   </div>
 
-  <div class="card">
-    <div class="card-title">🎭 切換身份檢視（測試用）</div>
-    <div class="muted text-sm mb-2">以下會以指定身份開啟對應頁面，方便你檢核老師/主管實際看到什麼。隨時可從頂部橫條離開。</div>
+  <div class="card" id="test-view">
+    <div class="card-title">測試老師視角（唯讀）</div>
+    <div class="muted text-sm mb-2">選擇人員與工作區後，會開啟對方真正看到的新版介面。測試期間無法上傳、儲存或送出正式資料。</div>
     <div id="impersonate-list"></div>
   </div>
 </div>
@@ -93,58 +104,54 @@
 <script>
 const session = AUTH.requireRole(['admin']);
 let notifyItems = [];
+let testViewUsers = [];
 
 window.addEventListener('load', async () => {
   UI.mountHeader(session);
   document.getElementById('ym').textContent = new Date().toISOString().slice(0, 7);
   await loadDashboard();
   await loadImpersonateList();
+  if (window.location.hash === '#test-view') document.getElementById('test-view')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 
-async function loadImpersonateList() {
-  const res = await API.listUsers();
-  if (!res.ok) return;
-  const grouped = { manager: [], teacher: [], admin_staff: [] };
-  res.users.forEach(u => {
-    if (grouped[u.role]) grouped[u.role].push(u);
-  });
-  const wrap = document.getElementById('impersonate-list');
-  const staffBlock = grouped.admin_staff.length ? `
-    <div style="margin-top:12px;">
-      <div style="font-weight:700; margin-bottom:6px;">📁 行政</div>
-      <div style="display:flex; flex-wrap:wrap; gap:6px;">
-        ${grouped.admin_staff.map(u => `<button class="btn btn-sm" onclick="impersonateAs('${u.nickname}')">${u.nickname}（${u.department}）</button>`).join('')}
-      </div>
-    </div>` : '';
-  wrap.innerHTML = `
-    <div style="margin-bottom:12px;">
-      <div style="font-weight:700; margin-bottom:6px;">👔 主管</div>
-      <div style="display:flex; flex-wrap:wrap; gap:6px;">
-        ${grouped.manager.map(u => `<button class="btn btn-sm" onclick="impersonateAs('${u.nickname}')">${u.nickname}（${u.department}）</button>`).join('')}
-      </div>
-    </div>
-    <div>
-      <div style="font-weight:700; margin-bottom:6px;">👩‍🏫 老師</div>
-      <div style="display:flex; flex-wrap:wrap; gap:6px;">
-        ${grouped.teacher.map(u => `<button class="btn btn-sm" onclick="impersonateAs('${u.nickname}')">${u.nickname}（${u.department}）</button>`).join('')}
-      </div>
-    </div>
-    ${staffBlock}
-  `;
+function safeText(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, character => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[character]));
 }
 
-function impersonateAs(nickname) {
-  const res = APP_CONFIG; // 暫存
-  API.listUsers().then(r => {
-    if (!r.ok) return;
-    const target = r.users.find(u => u.nickname === nickname);
-    if (!target) { UI.toast('找不到使用者', 'danger'); return; }
-    AUTH.impersonate(target);
-    const root = AUTH.relativeRoot();
-    if (target.role === 'manager') window.location.href = root + 'manager/dashboard.html';
-    else window.location.href = root + 'teacher/today.html';
-  });
+function normalizedNickname(value) {
+  return String(value || '').trim().replace(/(?:老師|主管)$/, '');
 }
+
+async function loadImpersonateList() {
+  const wrap = document.getElementById('impersonate-list');
+  if (normalizedNickname(session.nickname) !== '柏翰') {
+    wrap.innerHTML = '<div class="muted">此功能只開放柏翰管理員使用。</div>';
+    return;
+  }
+  const res = await API.listUsers();
+  if (!res.ok) {
+    wrap.innerHTML = `<div class="muted">${safeText(res.error || '無法讀取人員名單')}</div>`;
+    return;
+  }
+  testViewUsers = res.users.filter(user => ['active', 'pending'].includes(user.status) && user.role !== 'admin');
+  wrap.innerHTML = `<div class="test-view-grid">${testViewUsers.map(user => {
+    const assignments = KPI_WORKSPACES.getAssignments(user);
+    return `<article class="test-user"><div class="test-user-head"><span><strong>${safeText(user.nickname)}</strong><small>${safeText(user.department)} · ${user.role === 'manager' ? '主管' : user.role === 'admin_staff' ? '行政' : '老師'}</small></span><span class="test-status ${user.status === 'pending' ? 'pending' : ''}">${user.status === 'pending' ? '待開通，可測試' : '使用中'}</span></div><div class="test-workspaces">${assignments.length ? assignments.map(item => `<button type="button" class="btn btn-sm" data-test-nickname="${safeText(user.nickname)}" data-test-workspace="${safeText(item.id)}">查看${safeText(item.shortLabel)}</button>`).join('') : '<span class="muted text-sm">尚未設定工作區</span>'}</div></article>`;
+  }).join('')}</div>`;
+}
+
+function impersonateAs(nickname, workspaceId) {
+  const target = testViewUsers.find(user => user.nickname === nickname);
+  const allowed = target && KPI_WORKSPACES.getAssignments(target).some(item => item.id === workspaceId);
+  if (!target || !allowed) { UI.toast('找不到可測試的工作區', 'danger'); return; }
+  AUTH.impersonate(target);
+  window.location.href = KPI_WORKSPACES.hrefFor(workspaceId);
+}
+
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-test-workspace]');
+  if (button) impersonateAs(button.dataset.testNickname, button.dataset.testWorkspace);
+});
 
 async function loadDashboard() {
   UI.loading(true);

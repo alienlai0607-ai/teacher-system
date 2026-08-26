@@ -455,7 +455,7 @@ function migrateTalentUserProfiles_() {
     { nickname: '皮皮老師', employment_type: 'pt', work_assignments: ['talent-pt'], schedule_json: [{ weekday: 4, label: '週四', time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }] },
     { nickname: '紅豆', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'], schedule_json: [1, 3, 4, 5].map(function (weekday) { return { weekday: weekday, label: '週' + ['日', '一', '二', '三', '四', '五', '六'][weekday], time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }; }) },
     { nickname: '小明', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'], schedule_json: [{ weekday: 3, label: '週三', time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }] },
-    { nickname: '黑豹', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'pt', work_assignments: ['talent-pt'], schedule_json: [1, 3].map(function (weekday) { return { weekday: weekday, label: weekday === 1 ? '週一' : '週三', time: '依善化課表（1.5 小時）', siteType: 'partner', site: '善化合作校' }; }) },
+    { nickname: '黑豹', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'pt', work_assignments: ['talent-pt'], schedule_json: [1, 4].map(function (weekday) { return { weekday: weekday, label: weekday === 1 ? '週一' : '週四', time: '19:00–20:30', siteType: 'partner', site: '善化合作校' }; }) },
   ];
   const now = nowIso();
   const sheet = getSheet(SHEET_NAMES.USERS);
@@ -4009,14 +4009,10 @@ function existingChildFolder_(parent, name) {
   return iterator.hasNext() ? iterator.next() : null;
 }
 
-function teacherFolderPdfStats_(folder, ownerUser, scope, viewer) {
+function teacherFolderPdfStats_(folder) {
   let count = 0;
   let latest = '';
   let scanned = 0;
-  const props = PropertiesService.getScriptProperties();
-  const permissionKey = 'KPI_ACCESS_SYNC_' + folder.getId();
-  const accessRevision = kpiDriveAccessRevision_();
-  const reconcilePermissions = props.getProperty(permissionKey) !== accessRevision;
   function visit(current, depth) {
     if (depth > 2 || scanned >= 1000) return;
     const files = current.getFiles();
@@ -4024,7 +4020,6 @@ function teacherFolderPdfStats_(folder, ownerUser, scope, viewer) {
       const file = files.next();
       scanned += 1;
       if (!/\.pdf$/i.test(String(file.getName() || ''))) continue;
-      if (reconcilePermissions) secureKpiDriveItem_(file, ownerUser, scope, [viewer]);
       count += 1;
       const match = String(file.getName() || '').match(/\d{4}-\d{2}-\d{2}/);
       if (match && match[0] > latest) latest = match[0];
@@ -4032,13 +4027,25 @@ function teacherFolderPdfStats_(folder, ownerUser, scope, viewer) {
     const folders = current.getFolders();
     while (folders.hasNext() && scanned < 1000) {
       const child = folders.next();
-      if (reconcilePermissions) secureKpiDriveItem_(child, ownerUser, scope, [viewer]);
       visit(child, depth + 1);
     }
   }
   visit(folder, 0);
-  if (reconcilePermissions) props.setProperty(permissionKey, accessRevision);
   return { count: count, latest: latest };
+}
+
+function talentReportStatsByTeacher_() {
+  const stats = {};
+  sheetToObjects(SHEET_NAMES.TALENT_RECORDS).forEach(function (row) {
+    if (row.record_type !== 'lesson' || row.status !== 'submitted') return;
+    const lesson = talentRecordObject_(row);
+    if (!lesson.reportUrl) return;
+    if (!stats[row.nickname]) stats[row.nickname] = { count: 0, latest: '' };
+    stats[row.nickname].count += 1;
+    const date = String(row.record_date || lesson.date || '').slice(0, 10);
+    if (date > stats[row.nickname].latest) stats[row.nickname].latest = date;
+  });
+  return stats;
 }
 
 /**
@@ -4057,16 +4064,18 @@ function listTeacherReportFolders(params) {
     if (scope === 'anqin' && assignments.indexOf('anqin-manager') < 0) return { ok: false, error: '沒有安親日報查看權限' };
   }
   const root = getKpiPdfRootFolder_();
+  const talentStats = scope === 'talent' ? talentReportStatsByTeacher_() : {};
+  const canOpenTeacherRoot = viewer.role === 'admin' || isGlobalManager_(viewer);
   const folders = teacherReportUsersFor_(viewer, scope).map(function (user) {
     const department = normalizeDepartment_(user.department) || '未分部門';
-    const isActive = user.status === 'active';
-    const departmentFolder = isActive ? getOrCreateChildFolder_(root, department) : existingChildFolder_(root, department);
-    const teacherFolder = isActive ? getOrCreateChildFolder_(departmentFolder, user.nickname) : existingChildFolder_(departmentFolder, user.nickname);
+    const departmentFolder = existingChildFolder_(root, department);
+    const teacherFolder = existingChildFolder_(departmentFolder, user.nickname);
     const workFolderName = scope === 'talent' ? '才藝' : '安親';
-    const workFolder = isActive ? getOrCreateChildFolder_(teacherFolder, workFolderName) : existingChildFolder_(teacherFolder, workFolderName);
-    if (!departmentFolder || !teacherFolder || !workFolder) return null;
-    secureKpiReportPath_(root, departmentFolder, teacherFolder, workFolder, null, user, scope, [viewer]);
-    const stats = teacherFolderPdfStats_(workFolder, user, scope, viewer);
+    const workFolder = existingChildFolder_(teacherFolder, workFolderName);
+    const stats = scope === 'talent'
+      ? (talentStats[user.nickname] || { count: 0, latest: '' })
+      : (workFolder ? teacherFolderPdfStats_(workFolder) : { count: 0, latest: '' });
+    const targetFolder = canOpenTeacherRoot ? teacherFolder : workFolder;
     return {
       nickname: user.nickname,
       department: department,
@@ -4075,11 +4084,13 @@ function listTeacherReportFolders(params) {
       deletedAt: user.deleted_at || '',
       reportCount: stats.count,
       latestDate: stats.latest,
-      url: workFolder.getUrl(),
-      folderId: workFolder.getId(),
+      url: targetFolder ? targetFolder.getUrl() : '',
+      folderId: targetFolder ? targetFolder.getId() : '',
+      workspaceUrl: workFolder ? workFolder.getUrl() : '',
+      opensTeacherFolder: Boolean(canOpenTeacherRoot && teacherFolder),
     };
   }).filter(function (folder) {
-    return folder && (folder.status === 'active' || folder.reportCount > 0);
+    return folder.status === 'active' || folder.reportCount > 0;
   });
   folders.sort(function (left, right) {
     return left.department.localeCompare(right.department, 'zh-TW') || left.nickname.localeCompare(right.nickname, 'zh-TW');
@@ -4744,6 +4755,13 @@ function talentCanAccessHistoricalUser_(actor, target) {
   return actor.role === 'manager' && sameDepartment_(actor.department, target.department);
 }
 
+function talentCanAccessPendingUser_(actor, target) {
+  if (!actor || !target || actor.status !== 'active' || target.status !== 'pending') return false;
+  if (actor.role === 'admin' || isGlobalManager_(actor)) return true;
+  if (talentAssignments_(actor).indexOf('talent-manager') >= 0 && userHasTalentWork_(target)) return true;
+  return actor.role === 'manager' && sameDepartment_(actor.department, target.department);
+}
+
 function talentPublicUser_(user) {
   return {
     nickname: String(user.nickname || ''),
@@ -4868,6 +4886,9 @@ function getTalentWorkspaceData(params) {
   const historicalUsers = allUsers.filter(function (user) {
     return userHasTalentWork_(user) && talentCanAccessHistoricalUser_(actor, user);
   });
+  const pendingUsers = allUsers.filter(function (user) {
+    return userHasTalentWork_(user) && talentCanAccessPendingUser_(actor, user);
+  });
   const allowed = {};
   users.forEach(function (user) { allowed[user.nickname] = true; });
   historicalUsers.forEach(function (user) { allowed[user.nickname] = true; });
@@ -4908,6 +4929,7 @@ function getTalentWorkspaceData(params) {
     conversations: conversations,
     draft: draft,
     users: users.map(talentPublicUser_),
+    pending_users: pendingUsers.map(talentPublicUser_),
     archived_users: historicalUsers.map(talentPublicUser_),
     settings: {
       ptStrictStart: PropertiesService.getScriptProperties().getProperty('TALENT_PT_STRICT_START') || '2026-08-26'

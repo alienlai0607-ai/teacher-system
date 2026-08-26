@@ -78,6 +78,9 @@ svg { pointer-events: none; }
 
 .review-mark { width: 18px; height: 18px; border-radius: 5px; }
 .review-separator { width: 1px; height: 12px; background: #d8bd70; }
+.review-ribbon.test-view { color: #17485f; background: #dff3fa; border-bottom-color: #9bcddd; }
+.test-view-exit { min-height: 22px; display: inline-flex; align-items: center; margin-left: 6px; padding: 1px 9px; color: #17485f; background: #fff; border: 1px solid #77b8cf; border-radius: 6px; cursor: pointer; font-size: 11px; font-weight: 850; }
+.test-view-exit:hover { background: #f4fcff; }
 .app-shell { min-height: 100vh; }
 
 .topbar {
@@ -392,7 +395,9 @@ tbody tr:last-child td { border-bottom: 0; }
 
 .people-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; }
 .person-card { min-width: 0; padding: 15px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+.person-card.is-pending { border-style: dashed; background: #fffdf5; }
 .person-head { display: flex; align-items: center; gap: 10px; padding-bottom: 11px; border-bottom: 1px solid var(--line); }
+.person-head > div { min-width: 0; flex: 1; }
 .large-avatar { width: 48px; height: 48px; flex: 0 0 48px; font-size: 12px; }
 .person-head h2 { margin: 0; font-size: 14px; }
 .person-head p { margin: 1px 0 0; color: var(--muted); font-size: 10px; }
@@ -592,6 +597,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--blue); outline: 
 
 @media (max-width: 560px) {
   .review-separator, .review-ribbon span + * { display: none; }
+  .review-ribbon.test-view .test-view-exit { display: inline-flex !important; margin-left: auto; }
   .brand-copy { max-width: 134px; }
   .profile-button { min-width: 112px; max-width: 124px; }
   .profile-button > svg { display: none; }
@@ -710,6 +716,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--blue); outline: 
 }
 
 .cloud-folder-row:hover { border-color: var(--accent); background: #fffaf0; }
+.cloud-folder-row.is-disabled { color: var(--muted); background: var(--surface-soft); cursor: default; }
+.cloud-folder-row.is-disabled:hover { border-color: var(--border); background: var(--surface-soft); }
 .cloud-folder-row > span:nth-child(2) { min-width: 0; display: grid; gap: 4px; }
 .cloud-folder-row small { color: var(--muted); }
 

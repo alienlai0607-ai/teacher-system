@@ -2,6 +2,16 @@
 window.API = (function () {
   const URL = window.APP_CONFIG.API_URL;
   let authRedirectScheduled = false;
+  const IMPERSONATION_READ_ACTIONS = new Set([
+    'ping', 'whoami', 'listUsers',
+    'getLog', 'getTodayLog', 'listLogs', 'getEvidenceLog', 'getMakeupQuota',
+    'listTasks', 'getWeekly', 'listWeekly', 'listFeedback', 'listFeedbackThread',
+    'listObservations', 'listPosts', 'getWeekPostCount', 'getOKR',
+    'getEvalEvidence', 'getEval', 'listEvals', 'listStudents',
+    'getDashboard', 'getMyKpiPreview', 'listArchivedKpiFiles',
+    'listTeacherReportFolders', 'listCoursePreps', 'getTalentWorkspaceData',
+    'getSystemReadiness',
+  ]);
 
   function handleAuthFailure(action, data) {
     if (action === 'whoami' || !/^AUTH_/.test(String(data?.code || '')) || authRedirectScheduled) return;
@@ -20,6 +30,13 @@ window.API = (function () {
   }
 
   async function call(action, params = {}) {
+    if (window.AUTH?.isImpersonating?.() && !IMPERSONATION_READ_ACTIONS.has(action)) {
+      return {
+        ok: false,
+        code: 'READ_ONLY_TEST_VIEW',
+        error: '目前是柏翰測試視角，只能查看，不能寫入、上傳或送出正式資料',
+      };
+    }
     const payload = { action, ...params };
     const sessionToken = window.AUTH?.getSession?.()?.session_token || '';
     if (sessionToken && !payload.session_token) payload.session_token = sessionToken;

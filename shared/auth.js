@@ -85,12 +85,15 @@ window.AUTH = (function () {
   /**
    * 取得切換身份前的真實角色（離開時用於決定回到哪個 dashboard）
    */
-  function getRealRole() {
+  function getRealSession() {
     try {
       const raw = localStorage.getItem(REAL_SESSION_KEY);
-      if (!raw) return null;
-      return JSON.parse(raw).role || null;
+      return raw ? JSON.parse(raw) : null;
     } catch (e) { return null; }
+  }
+
+  function getRealRole() {
+    return getRealSession()?.role || null;
   }
 
   /**
@@ -171,5 +174,5 @@ window.AUTH = (function () {
     else window.location.href = root + 'teacher/today.html';
   }
 
-  return { getSession, setSession, clearSession, requireRole, logout, decodeJwt, routeByRole, relativeRoot, impersonate, exitImpersonate, isImpersonating, getRealRole };
+  return { getSession, setSession, clearSession, requireRole, logout, decodeJwt, routeByRole, relativeRoot, impersonate, exitImpersonate, isImpersonating, getRealRole, getRealSession };
 })();

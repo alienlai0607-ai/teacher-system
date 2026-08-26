@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 12;
+  const APP_VERSION = 13;
   const PREVIEW_MODE = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
     || window.location.hostname.endsWith('.trycloudflare.com');
   const reviewRibbon = document.getElementById('review-ribbon');
@@ -39,7 +39,7 @@
     { nickname: '皮皮老師', role: 'teacher', department: '才藝部門', employment: 'pt', work_assignments: ['talent-pt'], schedule: [{ weekday: 4, label: '週四', time: '19:00–20:30', siteType: 'self', site: '布拉克自營教室' }] },
     { nickname: '紅豆老師', role: 'teacher', department: '東橋教室', employment: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'], schedule: [1, 3, 4, 5].map(weekday => ({ weekday, label: `週${['日', '一', '二', '三', '四', '五', '六'][weekday]}`, time: '19:00–20:30', siteType: 'self', site: '布拉克自營教室' })) },
     { nickname: '小明老師', role: 'teacher', department: '北區教室', employment: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'], schedule: [{ weekday: 3, label: '週三', time: '19:00–20:30', siteType: 'self', site: '布拉克自營教室' }] },
-    { nickname: '黑豹老師', role: 'teacher', department: '才藝部門', employment: 'pt', work_assignments: ['talent-pt'], schedule: [1, 3].map(weekday => ({ weekday, label: `週${weekday === 1 ? '一' : '三'}`, time: '依善化課表（1.5 小時）', siteType: 'partner', site: '善化合作校' })) },
+    { nickname: '黑豹老師', role: 'teacher', department: '才藝部門', employment: 'pt', work_assignments: ['talent-pt'], schedule: [1, 4].map(weekday => ({ weekday, label: `週${weekday === 1 ? '一' : '四'}`, time: '19:00–20:30', siteType: 'partner', site: '善化合作校' })) },
     { nickname: '柳丁主管', role: 'manager', department: '才藝部門', employment: 'manager', work_assignments: ['talent-manager'], campus: '全才藝部' },
     { nickname: '柏翰', role: 'admin', department: '管理部', employment: 'admin', work_assignments: ['anqin-manager', 'talent-payroll'], campus: '全校' },
     { nickname: '小魚主管', role: 'manager', department: '管理部', employment: 'manager', work_assignments: ['anqin-manager', 'talent-payroll'], campus: '全校' },
@@ -145,6 +145,14 @@
     return;
   }
   window.KPI_REVIEW_USER = currentUser;
+  const TEST_VIEW_MODE = Boolean(identity.session?.impersonate);
+  const realActor = TEST_VIEW_MODE ? (window.AUTH?.getRealSession?.() || null) : identity.session;
+  const isBohanAdmin = Boolean(realActor?.role === 'admin' && normalizeName(realActor.nickname) === normalizeName('柏翰'));
+  if (TEST_VIEW_MODE && reviewRibbon) {
+    reviewRibbon.hidden = false;
+    reviewRibbon.classList.add('test-view');
+    reviewRibbon.innerHTML = `${icon('scan-eye', 15)}<strong>柏翰測試視角</strong><span class="review-separator" aria-hidden="true"></span>目前查看：${esc(currentUser.nickname)} · 唯讀，不會寫入正式資料 <button type="button" class="test-view-exit" data-action="exit-impersonation">回到管理頁</button>`;
+  }
 
   function createSeed() {
     const month = currentMonth();
@@ -154,6 +162,7 @@
       ui: { route: workspace.start, lastSavedAt: '', month },
       settings: { ptStrictStart: date, ptExceptions: [] },
       users: PREVIEW_MODE ? STAFF : [],
+      pendingUsers: [],
       archivedUsers: [],
       draftLog: null,
       draftPrep: null,
@@ -174,8 +183,8 @@
     };
   }
 
-  const sharedStorageKey = 'bp_talent_kpi_v12_shared';
-  const personalStorageKey = `bp_talent_kpi_v12_personal_${encodeURIComponent(currentUser?.nickname || 'review')}_${workspaceId}`;
+  const sharedStorageKey = 'bp_talent_kpi_v13_shared';
+  const personalStorageKey = `bp_talent_kpi_v13_personal_${encodeURIComponent(TEST_VIEW_MODE ? `${realActor?.nickname || 'admin'}_test_${currentUser?.nickname || 'review'}` : currentUser?.nickname || 'review')}_${workspaceId}`;
 
   function loadState() {
     const seed = createSeed();
@@ -186,7 +195,7 @@
     }
     try { personal = JSON.parse(localStorage.getItem(personalStorageKey) || 'null'); } catch (error) { personal = null; }
     if (!shared || shared.version !== APP_VERSION) {
-      shared = { version: APP_VERSION, settings: seed.settings, users: seed.users, preps: seed.preps, logs: seed.logs, scores: seed.scores, conversations: seed.conversations };
+      shared = { version: APP_VERSION, settings: seed.settings, users: seed.users, pendingUsers: seed.pendingUsers, preps: seed.preps, logs: seed.logs, scores: seed.scores, conversations: seed.conversations };
     }
     if (!personal || personal.version !== APP_VERSION) {
       personal = { version: APP_VERSION, ui: seed.ui, draftLog: null, draftPrep: null };
@@ -197,6 +206,7 @@
   let state = loadState();
   state.settings = state.settings || { ptStrictStart: todayIso(), ptExceptions: [] };
   state.users = Array.isArray(state.users) ? state.users : [];
+  state.pendingUsers = Array.isArray(state.pendingUsers) ? state.pendingUsers : [];
   state.archivedUsers = Array.isArray(state.archivedUsers) ? state.archivedUsers : [];
   let pendingFiles = { attendance: [], learning: [], room: [], prep: [] };
   let activeLogSource = null;
@@ -214,7 +224,7 @@
     state.ui.lastSavedAt = new Date().toISOString();
     try {
       if (PREVIEW_MODE) {
-        localStorage.setItem(sharedStorageKey, JSON.stringify({ version: APP_VERSION, settings: state.settings, users: state.users, archivedUsers: state.archivedUsers, preps: state.preps, logs: state.logs, scores: state.scores, conversations: state.conversations }));
+        localStorage.setItem(sharedStorageKey, JSON.stringify({ version: APP_VERSION, settings: state.settings, users: state.users, pendingUsers: state.pendingUsers, archivedUsers: state.archivedUsers, preps: state.preps, logs: state.logs, scores: state.scores, conversations: state.conversations }));
       } else {
         localStorage.removeItem(sharedStorageKey);
       }
@@ -245,9 +255,10 @@
     state.scores = Array.isArray(result.scores) ? result.scores : [];
     state.conversations = Array.isArray(result.conversations) ? result.conversations : [];
     state.users = Array.isArray(result.users) ? result.users : [];
+    state.pendingUsers = Array.isArray(result.pending_users) ? result.pending_users : [];
     state.archivedUsers = Array.isArray(result.archived_users) ? result.archived_users : [];
     state.settings = { ...state.settings, ...(result.settings || {}) };
-    if (result.draft && !state.draftLog) state.draftLog = result.draft;
+    if (!TEST_VIEW_MODE && result.draft && !state.draftLog) state.draftLog = result.draft;
     const profile = (result.users || []).find(user => normalizeName(user.nickname) === normalizeName(currentUser.nickname));
     if (profile) {
       currentUser.employment = profile.employment_type || currentUser.employment;
@@ -279,6 +290,17 @@
 
   function archivedTalentStaff() {
     return (Array.isArray(state.archivedUsers) ? state.archivedUsers : []).map(person => ({
+      ...person,
+      employment: person.employment || person.employment_type || '',
+      schedule: Array.isArray(person.schedule) ? person.schedule : Array.isArray(person.schedule_json) ? person.schedule_json : [],
+      restDays: Array.isArray(person.restDays) ? person.restDays : Array.isArray(person.rest_days) ? person.rest_days : [],
+      work_assignments: Array.isArray(person.work_assignments) ? person.work_assignments : [],
+      campus: person.campus || person.department || '',
+    }));
+  }
+
+  function pendingTalentStaff() {
+    return (Array.isArray(state.pendingUsers) ? state.pendingUsers : []).map(person => ({
       ...person,
       employment: person.employment || person.employment_type || '',
       schedule: Array.isArray(person.schedule) ? person.schedule : Array.isArray(person.schedule_json) ? person.schedule_json : [],
@@ -737,8 +759,11 @@
   }
 
   function renderPeople() {
+    const people = talentStaff()
+      .filter(person => ['fulltime', 'pt'].includes(person.employment))
+      .concat(pendingTalentStaff().filter(person => ['fulltime', 'pt'].includes(person.employment)));
     return `${pageHead('人員與排班', '排班與工作身分有生效日，新設定不會回頭改算已結算月份。')}
-      <section class="people-grid">${talentStaff().filter(person => ['fulltime', 'pt'].includes(person.employment)).map(person => `<article class="person-card"><div class="person-head"><span class="large-avatar">${esc(person.nickname.replace('老師', '').slice(0, 2))}</span><div><h2>${esc(person.nickname)}</h2><p>${person.employment === 'pt' ? '才藝 PT' : '才藝正職'}</p></div></div><div class="person-rules">${person.restDays?.length ? `<div><span>固定休假</span><strong>${person.restDays.join('、')}</strong></div>` : (person.schedule || []).map(item => `<div><span>${esc(item.label)}</span><strong>${esc(item.time)}</strong><small>${esc(item.site)}</small></div>`).join('')}${normalizeName(person.nickname) === normalizeName('黑豹老師') ? '<div class="special-rule"><span>善化合作校</span><strong>每堂 900，無續報獎金</strong></div>' : ''}</div><div class="assignment-tags">${(person.work_assignments || []).map(id => `<span>${id === 'anqin-teacher' ? '安親老師' : id === 'talent-pt' ? '才藝 PT' : id === 'talent-fulltime' ? '才藝正職' : esc(id)}</span>`).join('')}</div></article>`).join('')}</section>`;
+      <section class="people-grid">${people.map(person => `<article class="person-card ${person.status === 'pending' ? 'is-pending' : ''}"><div class="person-head"><span class="large-avatar">${esc(person.nickname.replace('老師', '').slice(0, 2))}</span><div><h2>${esc(person.nickname)}</h2><p>${person.employment === 'pt' ? '才藝 PT' : '才藝正職'}${person.status === 'pending' ? ' · 待開通' : ''}</p></div>${person.status === 'pending' ? '<span class="badge yellow">尚未綁定登入</span>' : ''}</div><div class="person-rules">${person.restDays?.length ? `<div><span>固定休假</span><strong>${person.restDays.join('、')}</strong></div>` : (person.schedule || []).map(item => `<div><span>${esc(item.label)}</span><strong>${esc(item.time)}</strong><small>${esc(item.site)}</small></div>`).join('')}${normalizeName(person.nickname) === normalizeName('黑豹老師') ? '<div class="special-rule"><span>善化合作校</span><strong>每堂 900，無續報獎金</strong></div>' : ''}</div><div class="assignment-tags">${(person.work_assignments || []).map(id => `<span>${id === 'anqin-teacher' ? '安親老師' : id === 'talent-pt' ? '才藝 PT' : id === 'talent-fulltime' ? '才藝正職' : esc(id)}</span>`).join('')}</div></article>`).join('')}</section>`;
   }
 
   async function loadCloudFolders(notify = false) {
@@ -751,7 +776,15 @@
     cloudRuntime.foldersStatus = 'loading';
     cloudRuntime.foldersMessage = '正在讀取才藝日報資料夾';
     renderApp();
-    const result = await window.API?.listTeacherReportFolders?.({ scope: 'talent' });
+    let timeoutId = 0;
+    const timeoutResult = new Promise(resolve => {
+      timeoutId = window.setTimeout(() => resolve({ ok: false, error: '雲端資料夾讀取逾時，請重新整理' }), 20000);
+    });
+    const result = await Promise.race([
+      window.API?.listTeacherReportFolders?.({ scope: 'talent' }) || Promise.resolve({ ok: false, error: '雲端服務尚未載入' }),
+      timeoutResult,
+    ]);
+    window.clearTimeout(timeoutId);
     if (!result?.ok) {
       cloudRuntime.foldersStatus = 'error';
       cloudRuntime.foldersMessage = result?.error || '雲端資料夾讀取失敗';
@@ -777,7 +810,12 @@
     } else if (!cloudRuntime.folders.length) {
       body = renderEmpty('目前沒有日報資料夾', '老師送出第一筆正式才藝日報後會自動歸檔。', 'folder-search');
     } else {
-      body = `<div class="cloud-folder-list">${cloudRuntime.folders.map(folder => `<a class="cloud-folder-row" href="${esc(folder.url)}" target="_blank" rel="noopener noreferrer"><span class="course-icon">${icon('folder-open', 21)}</span><span><strong>${esc(folder.nickname)}${folder.status === 'deleted' ? ' · 離職保留' : folder.status === 'suspended' ? ' · 帳號停用' : ''}</strong><small>${esc(folder.department)} · ${folder.reportCount ? `${folder.reportCount} 份日報${folder.latestDate ? ` · 最近 ${formatDate(folder.latestDate)}` : ''}` : '尚無日報'}</small></span><span class="badge ${folder.reportCount ? 'green' : 'gray'}">${folder.reportCount || 0} 份</span>${icon('external-link', 17)}</a>`).join('')}</div>`;
+      body = `<div class="cloud-folder-list">${cloudRuntime.folders.map(folder => {
+        const content = `<span class="course-icon">${icon(folder.url ? 'folder-open' : 'folder-clock', 21)}</span><span><strong>${esc(folder.nickname)}${folder.status === 'deleted' ? ' · 離職保留' : folder.status === 'suspended' ? ' · 帳號停用' : ''}</strong><small>${esc(folder.department)} · ${folder.reportCount ? `${folder.reportCount} 份日報${folder.latestDate ? ` · 最近 ${formatDate(folder.latestDate)}` : ''}` : '尚未產生正式日報'}${folder.opensTeacherFolder ? ' · 開啟老師資料夾' : ''}</small></span><span class="badge ${folder.reportCount ? 'green' : 'gray'}">${folder.reportCount || 0} 份</span>${folder.url ? icon('external-link', 17) : ''}`;
+        return folder.url
+          ? `<a class="cloud-folder-row" href="${esc(folder.url)}" target="_blank" rel="noopener noreferrer">${content}</a>`
+          : `<div class="cloud-folder-row is-disabled" aria-disabled="true">${content}</div>`;
+      }).join('')}</div>`;
     }
     return `${pageHead('雲端日報', '依老師與月份整理的正式日報資料夾。', `<button type="button" class="btn" data-action="refresh-cloud-folders">${icon('refresh-cw', 16)}重新整理</button>`)}<div class="notice info">${icon('shield-check', 19)}<div><strong>依登入權限顯示</strong><span>才藝主管查看才藝老師；小魚與管理員依全域權限查看。開啟 Drive 時請使用系統綁定的 Google 帳號。</span></div></div><section class="panel"><div class="panel-body">${body}</div></section>`;
   }
@@ -929,6 +967,7 @@
   }
 
   function captureLogDraft(syncCloud = true) {
+    if (TEST_VIEW_MODE) return;
     const form = $('#log-form');
     if (!form) return;
     const data = new FormData(form);
@@ -949,7 +988,7 @@
   }
 
   function queueCloudDraftSave() {
-    if (PREVIEW_MODE || !state.draftLog) return;
+    if (PREVIEW_MODE || TEST_VIEW_MODE || !state.draftLog) return;
     const snapshot = JSON.parse(JSON.stringify(state.draftLog));
     cloudDraftChain = cloudDraftChain.then(async () => {
       if (!state.draftLog) return;
@@ -1008,6 +1047,7 @@
   }
 
   async function uploadTalentFile(file, category) {
+    if (TEST_VIEW_MODE) throw new Error('測試視角為唯讀，不能上傳正式附件');
     if (PREVIEW_MODE) {
       return { id: uid('preview_file'), fileName: file.name, mimeType: file.type || '', url: '', category };
     }
@@ -1370,7 +1410,13 @@
 
   function openProfile() {
     const assignments = window.KPI_WORKSPACES?.getAssignments?.(currentUser) || [];
-    openDialog({ title: '帳號與工作模式', body: `<div class="profile-summary"><span class="large-avatar">${esc(initials())}</span><div><strong>${esc(currentUser.nickname)}</strong><span>${esc(currentUser.department)} · ${esc(workspace.label)}</span></div></div><div class="assignment-list"><h3>這個帳號可使用</h3>${assignments.map(item => `<div class="assignment-item"><span>${icon(item.icon, 18)}</span><div><strong>${esc(item.label)}</strong><small>${esc(item.description)}</small></div>${item.id === workspaceId ? statusBadge('正常') : ''}</div>`).join('')}</div>${!identity.session && PREVIEW_MODE ? `<div class="review-samples"><h3>內部審查樣本</h3><div><a class="btn" href="?workspace=talent-pt&reviewUser=紅豆老師">PT／紅豆</a><a class="btn" href="?workspace=talent-fulltime&reviewUser=浩浩老師">正職／浩浩</a><a class="btn" href="?workspace=talent-manager&reviewUser=柳丁主管">主管／柳丁</a><a class="btn" href="?workspace=talent-payroll&reviewUser=柏翰">薪資／柏翰</a><a class="btn" href="?workspace=talent-pt&reviewUser=黑豹老師">合作校／黑豹</a></div></div>` : ''}`, footer: `${identity.session ? `<button type="button" class="btn btn-danger" data-action="logout">登出</button><button type="button" class="btn" data-action="enable-push">開啟 APP 通知</button>${['admin', 'manager'].includes(currentUser.role) ? '<button type="button" class="btn" data-action="system-health">系統健康檢查</button><button type="button" class="btn" data-action="test-notifications">測試 APP／LINE</button>' : ''}` : ''}<button type="button" class="btn" data-action="close-dialog">關閉</button>` });
+    const testNotice = TEST_VIEW_MODE ? `<div class="notice info">${icon('scan-eye', 19)}<div><strong>柏翰正在測試 ${esc(currentUser.nickname)} 的畫面</strong><span>所有新增、上傳、儲存、送出與通知功能都已停用。</span></div></div>` : '';
+    const sessionActions = TEST_VIEW_MODE
+      ? `<button type="button" class="btn btn-primary" data-action="exit-impersonation">${icon('undo-2', 16)}回到測試人員清單</button>`
+      : identity.session
+        ? `<button type="button" class="btn btn-danger" data-action="logout">登出</button><button type="button" class="btn" data-action="enable-push">開啟 APP 通知</button>${isBohanAdmin ? `<button type="button" class="btn btn-primary" data-action="open-test-view">${icon('scan-eye', 16)}測試老師視角</button>` : ''}${['admin', 'manager'].includes(currentUser.role) ? '<button type="button" class="btn" data-action="system-health">系統健康檢查</button><button type="button" class="btn" data-action="test-notifications">測試 APP／LINE</button>' : ''}`
+        : '';
+    openDialog({ title: '帳號與工作模式', body: `${testNotice}<div class="profile-summary"><span class="large-avatar">${esc(initials())}</span><div><strong>${esc(currentUser.nickname)}</strong><span>${esc(currentUser.department)} · ${esc(workspace.label)}</span></div></div><div class="assignment-list"><h3>這個帳號可使用</h3>${assignments.map(item => `<div class="assignment-item"><span>${icon(item.icon, 18)}</span><div><strong>${esc(item.label)}</strong><small>${esc(item.description)}</small></div>${item.id === workspaceId ? statusBadge('正常') : ''}</div>`).join('')}</div>${!identity.session && PREVIEW_MODE ? `<div class="review-samples"><h3>內部審查樣本</h3><div><a class="btn" href="?workspace=talent-pt&reviewUser=紅豆老師">PT／紅豆</a><a class="btn" href="?workspace=talent-fulltime&reviewUser=浩浩老師">正職／浩浩</a><a class="btn" href="?workspace=talent-manager&reviewUser=柳丁主管">主管／柳丁</a><a class="btn" href="?workspace=talent-payroll&reviewUser=柏翰">薪資／柏翰</a><a class="btn" href="?workspace=talent-pt&reviewUser=黑豹老師">合作校／黑豹</a></div></div>` : ''}`, footer: `${sessionActions}<button type="button" class="btn" data-action="close-dialog">關閉</button>` });
   }
 
   function healthStatusRow(label, ok, detail) {
@@ -1453,6 +1499,13 @@
     toast('PT 逐堂月結 CSV 已匯出');
   }
 
+  const TEST_VIEW_MUTATION_ACTIONS = new Set([
+    'new-log', 'edit-log', 'submit-log', 'save-log-draft', 'discard-log-draft',
+    'new-prep', 'submit-prep', 'edit-prep', 'save-prep-draft', 'remove-upload',
+    'retry-report', 'toggle-app', 'review-prep', 'finish-prep-review', 'edit-score',
+    'open-bonus-approval', 'setup-automation', 'enable-push', 'test-notifications',
+  ]);
+
   document.addEventListener('click', async event => {
     if (event.target.matches('[data-dialog-backdrop]')) {
       closeDialog();
@@ -1461,6 +1514,19 @@
     const control = event.target.closest('[data-action]');
     if (!control) return;
     const action = control.dataset.action;
+    if (action === 'exit-impersonation') {
+      window.AUTH?.exitImpersonate?.();
+      window.location.href = `${window.AUTH?.relativeRoot?.() || '../../'}admin/dashboard.html#test-view`;
+      return;
+    }
+    if (action === 'open-test-view') {
+      window.location.href = `${window.AUTH?.relativeRoot?.() || '../../'}admin/dashboard.html#test-view`;
+      return;
+    }
+    if (TEST_VIEW_MODE && TEST_VIEW_MUTATION_ACTIONS.has(action)) {
+      toast('目前是柏翰測試視角，只能查看，不能修改正式資料', 'warning');
+      return;
+    }
     if (action === 'navigate') {
       state.ui.route = control.dataset.route; closeDialog(); closeDrawer(); persist(); renderApp();
       if (state.ui.route === 'cloud-reports' && cloudRuntime.foldersStatus === 'idle') window.setTimeout(loadCloudFolders, 0);
@@ -1597,6 +1663,10 @@
 
   document.addEventListener('submit', async event => {
     event.preventDefault();
+    if (TEST_VIEW_MODE) {
+      toast('目前是柏翰測試視角，表單不會送出', 'warning');
+      return;
+    }
     if (event.target.id === 'log-form') { await runFormAction(event.target, () => submitLog(event.target)); return; }
     if (event.target.id === 'prep-form') { await runFormAction(event.target, () => savePrep(event.target, true)); return; }
     const submittedForm = event.target;
@@ -1657,6 +1727,7 @@
   });
 
   document.addEventListener('input', event => {
+    if (TEST_VIEW_MODE) return;
     if (event.target.closest('#log-form')) {
       event.target.closest('#log-form').dataset.dirty = 'true';
       window.clearTimeout(window.__talentDraftTimer);
@@ -1673,6 +1744,11 @@
     }
     const fileInput = event.target.closest('[data-upload-category]');
     if (fileInput) {
+      if (TEST_VIEW_MODE) {
+        fileInput.value = '';
+        toast('測試視角不能上傳正式附件', 'warning');
+        return;
+      }
       const form = fileInput.closest('#log-form');
       if (form) form.dataset.dirty = 'true';
       await handleTalentFiles(fileInput);

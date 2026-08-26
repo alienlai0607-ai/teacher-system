@@ -81,6 +81,13 @@ function talentCanAccessHistoricalUser_(actor, target) {
   return actor.role === 'manager' && sameDepartment_(actor.department, target.department);
 }
 
+function talentCanAccessPendingUser_(actor, target) {
+  if (!actor || !target || actor.status !== 'active' || target.status !== 'pending') return false;
+  if (actor.role === 'admin' || isGlobalManager_(actor)) return true;
+  if (talentAssignments_(actor).indexOf('talent-manager') >= 0 && userHasTalentWork_(target)) return true;
+  return actor.role === 'manager' && sameDepartment_(actor.department, target.department);
+}
+
 function talentPublicUser_(user) {
   return {
     nickname: String(user.nickname || ''),
@@ -205,6 +212,9 @@ function getTalentWorkspaceData(params) {
   const historicalUsers = allUsers.filter(function (user) {
     return userHasTalentWork_(user) && talentCanAccessHistoricalUser_(actor, user);
   });
+  const pendingUsers = allUsers.filter(function (user) {
+    return userHasTalentWork_(user) && talentCanAccessPendingUser_(actor, user);
+  });
   const allowed = {};
   users.forEach(function (user) { allowed[user.nickname] = true; });
   historicalUsers.forEach(function (user) { allowed[user.nickname] = true; });
@@ -245,6 +255,7 @@ function getTalentWorkspaceData(params) {
     conversations: conversations,
     draft: draft,
     users: users.map(talentPublicUser_),
+    pending_users: pendingUsers.map(talentPublicUser_),
     archived_users: historicalUsers.map(talentPublicUser_),
     settings: {
       ptStrictStart: PropertiesService.getScriptProperties().getProperty('TALENT_PT_STRICT_START') || '2026-08-26'

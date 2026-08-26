@@ -1436,9 +1436,12 @@
   }
 
   function renderSystemStatusNotice() {
+    const session = legacySession();
+    if (session?.impersonate === true) {
+      return `<div class="system-status-notice"><div class="notice-band info">${icon('scan-eye', 19)}<div><div class="notice-title">${esc(session.impersonated_by || '柏翰')}測試視角：${esc(session.nickname)}</div><div class="notice-copy">目前只能查看；新增、上傳、儲存與正式送出皆已停用。</div></div><button type="button" class="btn btn-small" data-action="exit-impersonation">回到測試人員清單</button></div></div>`;
+    }
     const message = runtimeHealth.persistError || runtimeHealth.loadIssue;
     if (message) return `<div class="system-status-notice"><div class="notice-band danger">${icon('database-zap', 19)}<div><div class="notice-title">資料安全提醒</div><div class="notice-copy">${esc(message)}</div></div><button type="button" class="btn btn-small" data-action="open-health">健康檢查</button></div></div>`;
-    const session = legacySession();
     if (session?.role === 'teacher' && integrationRuntime.cloudStatus === 'error') {
       return `<div class="system-status-notice"><div class="notice-band danger">${icon('cloud-alert', 19)}<div><div class="notice-title">雲端資料讀取失敗</div><div class="notice-copy">${esc(integrationRuntime.cloudMessage || '目前只顯示本機保留內容，請勿把空白誤認為沒有舊紀錄。')}</div></div><button type="button" class="btn btn-small" data-action="sync-teacher-records">重新讀取</button></div></div>`;
     }
@@ -4517,6 +4520,9 @@
   function openProfileDialog() {
     const person = currentPerson();
     const session = legacySession();
+    const canOpenTestView = session?.role === 'admin'
+      && !window.AUTH?.isImpersonating?.()
+      && normalizeReviewNickname(session.nickname) === normalizeReviewNickname('柏翰');
     const visualTheme = currentVisualTheme();
     const storageNotice = state.integration.cloudSyncEnabled
       ? `<div class="notice-band success">${icon('cloud', 19)}<div><div class="notice-title">正式雲端送出已啟用</div><div class="notice-copy">送出時會核對登入身分，並將照片與日報存入雲端。</div></div></div>`
@@ -4524,7 +4530,7 @@
     openDialog({
       title: '使用者與介面',
       body: `<div class="teacher-status"><span class="status-avatar">${esc(person.initials || person.nickname.slice(0, 2))}</span><div><div class="table-primary">${esc(person.nickname)}</div><div class="table-secondary">${esc(person.department)} · ${esc(sessionRoleLabel(session?.role || (state.ui.role === 'manager' ? 'manager' : 'teacher')))}</div></div></div><div class="section-divider"></div><section class="visual-mode-setting" aria-labelledby="visual-mode-title"><div class="visual-mode-heading"><div><strong id="visual-mode-title">介面風格</strong><small>只調整外觀，工作紀錄與上傳資料不會改變</small></div><span class="badge outline">可隨時切換</span></div><div class="theme-choice-group" role="group" aria-label="選擇介面風格"><button type="button" class="theme-choice ${visualTheme === 'playful' ? 'active' : ''}" data-action="set-visual-theme" data-theme="playful" aria-pressed="${visualTheme === 'playful'}"><span class="theme-choice-icon playful">${icon('sparkles', 18)}</span><span><strong>布拉克可愛版</strong><small>暖色背景、角色圖案與清楚的品牌色按鈕</small></span><span class="theme-choice-check">${visualTheme === 'playful' ? icon('check', 15) : ''}</span></button><button type="button" class="theme-choice ${visualTheme === 'calm' ? 'active' : ''}" data-action="set-visual-theme" data-theme="calm" aria-pressed="${visualTheme === 'calm'}"><span class="theme-choice-icon">${icon('align-justify', 18)}</span><span><strong>清爽版</strong><small>減少色彩與裝飾，適合偏好簡潔的老師</small></span><span class="theme-choice-check">${visualTheme === 'calm' ? icon('check', 15) : ''}</span></button></div></section><div class="section-divider"></div>${storageNotice}`,
-      footer: `${session ? `<button type="button" class="btn" data-action="${window.AUTH?.isImpersonating?.() ? 'exit-impersonation' : 'logout'}">${icon(window.AUTH?.isImpersonating?.() ? 'undo-2' : 'log-out', 15)}${window.AUTH?.isImpersonating?.() ? '回到原帳號' : '登出／更換帳號'}</button>` : `<button type="button" class="btn btn-danger" data-action="reset-demo">${icon('rotate-ccw', 15)}清空審查資料</button>`}<button type="button" class="btn" data-action="open-health">${icon('activity', 15)}健康檢查</button><button type="button" class="btn" data-action="close-dialog">關閉</button>`,
+      footer: `${session ? `<button type="button" class="btn" data-action="${window.AUTH?.isImpersonating?.() ? 'exit-impersonation' : 'logout'}">${icon(window.AUTH?.isImpersonating?.() ? 'undo-2' : 'log-out', 15)}${window.AUTH?.isImpersonating?.() ? '回到測試人員清單' : '登出／更換帳號'}</button>${canOpenTestView ? `<button type="button" class="btn btn-primary" data-action="open-test-view">${icon('scan-eye', 15)}測試老師視角</button>` : ''}` : `<button type="button" class="btn btn-danger" data-action="reset-demo">${icon('rotate-ccw', 15)}清空審查資料</button>`}<button type="button" class="btn" data-action="open-health">${icon('activity', 15)}健康檢查</button><button type="button" class="btn" data-action="close-dialog">關閉</button>`,
     });
   }
 
@@ -6404,9 +6410,14 @@
     }
     else if (action === 'exit-impersonation') {
       persistCurrentDrawerDraft(true);
+      const realRole = window.AUTH?.getRealRole?.();
       window.AUTH?.exitImpersonate?.();
       const root = window.AUTH?.relativeRoot?.() || '../../';
-      window.location.href = `${root}index.html?v=20260825-profile-fix-3`;
+      window.location.href = realRole === 'admin' ? `${root}admin/dashboard.html#test-view` : `${root}manager/dashboard.html`;
+    }
+    else if (action === 'open-test-view') {
+      const root = window.AUTH?.relativeRoot?.() || '../../';
+      window.location.href = `${root}admin/dashboard.html#test-view`;
     }
     else if (action === 'open-health' || action === 'run-health-check') openHealthDialog();
     else if (action === 'check-integrations') await checkIntegrations();
