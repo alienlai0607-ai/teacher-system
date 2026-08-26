@@ -24,4 +24,14 @@ assert.match(source, /class="manager-eval-score-input"/, '主管輸入分數需�
 assert.match(styles, /\.task-open-button[\s\S]*overflow-wrap: anywhere/, '追蹤事項摘要需要可換行');
 assert.match(styles, /\.evaluation-score-row[\s\S]*grid-template-columns: minmax\(0, 1fr\) auto/, '各項分數必須在目前畫面直接可見');
 
-console.log('PASS anqin task dialog, cloud detail mapping, and visible evaluation scores');
+const dailyTrackRules = source.slice(source.indexOf('function activityTrackMeta('), source.indexOf('function activityDetailSchema('));
+assert.match(dailyTrackRules, /學科外｜特色課程（如有則填）/, '特色課程入口必須明確標示當日選填');
+assert.match(dailyTrackRules, /return tracks\.academic\.covered;/, '日結只要求每日課業輔導存在');
+assert.doesNotMatch(source, /blockers\.push\('新增特色課程紀錄'\)/, '沒有特色課程不得阻擋日結');
+assert.match(source, /!tracks\.enrichment\.covered \|\| tracks\.enrichment\.items\.every\(weeklyActivityCoreReady\)/, '週整理須將沒有特色課程視為正常');
+assert.match(source, /tracks\.enrichment\.covered && !enrichmentReady/, '若已新增特色課程但內容不完整仍須列為缺件');
+assert.match(source, /學科內必填；學科外有課才填/, '主管審查頁必須使用相同規則說明');
+assert.match(source, /id="activity-track-indicator">\$\{renderActivityTrackIndicator\(value\.type\)\}/, '特色課程表單內要再次顯示有課才填、填了要完整的規則');
+assert.match(styles, /\.daily-track-row\.is-optional:not\(\.is-covered\)/, '選填的特色課程不得以紅色缺件樣式呈現');
+
+console.log('PASS anqin task dialog, visible evaluation scores, and optional enrichment rules');

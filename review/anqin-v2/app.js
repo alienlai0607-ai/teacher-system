@@ -1645,7 +1645,7 @@
   function activityTrackMeta(track) {
     return {
       academic: { label: '學科內｜課業輔導／班級經營', shortLabel: '學科內', icon: 'book-open-check', tone: 'blue', description: '安親課業指導每天必填；班級經營有實際事件時再記。' },
-      enrichment: { label: '學科外｜當日特色課程', shortLabel: '學科外必填', icon: 'sparkles', tone: 'purple', description: '專案、機器人／STEAM、學習歷程或 SEL 等當日特色課程。' },
+      enrichment: { label: '學科外｜特色課程（如有則填）', shortLabel: '學科外選填', icon: 'sparkles', tone: 'purple', description: '當天有專案、機器人／STEAM、學習歷程或 SEL 才新增；有上課就要完整填寫。' },
       legacy: { label: '歷史紀錄', shortLabel: '歷史資料', icon: 'archive', tone: 'outline', description: '只保留舊資料，不提供新增。' },
     }[track] || { label: '學科內', shortLabel: '學科內', icon: 'book-open-check', tone: 'blue', description: '' };
   }
@@ -1665,7 +1665,7 @@
 
   function dailyRequiredTracksReady(activities = todayActivities()) {
     const tracks = dailyTrackStatus(activities);
-    return tracks.academic.covered && tracks.enrichment.covered;
+    return tracks.academic.covered;
   }
 
   function activityDetailSchema(type) {
@@ -1853,7 +1853,7 @@
       ${renderGuideInvite()}
       <div class="status-strip">
         <div class="status-cell"><div class="status-label">今日完成度</div><div class="status-value">${completion}%</div><div class="status-note">${state.daily.status === 'submitted' ? '已送出' : '草稿'}</div></div>
-        <div class="status-cell"><div class="status-label">今日必填</div><div class="status-value">${Number(tracks.academic.covered) + Number(tracks.enrichment.covered)}/2</div><div class="status-note">課業輔導 · 特色課程</div></div>
+        <div class="status-cell"><div class="status-label">今日必填</div><div class="status-value">${Number(tracks.academic.covered)}/1</div><div class="status-note">課業輔導 · 特色課程選填</div></div>
         <div class="status-cell"><div class="status-label">備課／成果</div><div class="status-value">${prepReady}/${prepRequired.length}</div><div class="status-note">成果 ${evidenceReady}/${evidenceRequired.length} 筆</div></div>
         <div class="status-cell"><div class="status-label">待追蹤</div><div class="status-value">${openTasks().length}</div><div class="status-note">${openTasks().filter(item => item.priority === 'high').length} 項優先</div></div>
       </div>
@@ -1880,7 +1880,7 @@
     const ready = activities.filter(activityComplete).length;
     return `<div class="content-grid">
       <section class="panel">
-        <div class="panel-head"><div><div class="panel-title">${icon('clipboard-list')}工作紀錄</div><div class="panel-subtitle">課業輔導與特色課程各 1 筆 · 完整 ${ready}/${activities.length || 0}</div></div></div>
+        <div class="panel-head"><div><div class="panel-title">${icon('clipboard-list')}工作紀錄</div><div class="panel-subtitle">課業輔導每日 1 筆；特色課程有上課才記 · 完整 ${ready}/${activities.length || 0}</div></div></div>
         <div class="panel-body">
           <div class="daily-track-requirements">${['academic', 'enrichment'].map(track => {
             const meta = activityTrackMeta(track);
@@ -1892,11 +1892,13 @@
                 : status.count
                   ? '已有班級經營，仍需新增安親課業指導'
                   : '尚未新增安親課業指導，今日紀錄無法送出'
-              : status.count ? `${status.complete}/${status.count} 筆完整` : '尚未新增，今日紀錄無法送出';
-            return `<article class="daily-track-row ${status.covered ? 'is-covered' : ''} ${fullyComplete ? 'is-complete' : ''}"><span class="daily-track-icon">${icon(meta.icon, 20)}</span><div><strong>${esc(meta.label)}</strong><div class="daily-track-progress">${esc(progress)}</div></div><button type="button" class="btn btn-small ${status.covered ? '' : 'btn-primary'}" data-action="open-activity" data-track="${track}">${icon(status.covered ? 'plus' : 'plus-circle', 14)}${status.covered ? '再記一筆' : '新增必填'}</button></article>`;
+              : status.count ? `${status.complete}/${status.count} 筆完整` : '今日沒有特色課程可不填；若有上課請新增';
+            const buttonLabel = status.covered ? '再記一筆' : track === 'academic' ? '新增必填' : '有課程就新增';
+            const buttonClass = !status.covered && track === 'academic' ? 'btn-primary' : '';
+            return `<article class="daily-track-row ${track === 'enrichment' ? 'is-optional' : ''} ${status.covered ? 'is-covered' : ''} ${fullyComplete ? 'is-complete' : ''}"><span class="daily-track-icon">${icon(meta.icon, 20)}</span><div><strong>${esc(meta.label)}</strong><div class="daily-track-progress">${esc(progress)}</div></div><button type="button" class="btn btn-small ${buttonClass}" data-action="open-activity" data-track="${track}">${icon(status.covered ? 'plus' : 'plus-circle', 14)}${buttonLabel}</button></article>`;
           }).join('')}</div>
           <div class="section-divider"></div>
-          ${activities.length ? `<div class="activity-list">${activities.map(renderActivityRow).join('')}</div>` : renderEmpty('clipboard-plus', '尚無工作紀錄', '請新增今天的兩項必填紀錄。', '', '')}
+          ${activities.length ? `<div class="activity-list">${activities.map(renderActivityRow).join('')}</div>` : renderEmpty('clipboard-plus', '尚無工作紀錄', '請先新增今天的課業輔導；有特色課程再另外新增。', '', '')}
         </div>
       </section>
       <aside class="stack">
@@ -2114,8 +2116,7 @@
     const summary = buildDailySummary();
     const blockers = [];
     if (!tracks.academic.covered) blockers.push('新增課業輔導紀錄');
-    if (!tracks.enrichment.covered) blockers.push('新增特色課程紀錄');
-    if (dailyRequiredTracksReady() && !status.activities) blockers.push('課程需選擇內容完整的備課檔案並完成課後回饋；班級經營只需工作欄位及可判讀成果證據');
+    if (dailyRequiredTracksReady() && !status.activities) blockers.push('已新增的課程需選擇內容完整的備課檔案並完成課後回饋；班級經營只需工作欄位及可判讀成果證據');
     if (!status.students) blockers.push('新增學生追蹤，或確認今日無需個別追蹤');
     if (!status.parents) blockers.push('新增親師溝通，或確認今日無聯繫');
     if (!status.operations) blockers.push('今日值日班務尚未確認');
@@ -2172,14 +2173,14 @@
     const fieldExamples = [guide.objective, guide.action, guide.result, guide.issue, guide.next];
     const dailySteps = [
       ['1', '學科內', '從學科內入口新增；安親課業指導每天至少一筆，班級經營有實際事件時再記。'],
-      ['2', '學科外', '從學科外入口新增；只會看到專案、機器人、學習歷程與 SEL。'],
+      ['2', '學科外（如有則填）', '當天有特色課程才從學科外入口新增；新增後需完整填寫教學內容、備課回饋與成果證據。'],
       ['3', '選取備課檔案並補成果', '課程帶入已完成的教案與教材；班級經營不需要備課檔案。'],
       ['4', '完成學生、親師與班務', '有狀況就留下追蹤；值日班務四項各拍一張，正常不寫說明，異常才補處理安排。'],
       ['5', '確認後送主管', '系統直接彙整成果、追蹤與待辦；主管提出意見後，老師可在同一筆資料接續回覆。'],
     ];
     return `<div class="page guide-page">
       ${pageHead('填寫指南', '說明與範例集中管理，不占用正式填寫畫面', `<button type="button" class="btn btn-primary" data-action="navigate" data-route="today">${icon('clipboard-pen-line', 16)}<span>開始今天的紀錄</span></button>`)}
-      <section class="guide-start-band"><div><span class="guide-kicker">每日工作順序</span><h2>先完成兩項課程，再確認系統彙整</h2><p>以下是固定流程；詳細範例只留在本頁，工作表單只保留必要欄位。</p></div><div class="guide-day-flow">${dailySteps.map(([number, title, copy]) => `<div class="guide-day-step"><span>${number}</span><div><strong>${esc(title)}</strong><small>${esc(copy)}</small></div></div>`).join('')}</div></section>
+      <section class="guide-start-band"><div><span class="guide-kicker">每日工作順序</span><h2>先完成課業輔導，有特色課程再記錄</h2><p>課業輔導每天必填；學科外當天有開課才填，新增後仍須完整留下教學與成果。</p></div><div class="guide-day-flow">${dailySteps.map(([number, title, copy]) => `<div class="guide-day-step"><span>${number}</span><div><strong>${esc(title)}</strong><small>${esc(copy)}</small></div></div>`).join('')}</div></section>
       <div class="notice-band info">${icon('folder-down', 19)}<div><div class="notice-title">每月雲端歸檔</div><div class="notice-copy">到「我的紀錄」選擇匯出月份；系統會依老師、年份與月份命名，並把各日期紀錄及主管對話收進同一份月檔。</div></div></div>
       <div class="notice-band info">${icon('scale', 19)}<div><div class="notice-title">隨時查閱評分標準</div><div class="notice-copy">手機請從底部「更多」進入；電腦請從左側選單開啟。正式填寫頁只保留工作欄位，不重複放制度說明。</div></div></div>
 
@@ -2491,7 +2492,7 @@
       : type === 'classroom'
         ? '歸在學科內，但不取代每日課業輔導'
         : activityTrack(type) === 'enrichment'
-          ? '可完成每日學科外必填'
+          ? '當天有課才填；新增後須完整填寫'
           : '只保留歷史資料，不提供新增';
     return `<div class="activity-track-indicator ${activityTrack(type)}">${icon(meta.icon, 17)}<div><strong>${esc(meta.label)}</strong><small>${esc(requirementCopy)}</small></div></div>`;
   }
@@ -2679,6 +2680,7 @@
     const typeLabel = formTrack === 'enrichment' ? '課程類型' : '工作類型';
     return `<form id="activity-form" data-form="activity" data-activity-track="${esc(formTrack)}">
       <input type="hidden" name="id" value="${esc(value.id)}">
+      <div id="activity-track-indicator">${renderActivityTrackIndicator(value.type)}</div>
       <div class="form-grid">
         <div class="form-field"><label class="form-label" for="activity-type">${esc(typeLabel)} <span class="required">*</span></label><select id="activity-type" name="type" data-change="activity-type" required>${renderActivityTypeOptions(value.type, formTrack)}</select></div>
         ${copy.hideClass ? '<input type="hidden" name="className" value="">' : `<div class="form-field"><label class="form-label" id="activity-class-label" for="activity-class">${esc(copy.classLabel)} <span class="required">*</span></label><input id="activity-class" name="className" value="${esc(value.className)}" placeholder="${esc(copy.classPlaceholder)}" required></div>`}
@@ -2904,7 +2906,7 @@
       const activities = source.activities.filter(activity => activity.date === date);
       const tracks = dailyTrackStatus(activities);
       const academicReady = tracks.academic.covered && tracks.academic.items.every(weeklyActivityCoreReady);
-      const enrichmentReady = tracks.enrichment.covered && tracks.enrichment.items.every(weeklyActivityCoreReady);
+      const enrichmentReady = !tracks.enrichment.covered || tracks.enrichment.items.every(weeklyActivityCoreReady);
       const evidenceRequired = activities.filter(activity => (ACTIVITY_TYPES[activity.type] || ACTIVITY_TYPES.tutoring).evidence);
       const evidenceReady = evidenceRequired.filter(activity => (activity.evidence || []).some(evidence => evidence.quality >= 80)).length;
       const operation = operationRecords().find(item => item.date === date);
@@ -2913,12 +2915,11 @@
       const missing = [];
       if (!tracks.academic.covered) missing.push('學科內');
       else if (!academicReady) missing.push('學科內內容');
-      if (!tracks.enrichment.covered) missing.push('學科外');
-      else if (!enrichmentReady) missing.push('學科外內容');
+      if (tracks.enrichment.covered && !enrichmentReady) missing.push('學科外內容');
       if (evidenceReady < evidenceRequired.length) missing.push('成果證據');
       if (ownDuty && !operationReady) missing.push('班務');
       return {
-        date, academicReady, enrichmentReady, evidenceReady, evidenceRequired: evidenceRequired.length,
+        date, academicReady, enrichmentReady, enrichmentCovered: tracks.enrichment.covered, evidenceReady, evidenceRequired: evidenceRequired.length,
         operationLabel: !operation ? '—' : ownDuty ? operationReady ? '完整' : '待補' : '非值日',
         operationTone: !operation || !ownDuty ? 'neutral' : operationReady ? 'done' : 'pending',
         missing, complete: missing.length === 0,
@@ -2940,7 +2941,7 @@
     return `<${tag} class="weekly-coverage-row ${row.complete ? 'is-complete' : 'is-pending'}"${action}>
       <span class="weekly-coverage-date"><strong>${formatShortDate(row.date)}</strong><small>${row.complete ? '資料完整' : '仍有待補'}</small></span>
       ${renderWeeklyCoverageCell('學科內', row.academicReady ? '完整' : '待補', row.academicReady ? 'done' : 'pending')}
-      ${renderWeeklyCoverageCell('學科外', row.enrichmentReady ? '完整' : '待補', row.enrichmentReady ? 'done' : 'pending')}
+      ${renderWeeklyCoverageCell('特色課程', row.enrichmentReady ? (row.enrichmentCovered ? '完整' : '無課程') : '待補', row.enrichmentReady ? (row.enrichmentCovered ? 'done' : 'neutral') : 'pending')}
       ${renderWeeklyCoverageCell('成果證據', evidenceLabel, evidenceTone)}
       ${renderWeeklyCoverageCell('班務', row.operationLabel, row.operationTone)}
       <span class="weekly-coverage-result"><strong>${row.complete ? '完整' : '待補'}</strong><small>${row.complete ? '沒有缺漏' : row.missing.join('、')}</small></span>
@@ -4137,7 +4138,7 @@
     const showThread = !readOnly || feedbackThreadMessages(threadKey).length > 0;
     return `<div class="stack">
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('sparkles')}主管摘要</div><div class="panel-subtitle">${esc(submission.teacher)} · ${formatDate(submission.date)} · ${formatTime(submission.submittedAt)} · 系統依原始紀錄彙整</div></div>${reviewStatusBadge(submission.status)}</div><div class="panel-body"><div class="summary-list"><div class="summary-line"><span class="summary-index">1</span><div><div class="summary-title">今日成果</div><div class="summary-copy">${esc(submission.keyResult)}</div></div></div><div class="summary-line"><span class="summary-index">2</span><div><div class="summary-title">需追蹤</div><div class="summary-copy">${esc(submission.followup)}</div></div></div><div class="summary-line"><span class="summary-index">3</span><div><div class="summary-title">最近待辦</div><div class="summary-copy">${esc(submission.tomorrowPriority)}</div></div></div>${submission.teacherNote ? `<div class="summary-line"><span class="summary-index">4</span><div><div class="summary-title">老師補充</div><div class="summary-copy">${esc(submission.teacherNote)}</div></div></div>` : ''}</div></div></section>
-      <div class="status-strip"><div class="status-cell"><div class="status-label">學科內／學科外</div><div class="status-value">${tracks.academic.count}/${tracks.enrichment.count}</div><div class="status-note">兩項皆需至少 1 筆</div></div><div class="status-cell"><div class="status-label">備課檔案／成果</div><div class="status-value">${prepReady}/${prepRequired.length} · ${evidence}</div></div><div class="status-cell"><div class="status-label">學生追蹤</div><div class="status-value">${cases.length}</div></div><div class="status-cell"><div class="status-label">親師溝通</div><div class="status-value">${contacts.length}</div></div></div>
+      <div class="status-strip"><div class="status-cell"><div class="status-label">學科內／學科外</div><div class="status-value">${tracks.academic.count}/${tracks.enrichment.count}</div><div class="status-note">學科內必填；學科外有課才填</div></div><div class="status-cell"><div class="status-label">備課檔案／成果</div><div class="status-value">${prepReady}/${prepRequired.length} · ${evidence}</div></div><div class="status-cell"><div class="status-label">學生追蹤</div><div class="status-value">${cases.length}</div></div><div class="status-cell"><div class="status-label">親師溝通</div><div class="status-value">${contacts.length}</div></div></div>
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-list')}工作與證據</div><div class="panel-subtitle">點選任一筆查看送出當下的完整內容</div></div></div><div class="panel-body">${activities.length ? `<div class="archived-activity-list">${activities.map(item => renderArchivedActivityRow(item, submission.id)).join('')}</div>` : `<div class="notice-band danger">${icon('file-question', 19)}<div><div class="notice-title">沒有可追溯的工作事件</div><div class="notice-copy">摘要無法連回班級、教學方法、學生結果與原始證據。</div></div></div>`}</div></section>
       <div class="detail-split"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('user-round-search')}學生追蹤</div></div></div><div class="panel-body">${cases.length ? `<div class="metadata-list">${cases.map(item => `<div class="metadata-row"><div class="metadata-label">${esc(item.student)}</div><div class="metadata-value">${esc(item.observation)}<br><span class="muted">下一步：${esc(item.nextAction)}</span></div></div>`).join('')}</div>` : '<div class="text-small muted">當日無學生追蹤紀錄。</div>'}</div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('messages-square')}親師溝通</div></div></div><div class="panel-body">${contacts.length ? `<div class="metadata-list">${contacts.map(item => `<div class="metadata-row"><div class="metadata-label">${esc(item.student)}</div><div class="metadata-value">${esc(item.summary)}<br><span class="muted">共識：${esc(item.decision)}</span></div></div>`).join('')}</div>` : '<div class="text-small muted">當日無親師溝通紀錄。</div>'}</div></section></div>
       ${showThread ? renderFeedbackThread(threadKey) : ''}

@@ -1595,6 +1595,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--brand); }
 }
 .daily-track-row.is-covered { background: #fffaf0; border-color: #ead7a8; border-left-color: var(--sun); }
 .daily-track-row.is-complete { background: #f5fbf6; border-color: #c8dfce; border-left-color: var(--green); }
+.daily-track-row.is-optional:not(.is-covered) { background: #f8f6fc; border-color: #ded7ed; border-left-color: #8a76b4; }
 .daily-track-icon { width: 36px; height: 36px; display: grid; place-items: center; color: var(--brand-strong); background: #fff; border: 1px solid var(--line); border-radius: 7px; }
 .daily-track-row strong,
 .daily-track-row small { display: block; }
@@ -1603,6 +1604,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--brand); }
 .daily-track-progress { margin-top: 4px; color: var(--red); font-size: 10px; font-weight: 900; }
 .daily-track-row.is-covered .daily-track-progress { color: #86600e; }
 .daily-track-row.is-complete .daily-track-progress { color: var(--green); }
+.daily-track-row.is-optional:not(.is-covered) .daily-track-progress { color: var(--muted); }
 
 .activity-track-indicator {
   min-height: 42px;
@@ -1616,6 +1618,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--brand); }
   border-radius: 0 5px 5px 0;
 }
 .activity-track-indicator.enrichment { color: #574489; background: #f0ebfa; border-left-color: #7b66aa; }
+#activity-track-indicator { margin-bottom: 14px; }
 .activity-track-indicator > svg { flex: 0 0 auto; }
 .activity-track-indicator strong,
 .activity-track-indicator small { display: block; }
@@ -2677,6 +2680,7 @@ html[data-visual-theme="calm"] .daily-track-row.is-complete {
 }
 html[data-visual-theme="calm"] .daily-track-row.is-complete { border-left-color: var(--green); }
 html[data-visual-theme="calm"] .daily-track-row:not(.is-complete) { border-left-color: var(--red); }
+html[data-visual-theme="calm"] .daily-track-row.is-optional:not(.is-covered) { border-left-color: var(--line-strong); }
 html[data-visual-theme="calm"] .daily-track-icon { color: var(--ink-soft); background: var(--surface-soft); border-color: var(--line); }
 html[data-visual-theme="calm"] .daily-track-row.is-covered .daily-track-progress { color: var(--muted); }
 html[data-visual-theme="calm"] .daily-track-row.is-complete .daily-track-progress { color: var(--green); }
