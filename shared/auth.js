@@ -159,6 +159,10 @@ window.AUTH = (function () {
   function routeByRole(role, user) {
     const root = relativeRoot();
     const session = user || getSession() || {};
+    if (window.KPI_WORKSPACES?.getAssignments?.(session).length) {
+      window.location.href = window.KPI_WORKSPACES.defaultHref(session);
+      return;
+    }
     const anqinDepartments = ['東橋教室', '永康教室', '北區教室'];
     const usesAnqinWorkspace = role === 'admin'
       || (['manager', 'teacher'].includes(role) && anqinDepartments.includes(session.department));

@@ -9,6 +9,17 @@ function canCreateTask_(role) {
   return role === 'admin' || role === 'manager' || role === 'admin_staff';
 }
 
+function systemMaintenanceUser_(params) {
+  const operator = params && params.operator ? findUserByNickname(params.operator) : null;
+  if (operator) return operator;
+  let email = '';
+  try { email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase(); } catch (error) {}
+  if (!email) {
+    try { email = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase(); } catch (error) {}
+  }
+  return email ? findUserByEmail(email) : null;
+}
+
 // 把 due_date 正規化成 yyyy-MM-dd（Sheets 會把日期字串自動轉成 Date 物件）
 function taskDateStr_(v) {
   if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
@@ -30,7 +41,7 @@ function setConfig(params) {
 
 /** 不回傳機密值，只供管理介面檢查通知、教材與排程是否已完成設定。 */
 function getSystemReadiness(params) {
-  const user = params && params.operator ? findUserByNickname(params.operator) : null;
+  const user = systemMaintenanceUser_(params);
   if (!user || (user.role !== 'admin' && user.role !== 'manager')) return { ok: false, error: '需主管或管理員權限' };
   const props = PropertiesService.getScriptProperties();
   const triggers = ScriptApp.getProjectTriggers().map(t => t.getHandlerFunction());
@@ -49,16 +60,18 @@ function getSystemReadiness(params) {
       dailyTaskMorning: triggers.indexOf('sendMorningReminders') >= 0,
       dailyTaskEvening: triggers.indexOf('sendEveningPreview') >= 0,
       dailyTaskReminder: triggers.indexOf('sendMorningReminders') >= 0 && triggers.indexOf('sendEveningPreview') >= 0,
+      talentPdfRepair: triggers.indexOf('repairMissingTalentLessonReportsAuto') >= 0,
     },
   };
 }
 
 /** 管理員一鍵補齊每日 PDF 與事項提醒排程。 */
 function setupSystemAutomation(params) {
-  const user = params && params.operator ? findUserByNickname(params.operator) : null;
+  const user = systemMaintenanceUser_(params);
   if (!user || user.role !== 'admin') return { ok: false, error: '需 admin 權限' };
   setupKpiReportTrigger();
   setupTaskReminderTrigger();
+  setupTalentReportRepairTrigger();
   logSystem(user.nickname, 'setup_system_automation', '', {});
   return getSystemReadiness({ operator: user.nickname });
 }
@@ -80,7 +93,8 @@ function testMyNotifications(params) {
 function registerPushSubscription(params) {
   ensureHeaders(getSheet(SHEET_NAMES.USERS), [
     'nickname', 'email', 'role', 'department', 'status', 'phone', 'joined_at',
-    'last_login', 'notes', 'subtype', 'line_user_id', 'push_subscription_id'
+    'last_login', 'notes', 'subtype', 'line_user_id', 'push_subscription_id',
+    'employment_type', 'work_assignments', 'schedule_json', 'rest_days', 'deleted_at', 'deleted_by'
   ]);
   const user = params && params.operator ? findUserByNickname(params.operator) : null;
   if (!user || user.status !== 'active') return { ok: false, error: '找不到可用帳號' };
@@ -279,8 +293,8 @@ function pushLine_(userId, text) {
 }
 
 // OneSignal Web Push：只使用經登入驗證後登記的 subscription ID，不再相信前端自填 external_id。
-function oneSignalAttempts_(appId, key, subscriptionId, title, message) {
-  const link = 'https://teacher.blockplanetcamp.com/review/anqin-v2/index.html?notify=1';
+function oneSignalAttempts_(appId, key, subscriptionId, title, message, targetUrl) {
+  const link = String(targetUrl || 'https://teacher.blockplanetcamp.com/index.html?notify=1');
   return [
     { url: 'https://api.onesignal.com/notifications', auth: 'Key ' + key,
       body: { app_id: appId, target_channel: 'push', include_subscription_ids: [String(subscriptionId)], headings: { en: title }, contents: { en: message }, url: link } },
@@ -288,14 +302,14 @@ function oneSignalAttempts_(appId, key, subscriptionId, title, message) {
       body: { app_id: appId, include_player_ids: [String(subscriptionId)], headings: { en: title }, contents: { en: message }, url: link } }
   ];
 }
-function pushOneSignal_(externalId, title, message) {
+function pushOneSignal_(externalId, title, message, targetUrl) {
   const props = PropertiesService.getScriptProperties();
   const appId = props.getProperty('ONESIGNAL_APP_ID');
   const key = props.getProperty('ONESIGNAL_REST_KEY');
   const user = externalId ? findUserByNickname(String(externalId)) : null;
   const subscriptionId = user ? String(user.push_subscription_id || '') : '';
   if (!appId || !key || !subscriptionId) return false;
-  const attempts = oneSignalAttempts_(appId, key, subscriptionId, title, message);
+  const attempts = oneSignalAttempts_(appId, key, subscriptionId, title, message, targetUrl);
   for (let i = 0; i < attempts.length; i++) {
     try {
       const r = UrlFetchApp.fetch(attempts[i].url, {

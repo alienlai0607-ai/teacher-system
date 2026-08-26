@@ -52,6 +52,7 @@ function handleRequest(e, method) {
       'addUser': () => addUser(params),
       'updateUser': () => updateUser(params),
       'approveUser': () => approveUser(params),
+      'deleteUser': () => deleteUser(params),
 
       // 日誌
       'saveLog': () => saveLog(params),
@@ -68,12 +69,25 @@ function handleRequest(e, method) {
       'sendDailyKpiPdf': () => sendDailyKpiPdf(params),
       'sendSubmitPdf': () => sendSubmitPdf(params),
       'listArchivedKpiFiles': () => listArchivedKpiFiles(params),
+      'listTeacherReportFolders': () => listTeacherReportFolders(params),
       'archiveMonthlyCsv': () => archiveMonthlyCsv(params),
 
       // 安親 V2 備課教案建檔
       'saveCoursePrep': () => saveCoursePrep(params),
       'listCoursePreps': () => listCoursePreps(params),
       'deleteCoursePrep': () => deleteCoursePrep(params),
+
+      // 才藝 V2：正職、PT、主管與薪資共用同一份正式資料
+      'getTalentWorkspaceData': () => getTalentWorkspaceData(params),
+      'saveTalentLesson': () => saveTalentLesson(params),
+      'regenerateTalentLessonReport': () => regenerateTalentLessonReport(params),
+      'saveTalentDraft': () => saveTalentDraft(params),
+      'saveTalentPrep': () => saveTalentPrep(params),
+      'reviewTalentPrep': () => reviewTalentPrep(params),
+      'updateTalentAppStatus': () => updateTalentAppStatus(params),
+      'saveTalentScore': () => saveTalentScore(params),
+      'addTalentMessage': () => addTalentMessage(params),
+      'approveTalentBonus': () => approveTalentBonus(params),
 
       // 週報
       'saveWeekly': () => saveWeekly(params),
@@ -171,6 +185,7 @@ const SHEET_NAMES = {
   STUDENTS: 'Students',
   TASKS: 'Tasks',
   COURSE_PREP: 'CoursePrep',
+  TALENT_RECORDS: 'TalentRecords',
 };
 
 const DEPARTMENTS = ['東橋教室', '北區教室', '才藝部門', '總部'];
@@ -181,19 +196,19 @@ const ROLES = ['admin', 'manager', 'teacher', 'admin_staff'];
 const ADMIN_STAFF_SUBTYPES = ['general', 'marketing'];
 
 const INITIAL_USERS = [
-  { nickname: '柏翰',     role: 'admin',       department: '總部',     status: 'active' },
-  { nickname: '酸酸',     role: 'manager',     department: '東橋教室', status: 'active' },
-  { nickname: '小魚',     role: 'manager',     department: '北區教室', status: 'active' },
-  { nickname: '柳丁',     role: 'manager',     department: '才藝部門', status: 'active' },
+  { nickname: '柏翰',     role: 'admin',       department: '總部',     status: 'active', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll'] },
+  { nickname: '酸酸',     role: 'manager',     department: '東橋教室', status: 'active', employment_type: 'manager', work_assignments: ['anqin-manager'] },
+  { nickname: '小魚',     role: 'manager',     department: '北區教室', status: 'active', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll'] },
+  { nickname: '柳丁',     role: 'manager',     department: '才藝部門', status: 'active', employment_type: 'manager', work_assignments: ['talent-manager'] },
   { nickname: '松鼠',     role: 'teacher',     department: '東橋教室', status: 'active' },
   { nickname: '羊羊',     role: 'teacher',     department: '東橋教室', status: 'active' },
-  { nickname: '紅豆',     role: 'teacher',     department: '東橋教室', status: 'active' },
+  { nickname: '紅豆',     role: 'teacher',     department: '東橋教室', status: 'active', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'] },
   { nickname: '江江',     role: 'teacher',     department: '北區教室', status: 'active' },
-  { nickname: '小明',     role: 'teacher',     department: '北區教室', status: 'active' },
-  { nickname: '浩浩',     role: 'teacher',     department: '才藝部門', status: 'active' },
+  { nickname: '小明',     role: 'teacher',     department: '北區教室', status: 'active', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'] },
+  { nickname: '浩浩',     role: 'teacher',     department: '才藝部門', status: 'active', employment_type: 'fulltime', work_assignments: ['talent-fulltime'] },
   { nickname: '毛毛',     role: 'teacher',     department: '才藝部門', status: 'active' },
   // 行政美編行銷（歸北區教室，由小魚評核）
-  { nickname: '皮皮老師', role: 'admin_staff', department: '北區教室', status: 'active', subtype: 'marketing' },
+  { nickname: '皮皮老師', role: 'admin_staff', department: '北區教室', status: 'active', subtype: 'marketing', employment_type: 'pt', work_assignments: ['talent-pt'] },
 ];
 
 const INITIAL_STUDENT_ROSTER = [

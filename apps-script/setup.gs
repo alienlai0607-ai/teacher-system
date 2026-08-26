@@ -8,7 +8,8 @@ function setupSheets() {
   const schemas = {
     [SHEET_NAMES.USERS]: [
       'nickname', 'email', 'role', 'department', 'status',
-      'phone', 'joined_at', 'last_login', 'notes', 'subtype', 'line_user_id', 'push_subscription_id'
+      'phone', 'joined_at', 'last_login', 'notes', 'subtype', 'line_user_id', 'push_subscription_id',
+      'employment_type', 'work_assignments', 'schedule_json', 'rest_days', 'deleted_at', 'deleted_by'
     ],
     [SHEET_NAMES.LOGS]: [
       'log_id', 'date', 'nickname', 'department', 'role',
@@ -87,6 +88,11 @@ function setupSheets() {
       'prep_id', 'nickname', 'department', 'title', 'course_type',
       'created_date', 'status', 'data_json', 'created_at', 'updated_at'
     ],
+    [SHEET_NAMES.TALENT_RECORDS]: [
+      'record_id', 'record_type', 'nickname', 'department', 'record_date',
+      'year_month', 'status', 'data_json', 'created_by', 'updated_by',
+      'created_at', 'updated_at', 'submitted_at'
+    ],
   };
 
   Object.entries(schemas).forEach(([name, headers]) => {
@@ -103,12 +109,16 @@ function setupSheets() {
   const usersSheet = ss.getSheetByName(SHEET_NAMES.USERS);
   if (usersSheet.getLastRow() === 1) {
     const now = new Date().toISOString();
-    const rows = INITIAL_USERS.map(u => [
-      u.nickname, '', u.role, u.department, u.status,
-      '', now, '', '', u.subtype || ''
-    ]);
-    usersSheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+    const headers = getHeaders(usersSheet);
+    const rows = INITIAL_USERS.map(u => headers.map(header => {
+      if (header === 'joined_at') return now;
+      if (header === 'work_assignments') return JSON.stringify(u.work_assignments || []);
+      return u[header] === undefined ? '' : u[header];
+    }));
+    usersSheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
   }
+
+  migrateTalentUserProfiles_();
 
   const seededStudents = seedInitialStudents_();
 
@@ -117,6 +127,92 @@ function setupSheets() {
 
   Logger.log('Setup completed; seeded students: ' + seededStudents);
   return { ok: true, seeded_students: seededStudents };
+}
+
+/**
+ * 補齊既有帳號的多工作身分與才藝排班。既有管理員已調整過的欄位不覆蓋；
+ * 尚未取得 Google Email 的 RITA／黑豹先以 pending 建檔，避免被誤啟用。
+ */
+function migrateTalentUserProfiles_() {
+  const profiles = [
+    { nickname: '柏翰', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll'] },
+    { nickname: '酸酸', employment_type: 'manager', work_assignments: ['anqin-manager'] },
+    { nickname: '小魚', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll'] },
+    { nickname: '柳丁', employment_type: 'manager', work_assignments: ['talent-manager'] },
+    { nickname: '浩浩', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'], rest_days: ['週一', '週日'] },
+    { nickname: 'RITA', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'], rest_days: ['週二', '週日'] },
+    { nickname: '皮皮老師', employment_type: 'pt', work_assignments: ['talent-pt'], schedule_json: [{ weekday: 4, label: '週四', time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }] },
+    { nickname: '紅豆', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'], schedule_json: [1, 3, 4, 5].map(function (weekday) { return { weekday: weekday, label: '週' + ['日', '一', '二', '三', '四', '五', '六'][weekday], time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }; }) },
+    { nickname: '小明', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'], schedule_json: [{ weekday: 3, label: '週三', time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }] },
+    { nickname: '黑豹', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'pt', work_assignments: ['talent-pt'], schedule_json: [1, 3].map(function (weekday) { return { weekday: weekday, label: weekday === 1 ? '週一' : '週三', time: '依善化課表（1.5 小時）', siteType: 'partner', site: '善化合作校' }; }) },
+  ];
+  const now = nowIso();
+  const sheet = getSheet(SHEET_NAMES.USERS);
+  const headers = getHeaders(sheet);
+  const indexes = {};
+  headers.forEach(function (header, index) { indexes[header] = index; });
+  const rows = sheet.getLastRow() > 1
+    ? sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues()
+    : [];
+  const rowByNickname = {};
+  rows.forEach(function (row, index) {
+    rowByNickname[String(row[indexes.nickname] || '').trim()] = index;
+  });
+  let changed = false;
+
+  function storedValue(value) {
+    if (value === undefined || value === null) return '';
+    return typeof value === 'object' ? JSON.stringify(value) : value;
+  }
+
+  profiles.forEach(function (profile) {
+    let rowIndex = rowByNickname[profile.nickname];
+    if (rowIndex === undefined) {
+      const user = {
+        nickname: profile.nickname,
+        email: '',
+        role: profile.role || 'teacher',
+        department: profile.department || '才藝部門',
+        status: profile.status || 'pending',
+        joined_at: now,
+        employment_type: profile.employment_type || '',
+        work_assignments: profile.work_assignments || [],
+        schedule_json: profile.schedule_json || [],
+        rest_days: profile.rest_days || [],
+      };
+      rows.push(headers.map(function (header) { return storedValue(user[header]); }));
+      rowIndex = rows.length - 1;
+      rowByNickname[profile.nickname] = rowIndex;
+      changed = true;
+      return;
+    }
+    const row = rows[rowIndex];
+    const currentAssignments = parseUserListField_(row[indexes.work_assignments]);
+    const requiredAssignments = profile.work_assignments || [];
+    const mergedAssignments = currentAssignments.slice();
+    requiredAssignments.forEach(function (assignment) {
+      if (mergedAssignments.indexOf(assignment) < 0) mergedAssignments.push(assignment);
+    });
+    if (mergedAssignments.length !== currentAssignments.length) {
+      row[indexes.work_assignments] = JSON.stringify(mergedAssignments);
+      changed = true;
+    }
+    ['employment_type', 'schedule_json', 'rest_days'].forEach(function (key) {
+      const index = indexes[key];
+      if (index >= 0 && (row[index] === '' || row[index] === null || row[index] === undefined) && profile[key] !== undefined) {
+        row[index] = storedValue(profile[key]);
+        changed = true;
+      }
+    });
+  });
+  if (changed) sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+  invalidateKpiDriveAccess_();
+}
+
+/** 可由 Apps Script 編輯器單獨執行，避免既有大量日誌拖慢完整初始化。 */
+function migrateTalentUserProfiles() {
+  migrateTalentUserProfiles_();
+  return { ok: true, message: '才藝工作身分與排班已補齊' };
 }
 
 /**
@@ -157,23 +253,17 @@ function migrateLegacyDepartmentNames_() {
   [
     SHEET_NAMES.USERS, SHEET_NAMES.LOGS, SHEET_NAMES.WEEKLY, SHEET_NAMES.STUDENTS,
     SHEET_NAMES.TASKS, SHEET_NAMES.COURSE_PREP, SHEET_NAMES.POSTS,
+    SHEET_NAMES.TALENT_RECORDS,
   ].forEach(name => {
     const sheet = ss.getSheetByName(name);
     if (!sheet || sheet.getLastRow() <= 1) return;
     const headers = getHeaders(sheet);
     const column = headers.indexOf('department') + 1;
     if (!column) return;
-    const range = sheet.getRange(2, column, sheet.getLastRow() - 1, 1);
-    const values = range.getValues();
-    let changed = false;
-    values.forEach(row => {
-      const normalized = normalizeDepartment_(row[0]);
-      if (normalized && normalized !== String(row[0] || '').trim()) {
-        row[0] = normalized;
-        changed = true;
-      }
-    });
-    if (changed) range.setValues(values);
+    sheet.getRange(2, column, sheet.getLastRow() - 1, 1)
+      .createTextFinder('永康教室')
+      .matchEntireCell(true)
+      .replaceAllWith('東橋教室');
   });
 }
 

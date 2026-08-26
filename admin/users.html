@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="../shared/style.css?v=20260624k">
 <script src="../shared/config.js?v=20260825-production-audit-2"></script>
 <script src="../shared/auth.js?v=20260825-production-audit-2"></script>
-<script src="../shared/api.js?v=20260825-production-audit-2"></script>
+<script src="../shared/api.js?v=20260826-employee-delete-1"></script>
 <script src="../shared/ui.js?v=20260825-production-audit-2"></script>
 <script src="../shared/pwa.js?v=20260825-production-audit-2"></script>
 <script src="../shared/push.js?v=20260825-production-audit-2"></script>
@@ -24,9 +24,24 @@
     align-items: center; margin-bottom: 6px;
   }
   .user-card-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .assignment-checks { display:flex; flex-wrap:wrap; gap:8px 14px; padding:10px; border:1px solid var(--border); border-radius:8px; }
+  .assignment-checks label { display:flex; align-items:center; gap:6px; font-weight:500; }
+  .talent-settings { grid-column:1/-1; padding:14px; border:1px solid var(--border); border-radius:10px; background:#faf9f6; }
+  .talent-settings[hidden] { display:none; }
+  .talent-settings h3 { margin:0 0 10px; font-size:16px; }
+  .talent-settings-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+  .talent-settings .assignment-checks { margin-top:6px; background:#fff; }
+  .user-list-tools { display:grid; grid-template-columns:minmax(260px,1fr) auto; gap:12px; align-items:center; margin-bottom:12px; }
+  .user-list-tools input[type="text"] { margin:0; }
+  .archive-toggle { display:flex; align-items:center; gap:8px; white-space:nowrap; cursor:pointer; font-weight:600; }
+  .archive-toggle input { width:18px; height:18px; margin:0; }
+  .deleted-note { display:block; margin-top:3px; color:var(--muted); font-size:12px; }
   @media (max-width: 768px) {
     .users-table { display: none !important; }
     .users-cards { display: block !important; }
+    .talent-settings-grid { grid-template-columns:1fr; }
+    .user-list-tools { grid-template-columns:1fr; }
+    .archive-toggle { white-space:normal; }
   }
   @media (min-width: 769px) {
     .users-cards { display: none !important; }
@@ -69,6 +84,42 @@
           <option>總部</option>
         </select>
       </div>
+      <div class="form-row">
+        <label>才藝聘用身分</label>
+        <select id="n-employment" onchange="toggleTalentFields()">
+          <option value="">不適用</option>
+          <option value="fulltime">才藝正職</option>
+          <option value="pt">才藝 PT</option>
+          <option value="manager">主管</option>
+          <option value="admin">管理員</option>
+        </select>
+      </div>
+      <div class="form-row" style="grid-column:1/-1">
+        <label>可使用的工作區（可複選）</label>
+        <div class="assignment-checks" id="n-assignments">
+          <label><input type="checkbox" value="anqin-teacher">安親老師</label>
+          <label><input type="checkbox" value="anqin-manager">安親主管</label>
+          <label><input type="checkbox" value="talent-fulltime">才藝正職</label>
+          <label><input type="checkbox" value="talent-pt">才藝 PT</label>
+          <label><input type="checkbox" value="talent-manager">才藝主管</label>
+          <label><input type="checkbox" value="talent-payroll">才藝薪資</label>
+        </div>
+      </div>
+      <section class="talent-settings" id="n-pt-settings" hidden>
+        <h3>才藝 PT 固定排班</h3>
+        <div class="form-row"><label>固定上課日 <span style="color:#c43d32">*</span></label><div class="assignment-checks" id="n-schedule-days"><label><input type="checkbox" value="1">週一</label><label><input type="checkbox" value="2">週二</label><label><input type="checkbox" value="3">週三</label><label><input type="checkbox" value="4">週四</label><label><input type="checkbox" value="5">週五</label><label><input type="checkbox" value="6">週六</label><label><input type="checkbox" value="0">週日</label></div></div>
+        <div class="talent-settings-grid">
+          <div class="form-row"><label>上課時間 <span style="color:#c43d32">*</span></label><input id="n-schedule-time" value="19:00–20:30" placeholder="例：19:00–20:30"></div>
+          <div class="form-row"><label>場域</label><select id="n-schedule-site-type"><option value="self">布拉克自營教室</option><option value="partner">合作校／外派</option></select></div>
+          <div class="form-row"><label>上課地點 <span style="color:#c43d32">*</span></label><input id="n-schedule-site" value="布拉克自營教室" placeholder="例：北區教室／善化合作校"></div>
+        </div>
+        <div class="form-row" style="margin-top:12px"><label>其他固定班次（選填）</label><textarea id="n-schedule-extra" rows="3" placeholder="每行一堂，例如：&#10;週一|17:00-18:00|self|北區教室&#10;週三|19:00-20:30|partner|善化合作校"></textarea></div>
+        <small class="muted">上方勾選的星期共用同一時間與地點；同一天多堂或不同地點請逐行加入。場域填 self（自營）或 partner（合作校）。</small>
+      </section>
+      <section class="talent-settings" id="n-fulltime-settings" hidden>
+        <h3>才藝正職固定休假</h3>
+        <div class="assignment-checks" id="n-rest-days"><label><input type="checkbox" value="週一">週一</label><label><input type="checkbox" value="週二">週二</label><label><input type="checkbox" value="週三">週三</label><label><input type="checkbox" value="週四">週四</label><label><input type="checkbox" value="週五">週五</label><label><input type="checkbox" value="週六">週六</label><label><input type="checkbox" value="週日">週日</label></div>
+      </section>
       <div class="form-row"><label>電話</label><input id="n-phone"></div>
       <div class="form-row"><label>備註</label><input id="n-notes"></div>
     </div>
@@ -77,7 +128,10 @@
 
   <div class="card">
     <div class="card-title">📋 所有人員</div>
-    <input id="search" placeholder="🔍 搜尋暱稱/Email" oninput="renderTable()" class="mb-1">
+    <div class="user-list-tools">
+      <input id="search" type="text" placeholder="🔍 搜尋暱稱/Email" oninput="renderTable()">
+      <label class="archive-toggle"><input id="show-deleted" type="checkbox" onchange="renderTable()">顯示已刪除人員 <span id="deleted-count"></span></label>
+    </div>
     <table class="users-table">
       <thead>
         <tr><th>暱稱</th><th>角色</th><th>部門</th><th>Google</th><th>LINE</th><th>狀態</th><th>操作</th></tr>
@@ -103,33 +157,70 @@ async function loadUsers() {
   UI.loading(false);
   if (!res.ok) return;
   allUsers = res.users;
+  const deletedCount = allUsers.filter(user => user.status === 'deleted').length;
+  document.getElementById('deleted-count').textContent = deletedCount ? `(${deletedCount})` : '';
   renderTable();
+}
+
+function safeText(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, character => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[character]));
+}
+
+function safeInlineArgument(value) {
+  return safeText(JSON.stringify(String(value == null ? '' : value)).replace(/</g, '\\u003c'));
+}
+
+function talentConfigSummary(user) {
+  if (user.configuration_error) return `設定錯誤：${user.configuration_error}`;
+  if (user.employment_type === 'pt') {
+    const schedule = Array.isArray(user.schedule_json) ? user.schedule_json : [];
+    return schedule.length ? schedule.map(item => `${item.label} ${item.time} ${item.site}`).join('、') : 'PT 尚未設定排班';
+  }
+  if (user.employment_type === 'fulltime') {
+    const days = Array.isArray(user.rest_days) ? user.rest_days : [];
+    return days.length ? `休假：${days.join('、')}` : '正職未設定固定休假';
+  }
+  return '';
+}
+
+function statusLabel(status) {
+  return ({ active:'使用中', pending:'待開通', suspended:'已停用', deleted:'已刪除' })[status] || status;
+}
+
+function userActions(user) {
+  if (user.status === 'deleted') {
+    const detail = user.deleted_at ? `刪除於 ${String(user.deleted_at).slice(0, 10)}` : '帳號與綁定已移除';
+    return `<span class="muted">歷史資料保留</span><small class="deleted-note">${safeText(detail)}</small>`;
+  }
+  return `
+    <button class="btn btn-sm" onclick="editUser(${safeInlineArgument(user.nickname)})">編輯</button>
+    ${user.status === 'active'
+      ? `<button class="btn btn-sm" onclick="setStatus(${safeInlineArgument(user.nickname)},'suspended')">停用</button>`
+      : `<button class="btn btn-sm btn-primary" onclick="setStatus(${safeInlineArgument(user.nickname)},'active')">啟用</button>`}
+    ${user.email ? `<button class="btn btn-sm" onclick="clearEmail(${safeInlineArgument(user.nickname)})">解除 Google</button>` : ''}
+    ${user.line_user_id ? `<button class="btn btn-sm" onclick="clearLine(${safeInlineArgument(user.nickname)})">解除 LINE</button>` : ''}
+    ${String(session.nickname || '').replace(/(?:老師|主管)$/, '') === '柏翰' && user.role !== 'admin' && user.nickname !== session.nickname ? `<button class="btn btn-sm btn-danger" onclick="deleteEmployee(${safeInlineArgument(user.nickname)})">刪除員工</button>` : ''}`;
 }
 
 function renderTable() {
   const q = document.getElementById('search').value.trim().toLowerCase();
+  const includeDeleted = document.getElementById('show-deleted').checked;
+  const visibleUsers = allUsers.filter(user => includeDeleted || user.status !== 'deleted');
   const list = q
-    ? allUsers.filter(u => String(u.nickname).toLowerCase().includes(q) || String(u.email).toLowerCase().includes(q))
-    : allUsers;
+    ? visibleUsers.filter(u => String(u.nickname).toLowerCase().includes(q) || String(u.email).toLowerCase().includes(q))
+    : visibleUsers;
 
   // 桌面版表格
   const tbody = document.getElementById('users-tbody');
   tbody.innerHTML = list.map(u => `
     <tr>
-      <td><strong>${u.nickname}</strong></td>
+      <td><strong>${safeText(u.nickname)}</strong></td>
       <td>${UI.roleLabel(u.role)}</td>
-      <td>${u.department}</td>
-      <td>${u.email || '<span class="muted">未綁定</span>'}</td>
+      <td>${safeText(u.department)}<small class="table-sub">${safeText(Array.isArray(u.work_assignments) ? u.work_assignments.join('、') : (u.work_assignments || ''))}</small>${talentConfigSummary(u) ? `<small class="table-sub">${safeText(talentConfigSummary(u))}</small>` : ''}</td>
+      <td>${u.email ? safeText(u.email) : '<span class="muted">未綁定</span>'}</td>
       <td>${u.line_user_id ? '<span class="tag tag-success">已綁定</span>' : '<span class="muted">未綁定</span>'}</td>
-      <td><span class="tag tag-${u.status === 'active' ? 'success' : 'warn'}">${u.status}</span></td>
-      <td>
-        <button class="btn btn-sm" onclick="editUser('${u.nickname}')">編輯</button>
-        ${u.status === 'active'
-          ? `<button class="btn btn-sm" onclick="setStatus('${u.nickname}','suspended')">停用</button>`
-          : `<button class="btn btn-sm btn-primary" onclick="setStatus('${u.nickname}','active')">啟用</button>`}
-        ${u.email ? `<button class="btn btn-sm" onclick="clearEmail('${u.nickname}')">解除 Google</button>` : ''}
-        ${u.line_user_id ? `<button class="btn btn-sm" onclick="clearLine('${u.nickname}')">解除 LINE</button>` : ''}
-      </td>
+      <td><span class="tag tag-${u.status === 'active' ? 'success' : 'warn'}">${statusLabel(u.status)}</span></td>
+      <td>${userActions(u)}</td>
     </tr>
   `).join('');
 
@@ -139,22 +230,17 @@ function renderTable() {
     <div class="user-card">
       <div class="user-card-row">
         <div>
-          <span style="font-size:17px; font-weight:700;">${u.nickname}</span>
+          <span style="font-size:17px; font-weight:700;">${safeText(u.nickname)}</span>
           <span class="tag" style="margin-left:6px;">${UI.roleLabel(u.role)}</span>
         </div>
-        <span class="tag tag-${u.status === 'active' ? 'success' : 'warn'}">${u.status}</span>
+        <span class="tag tag-${u.status === 'active' ? 'success' : 'warn'}">${statusLabel(u.status)}</span>
       </div>
-      <div class="text-sm muted">🏫 ${u.department}</div>
-      <div class="text-sm" style="word-break: break-all;">📧 ${u.email || '<span class="muted">尚未綁定</span>'}</div>
+      <div class="text-sm muted">🏫 ${safeText(u.department)}</div>
+      <div class="text-sm muted">工作區：${safeText(Array.isArray(u.work_assignments) ? u.work_assignments.join('、') : (u.work_assignments || '未設定'))}</div>
+      ${talentConfigSummary(u) ? `<div class="text-sm muted">排班：${safeText(talentConfigSummary(u))}</div>` : ''}
+      <div class="text-sm" style="word-break: break-all;">📧 ${u.email ? safeText(u.email) : '<span class="muted">尚未綁定</span>'}</div>
       <div class="text-sm">LINE：${u.line_user_id ? '已綁定' : '<span class="muted">尚未綁定</span>'}</div>
-      <div class="user-card-actions">
-        <button class="btn btn-sm" onclick="editUser('${u.nickname}')">編輯</button>
-        ${u.status === 'active'
-          ? `<button class="btn btn-sm" onclick="setStatus('${u.nickname}','suspended')">停用</button>`
-          : `<button class="btn btn-sm btn-primary" onclick="setStatus('${u.nickname}','active')">啟用</button>`}
-        ${u.email ? `<button class="btn btn-sm" onclick="clearEmail('${u.nickname}')">解除 Google</button>` : ''}
-        ${u.line_user_id ? `<button class="btn btn-sm" onclick="clearLine('${u.nickname}')">解除 LINE</button>` : ''}
-      </div>
+      <div class="user-card-actions">${userActions(u)}</div>
     </div>
   `).join('');
 }
@@ -164,8 +250,56 @@ function toggleSubtype() {
   document.getElementById('subtype-row').style.display = isStaff ? '' : 'none';
 }
 
+function toggleTalentFields() {
+  const employment = document.getElementById('n-employment').value;
+  document.getElementById('n-pt-settings').hidden = employment !== 'pt';
+  document.getElementById('n-fulltime-settings').hidden = employment !== 'fulltime';
+}
+
+function selectedAssignments() {
+  return Array.from(document.querySelectorAll('#n-assignments input:checked')).map(input => input.value);
+}
+
+function newTalentSchedule() {
+  if (document.getElementById('n-employment').value !== 'pt') return [];
+  const labels = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
+  const weekdayMap = { 週日:0, 週一:1, 週二:2, 週三:3, 週四:4, 週五:5, 週六:6 };
+  const weekdays = Array.from(document.querySelectorAll('#n-schedule-days input:checked')).map(input => Number(input.value));
+  const time = document.getElementById('n-schedule-time').value.trim();
+  const siteType = document.getElementById('n-schedule-site-type').value;
+  const site = document.getElementById('n-schedule-site').value.trim();
+  if (weekdays.length && (!time || !site)) throw new Error('勾選固定上課日後，請完成時間與地點');
+  const schedule = weekdays.map(weekday => ({ weekday, label: labels[weekday], time, siteType, site }));
+  const extra = document.getElementById('n-schedule-extra').value.trim();
+  if (extra) {
+    extra.split(/\n+/).map(line => line.trim()).filter(Boolean).forEach(line => {
+      const [label, extraTime, extraSiteType, extraSite] = line.split('|').map(item => String(item || '').trim());
+      if (!(label in weekdayMap) || !extraTime || !['self', 'partner'].includes(extraSiteType) || !extraSite) {
+        throw new Error('其他固定班次格式不正確，請依「星期|時間|self 或 partner|地點」填寫');
+      }
+      schedule.push({ weekday: weekdayMap[label], label, time: extraTime, siteType: extraSiteType, site: extraSite });
+    });
+  }
+  if (!schedule.length) throw new Error('才藝 PT 請至少設定一筆固定排班');
+  return schedule;
+}
+
+function newRestDays() {
+  if (document.getElementById('n-employment').value !== 'fulltime') return [];
+  return Array.from(document.querySelectorAll('#n-rest-days input:checked')).map(input => input.value);
+}
+
 async function addUser() {
   const role = document.getElementById('n-role').value;
+  let scheduleJson = [];
+  let restDays = [];
+  try {
+    scheduleJson = newTalentSchedule();
+    restDays = newRestDays();
+  } catch (error) {
+    UI.toast(error.message, 'warn');
+    return;
+  }
   const payload = {
     nickname: document.getElementById('n-nickname').value.trim(),
     email: document.getElementById('n-email').value.trim(),
@@ -173,6 +307,10 @@ async function addUser() {
     department: document.getElementById('n-dept').value,
     phone: document.getElementById('n-phone').value,
     notes: document.getElementById('n-notes').value,
+    employment_type: document.getElementById('n-employment').value,
+    work_assignments: selectedAssignments(),
+    schedule_json: scheduleJson,
+    rest_days: restDays,
     operator: session.nickname,
   };
   if (role === 'admin_staff') payload.subtype = document.getElementById('n-subtype').value;
@@ -189,6 +327,11 @@ async function addUser() {
   }
   UI.toast('新增成功', 'success');
   ['n-nickname','n-email','n-phone','n-notes'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('n-schedule-extra').value = '';
+  document.getElementById('n-employment').value = '';
+  document.querySelectorAll('#n-assignments input').forEach(input => { input.checked = false; });
+  document.querySelectorAll('#n-schedule-days input, #n-rest-days input').forEach(input => { input.checked = false; });
+  toggleTalentFields();
   loadUsers();
 }
 
@@ -207,6 +350,40 @@ async function editUser(nickname) {
     nickname, role: newRole, department: newDept, status: newStatus, email: newEmail.trim(),
     operator: session.nickname
   };
+  const currentAssignments = Array.isArray(u.work_assignments)
+    ? u.work_assignments.join(',')
+    : String(u.work_assignments || '').replace(/[\[\]"]/g, '');
+  const newEmployment = prompt('才藝聘用身分（fulltime/pt/manager/admin；不適用請留空）：', u.employment_type || '');
+  if (newEmployment === null) return;
+  const newAssignments = prompt('工作區（可用逗號分隔多個）：\nanqin-teacher, anqin-manager, talent-fulltime, talent-pt, talent-manager, talent-payroll', currentAssignments);
+  if (newAssignments === null) return;
+  payload.employment_type = newEmployment.trim();
+  payload.work_assignments = newAssignments.split(/[,、;|]/).map(item => item.trim()).filter(Boolean);
+  if (payload.employment_type === 'pt') {
+    const currentSchedule = (Array.isArray(u.schedule_json) ? u.schedule_json : []).map(item => `${item.label || ''}|${item.time || ''}|${item.siteType || 'self'}|${item.site || ''}`).join('\n');
+    const scheduleText = prompt('固定排班，每行一堂：\n週一|19:00–20:30|self|布拉克自營教室\n場域請填 self 或 partner', currentSchedule);
+    if (scheduleText === null) return;
+    const weekdayMap = { 週日:0, 週一:1, 週二:2, 週三:3, 週四:4, 週五:5, 週六:6 };
+    try {
+      payload.schedule_json = scheduleText.split(/\n+/).map(line => line.trim()).filter(Boolean).map(line => {
+        const [label, time, siteType, site] = line.split('|').map(item => String(item || '').trim());
+        if (!(label in weekdayMap) || !time || !['self', 'partner'].includes(siteType) || !site) throw new Error('排班格式不正確');
+        return { weekday: weekdayMap[label], label, time, siteType, site };
+      });
+    } catch (error) {
+      UI.toast('固定排班格式不正確，請依每行四欄填寫', 'warn');
+      return;
+    }
+    payload.rest_days = [];
+  } else if (payload.employment_type === 'fulltime') {
+    const restText = prompt('固定休假日（以逗號分隔，例如：週一,週日）：', (Array.isArray(u.rest_days) ? u.rest_days : []).join(','));
+    if (restText === null) return;
+    payload.rest_days = restText.split(/[,、;|]/).map(item => item.trim()).filter(Boolean);
+    payload.schedule_json = [];
+  } else {
+    payload.schedule_json = [];
+    payload.rest_days = [];
+  }
   if (newRole === 'admin_staff') {
     const newSub = prompt('行政類型（general=總務 / marketing=美編行銷）：', u.subtype || 'general');
     if (newSub) payload.subtype = newSub;
@@ -253,6 +430,29 @@ async function clearLine(nickname) {
   if (!res.ok) { UI.toast(res.error, 'danger'); return; }
   UI.toast('已解除 LINE 綁定', 'success');
   loadUsers();
+}
+
+async function deleteEmployee(nickname) {
+  const accepted = await UI.confirmDialog(
+    `確定要刪除員工「${nickname}」？\n\n此操作會立即移除登入、Google、LINE、APP 與電話綁定，且不能用「啟用」復原。歷史日報、薪資與評分會保留供主管查核。`
+  );
+  if (!accepted) return;
+  const confirmation = prompt(`為避免誤刪，請完整輸入「${nickname}」：`, '');
+  if (confirmation === null) return;
+  if (confirmation.trim() !== nickname) {
+    UI.toast('輸入的暱稱不一致，未刪除任何資料', 'warn');
+    return;
+  }
+  UI.loading(true);
+  const res = await API.deleteUser(nickname, confirmation.trim());
+  UI.loading(false);
+  if (!res.ok) {
+    UI.toast(res.error, 'danger');
+    return;
+  }
+  const driveWarning = res.drive_revocation && res.drive_revocation.ok === false;
+  UI.toast(driveWarning ? '員工已刪除；雲端權限將於下次同步再次收斂' : '員工已刪除，歷史資料已保留', driveWarning ? 'warn' : 'success');
+  await loadUsers();
 }
 </script>
 </body>

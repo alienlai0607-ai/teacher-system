@@ -1,17 +1,19 @@
 # Google Sheet Schema
 
-Apps Script `setupSheets()` 會建立或補齊 15 個資料表。它不刪除既有欄位與資料，並把舊部門名稱「永康教室」轉為「東橋教室」。
+Apps Script `setupSheets()` 會建立或補齊 16 個資料表。它不刪除既有欄位與資料，並把舊部門名稱「永康教室」轉為「東橋教室」。
 
 ## 1. Users
 
-`nickname, email, role, department, status, phone, joined_at, last_login, notes, subtype, line_user_id, push_subscription_id`
+`nickname, email, role, department, status, phone, joined_at, last_login, notes, subtype, line_user_id, push_subscription_id, employment_type, work_assignments, schedule_json, rest_days, deleted_at, deleted_by`
 
 - `nickname`：系統主識別名稱。
 - `email`：由管理員預先綁定的 Google Email，不提供自助認領。
 - `role`：`admin`、`manager`、`teacher`、`admin_staff`。
 - `department`：`東橋教室`、`北區教室`、`才藝部門`、`總部`。
-- `status`：`active`、`pending`、`suspended`。
+- `status`：`active`、`pending`、`suspended`、`deleted`。`deleted` 只能由柏翰管理頁的刪除流程寫入，不能用一般啟用操作復原。
 - `subtype`：行政子類型 `general` 或 `marketing`。
+- `employment_type`、`work_assignments`、`schedule_json`、`rest_days`：才藝正職／PT、多工作區、固定班次與休假設定。
+- `deleted_at`、`deleted_by`：刪除稽核；刪除後清除 Email、電話、LINE、APP 與最後登入，但保留暱稱與職務快照供歷史資料關聯。
 - 通知識別碼只由已登入帳號的綁定流程寫入。
 
 ## 2. DailyLogs
@@ -96,10 +98,21 @@ Apps Script `setupSheets()` 會建立或補齊 15 個資料表。它不刪除既
 - `data_json` 保存教案流程、目標、教材與版本內容；不要求預計授課日、送審日、鎖定日或適用班級。
 - 只有本人或管理員可改寫、刪除；主管從教案審查讀取並提出意見。
 
+## 16. TalentRecords
+
+`record_id, record_type, nickname, department, record_date, year_month, status, data_json, created_by, updated_by, created_at, updated_at, submitted_at`
+
+- `record_type`：`lesson`、`lesson_draft`、`prep`、`score`、`conversation`。
+- 課堂紀錄、備課、KPI 分數與主管對話共用正式資料層，但依 `record_type` 與後端角色權限分流。
+- PT 鐘點由後端依正式實到加補課重算；體驗不計，合作校依固定費率，停課不計鐘點。
+- 已刪除員工不能新增或修改；有歷史資料的月份仍可供主管月結、列印與 PDF 修復。
+
 ## Drive 輸出
 
-- 個人與全體 PDF：`KPI日報PDF / YYYY-MM`。
+- 個人 PDF：`KPI日報PDF / 部門 / 老師 / 安親或才藝 / YYYY-MM`。
 - 月歸檔 CSV：`KPI月歸檔 / 教室 / 老師 / YYYY-MM`。
+- 教材與證據：`KPI教材`、`KPI證據`，同樣依部門、老師、工作區及月份整理。
+- 所有輸出採私人分享，只授權本人、正式主管鏈與管理員；刪除員工時立即收回其 Google 權限。
 - 舊 PDF 只作歷史查閱，不寫回 `DailyLogs`。
 
 ## 相容與索引

@@ -20,10 +20,23 @@
   const HEALTH_PROBE_KEY = `${STORAGE_KEY}_health_probe`;
   const IS_REVIEW_BUILD = window.location.pathname.includes('/review/');
   const IS_QA_HARNESS = window.location.pathname.endsWith('/qa-harness.html');
+  const LOCAL_REVIEW_NICKNAME = new URLSearchParams(window.location.search).get('reviewUser') || '';
+  const IS_PREVIEW_REVIEW_SESSION = IS_REVIEW_BUILD
+    && (['127.0.0.1', 'localhost'].includes(window.location.hostname)
+      || window.location.hostname.endsWith('.trycloudflare.com'))
+    && Boolean(LOCAL_REVIEW_NICKNAME);
   const APP_VERSION = 17;
   const MAX_EVIDENCE_FILES = 8;
   const GLOBAL_MANAGER_NICKNAMES = ['小魚'];
   let loadStateIssue = '';
+
+  function normalizeReviewNickname(value) {
+    return String(value || '')
+      .trim()
+      .replace(/\s+/g, '')
+      .replace(/(?:老師|主管)$/u, '')
+      .toLowerCase();
+  }
 
   const ACTIVITY_TYPES = {
     tutoring: { label: '安親課業指導', icon: 'book-open-check', tone: '', track: 'academic', kpi: '課業指導', evidence: true, requiresPlan: true },
@@ -233,6 +246,7 @@
     { route: 'team', label: '團隊狀態', icon: 'users-round' },
     { route: 'evaluations', label: '月度評核', icon: 'chart-no-axes-column-increasing' },
     { route: 'scoring', label: '評分標準', icon: 'scale' },
+    { route: 'cloud-reports', label: '雲端日報', icon: 'folder-open' },
     { route: 'settings', label: '系統設定', icon: 'settings-2' },
   ];
 
@@ -695,6 +709,9 @@
     legacyArchiveMessage: '',
     legacyArchiveFiles: [],
     legacyArchiveMonth: '',
+    reportFolderStatus: 'idle',
+    reportFolderMessage: '',
+    reportFolders: [],
   };
   let openDraftStore = loadOpenDraftStore();
 
@@ -1489,6 +1506,13 @@
     const session = legacySession();
     const canSwitchReviewRole = IS_REVIEW_BUILD && !session;
     const workspaceLabel = session?.role === 'admin' ? '管理員工作區' : state.ui.role === 'manager' ? '主管工作區' : '老師工作區';
+    const workspaceUser = session || {
+      nickname: person.nickname,
+      role: state.ui.role,
+      department: person.department,
+    };
+    const workspaceId = state.ui.role === 'manager' ? 'anqin-manager' : 'anqin-teacher';
+    window.KPI_REVIEW_USER = workspaceUser;
     app.innerHTML = `
       <header class="topbar">
         <div class="brand-block">
@@ -1503,6 +1527,7 @@
           <div id="save-state" class="save-state is-saved">${icon('circle-check', 14)}<span>${state.ui.lastSavedAt ? `已儲存 ${formatTime(state.ui.lastSavedAt)}` : '尚無變更'}</span></div>
         </div>
         <div class="topbar-actions">
+          ${window.KPI_WORKSPACES?.renderSwitcher?.(workspaceUser, { currentId: workspaceId }) || ''}
           ${canSwitchReviewRole ? `<div class="role-switch" aria-label="切換審查角色">
             <button type="button" data-action="switch-role" data-role="teacher" class="${state.ui.role === 'teacher' ? 'active' : ''}">老師視角</button>
             <button type="button" data-action="switch-role" data-role="manager" class="${state.ui.role === 'manager' ? 'active' : ''}">主管視角</button>
@@ -1527,7 +1552,7 @@
         </div>
       </aside>
 
-      <main class="app-main" id="main-content">${renderSystemStatusNotice()}${renderRoute()}</main>
+      <main class="app-main" id="main-content">${renderSystemStatusNotice()}${window.KPI_WORKSPACES?.renderQuickSwitcher?.(workspaceUser, { currentId: workspaceId }) || ''}${renderRoute()}</main>
 
       <nav class="mobile-bottom-nav" aria-label="行動版主要導覽">
         ${renderMobileNav(nav)}
@@ -1565,6 +1590,7 @@
       team: renderTeamStatus,
       evaluations: renderManagerEvaluations,
       scoring: renderScoringStandards,
+      'cloud-reports': renderManagerCloudReports,
       settings: renderIntegrationSettings,
     } : {
       today: renderTeacherToday,
@@ -1585,7 +1611,7 @@
     const mascotByRoute = {
       today: 'mascot-blue', weekly: 'mascot-green', plans: 'mascot-coral', records: 'mascot-black', evaluation: 'mascot-coral', tasks: 'mascot-green', guide: 'mascot-blue', scoring: 'mascot-coral',
       dashboard: 'mascot-black', reviews: 'mascot-blue', evidence: 'mascot-black', students: 'mascot-green',
-      'operations-review': 'mascot-green', 'plans-review': 'mascot-coral', team: 'mascot-blue', evaluations: 'mascot-coral', settings: 'mascot-black',
+      'operations-review': 'mascot-green', 'plans-review': 'mascot-coral', team: 'mascot-blue', evaluations: 'mascot-coral', 'cloud-reports': 'mascot-green', settings: 'mascot-black',
     };
     const mascotClass = mascotByRoute[state.ui.route] || 'mascot-coral';
     return `<div class="page-head"><div class="page-heading"><span class="mascot-peek ${mascotClass}" aria-hidden="true"><img src="../../shared/icons/bg.jpg" alt=""></span><div><h1>${esc(title)}</h1><p class="page-subtitle">${esc(subtitle)}</p></div></div><div class="page-actions">${actions}</div></div>`;
@@ -3089,6 +3115,50 @@
       body = `<div class="legacy-file-list">${files.map(file => `<a class="legacy-file-row" href="${esc(file.url)}" target="_blank" rel="noopener noreferrer"><span class="legacy-file-icon">${icon('file-text', 19)}</span><span class="legacy-file-main"><strong>${esc(file.kind === 'daily' ? '全體 KPI 日報' : file.nickname ? `${file.nickname} KPI 日報` : file.fileName)}</strong><small>${file.date ? formatDate(file.date) : esc(file.fileName)}</small></span><span class="badge outline">PDF</span>${icon('external-link', 16)}</a>`).join('')}</div>`;
     }
     return `<section class="panel mt-16 legacy-archive-panel"><div class="panel-head"><div><div class="panel-title">${icon('archive')}舊版日報檔案</div><div class="panel-subtitle">直接開啟既有 PDF，不會併入新版紀錄</div></div><div class="panel-head-actions">${monthSelect}<button type="button" class="icon-button" data-action="refresh-legacy-archives" aria-label="重新讀取舊版檔案" title="重新讀取">${icon('refresh-cw', 15)}</button></div></div><div class="panel-body">${body}</div></section>`;
+  }
+
+  async function loadManagerReportFolders(notify = false) {
+    const session = legacySession();
+    if (!session || !['admin', 'manager'].includes(session.role) || !window.API?.listTeacherReportFolders) {
+      integrationRuntime.reportFolderStatus = 'restricted';
+      integrationRuntime.reportFolderMessage = '請使用主管正式帳號登入';
+      if (state.ui.route === 'cloud-reports') renderApp();
+      return { ok: false };
+    }
+    integrationRuntime.reportFolderStatus = 'loading';
+    integrationRuntime.reportFolderMessage = '正在讀取老師資料夾';
+    if (state.ui.route === 'cloud-reports') renderApp();
+    const result = await API.listTeacherReportFolders({ scope: 'anqin' });
+    if (!result?.ok) {
+      integrationRuntime.reportFolderStatus = 'error';
+      integrationRuntime.reportFolderMessage = result?.error || '雲端資料夾讀取失敗';
+    } else {
+      integrationRuntime.reportFolderStatus = 'saved';
+      integrationRuntime.reportFolders = Array.isArray(result.folders) ? result.folders : [];
+      integrationRuntime.reportFolderMessage = integrationRuntime.reportFolders.length
+        ? `已讀取 ${integrationRuntime.reportFolders.length} 位老師的資料夾`
+        : '目前沒有可查看的老師資料夾';
+    }
+    if (state.ui.route === 'cloud-reports') renderApp();
+    if (notify) toast(integrationRuntime.reportFolderMessage, result?.ok ? 'success' : 'danger');
+    return result;
+  }
+
+  function renderManagerCloudReports() {
+    const status = integrationRuntime.reportFolderStatus;
+    const folders = integrationRuntime.reportFolders || [];
+    let content = '';
+    if (status === 'idle' || status === 'loading') {
+      content = `<div class="empty-state"><div><div class="empty-icon">${icon('loader-circle', 23)}</div><div class="empty-title">正在讀取雲端日報</div><div class="empty-copy">只會顯示目前帳號有權限查看的老師。</div></div></div>`;
+    } else if (status === 'error' || status === 'restricted') {
+      content = `<div class="notice-band danger">${icon('cloud-alert', 19)}<div><div class="notice-title">無法讀取雲端日報</div><div class="notice-copy">${esc(integrationRuntime.reportFolderMessage)}</div></div></div>`;
+    } else if (!folders.length) {
+      content = `<div class="empty-state"><div><div class="empty-icon">${icon('folder-search', 23)}</div><div class="empty-title">目前沒有可查看的資料夾</div></div></div>`;
+    } else {
+      const departments = [...new Set(folders.map(item => item.department))];
+      content = departments.map(department => `<section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('school')}${esc(department)}</div><div class="panel-subtitle">${folders.filter(item => item.department === department).length} 位老師</div></div></div><div class="panel-body"><div class="legacy-file-list">${folders.filter(item => item.department === department).map(folder => `<a class="legacy-file-row" href="${esc(folder.url)}" target="_blank" rel="noopener noreferrer"><span class="legacy-file-icon">${icon('folder-open', 20)}</span><span class="legacy-file-main"><strong>${esc(folder.nickname)}${folder.status === 'deleted' ? ' · 離職保留' : folder.status === 'suspended' ? ' · 帳號停用' : ''}</strong><small>${folder.reportCount ? `${folder.reportCount} 份日報 · 最近 ${formatDate(folder.latestDate)}` : '資料夾已建立，尚無日報'}</small></span><span class="badge ${folder.reportCount ? 'green' : 'outline'}">${folder.reportCount || 0} 份</span>${icon('external-link', 16)}</a>`).join('')}</div></div></section>`).join('');
+    }
+    return `<div class="page">${pageHead('雲端日報', '依教室與老師整理的正式日報資料夾', `<button type="button" class="btn" data-action="refresh-report-folders">${icon('refresh-cw', 16)}重新整理</button>`)}<div class="notice-band info">${icon('shield-check', 19)}<div><div class="notice-title">已依主管權限篩選</div><div class="notice-copy">東橋與北區主管只會看到自己的管理範圍；小魚與管理員依全域權限查看。開啟 Drive 時請使用系統綁定的 Google 帳號。</div></div></div>${content}</div>`;
   }
 
   function renderRecords() {
@@ -5436,6 +5506,9 @@
     if (route === 'records' && integrationRuntime.legacyArchiveStatus === 'idle') {
       window.setTimeout(loadLegacyArchiveFiles, 0);
     }
+    if (route === 'cloud-reports' && integrationRuntime.reportFolderStatus === 'idle') {
+      window.setTimeout(loadManagerReportFolders, 0);
+    }
     if (route === 'plans' && session?.role === 'teacher' && integrationRuntime.prepSyncStatus === 'idle') {
       window.setTimeout(refreshCoursePrepCloudData, 0);
     }
@@ -6414,6 +6487,7 @@
       }
     }
     else if (action === 'refresh-legacy-archives') await loadLegacyArchiveFiles(true);
+    else if (action === 'refresh-report-folders') await loadManagerReportFolders(true);
     else if (action === 'reload-manager-evaluation') {
       await loadManagerEvaluation(integrationRuntime.managerEvaluationTeacher, integrationRuntime.managerEvaluationMonth);
     }
@@ -6663,7 +6737,7 @@
 
   const initialSession = legacySession();
   const openedFromNotification = new URLSearchParams(window.location.search).get('notify') === '1';
-  if (!initialSession && !IS_QA_HARNESS) {
+  if (!initialSession && !IS_QA_HARNESS && !IS_PREVIEW_REVIEW_SESSION) {
     window.location.replace(loginReturnPath(openedFromNotification ? 'review/anqin-v2/index.html?notify=1' : 'review/anqin-v2/index.html'));
     return;
   }
@@ -6675,6 +6749,14 @@
     return;
   }
   applyLegacySessionContext();
+  if (IS_PREVIEW_REVIEW_SESSION) {
+    const requestedPerson = state.people.find(person => normalizeReviewNickname(person.nickname) === normalizeReviewNickname(LOCAL_REVIEW_NICKNAME));
+    if (requestedPerson) {
+      state.ui.role = 'teacher';
+      state.context.teacher = requestedPerson.nickname;
+      state.context.department = requestedPerson.department;
+    }
+  }
   const rolledFromDate = rollWorkspaceToToday();
   if (rolledFromDate) persist(`已保留 ${formatShortDate(rolledFromDate)} 紀錄並開始今天`);
   if (openedFromNotification && initialSession?.role === 'teacher') state.ui.route = 'records';

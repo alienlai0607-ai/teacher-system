@@ -418,14 +418,15 @@ function dailyLockOldLogs() {
 }
 
 /**
- * 拍照存證：把前端壓縮後的照片存進 Google Drive，回傳可公開檢視的網址
+ * 拍照存證：把前端壓縮後的照片存進 Google Drive，回傳授權檢視網址
  * params: { nickname, date, kpi, mimeType, base64, description }
  * 資料夾結構：KPI證據 / 部門 / 暱稱 / 年月
- * 權限：知道連結即可檢視（檔名用 UUID 亂碼，實務上猜不到）
+ * 權限：資料本人、所屬主管、全域主管與管理員
  */
 function uploadPhoto(params) {
   const { nickname, date, kpi, mimeType, base64 } = params;
   if (!nickname || !base64) return { ok: false, error: 'missing nickname or base64' };
+  if (String(base64).length > 12 * 1024 * 1024) return { ok: false, error: '照片內容過大，請壓縮後再上傳' };
 
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
@@ -433,23 +434,27 @@ function uploadPhoto(params) {
   const dateStr = String(date || todayStr());
   const ym = dateStr.slice(0, 7); // YYYY-MM
   const mt = mimeType || 'image/jpeg';
-  const ext = mt.indexOf('png') >= 0 ? 'png' : 'jpg';
+  const ext = mt.indexOf('png') >= 0 ? 'png'
+    : mt.indexOf('webp') >= 0 ? 'webp'
+    : mt.indexOf('gif') >= 0 ? 'gif'
+    : mt.indexOf('heif') >= 0 ? 'heif'
+    : mt.indexOf('heic') >= 0 ? 'heic'
+    : 'jpg';
 
   // 資料夾：KPI證據 / 部門 / 暱稱 / 年月
+  const scope = String(kpi || '').indexOf('talent-') === 0 ? 'talent' : 'anqin';
   const root = getEvidenceRootFolder_();
   const deptF = getOrCreateChildFolder_(root, normalizeDepartment_(user.department) || '未分部門');
   const userF = getOrCreateChildFolder_(deptF, nickname);
-  const ymF = getOrCreateChildFolder_(userF, ym);
+  const workF = getOrCreateChildFolder_(userF, scope === 'talent' ? '才藝' : '安親');
+  const ymF = getOrCreateChildFolder_(workF, ym);
 
   const bytes = Utilities.base64Decode(base64);
   const filename = `K${kpi || 0}-${dateStr}-${Utilities.getUuid().slice(0, 8)}.${ext}`;
   const blob = Utilities.newBlob(bytes, mt, filename);
   const file = ymF.createFile(blob);
-  try {
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  } catch (e) {
-    // 部分帳號政策會擋公開分享，仍回傳網址（登入有權限者可看）
-  }
+  secureKpiReportPath_(root, deptF, userF, workF, ymF, user, scope, []);
+  secureKpiDriveItem_(file, user, scope, []);
 
   const fileId = file.getId();
   const url = 'https://drive.google.com/file/d/' + fileId + '/view';
@@ -480,16 +485,15 @@ function uploadFile(params) {
   const bytes = Utilities.base64Decode(base64);
   const blob = Utilities.newBlob(bytes, mimeType || 'application/octet-stream', uniqueName);
 
+  const scope = String(params.category || '').indexOf('talent-') === 0 ? 'talent' : 'anqin';
   const root = getMaterialRootFolder_();
   const deptF = getOrCreateChildFolder_(root, normalizeDepartment_(user.department) || '未分部門');
   const userF = getOrCreateChildFolder_(deptF, nickname);
-  const ymF = getOrCreateChildFolder_(userF, ym);
+  const workF = getOrCreateChildFolder_(userF, scope === 'talent' ? '才藝' : '安親');
+  const ymF = getOrCreateChildFolder_(workF, ym);
   const file = ymF.createFile(blob);
-  try {
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  } catch (e) {
-    // 組織政策若禁止公開分享，仍保留給有權限的登入者查看。
-  }
+  secureKpiReportPath_(root, deptF, userF, workF, ymF, user, scope, []);
+  secureKpiDriveItem_(file, user, scope, []);
 
   const fileId = file.getId();
   const url = 'https://drive.google.com/file/d/' + fileId + '/view';

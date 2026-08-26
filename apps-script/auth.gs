@@ -37,10 +37,94 @@ function whoami(params) {
       email: user.email,
       role: user.role,
       department: normalizeDepartment_(user.department),
-      status: user.status
+      status: user.status,
+      subtype: user.subtype || '',
+      employment_type: user.employment_type || '',
+      work_assignments: parseUserListField_(user.work_assignments),
+      schedule_json: parseUserListField_(user.schedule_json),
+      rest_days: parseUserListField_(user.rest_days)
     },
     session_token: user.status === 'active' ? issueSessionToken_(user) : ''
   };
+}
+
+function parseUserListField_(value) {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(String(value));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return String(value).split(/[,、;|]/).map(function (item) { return item.trim(); }).filter(Boolean);
+  }
+}
+
+function userScheduleKey_(item) {
+  if (!item || typeof item !== 'object') return '';
+  if (item.scheduleKey || item.key) return String(item.scheduleKey || item.key).trim().slice(0, 240);
+  return [
+    'w' + Number(item.weekday),
+    String(item.time || '').trim(),
+    String(item.siteType || '').trim(),
+    String(item.site || '').trim()
+  ].map(function (value) { return encodeURIComponent(value); }).join('__');
+}
+
+function normalizeUserSchedule_(value) {
+  const list = parseUserListField_(value);
+  if (list.length > 28) throw new Error('固定排班最多 28 筆');
+  const weekdayLabels = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
+  const seen = {};
+  return list.map(function (item) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('固定排班格式不正確');
+    const weekday = Number(item.weekday);
+    const time = String(item.time || '').trim().slice(0, 80);
+    const siteType = String(item.siteType || 'self').trim();
+    const site = String(item.site || '').trim().slice(0, 100);
+    if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) throw new Error('固定排班星期不正確');
+    if (!time || !site) throw new Error('固定排班必須包含時間與地點');
+    if (['self', 'partner'].indexOf(siteType) < 0) throw new Error('固定排班場域不正確');
+    const normalized = {
+      weekday: weekday,
+      label: String(item.label || weekdayLabels[weekday]).trim().slice(0, 20),
+      time: time,
+      siteType: siteType,
+      site: site
+    };
+    normalized.scheduleKey = userScheduleKey_(Object.assign({}, normalized, { scheduleKey: item.scheduleKey || item.key || '' }));
+    if (!normalized.scheduleKey || seen[normalized.scheduleKey]) throw new Error('固定排班有重複班次，請確認星期、時間與地點');
+    seen[normalized.scheduleKey] = true;
+    return normalized;
+  });
+}
+
+function normalizeRestDays_(value) {
+  const allowed = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
+  const seen = {};
+  return parseUserListField_(value).map(function (item) { return String(item || '').trim(); }).filter(function (item) {
+    if (allowed.indexOf(item) < 0) throw new Error('固定休假日期不正確');
+    if (seen[item]) return false;
+    seen[item] = true;
+    return true;
+  });
+}
+
+function validateUserWorkConfiguration_(role, employment, assignments, schedule) {
+  const work = Array.isArray(assignments) ? assignments : [];
+  const employmentType = String(employment || '');
+  if (work.indexOf('talent-pt') >= 0) {
+    if (employmentType !== 'pt') throw new Error('才藝 PT 工作區必須搭配 PT 聘用身分');
+    if (!Array.isArray(schedule) || !schedule.length) throw new Error('才藝 PT 必須先設定至少一筆固定排班');
+  }
+  if (work.indexOf('talent-fulltime') >= 0 && employmentType !== 'fulltime') {
+    throw new Error('才藝正職工作區必須搭配正職聘用身分');
+  }
+  if (work.indexOf('talent-manager') >= 0 && role !== 'manager' && role !== 'admin') {
+    throw new Error('才藝主管工作區只可指派給主管或管理員');
+  }
+  if (work.indexOf('talent-payroll') >= 0 && role !== 'manager' && role !== 'admin') {
+    throw new Error('才藝薪資工作區只可指派給主管或管理員');
+  }
 }
 
 /** 驗證首次 Google 登入，或用尚未過期的後端工作階段重新核對身分。 */
@@ -199,9 +283,9 @@ function authorizeTaskResource_(actor, taskId, deleting) {
  */
 function authorizeApiAction_(action, params, actor) {
   const adminOnly = [
-    'addUser', 'updateUser', 'approveUser', 'setConfig', 'setupSystemAutomation',
+    'addUser', 'updateUser', 'approveUser', 'deleteUser', 'setConfig', 'setupSystemAutomation',
     'cleanupDuplicateEvidence', 'adminStampSubmitted', 'adminBroadcast',
-    'sendDailyKpiPdf', 'setupSheets', 'purgeTestData'
+    'sendDailyKpiPdf', 'setupSheets', 'purgeTestData', 'approveTalentBonus'
   ];
   if (adminOnly.indexOf(action) >= 0) {
     requireApiRole_(actor, ['admin']);
@@ -232,10 +316,46 @@ function authorizeApiAction_(action, params, actor) {
 
   const viewerActions = [
     'listLogs', 'getEvidenceLog', 'listWeekly', 'listCoursePreps',
-    'listArchivedKpiFiles', 'getEvalEvidence', 'getEval', 'listEvals',
+    'listArchivedKpiFiles', 'listTeacherReportFolders', 'getTalentWorkspaceData',
+    'getEvalEvidence', 'getEval', 'listEvals',
     'listTasks', 'getDashboard'
   ];
   if (viewerActions.indexOf(action) >= 0) params.viewer = actor.nickname;
+
+  if (action === 'listTeacherReportFolders') {
+    requireApiRole_(actor, ['admin', 'manager']);
+    params.viewer = actor.nickname;
+    return;
+  }
+
+  if (action === 'getTalentWorkspaceData') {
+    params.viewer = actor.nickname;
+    return;
+  }
+
+  if (['saveTalentLesson', 'saveTalentDraft', 'saveTalentPrep', 'updateTalentAppStatus'].indexOf(action) >= 0) {
+    const target = requireApiUserScope_(actor, params.nickname || actor.nickname);
+    if (target.status !== 'active') throw new Error('此員工帳號已停用或刪除，不能新增或修改才藝資料');
+    params.nickname = target.nickname;
+    if (actor.role !== 'admin' && target.nickname !== actor.nickname) throw new Error('只能修改自己的才藝資料');
+    return;
+  }
+
+  if (action === 'regenerateTalentLessonReport') {
+    params.operator = actor.nickname;
+    return;
+  }
+
+  if (['reviewTalentPrep', 'saveTalentScore'].indexOf(action) >= 0) {
+    requireApiRole_(actor, ['admin', 'manager']);
+    params.operator = actor.nickname;
+    return;
+  }
+
+  if (action === 'addTalentMessage') {
+    params.operator = actor.nickname;
+    return;
+  }
 
   const ownContentActions = [
     'saveLog', 'uploadPhoto', 'uploadFile', 'saveWeekly', 'saveCoursePrep',
@@ -243,6 +363,7 @@ function authorizeApiAction_(action, params, actor) {
   ];
   if (ownContentActions.indexOf(action) >= 0) {
     const target = requireApiUserScope_(actor, params.nickname || actor.nickname);
+    if (target.status !== 'active') throw new Error('此員工帳號已停用或刪除，不能新增或修改資料');
     params.nickname = target.nickname;
     if (actor.role !== 'admin' && target.nickname !== actor.nickname) throw new Error('只能修改自己的資料');
     return;
@@ -444,6 +565,22 @@ function listUsers(params) {
   if (operator.role !== 'admin' && !isGlobalManager_(operator)) {
     users = users.filter(user => sameDepartment_(user.department, operator.department) || user.nickname === operator.nickname);
   }
+  users = users.map(function (user) {
+    const copy = Object.assign({}, user);
+    delete copy._row;
+    copy.department = normalizeDepartment_(copy.department);
+    copy.work_assignments = parseUserListField_(copy.work_assignments);
+    try {
+      copy.schedule_json = normalizeUserSchedule_(copy.schedule_json);
+      copy.rest_days = normalizeRestDays_(copy.rest_days);
+      copy.configuration_error = '';
+    } catch (error) {
+      copy.schedule_json = [];
+      copy.rest_days = [];
+      copy.configuration_error = String(error.message || error);
+    }
+    return copy;
+  });
   return { ok: true, users };
 }
 
@@ -462,6 +599,17 @@ function addUser(params) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) return { ok: false, error: 'Google Email 格式不正確' };
   if (!ROLES.includes(role)) return { ok: false, error: 'invalid role' };
   if (!DEPARTMENTS.includes(normalizedDepartment)) return { ok: false, error: 'invalid department' };
+  if (params.employment_type && !['fulltime', 'pt', 'manager', 'admin'].includes(String(params.employment_type))) {
+    return { ok: false, error: 'invalid employment_type' };
+  }
+  const workAssignments = parseUserListField_(params.work_assignments);
+  const allowedAssignments = ['anqin-teacher', 'anqin-manager', 'talent-fulltime', 'talent-pt', 'talent-manager', 'talent-payroll'];
+  if (workAssignments.some(function (item) { return allowedAssignments.indexOf(item) < 0; })) {
+    return { ok: false, error: 'invalid work_assignments' };
+  }
+  const normalizedSchedule = normalizeUserSchedule_(params.schedule_json);
+  const normalizedRestDays = normalizeRestDays_(params.rest_days);
+  validateUserWorkConfiguration_(role, params.employment_type, workAssignments, normalizedSchedule);
 
   // 行政美編行銷必須有 subtype（general/marketing），否則 KPI_Config 查不到
   const subtype = role === 'admin_staff'
@@ -487,8 +635,13 @@ function addUser(params) {
     joined_at: nowIso(),
     last_login: '',
     notes: notes || '',
-    subtype
+    subtype,
+    employment_type: params.employment_type || '',
+    work_assignments: workAssignments,
+    schedule_json: normalizedSchedule,
+    rest_days: normalizedRestDays
   });
+  invalidateKpiDriveAccess_();
   logSystem(params.operator || 'system', 'add_user', nickname, { role, department });
 
   return { ok: true, msg: '新增成功' };
@@ -504,9 +657,11 @@ function updateUser(params) {
   if (!nickname) return { ok: false, error: 'missing nickname' };
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
+  if (user.status === 'deleted') return { ok: false, error: '此員工帳號已刪除，不能重新啟用或修改' };
 
   const updates = {};
-  ['email', 'line_user_id', 'role', 'department', 'status', 'phone', 'notes', 'subtype'].forEach(k => {
+  ['email', 'line_user_id', 'role', 'department', 'status', 'phone', 'notes', 'subtype',
+   'employment_type', 'work_assignments', 'schedule_json', 'rest_days'].forEach(k => {
     if (params[k] !== undefined) updates[k] = params[k];
   });
   if (updates.email !== undefined) {
@@ -522,13 +677,90 @@ function updateUser(params) {
   }
   if (updates.status !== undefined && !['active', 'pending', 'suspended'].includes(updates.status)) return { ok: false, error: 'invalid status' };
   if (updates.subtype !== undefined && updates.subtype && !ADMIN_STAFF_SUBTYPES.includes(updates.subtype)) return { ok: false, error: 'invalid subtype' };
+  if (updates.employment_type !== undefined && updates.employment_type && !['fulltime', 'pt', 'manager', 'admin'].includes(String(updates.employment_type))) return { ok: false, error: 'invalid employment_type' };
+  if (updates.work_assignments !== undefined) {
+    const assignments = parseUserListField_(updates.work_assignments);
+    const allowed = ['anqin-teacher', 'anqin-manager', 'talent-fulltime', 'talent-pt', 'talent-manager', 'talent-payroll'];
+    if (assignments.some(function (item) { return allowed.indexOf(item) < 0; })) return { ok: false, error: 'invalid work_assignments' };
+    updates.work_assignments = assignments;
+  }
+  if (updates.schedule_json !== undefined) updates.schedule_json = normalizeUserSchedule_(updates.schedule_json);
+  if (updates.rest_days !== undefined) updates.rest_days = normalizeRestDays_(updates.rest_days);
+  const resultingRole = updates.role !== undefined ? updates.role : user.role;
+  const resultingEmployment = updates.employment_type !== undefined ? updates.employment_type : user.employment_type;
+  const resultingAssignments = updates.work_assignments !== undefined ? updates.work_assignments : parseUserListField_(user.work_assignments);
+  const resultingSchedule = updates.schedule_json !== undefined ? updates.schedule_json : normalizeUserSchedule_(user.schedule_json);
+  validateUserWorkConfiguration_(resultingRole, resultingEmployment, resultingAssignments, resultingSchedule);
   const resultingStatus = updates.status !== undefined ? updates.status : user.status;
   const resultingEmail = updates.email !== undefined ? updates.email : String(user.email || '').trim();
   if (resultingStatus === 'active' && !resultingEmail) return { ok: false, error: '啟用帳號前必須先綁定 Google Email' };
   updateRow(SHEET_NAMES.USERS, user._row, updates);
+  invalidateKpiDriveAccess_();
   logSystem(params.operator || 'system', 'update_user', nickname, updates);
 
   return { ok: true, msg: '更新成功' };
+}
+
+/**
+ * 永久刪除員工帳號。保留暱稱、職務與排班快照，讓既有日報、薪資及評分
+ * 仍可稽核；登入資料與所有通知綁定會立即移除，且不可由一般更新流程復原。
+ */
+function deleteUser(params) {
+  const operator = params && params.operator ? findUserByNickname(params.operator) : null;
+  const operatorName = String(operator && operator.nickname || '').trim().replace(/(?:老師|主管)$/, '');
+  if (!operator || operator.role !== 'admin' || operator.status !== 'active' || operatorName !== '柏翰') {
+    return { ok: false, error: '只有柏翰管理員可以刪除員工' };
+  }
+  ensureHeaders(getSheet(SHEET_NAMES.USERS), ['deleted_at', 'deleted_by']);
+  const nickname = String(params.nickname || '').trim();
+  const confirmation = String(params.confirm_nickname || '').trim();
+  if (!nickname || confirmation !== nickname) return { ok: false, error: '請完整輸入員工暱稱以確認刪除' };
+  if (nickname === operator.nickname) return { ok: false, error: '不能刪除目前登入的管理員帳號' };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  let user;
+  let previousEmail = '';
+  try {
+    user = findUserByNickname(nickname);
+    if (!user) return { ok: false, error: '找不到此員工' };
+    if (user.role === 'admin') return { ok: false, error: '管理員帳號不可從此處刪除' };
+    if (user.status === 'deleted') return { ok: false, error: '此員工帳號已刪除' };
+    previousEmail = String(user.email || '').trim().toLowerCase();
+    updateRow(SHEET_NAMES.USERS, user._row, {
+      status: 'deleted',
+      email: '',
+      phone: '',
+      line_user_id: '',
+      push_subscription_id: '',
+      last_login: '',
+      notes: '',
+      deleted_at: nowIso(),
+      deleted_by: operator.nickname,
+    });
+  } finally {
+    lock.releaseLock();
+  }
+
+  invalidateKpiDriveAccess_();
+  let driveRevocation = { ok: true, scanned: 0, removed: 0, complete: true };
+  if (previousEmail) {
+    try {
+      driveRevocation = revokeKpiDriveUserAccess_(user, previousEmail);
+    } catch (error) {
+      driveRevocation = { ok: false, error: String(error.message || error) };
+    }
+  }
+  logSystem(operator.nickname, 'delete_user', nickname, {
+    deleted_at: nowIso(),
+    had_google_binding: Boolean(previousEmail),
+    drive_revocation: driveRevocation,
+  });
+  return {
+    ok: true,
+    msg: '員工帳號已刪除；歷史日報、薪資與評分保留供稽核',
+    drive_revocation: driveRevocation,
+  };
 }
 
 function approveUser(params) {
@@ -549,7 +781,8 @@ function requireRole(nickname, allowedRoles) {
 
 /** 小魚主管需跨校區支援；其他主管仍只看自己的校區。 */
 function isGlobalManager_(user) {
-  return !!user && user.role === 'manager' && String(user.nickname || '').trim() === '小魚';
+  const nickname = String(user && user.nickname || '').trim().replace(/(?:老師|主管)$/, '');
+  return !!user && user.role === 'manager' && nickname === '小魚';
 }
 
 function canViewDepartment_(user, department) {

@@ -1,25 +1,195 @@
 /**
  * 列出既有 KPI PDF 歸檔。舊資料只以檔案供查閱，不匯入安親 V2 紀錄。
  */
+function getKpiPdfRootFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const cached = props.getProperty('KPI_PDF_FOLDER_ID');
+  if (cached) {
+    try { return DriveApp.getFolderById(cached); } catch (error) {}
+  }
+  const roots = DriveApp.getFoldersByName('KPI日報PDF');
+  const root = roots.hasNext() ? roots.next() : DriveApp.createFolder('KPI日報PDF');
+  props.setProperty('KPI_PDF_FOLDER_ID', root.getId());
+  return root;
+}
+
+/**
+ * 日報、教案與證據只授權給資料本人及其正式管理鏈。
+ * 不使用「知道連結即可查看」，避免連結被轉傳後繞過系統角色權限。
+ */
+function kpiDriveViewerUsers_(ownerUser, scope, extraUsers) {
+  const ownerNickname = ownerUser && String(ownerUser.nickname || '');
+  const ownerDepartment = ownerUser && normalizeDepartment_(ownerUser.department);
+  const extras = Array.isArray(extraUsers) ? extraUsers : [];
+  const extraKeys = {};
+  extras.forEach(function (user) {
+    if (user && user.nickname) extraKeys[String(user.nickname)] = true;
+    if (user && user.email) extraKeys[String(user.email).toLowerCase()] = true;
+  });
+  const seen = {};
+  return sheetToObjects(SHEET_NAMES.USERS).filter(function (user) {
+    if (!user || user.status !== 'active' || !String(user.email || '').trim()) return false;
+    const assignments = talentAssignments_(user);
+    const included = user.nickname === ownerNickname || user.role === 'admin' || isGlobalManager_(user) ||
+      extraKeys[user.nickname] || extraKeys[String(user.email || '').toLowerCase()] ||
+      (scope === 'talent' && assignments.indexOf('talent-manager') >= 0) ||
+      (scope !== 'talent' && user.role === 'manager' && ownerDepartment && sameDepartment_(user.department, ownerDepartment));
+    const email = String(user.email || '').toLowerCase();
+    if (!included || seen[email]) return false;
+    seen[email] = true;
+    return true;
+  });
+}
+
+function kpiDriveAccessRevision_() {
+  const props = PropertiesService.getScriptProperties();
+  let revision = props.getProperty('KPI_DRIVE_ACCESS_REVISION');
+  if (!revision) {
+    revision = '20260826-initial';
+    props.setProperty('KPI_DRIVE_ACCESS_REVISION', revision);
+  }
+  return revision;
+}
+
+function invalidateKpiDriveAccess_() {
+  PropertiesService.getScriptProperties().setProperty(
+    'KPI_DRIVE_ACCESS_REVISION',
+    String(Date.now()) + '-' + Utilities.getUuid().slice(0, 8)
+  );
+}
+
+/**
+ * 刪除員工時立即收回其既有 Drive 權限。只掃描各 KPI 根資料夾內與該員工
+ * 同名的分支，不碰其他老師的檔案；歷史檔本身不刪除。
+ */
+function revokeKpiDriveUserAccess_(user, email) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const nickname = String(user && user.nickname || '').trim();
+  if (!normalizedEmail || !nickname) return { ok: true, scanned: 0, removed: 0, complete: true };
+  const rootNames = ['KPI日報PDF', 'KPI月歸檔', 'KPI教材', 'KPI證據'];
+  const roots = [];
+  const seenRoots = {};
+  rootNames.forEach(function (name) {
+    const iterator = DriveApp.getFoldersByName(name);
+    while (iterator.hasNext()) {
+      const folder = iterator.next();
+      if (!seenRoots[folder.getId()]) {
+        seenRoots[folder.getId()] = true;
+        roots.push(folder);
+      }
+    }
+  });
+
+  const limit = 5000;
+  let scanned = 0;
+  let removed = 0;
+  let complete = true;
+  function normalizedName(value) {
+    return String(value || '').trim().replace(/\s+/g, '').replace(/(?:老師|主管)$/, '').toLowerCase();
+  }
+  function revokeItem(item) {
+    if (!item || scanned >= limit) {
+      complete = false;
+      return;
+    }
+    scanned += 1;
+    try {
+      item.getViewers().forEach(function (viewer) {
+        if (String(viewer.getEmail() || '').trim().toLowerCase() !== normalizedEmail) return;
+        try { item.removeViewer(normalizedEmail); removed += 1; } catch (error) {}
+      });
+    } catch (error) {}
+    try {
+      item.getEditors().forEach(function (editor) {
+        if (String(editor.getEmail() || '').trim().toLowerCase() !== normalizedEmail) return;
+        try { item.removeEditor(normalizedEmail); removed += 1; } catch (error) {}
+      });
+    } catch (error) {}
+  }
+  function revokeBranch(folder, depth) {
+    if (depth > 6 || scanned >= limit) {
+      complete = false;
+      return;
+    }
+    revokeItem(folder);
+    const files = folder.getFiles();
+    while (files.hasNext() && scanned < limit) revokeItem(files.next());
+    const children = folder.getFolders();
+    while (children.hasNext() && scanned < limit) revokeBranch(children.next(), depth + 1);
+    if ((files.hasNext() || children.hasNext()) && scanned >= limit) complete = false;
+  }
+  function findTeacherBranch(folder, depth) {
+    if (depth > 3 || scanned >= limit) return;
+    revokeItem(folder);
+    const children = folder.getFolders();
+    while (children.hasNext() && scanned < limit) {
+      const child = children.next();
+      if (normalizedName(child.getName()) === normalizedName(nickname)) revokeBranch(child, 0);
+      else findTeacherBranch(child, depth + 1);
+    }
+  }
+  roots.forEach(function (root) { findTeacherBranch(root, 0); });
+  return { ok: true, scanned: scanned, removed: removed, complete: complete };
+}
+
+function secureKpiDriveItem_(item, ownerUser, scope, extraUsers) {
+  if (!item) return;
+  const allowed = {};
+  const viewers = kpiDriveViewerUsers_(ownerUser, scope, extraUsers);
+  viewers.forEach(function (user) {
+    const email = String(user.email || '').trim().toLowerCase();
+    if (email) allowed[email] = true;
+  });
+  let ownerEmail = '';
+  const currentViewers = {};
+  try { ownerEmail = String(item.getOwner().getEmail() || '').trim().toLowerCase(); } catch (error) {}
+  try { item.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.VIEW); } catch (error) {}
+  try { item.setShareableByEditors(false); } catch (error) {}
+
+  // 舊版曾授權過的主管可能已離職或換部門；每次開啟雲端日報時同步收斂權限。
+  try {
+    item.getEditors().forEach(function (user) {
+      const email = String(user.getEmail() || '').trim().toLowerCase();
+      if (!email || email === ownerEmail) return;
+      try { item.removeEditor(email); } catch (error) {}
+    });
+  } catch (error) {}
+  try {
+    item.getViewers().forEach(function (user) {
+      const email = String(user.getEmail() || '').trim().toLowerCase();
+      if (!email || email === ownerEmail) return;
+      if (allowed[email]) currentViewers[email] = true;
+      else try { item.removeViewer(email); } catch (error) {}
+    });
+  } catch (error) {}
+
+  viewers.forEach(function (user) {
+    const email = String(user.email || '').trim().toLowerCase();
+    if (!email || email === ownerEmail || currentViewers[email]) return;
+    try { item.addViewer(email); } catch (error) {}
+  });
+}
+
+function secureKpiReportPath_(root, departmentFolder, teacherFolder, workFolder, monthFolder, ownerUser, scope, extraUsers) {
+  // 上層資料夾不授權部門主管，避免從父層看到其他老師或其他工作區。
+  secureKpiDriveItem_(root, null, 'root', []);
+  secureKpiDriveItem_(departmentFolder, null, 'root', []);
+  secureKpiDriveItem_(teacherFolder, ownerUser, 'owner', []);
+  secureKpiDriveItem_(workFolder, ownerUser, scope, extraUsers || []);
+  if (monthFolder) secureKpiDriveItem_(monthFolder, ownerUser, scope, extraUsers || []);
+}
+
 function listArchivedKpiFiles(params) {
   const viewer = params && params.viewer ? findUserByNickname(params.viewer) : null;
   if (!viewer || viewer.status !== 'active') return { ok: false, error: '找不到可用帳號' };
 
   const requestedMonth = /^\d{4}-\d{2}$/.test(String(params.month || '')) ? String(params.month) : '';
   const limit = Math.max(1, Math.min(Number(params.limit) || 300, 500));
-  const props = PropertiesService.getScriptProperties();
-  let root = null;
-  const cached = props.getProperty('KPI_PDF_FOLDER_ID');
-  if (cached) {
-    try { root = DriveApp.getFolderById(cached); } catch (e) {}
-  }
-  if (!root) {
-    const roots = DriveApp.getFoldersByName('KPI日報PDF');
-    if (roots.hasNext()) root = roots.next();
-  }
-  if (!root) return { ok: true, files: [], months: [] };
+  const root = getKpiPdfRootFolder_();
 
-  const users = sheetToObjects(SHEET_NAMES.USERS).filter(user => user.status === 'active');
+  const users = sheetToObjects(SHEET_NAMES.USERS).filter(function (user) {
+    return ['active', 'suspended', 'deleted'].indexOf(String(user.status || '')) >= 0;
+  });
   let allowedNicknames = [];
   if (viewer.role === 'admin') {
     allowedNicknames = users.map(user => String(user.nickname || '')).filter(Boolean);
@@ -43,6 +213,7 @@ function listArchivedKpiFiles(params) {
     scanned += 1;
     const fileName = String(file.getName() || '');
     if (!/\.pdf$/i.test(fileName)) return;
+    if (/^才藝日報_/.test(fileName)) return;
 
     const personMatch = /^KPI_(.+)_(\d{4}-\d{2}-\d{2})\.pdf$/i.exec(fileName);
     const dailyMatch = /^KPI日報_(\d{4}-\d{2}-\d{2})\.pdf$/i.exec(fileName);
@@ -70,6 +241,8 @@ function listArchivedKpiFiles(params) {
     const month = date ? date.slice(0, 7) : monthHint;
     if (requestedMonth && month !== requestedMonth) return;
     if (month) months[month] = true;
+    const ownerUser = nickname ? users.filter(function (user) { return String(user.nickname || '') === nickname; })[0] || null : null;
+    secureKpiDriveItem_(file, ownerUser, 'anqin', [viewer]);
     files.push({
       id: file.getId(),
       fileName: fileName,
@@ -82,22 +255,22 @@ function listArchivedKpiFiles(params) {
     });
   }
 
-  function scanFiles(folder, monthHint) {
+  function scanFiles(folder, monthHint, depth) {
+    if (depth > 4 || scanned >= 1500) return;
     const iterator = folder.getFiles();
     while (iterator.hasNext() && scanned < 1500) addFile(iterator.next(), monthHint);
-  }
-
-  scanFiles(root, '');
-  if (requestedMonth) {
-    const matchingFolders = root.getFoldersByName(requestedMonth);
-    while (matchingFolders.hasNext() && scanned < 1500) scanFiles(matchingFolders.next(), requestedMonth);
-  } else {
-    const folders = root.getFolders();
-    while (folders.hasNext() && scanned < 1500) {
-      const folder = folders.next();
-      scanFiles(folder, /^\d{4}-\d{2}$/.test(folder.getName()) ? folder.getName() : '');
+    const children = folder.getFolders();
+    while (children.hasNext() && scanned < 1500) {
+      const child = children.next();
+      const childName = String(child.getName() || '');
+      const nextMonth = /^\d{4}-\d{2}$/.test(childName) ? childName : monthHint;
+      if (!requestedMonth || !/^\d{4}-\d{2}$/.test(childName) || childName === requestedMonth) {
+        scanFiles(child, nextMonth, depth + 1);
+      }
     }
   }
+
+  scanFiles(root, '', 0);
 
   files.sort((a, b) => String(b.date || b.updatedAt).localeCompare(String(a.date || a.updatedAt)) || a.fileName.localeCompare(b.fileName));
   return {
@@ -105,6 +278,104 @@ function listArchivedKpiFiles(params) {
     files: files.slice(0, limit),
     months: Object.keys(months).sort().reverse(),
   };
+}
+
+function teacherReportUsersFor_(viewer, scope) {
+  let users = sheetToObjects(SHEET_NAMES.USERS).filter(function (user) {
+    if (['active', 'suspended', 'deleted'].indexOf(String(user.status || '')) < 0) return false;
+    if (scope === 'talent') {
+      const assignments = talentAssignments_(user);
+      return assignments.indexOf('talent-fulltime') >= 0 || assignments.indexOf('talent-pt') >= 0;
+    }
+    return ['東橋教室', '北區教室'].indexOf(normalizeDepartment_(user.department)) >= 0 && ['teacher', 'manager'].indexOf(user.role) >= 0;
+  });
+  if (viewer.role === 'admin' || isGlobalManager_(viewer)) return users;
+  if (scope === 'talent' && talentAssignments_(viewer).indexOf('talent-manager') >= 0) return users;
+  return users.filter(function (user) { return sameDepartment_(user.department, viewer.department); });
+}
+
+function existingChildFolder_(parent, name) {
+  if (!parent) return null;
+  const iterator = parent.getFoldersByName(name);
+  return iterator.hasNext() ? iterator.next() : null;
+}
+
+function teacherFolderPdfStats_(folder, ownerUser, scope, viewer) {
+  let count = 0;
+  let latest = '';
+  let scanned = 0;
+  const props = PropertiesService.getScriptProperties();
+  const permissionKey = 'KPI_ACCESS_SYNC_' + folder.getId();
+  const accessRevision = kpiDriveAccessRevision_();
+  const reconcilePermissions = props.getProperty(permissionKey) !== accessRevision;
+  function visit(current, depth) {
+    if (depth > 2 || scanned >= 1000) return;
+    const files = current.getFiles();
+    while (files.hasNext() && scanned < 1000) {
+      const file = files.next();
+      scanned += 1;
+      if (!/\.pdf$/i.test(String(file.getName() || ''))) continue;
+      if (reconcilePermissions) secureKpiDriveItem_(file, ownerUser, scope, [viewer]);
+      count += 1;
+      const match = String(file.getName() || '').match(/\d{4}-\d{2}-\d{2}/);
+      if (match && match[0] > latest) latest = match[0];
+    }
+    const folders = current.getFolders();
+    while (folders.hasNext() && scanned < 1000) {
+      const child = folders.next();
+      if (reconcilePermissions) secureKpiDriveItem_(child, ownerUser, scope, [viewer]);
+      visit(child, depth + 1);
+    }
+  }
+  visit(folder, 0);
+  if (reconcilePermissions) props.setProperty(permissionKey, accessRevision);
+  return { count: count, latest: latest };
+}
+
+/**
+ * 主管專用雲端日報入口。回傳的老師資料夾已依登入者權限與工作區篩選；
+ * 東橋主管不會拿到北區或才藝資料夾，才藝主管只會拿到才藝工作成員。
+ */
+function listTeacherReportFolders(params) {
+  const viewer = params && params.viewer ? findUserByNickname(params.viewer) : null;
+  if (!viewer || viewer.status !== 'active' || ['admin', 'manager'].indexOf(viewer.role) < 0) {
+    return { ok: false, error: '只有主管可查看雲端日報資料夾' };
+  }
+  const scope = String(params.scope || '') === 'talent' ? 'talent' : 'anqin';
+  const assignments = talentAssignments_(viewer);
+  if (viewer.role !== 'admin' && !isGlobalManager_(viewer)) {
+    if (scope === 'talent' && assignments.indexOf('talent-manager') < 0) return { ok: false, error: '沒有才藝日報查看權限' };
+    if (scope === 'anqin' && assignments.indexOf('anqin-manager') < 0) return { ok: false, error: '沒有安親日報查看權限' };
+  }
+  const root = getKpiPdfRootFolder_();
+  const folders = teacherReportUsersFor_(viewer, scope).map(function (user) {
+    const department = normalizeDepartment_(user.department) || '未分部門';
+    const isActive = user.status === 'active';
+    const departmentFolder = isActive ? getOrCreateChildFolder_(root, department) : existingChildFolder_(root, department);
+    const teacherFolder = isActive ? getOrCreateChildFolder_(departmentFolder, user.nickname) : existingChildFolder_(departmentFolder, user.nickname);
+    const workFolderName = scope === 'talent' ? '才藝' : '安親';
+    const workFolder = isActive ? getOrCreateChildFolder_(teacherFolder, workFolderName) : existingChildFolder_(teacherFolder, workFolderName);
+    if (!departmentFolder || !teacherFolder || !workFolder) return null;
+    secureKpiReportPath_(root, departmentFolder, teacherFolder, workFolder, null, user, scope, [viewer]);
+    const stats = teacherFolderPdfStats_(workFolder, user, scope, viewer);
+    return {
+      nickname: user.nickname,
+      department: department,
+      employment_type: user.employment_type || '',
+      status: user.status || '',
+      deletedAt: user.deleted_at || '',
+      reportCount: stats.count,
+      latestDate: stats.latest,
+      url: workFolder.getUrl(),
+      folderId: workFolder.getId(),
+    };
+  }).filter(function (folder) {
+    return folder && (folder.status === 'active' || folder.reportCount > 0);
+  });
+  folders.sort(function (left, right) {
+    return left.department.localeCompare(right.department, 'zh-TW') || left.nickname.localeCompare(right.nickname, 'zh-TW');
+  });
+  return { ok: true, scope: scope, rootUrl: root.getUrl(), folders: folders };
 }
 
 /**
@@ -133,7 +404,8 @@ function archiveMonthlyCsv(params) {
   const existing = monthFolder.getFilesByName(fileName);
   while (existing.hasNext()) existing.next().setTrashed(true);
   const file = monthFolder.createFile(Utilities.newBlob(csv, 'text/csv;charset=utf-8', fileName));
-  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (error) {}
+  secureKpiReportPath_(root, departmentFolder, userFolder, monthFolder, null, user, 'anqin', []);
+  secureKpiDriveItem_(file, user, 'anqin', []);
   const url = 'https://drive.google.com/file/d/' + file.getId() + '/view';
   logSystem(nickname, 'archive_monthly_csv', month, { fileName: fileName });
   return {

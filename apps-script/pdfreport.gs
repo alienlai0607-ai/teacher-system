@@ -206,25 +206,19 @@ function buildDailyKpiHtml_(dateStr) {
   return { html: h, summary: { submitted: submittedNames.length, draft: draftNames.length, missing: missingNames.length, total: users.length, help: helpNames, missingNames: missingNames } };
 }
 
-/** 生成 PDF → 存 Drive（KPI日報PDF/年月）→ 回傳連結 */
+/** 生成全體 PDF → 存 Drive（KPI日報PDF/年月）→ 回傳連結 */
 function generateDailyKpiPdf_(dateStr) {
   const built = buildDailyKpiHtml_(dateStr);
   const blob = Utilities.newBlob(built.html, 'text/html', 'kpi.html').getAs('application/pdf').setName('KPI日報_' + dateStr + '.pdf');
-  const props = PropertiesService.getScriptProperties();
-  let root;
-  const cached = props.getProperty('KPI_PDF_FOLDER_ID');
-  if (cached) { try { root = DriveApp.getFolderById(cached); } catch (e) {} }
-  if (!root) {
-    const it = DriveApp.getFoldersByName('KPI日報PDF');
-    root = it.hasNext() ? it.next() : DriveApp.createFolder('KPI日報PDF');
-    props.setProperty('KPI_PDF_FOLDER_ID', root.getId());
-  }
+  const root = getKpiPdfRootFolder_();
   const ymF = getOrCreateChildFolder_(root, dateStr.slice(0, 7));
   // 同日重跑先移除舊檔（避免堆一堆同名 PDF）
   const dup = ymF.getFilesByName('KPI日報_' + dateStr + '.pdf');
   while (dup.hasNext()) dup.next().setTrashed(true);
   const file = ymF.createFile(blob);
-  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
+  secureKpiDriveItem_(root, null, 'root', []);
+  secureKpiDriveItem_(ymF, null, 'anqin', bossUsers_());
+  secureKpiDriveItem_(file, null, 'anqin', bossUsers_());
   return { url: 'https://drive.google.com/file/d/' + file.getId() + '/view', fileId: file.getId(), summary: built.summary };
 }
 
@@ -270,21 +264,19 @@ function generatePersonKpiPdf_(nickname, dateStr) {
   h += pdfLogCard_(log);
   h += '<div style="text-align:center; color:#A08B72; font-size:10px; margin-top:14px;">球球・布布・克克・拉拉・星星 陪你紀錄每一天 🪐 布拉克星球教育團隊</div></body></html>';
   const blob = Utilities.newBlob(h, 'text/html', 'kpi.html').getAs('application/pdf').setName('KPI_' + nickname + '_' + dateStr + '.pdf');
-  const props = PropertiesService.getScriptProperties();
-  let root;
-  const cached = props.getProperty('KPI_PDF_FOLDER_ID');
-  if (cached) { try { root = DriveApp.getFolderById(cached); } catch (e) {} }
-  if (!root) {
-    const it = DriveApp.getFoldersByName('KPI日報PDF');
-    root = it.hasNext() ? it.next() : DriveApp.createFolder('KPI日報PDF');
-    props.setProperty('KPI_PDF_FOLDER_ID', root.getId());
-  }
-  const ymF = getOrCreateChildFolder_(root, String(dateStr).slice(0, 7));
+  const root = getKpiPdfRootFolder_();
+  const departmentFolder = getOrCreateChildFolder_(root, normalizeDepartment_(log.department) || '未分部門');
+  const teacherFolder = getOrCreateChildFolder_(departmentFolder, nickname);
+  const workFolder = getOrCreateChildFolder_(teacherFolder, '安親');
+  const ymF = getOrCreateChildFolder_(workFolder, String(dateStr).slice(0, 7));
   const dup = ymF.getFilesByName('KPI_' + nickname + '_' + dateStr + '.pdf');
   while (dup.hasNext()) dup.next().setTrashed(true);
   const file = ymF.createFile(blob);
-  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
-  return { url: 'https://drive.google.com/file/d/' + file.getId() + '/view', log: log };
+  const ownerUser = findUserByNickname(nickname);
+  const recipients = reportRecipientUsers_(log);
+  secureKpiReportPath_(root, departmentFolder, teacherFolder, workFolder, ymF, ownerUser, 'anqin', recipients);
+  secureKpiDriveItem_(file, ownerUser, 'anqin', recipients);
+  return { url: 'https://drive.google.com/file/d/' + file.getId() + '/view', folderUrl: workFolder.getUrl(), log: log };
 }
 
 /**
