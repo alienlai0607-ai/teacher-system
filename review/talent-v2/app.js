@@ -35,11 +35,11 @@
 
   const STAFF = [
     { nickname: '浩浩老師', role: 'teacher', department: '才藝部門', employment: 'fulltime', work_assignments: ['talent-fulltime'], restDays: ['週一', '週日'], campus: '自營教室' },
-    { nickname: 'RITA老師', role: 'teacher', department: '才藝部門', employment: 'fulltime', work_assignments: ['talent-fulltime'], restDays: ['週二', '週日'], campus: '自營教室' },
+    { nickname: 'RITA老師', role: 'teacher', department: '才藝部門', status: 'pending', employment: 'fulltime', work_assignments: ['talent-fulltime'], restDays: ['週二', '週日'], campus: '自營教室' },
     { nickname: '皮皮老師', role: 'teacher', department: '才藝部門', employment: 'pt', work_assignments: ['talent-pt'], schedule: [{ weekday: 4, label: '週四', time: '19:00–20:30', siteType: 'self', site: '布拉克自營教室' }] },
     { nickname: '紅豆老師', role: 'teacher', department: '東橋教室', employment: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'], schedule: [1, 3, 4, 5].map(weekday => ({ weekday, label: `週${['日', '一', '二', '三', '四', '五', '六'][weekday]}`, time: '19:00–20:30', siteType: 'self', site: '布拉克自營教室' })) },
     { nickname: '小明老師', role: 'teacher', department: '北區教室', employment: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'], schedule: [{ weekday: 3, label: '週三', time: '19:00–20:30', siteType: 'self', site: '布拉克自營教室' }] },
-    { nickname: '黑豹老師', role: 'teacher', department: '才藝部門', employment: 'pt', work_assignments: ['talent-pt'], schedule: [1, 4].map(weekday => ({ weekday, label: `週${weekday === 1 ? '一' : '四'}`, time: '19:00–20:30', siteType: 'partner', site: '善化合作校' })) },
+    { nickname: '黑豹老師', role: 'teacher', department: '才藝部門', status: 'pending', employment: 'pt', work_assignments: ['talent-pt'], schedule: [1, 4].map(weekday => ({ weekday, label: `週${weekday === 1 ? '一' : '四'}`, time: '19:00–20:30', siteType: 'partner', site: '善化合作校' })) },
     { nickname: '柳丁主管', role: 'manager', department: '才藝部門', employment: 'manager', work_assignments: ['talent-manager'], campus: '全才藝部' },
     { nickname: '柏翰', role: 'admin', department: '管理部', employment: 'admin', work_assignments: ['anqin-manager', 'talent-payroll'], campus: '全校' },
     { nickname: '小魚主管', role: 'manager', department: '管理部', employment: 'manager', work_assignments: ['anqin-manager', 'talent-payroll'], campus: '全校' },
@@ -161,8 +161,8 @@
       version: APP_VERSION,
       ui: { route: workspace.start, lastSavedAt: '', month },
       settings: { ptStrictStart: date, ptExceptions: [] },
-      users: PREVIEW_MODE ? STAFF : [],
-      pendingUsers: [],
+      users: PREVIEW_MODE ? STAFF.filter(person => person.status !== 'pending') : [],
+      pendingUsers: PREVIEW_MODE ? STAFF.filter(person => person.status === 'pending') : [],
       archivedUsers: [],
       draftLog: null,
       draftPrep: null,
@@ -308,6 +308,12 @@
       work_assignments: Array.isArray(person.work_assignments) ? person.work_assignments : [],
       campus: person.campus || person.department || '',
     }));
+  }
+
+  function visibleTalentStaff() {
+    const active = talentStaff();
+    const activeNames = new Set(active.map(person => normalizeName(person.nickname)));
+    return active.concat(pendingTalentStaff().filter(person => !activeNames.has(normalizeName(person.nickname))));
   }
 
   function isActiveTalentTeacher(nickname) {
@@ -675,7 +681,7 @@
     const missing = incomplete + missedPt;
     return `${pageHead('主管總覽', '先看缺件與待決策，再進入單筆證據。')}
       <section class="status-grid manager"><article class="status-card"><span class="status-icon yellow">${icon('file-clock', 20)}</span><div><small>待審備課</small><strong>${pendingPreps} 份</strong><span>授課前需完成</span></div></article><article class="status-card"><span class="status-icon blue">${icon('notebook-pen', 20)}</span><div><small>本月課堂</small><strong>${logs.length} 堂</strong><span>正職與 PT 分開結算</span></div></article><article class="status-card"><span class="status-icon red">${icon('triangle-alert', 20)}</span><div><small>缺件／資格失效</small><strong>${missing} 堂</strong><span>${missedPt ? `含 PT 未當日送出 ${missedPt} 堂` : '不將不完整資料列入結算'}</span></div></article></section>
-      <section class="two-column manager-grid"><article class="panel"><div class="panel-head"><div><h2>待處理</h2><p>依時效排序</p></div></div><div class="panel-body action-list">${pendingPreps ? `<button type="button" data-action="navigate" data-route="prep-review"><span class="action-icon yellow">${icon('file-check-2', 19)}</span><span><strong>${pendingPreps} 份備課等待審查</strong><small>檢查原理、引導、遊戲與教材</small></span>${icon('chevron-right', 18)}</button>` : ''}<button type="button" data-action="navigate" data-route="scoring"><span class="action-icon blue">${icon('gauge', 19)}</span><span><strong>本月 KPI 尚未公布</strong><small>核對系統證據後再確定分數</small></span>${icon('chevron-right', 18)}</button><button type="button" data-action="navigate" data-route="settlement"><span class="action-icon green">${icon('calculator', 19)}</span><span><strong>鐘點與獎金待行政核准</strong><small>老師申報僅為預估，正式金額需核准</small></span>${icon('chevron-right', 18)}</button></div></article><article class="panel"><div class="panel-head"><div><h2>人員概況</h2><p>同帳號多工作不混算</p></div></div><div class="panel-body people-mini">${talentStaff().filter(person => ['fulltime', 'pt'].includes(person.employment)).map(person => `<div><span class="mini-avatar">${esc(person.nickname.replace('老師', '').slice(0, 2))}</span><span><strong>${esc(person.nickname)}</strong><small>${person.employment === 'pt' ? 'PT' : '正職'} · ${person.schedule?.[0]?.site || person.campus}</small></span>${statusBadge('正常')}</div>`).join('')}</div></article></section>`;
+      <section class="two-column manager-grid"><article class="panel"><div class="panel-head"><div><h2>待處理</h2><p>依時效排序</p></div></div><div class="panel-body action-list">${pendingPreps ? `<button type="button" data-action="navigate" data-route="prep-review"><span class="action-icon yellow">${icon('file-check-2', 19)}</span><span><strong>${pendingPreps} 份備課等待審查</strong><small>檢查原理、引導、遊戲與教材</small></span>${icon('chevron-right', 18)}</button>` : ''}<button type="button" data-action="navigate" data-route="scoring"><span class="action-icon blue">${icon('gauge', 19)}</span><span><strong>本月 KPI 尚未公布</strong><small>核對系統證據後再確定分數</small></span>${icon('chevron-right', 18)}</button><button type="button" data-action="navigate" data-route="settlement"><span class="action-icon green">${icon('calculator', 19)}</span><span><strong>鐘點與獎金待行政核准</strong><small>老師申報僅為預估，正式金額需核准</small></span>${icon('chevron-right', 18)}</button></div></article><article class="panel"><div class="panel-head"><div><h2>人員概況</h2><p>含待開通人員；未啟用前不列入計薪與漏填</p></div></div><div class="panel-body people-mini">${visibleTalentStaff().filter(person => ['fulltime', 'pt'].includes(person.employment)).map(person => `<div><span class="mini-avatar">${esc(person.nickname.replace('老師', '').slice(0, 2))}</span><span><strong>${esc(person.nickname)}</strong><small>${person.employment === 'pt' ? 'PT' : '正職'} · ${person.schedule?.[0]?.site || person.campus}</small></span>${statusBadge(person.status === 'pending' ? '待開通' : '正常')}</div>`).join('')}</div></article></section>`;
   }
 
   function renderPrepReview() {
@@ -759,9 +765,7 @@
   }
 
   function renderPeople() {
-    const people = talentStaff()
-      .filter(person => ['fulltime', 'pt'].includes(person.employment))
-      .concat(pendingTalentStaff().filter(person => ['fulltime', 'pt'].includes(person.employment)));
+    const people = visibleTalentStaff().filter(person => ['fulltime', 'pt'].includes(person.employment));
     return `${pageHead('人員與排班', '排班與工作身分有生效日，新設定不會回頭改算已結算月份。')}
       <section class="people-grid">${people.map(person => `<article class="person-card ${person.status === 'pending' ? 'is-pending' : ''}"><div class="person-head"><span class="large-avatar">${esc(person.nickname.replace('老師', '').slice(0, 2))}</span><div><h2>${esc(person.nickname)}</h2><p>${person.employment === 'pt' ? '才藝 PT' : '才藝正職'}${person.status === 'pending' ? ' · 待開通' : ''}</p></div>${person.status === 'pending' ? '<span class="badge yellow">尚未綁定登入</span>' : ''}</div><div class="person-rules">${person.restDays?.length ? `<div><span>固定休假</span><strong>${person.restDays.join('、')}</strong></div>` : (person.schedule || []).map(item => `<div><span>${esc(item.label)}</span><strong>${esc(item.time)}</strong><small>${esc(item.site)}</small></div>`).join('')}${normalizeName(person.nickname) === normalizeName('黑豹老師') ? '<div class="special-rule"><span>善化合作校</span><strong>每堂 900，無續報獎金</strong></div>' : ''}</div><div class="assignment-tags">${(person.work_assignments || []).map(id => `<span>${id === 'anqin-teacher' ? '安親老師' : id === 'talent-pt' ? '才藝 PT' : id === 'talent-fulltime' ? '才藝正職' : esc(id)}</span>`).join('')}</div></article>`).join('')}</section>`;
   }
@@ -841,7 +845,7 @@
 
   function statusBadge(status) {
     const map = {
-      approved: ['已核准', 'green'], pending: ['待審', 'yellow'], returned: ['退回修改', 'red'], draft: ['草稿', 'gray'], submitted: ['已送出', 'green'], cancelled: ['已停課', 'gray'], published: ['已發布', 'green'], '正常': ['正常', 'green'], complete: ['完整', 'green'], '資格取消': ['資格取消', 'red'], '待完成': ['待完成', 'yellow']
+      approved: ['已核准', 'green'], pending: ['待審', 'yellow'], returned: ['退回修改', 'red'], draft: ['草稿', 'gray'], submitted: ['已送出', 'green'], cancelled: ['已停課', 'gray'], published: ['已發布', 'green'], '正常': ['正常', 'green'], '待開通': ['待開通', 'yellow'], complete: ['完整', 'green'], '資格取消': ['資格取消', 'red'], '待完成': ['待完成', 'yellow']
     };
     const item = map[status] || [status, 'gray'];
     return `<span class="badge ${item[1]}">${esc(item[0])}</span>`;

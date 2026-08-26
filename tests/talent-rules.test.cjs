@@ -109,6 +109,8 @@ assert.match(adminUsersSource, /歷史日報、薪資與評分會保留/);
 assert.match(talentUiSource, /route: 'cloud-reports', label: '雲端日報'/);
 assert.match(talentUiSource, /pending_users/, '主管人員頁需顯示待開通的黑豹');
 assert.match(backendSource, /function talentCanAccessPendingUser_\(/, '待開通才藝人員只能由授權主管查看');
+assert.match(talentUiSource, /function visibleTalentStaff\(\)/, '主管總覽與排班需同時顯示已啟用及待開通才藝人員');
+assert.match(talentUiSource, /未啟用前不列入計薪與漏填/, '待開通人員需顯示但不可誤列入薪資或漏填');
 assert.match(talentUiSource, /function settlementStaff\(/, '離職人員只應在有歷史資料的月份出現在月結');
 assert.match(talentUiSource, /person\.status === 'deleted'.*deleted_at/s, 'PT 月結排課應在刪除日期截止');
 assert.match(talentUiSource, /isActiveTalentTeacher\(item\.teacher\)/, '離職老師的未完成備課不可留在主管待辦');
