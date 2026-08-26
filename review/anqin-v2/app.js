@@ -230,7 +230,7 @@
     { route: 'plans', label: '備課教案建檔', icon: 'notebook-tabs' },
     { route: 'records', label: '我的紀錄', icon: 'history' },
     { route: 'evaluation', label: '主管評核', icon: 'chart-no-axes-column-increasing' },
-    { route: 'tasks', label: '追蹤事項', icon: 'list-checks', count: () => openTasks().length },
+    { route: 'tasks', label: '追蹤事項', icon: 'list-checks', count: () => state.tasks.filter(task => task.owner === state.context.teacher && task.status !== 'done').length },
     { route: 'guide', label: '填寫指南', icon: 'circle-help' },
     { route: 'scoring', label: '評分標準', icon: 'scale' },
     { route: 'settings', label: '帳號與通知', icon: 'settings-2' },
@@ -2234,7 +2234,7 @@
     const hasInvalidScores = invalidScores.some(Boolean);
     const scoreRows = ANQIN_KPI_STANDARDS.map((category, index) => {
       const score = scoreValues[index];
-      return `<tr><td><div class="kpi-table-category">${icon(category.icon, 16)}<strong>${esc(category.name)}</strong></div></td><td>${invalidScores[index] ? statusBadge('待主管確認', 'red') : `<strong>${score}</strong> / ${category.points}`}</td></tr>`;
+      return `<div class="evaluation-score-row"><div class="evaluation-score-category">${icon(category.icon, 16)}<strong>${esc(category.name)}</strong></div><div class="evaluation-score-value">${invalidScores[index] ? statusBadge('待主管確認', 'red') : `<strong>${score}</strong><span>/ ${category.points}</span>`}</div></div>`;
     }).join('');
     const managerComment = String(evaluation.manager_comment || '').trim();
     const interviewNotes = String(evaluation.interview_notes || '').trim();
@@ -2242,7 +2242,7 @@
       ${pageHead('主管評核', `${esc(month)} · ${state.context.teacher}`, actions)}
       ${hasInvalidScores ? `<div class="notice-band danger">${icon('triangle-alert', 19)}<div><div class="notice-title">這份評核需要主管重新確認</div><div class="notice-copy">部分舊資料超過新版項目配分，系統暫不顯示錯誤分數與總分。</div></div></div>` : ''}
       <div class="status-strip"><div class="status-cell"><div class="status-label">KPI 總分</div><div class="status-value">${hasInvalidScores ? '待確認' : `${Number(evaluation.total_score || 0)} / 100`}</div></div><div class="status-cell"><div class="status-label">等第</div><div class="status-value status-value-badge">${statusBadge(hasInvalidScores ? '待確認' : (evaluation.grade || '—'), hasInvalidScores ? 'red' : 'blue')}</div></div><div class="status-cell"><div class="status-label">績效獎金</div><div class="status-value">${hasInvalidScores ? '待確認' : granted ? `NT$${Number(evaluation.bonus || 0).toLocaleString('zh-TW')}` : '未核發'}</div></div><div class="status-cell"><div class="status-label">評核狀態</div><div class="status-value status-value-badge">${statusBadge(hasInvalidScores ? '需修正' : '已完成', hasInvalidScores ? 'red' : 'green')}</div></div></div>
-      <div class="content-grid mt-16"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('chart-no-axes-column-increasing')}各項評分</div></div></div><div class="panel-body flush"><div class="table-wrap"><table class="data-table"><thead><tr><th>項目</th><th>分數</th></tr></thead><tbody>${scoreRows}</tbody></table></div></div></section><aside class="stack"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('message-square-text')}主管建議</div></div></div><div class="panel-body"><p class="text-small">${nl2br(managerComment || '主管未填寫其他建議。')}</p>${interviewNotes ? `<div class="section-divider"></div><h3 class="section-title">面談紀錄</h3><p class="text-small">${nl2br(interviewNotes)}</p>` : ''}</div></section>${Number(evaluation.makeup_penalty || 0) || Number(evaluation.late_penalty || 0) ? `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('circle-alert')}扣分紀錄</div></div></div><div class="panel-body"><div class="metadata-list">${Number(evaluation.makeup_penalty || 0) ? `<div class="metadata-row"><div class="metadata-label">補繳</div><div class="metadata-value">${Number(evaluation.makeup_count || 0)} 次，扣 ${Number(evaluation.makeup_penalty)} 分</div></div>` : ''}${Number(evaluation.late_penalty || 0) ? `<div class="metadata-row"><div class="metadata-label">遲到</div><div class="metadata-value">${Number(evaluation.score_late_count || 0)} 次，扣 ${Number(evaluation.late_penalty)} 分</div></div>` : ''}</div></div></section>` : ''}</aside></div>
+      <div class="content-grid mt-16"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('chart-no-axes-column-increasing')}各項評分</div></div></div><div class="panel-body flush"><div class="evaluation-score-list">${scoreRows}</div></div></section><aside class="stack"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('message-square-text')}主管建議</div></div></div><div class="panel-body"><p class="text-small">${nl2br(managerComment || '主管未填寫其他建議。')}</p>${interviewNotes ? `<div class="section-divider"></div><h3 class="section-title">面談紀錄</h3><p class="text-small">${nl2br(interviewNotes)}</p>` : ''}</div></section>${Number(evaluation.makeup_penalty || 0) || Number(evaluation.late_penalty || 0) ? `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('circle-alert')}扣分紀錄</div></div></div><div class="panel-body"><div class="metadata-list">${Number(evaluation.makeup_penalty || 0) ? `<div class="metadata-row"><div class="metadata-label">補繳</div><div class="metadata-value">${Number(evaluation.makeup_count || 0)} 次，扣 ${Number(evaluation.makeup_penalty)} 分</div></div>` : ''}${Number(evaluation.late_penalty || 0) ? `<div class="metadata-row"><div class="metadata-label">遲到</div><div class="metadata-value">${Number(evaluation.score_late_count || 0)} 次，扣 ${Number(evaluation.late_penalty)} 分</div></div>` : ''}</div></div></section>` : ''}</aside></div>
     </div>`;
   }
 
@@ -2317,9 +2317,9 @@
     const evaluation = integrationRuntime.managerEvaluation;
     const teacherOptions = teachers.map(person => `<option value="${esc(person.nickname)}" ${selectedTeacher === person.nickname ? 'selected' : ''}>${esc(person.nickname)} · ${esc(person.department)}</option>`).join('');
     const actions = `<label class="month-picker"><span>老師</span><select aria-label="評核老師" data-change="manager-evaluation-teacher">${teacherOptions}</select></label><label class="month-picker"><span>月份</span><input type="month" value="${esc(selectedMonth)}" data-change="manager-evaluation-month" aria-label="評核月份"></label>`;
-    if (!teachers.length) return `<div class="page">${pageHead('月度評核', '依紀錄、證據、觀課與工作表現完成評分', '')}<section class="panel"><div class="panel-body">${renderEmpty('user-x', '目前沒有可評核的老師', '請先到人員管理完成老師帳號與部門設定。')}</div></section></div>`;
-    if (loading) return `<div class="page">${pageHead('月度評核', `${esc(selectedMonth)} · ${esc(selectedTeacher)}`, actions)}<section class="panel"><div class="panel-body"><div class="integration-empty-state">${icon('loader-circle', 24)}<div><strong>正在彙整評核資料</strong></div></div></div></section></div>`;
-    if (!evidence) return `<div class="page">${pageHead('月度評核', `${esc(selectedMonth)} · ${esc(selectedTeacher)}`, actions)}<section class="panel"><div class="panel-body"><div class="empty-state"><div><div class="empty-icon">${icon('cloud-alert', 22)}</div><div class="empty-title">${esc(integrationRuntime.managerEvaluationMessage || '尚未讀取評核資料')}</div><button type="button" class="btn mt-12" data-action="reload-manager-evaluation">重新讀取</button></div></div></div></section></div>`;
+    if (!teachers.length) return `<div class="page manager-evaluation-page">${pageHead('月度評核', '依紀錄、證據、觀課與工作表現完成評分', '')}<section class="panel"><div class="panel-body">${renderEmpty('user-x', '目前沒有可評核的老師', '請先到人員管理完成老師帳號與部門設定。')}</div></section></div>`;
+    if (loading) return `<div class="page manager-evaluation-page">${pageHead('月度評核', `${esc(selectedMonth)} · ${esc(selectedTeacher)}`, actions)}<section class="panel"><div class="panel-body"><div class="integration-empty-state">${icon('loader-circle', 24)}<div><strong>正在彙整評核資料</strong></div></div></div></section></div>`;
+    if (!evidence) return `<div class="page manager-evaluation-page">${pageHead('月度評核', `${esc(selectedMonth)} · ${esc(selectedTeacher)}`, actions)}<section class="panel"><div class="panel-body"><div class="empty-state"><div><div class="empty-icon">${icon('cloud-alert', 22)}</div><div class="empty-title">${esc(integrationRuntime.managerEvaluationMessage || '尚未讀取評核資料')}</div><button type="button" class="btn mt-12" data-action="reload-manager-evaluation">重新讀取</button></div></div></div></section></div>`;
     const values = managerEvaluationValues();
     const invalid = values.some((score, index) => score < 0 || score > ANQIN_KPI_STANDARDS[index].points);
     const makeupPenalty = Number(evidence.summary?.makeup_count || 0) * 2;
@@ -2329,7 +2329,7 @@
     const status = evaluation?.status === 'submitted' ? ['已完成', 'green'] : evaluation ? ['草稿', 'yellow'] : ['未建立', 'outline'];
     const scoreInputs = ANQIN_KPI_STANDARDS.map((category, index) => {
       const evidenceCount = (evidence.evidence_by_kpi?.[index + 1] || []).length;
-      return `<div class="manager-eval-score-row"><div><strong>${esc(category.name)}</strong><small>${category.points} 分 · ${evidenceCount} 件直接證據</small></div><label><span class="sr-only">${esc(category.name)}分數</span><input type="number" name="score_k${index + 1}" min="0" max="${category.points}" step="1" value="${values[index]}" data-input="manager-eval-score" required><span>/ ${category.points}</span></label></div>`;
+      return `<div class="manager-eval-score-row"><div class="manager-eval-score-copy"><strong>${esc(category.name)}</strong><small>${category.points} 分 · ${evidenceCount} 件直接證據</small></div><label class="manager-eval-score-input"><span class="sr-only">${esc(category.name)}分數</span><input type="number" name="score_k${index + 1}" min="0" max="${category.points}" step="1" value="${values[index]}" data-input="manager-eval-score" required><span>/ ${category.points}</span></label></div>`;
     }).join('');
     const summary = evidence.summary || {};
     return `<div class="page manager-evaluation-page">
@@ -3198,12 +3198,60 @@
     return `<div class="page">${pageHead('我的紀錄', '點選任一日期，查看完整內容與對話紀錄', actions)}${filtersMarkup}<section class="panel mt-16"><div class="panel-body"><div class="timeline">${entries.length ? entries.map(renderRecordTimelineEntry).join('') : empty}</div></div></section>${renderLegacyArchiveFiles()}</div>`;
   }
 
+  function taskPriorityMeta(task) {
+    if (task.priority === 'high') return { label: '高', tone: 'red' };
+    if (task.priority === 'medium') return { label: '中', tone: 'yellow' };
+    return { label: '一般', tone: 'blue' };
+  }
+
+  function taskDetailText(task) {
+    const detail = String(task.detail || '').trim();
+    return detail && detail !== String(task.source || '').trim() ? detail : '';
+  }
+
+  function renderTaskRow(task) {
+    const priority = taskPriorityMeta(task);
+    const done = task.status === 'done';
+    const detail = taskDetailText(task);
+    return `<article class="task-list-row ${done ? 'is-done' : ''}">
+      <label class="task-complete-control" title="${done ? '恢復進行中' : '標記完成'}"><input type="checkbox" data-change="toggle-task" data-task-id="${esc(task.id)}" ${done ? 'checked' : ''} aria-label="${esc(task.title)}"><span>${icon('check', 14)}</span></label>
+      <button type="button" class="task-open-button" data-action="open-task-detail" data-task-id="${esc(task.id)}" aria-label="查看追蹤事項：${esc(task.title)}">
+        <span class="task-row-main"><span class="task-row-title">${esc(task.title)}</span><span class="task-row-meta"><span class="badge outline">${esc(task.source || '追蹤事項')}</span><span>${formatDate(task.dueDate)}</span>${detail ? '<span>含詳細說明</span>' : ''}</span></span>
+        <span class="badge ${priority.tone}">${priority.label}</span>${icon('chevron-right', 17)}
+      </button>
+    </article>`;
+  }
+
+  function renderTaskDetail(task) {
+    const priority = taskPriorityMeta(task);
+    const detail = taskDetailText(task);
+    return `<div class="task-detail-view">
+      <div class="task-detail-badges"><span class="badge ${task.status === 'done' ? 'green' : 'yellow'}">${task.status === 'done' ? '已完成' : '進行中'}</span><span class="badge ${priority.tone}">${priority.label}優先</span></div>
+      <section class="task-detail-section"><div class="task-detail-label">事項內容</div><div class="task-detail-copy">${nl2br(task.title)}</div></section>
+      ${detail ? `<section class="task-detail-section"><div class="task-detail-label">主管說明</div><div class="task-detail-copy">${nl2br(detail)}</div></section>` : ''}
+      <div class="metadata-list task-detail-metadata"><div class="metadata-row"><div class="metadata-label">來源</div><div class="metadata-value">${esc(task.source || '追蹤事項')}</div></div><div class="metadata-row"><div class="metadata-label">期限</div><div class="metadata-value">${formatDate(task.dueDate)}</div></div>${task.createdBy ? `<div class="metadata-row"><div class="metadata-label">建立者</div><div class="metadata-value">${esc(task.createdBy)}</div></div>` : ''}</div>
+    </div>`;
+  }
+
+  function openTaskDetail(taskId) {
+    const task = state.tasks.find(item => item.id === taskId && item.owner === state.context.teacher);
+    if (!task) {
+      toast('找不到這筆追蹤事項，請重新讀取', 'danger');
+      return;
+    }
+    openDialog({
+      title: '追蹤事項',
+      body: renderTaskDetail(task),
+      footer: `<button type="button" class="btn" data-action="close-dialog">返回列表</button><button type="button" class="btn btn-primary" data-action="toggle-task-detail" data-task-id="${esc(task.id)}">${icon(task.status === 'done' ? 'rotate-ccw' : 'check', 15)}${task.status === 'done' ? '恢復進行中' : '標記完成'}</button>`,
+    });
+  }
+
   function renderTasks() {
     const allTasks = state.tasks.filter(task => task.owner === state.context.teacher);
     const filters = getFilters('tasks', { status: 'open' });
     const tasks = allTasks.filter(task => filters.status === 'done' ? task.status === 'done' : task.status !== 'done');
     const open = allTasks.filter(task => task.status !== 'done');
-    return `<div class="page">${pageHead('追蹤事項', `${open.length} 項待完成 · 由工作、學生、親師與主管交辦集中產生`, `<button type="button" class="btn btn-primary" data-action="open-task">${icon('plus', 16)}<span>新增事項</span></button>`)}<div class="content-grid"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('list-checks')}我的事項</div><div class="panel-subtitle">依期限與優先度排序</div></div><div class="segmented"><button type="button" data-action="set-view-filter" data-filter-group="tasks" data-filter-key="status" data-filter-value="open" class="${filters.status === 'open' ? 'active' : ''}">進行中</button><button type="button" data-action="set-view-filter" data-filter-group="tasks" data-filter-key="status" data-filter-value="done" class="${filters.status === 'done' ? 'active' : ''}">已完成</button></div></div><div class="panel-body flush"><div class="table-wrap"><table class="data-table"><thead><tr><th>完成</th><th>事項</th><th>來源</th><th>期限</th><th>優先度</th></tr></thead><tbody>${tasks.length ? tasks.map(task => `<tr><td><input type="checkbox" data-change="toggle-task" data-task-id="${task.id}" ${task.status === 'done' ? 'checked' : ''} aria-label="${esc(task.title)}"></td><td><div class="table-primary" style="${task.status === 'done' ? 'text-decoration:line-through;color:var(--muted);' : ''}">${esc(task.title)}</div></td><td><span class="badge outline">${esc(task.source)}</span></td><td>${formatDate(task.dueDate)}</td><td><span class="badge ${task.priority === 'high' ? 'red' : task.priority === 'medium' ? 'yellow' : 'blue'}">${task.priority === 'high' ? '高' : task.priority === 'medium' ? '中' : '一般'}</span></td></tr>`).join('') : '<tr><td colspan="5" class="muted">此狀態目前沒有事項</td></tr>'}</tbody></table></div></div></section><aside class="stack"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('pie-chart')}事項來源</div></div></div><div class="panel-body"><div class="summary-list">${['學生追蹤', '工作紀錄', '親師溝通', '主管交辦'].map((source, index) => `<div class="summary-line"><span class="summary-index">${index + 1}</span><div><div class="summary-title">${source}</div><div class="summary-copy">${allTasks.filter(task => task.source === source && task.status !== 'done').length} 項進行中</div></div></div>`).join('')}</div></div></section></aside></div></div>`;
+    return `<div class="page">${pageHead('追蹤事項', `${open.length} 項待完成`, `<button type="button" class="btn btn-primary" data-action="open-task">${icon('plus', 16)}<span>新增事項</span></button>`)}<div class="content-grid"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('list-checks')}我的事項</div><div class="panel-subtitle">點選事項查看完整內容</div></div><div class="segmented"><button type="button" data-action="set-view-filter" data-filter-group="tasks" data-filter-key="status" data-filter-value="open" class="${filters.status === 'open' ? 'active' : ''}">進行中</button><button type="button" data-action="set-view-filter" data-filter-group="tasks" data-filter-key="status" data-filter-value="done" class="${filters.status === 'done' ? 'active' : ''}">已完成</button></div></div><div class="panel-body flush">${tasks.length ? `<div class="task-list">${tasks.map(renderTaskRow).join('')}</div>` : '<div class="task-list-empty">此狀態目前沒有事項</div>'}</div></section><aside class="stack"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('pie-chart')}事項來源</div></div></div><div class="panel-body"><div class="summary-list">${['學生追蹤', '工作紀錄', '親師溝通', '主管交辦'].map((source, index) => `<div class="summary-line"><span class="summary-index">${index + 1}</span><div><div class="summary-title">${source}</div><div class="summary-copy">${allTasks.filter(task => task.source === source && task.status !== 'done').length} 項進行中</div></div></div>`).join('')}</div></div></section></aside></div></div>`;
   }
 
   function expectedBackendDepartment(department) {
@@ -4908,7 +4956,8 @@
     if (!cloudIdentityReady() || task.owner !== state.context.teacher) return { ok: false, error: '事項身分不符' };
     if (!window.API?.saveSelfTask) return { ok: false, error: '事項雲端服務尚未載入' };
     task.cloudSyncStatus = 'saving';
-    const result = await API.saveSelfTask({ nickname: backendNickname(state.context.teacher), task: removeInlineMedia(task) });
+    const cloudTask = { ...task, source: taskDetailText(task) || task.source };
+    const result = await API.saveSelfTask({ nickname: backendNickname(state.context.teacher), task: removeInlineMedia(cloudTask) });
     task.cloudSyncStatus = result?.ok ? 'saved' : 'error';
     if (result?.ok) task.cloudUpdatedAt = result.updated_at || new Date().toISOString();
     return result;
@@ -4953,10 +5002,18 @@
       const id = String(remote.task_id || '');
       if (!id) return;
       const existing = state.tasks.find(task => task.id === id);
+      const remoteDetail = String(remote.detail || '').trim();
+      const knownSources = ['老師自建', '主管交辦', '學生追蹤', '工作紀錄', '親師溝通'];
+      const createdBy = String(remote.created_by || '').trim();
+      const assignee = String(remote.assignee || session.nickname || '').trim();
+      const source = knownSources.includes(remoteDetail)
+        ? remoteDetail
+        : createdBy && createdBy !== assignee ? '主管交辦' : '老師自建';
       const item = {
-        id, title: String(remote.title || ''), source: String(remote.detail || '主管交辦'), owner: state.context.teacher,
+        id, title: String(remote.title || ''), detail: knownSources.includes(remoteDetail) ? '' : remoteDetail, source, owner: state.context.teacher,
         dueDate: String(remote.due_date || '').slice(0, 10), status: remote.status === 'done' ? 'done' : 'open',
-        priority: String(remote.due_date || '') < state.daily.date ? 'high' : 'medium', cloudSyncStatus: 'saved', cloudUpdatedAt: remote.updated_at || '',
+        priority: String(remote.due_date || '') < state.daily.date ? 'high' : 'medium', createdBy,
+        cloudSyncStatus: 'saved', cloudUpdatedAt: remote.updated_at || '',
       };
       if (existing) Object.assign(existing, item);
       else { state.tasks.push(item); imported += 1; }
@@ -6401,6 +6458,18 @@
     else if (action === 'accept-evidence') await handleReviewDecision('evidence-accept', control.dataset.activityId, control.dataset.evidenceId);
     else if (action === 'request-evidence-clarify') await handleReviewDecision('evidence-clarify', control.dataset.activityId, control.dataset.evidenceId);
     else if (action === 'open-case-detail') openCaseDetail(control.dataset.caseId);
+    else if (action === 'open-task-detail') openTaskDetail(control.dataset.taskId);
+    else if (action === 'toggle-task-detail') {
+      const task = state.tasks.find(item => item.id === control.dataset.taskId && item.owner === state.context.teacher);
+      if (task) {
+        task.status = task.status === 'done' ? 'open' : 'done';
+        scheduleTaskCloudSync(task);
+        closeDialog();
+        persist();
+        renderApp();
+        toast(task.status === 'done' ? '事項已完成' : '事項已恢復為進行中', 'success');
+      }
+    }
     else if (action === 'open-task') openTaskEditor();
     else if (action === 'open-profile') openProfileDialog();
     else if (action === 'logout') {
