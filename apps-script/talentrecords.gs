@@ -4,6 +4,8 @@
  * 所有權限、PT 當日限制與鐘點計算都由後端重算，不能只信任前端。
  */
 
+const TALENT_EFFECTIVE_DATE_ = '2026-09-01';
+
 function ensureTalentRecordsSheet_() {
   const ss = getSS();
   let sheet = ss.getSheetByName(SHEET_NAMES.TALENT_RECORDS);
@@ -149,6 +151,16 @@ function talentAttachments_(items, required) {
   return cleaned;
 }
 
+function talentAppEvidence_(items, required) {
+  const files = talentAttachments_(items, required);
+  if (files.some(function (item) {
+    return !/^image\//i.test(String(item.mimeType || '')) && !/\.(?:jpe?g|png|webp|gif|heic|heif)$/i.test(String(item.fileName || ''));
+  })) {
+    throw new Error('家長 APP 發布證據只接受圖片');
+  }
+  return files;
+}
+
 function talentRecordObject_(row) {
   const data = parseJsonField(row.data_json) || {};
   data.id = data.id || row.record_id;
@@ -258,7 +270,10 @@ function getTalentWorkspaceData(params) {
     pending_users: pendingUsers.map(talentPublicUser_),
     archived_users: historicalUsers.map(talentPublicUser_),
     settings: {
-      ptStrictStart: PropertiesService.getScriptProperties().getProperty('TALENT_PT_STRICT_START') || '2026-08-26'
+      ptStrictStart: (function () {
+        const configured = PropertiesService.getScriptProperties().getProperty('TALENT_PT_STRICT_START') || TALENT_EFFECTIVE_DATE_;
+        return configured > TALENT_EFFECTIVE_DATE_ ? configured : TALENT_EFFECTIVE_DATE_;
+      })()
     }
   };
 }
@@ -328,7 +343,7 @@ function saveTalentLesson(params) {
   const initialExisting = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lesson.id);
   const initialLesson = initialExisting && initialExisting.record_type === 'lesson' && initialExisting.nickname === nickname
     ? talentRecordObject_(initialExisting) : null;
-  ['reportUrl', 'reportFileId', 'reportGeneratedAt', 'reportRevision'].forEach(function (key) {
+  ['reportUrl', 'reportFileId', 'reportFolderUrl', 'reportGeneratedAt', 'reportRevision'].forEach(function (key) {
     lesson[key] = initialLesson ? initialLesson[key] || '' : '';
   });
   if (initialLesson && initialLesson.createdAt) lesson.createdAt = initialLesson.createdAt;
@@ -358,6 +373,9 @@ function saveTalentLesson(params) {
     lesson.payRate = 0;
     lesson.payTier = '停課';
     lesson.appStatus = 'not_required';
+    lesson.appFiles = [];
+    lesson.appUpdatedAt = '';
+    lesson.appPublishedAt = '';
     lesson.backfilled = lesson.date !== todayStr();
   } else {
     ['courseType', 'courseName', 'siteType', 'site', 'prepId', 'completed', 'response', 'issue', 'parentStatus'].forEach(function (key) {
@@ -386,7 +404,17 @@ function saveTalentLesson(params) {
     lesson.payRate = pay.rate;
     lesson.payTier = pay.tier;
     lesson.payRequiresReview = pay.requiresReview;
-    lesson.appStatus = lesson.appStatus === 'published' ? 'published' : 'pending';
+    if (lesson.siteType === 'partner') {
+      lesson.appStatus = 'not_required';
+      lesson.appFiles = [];
+      lesson.appUpdatedAt = '';
+      lesson.appPublishedAt = '';
+    } else {
+      lesson.appFiles = talentAppEvidence_(initialLesson && initialLesson.appFiles || lesson.appFiles || [], false);
+      lesson.appStatus = lesson.appFiles.length ? 'published' : 'pending';
+      lesson.appUpdatedAt = initialLesson && initialLesson.appUpdatedAt || lesson.appUpdatedAt || '';
+      lesson.appPublishedAt = initialLesson && initialLesson.appPublishedAt || lesson.appPublishedAt || '';
+    }
     lesson.backfilled = false;
     const bonusCountsChanged = initialLesson && (
       Number(initialLesson.newCount || 0) !== lesson.newCount || Number(initialLesson.renewalCount || 0) !== lesson.renewalCount
@@ -442,6 +470,7 @@ function saveTalentLesson(params) {
         const latest = talentRecordObject_(latestRow);
         latest.reportUrl = pdf.url;
         latest.reportFileId = pdf.fileId;
+        latest.reportFolderUrl = pdf.folderUrl || latest.reportFolderUrl || '';
         latest.reportGeneratedAt = nowIso();
         latest.reportRevision = saved.contentRevision;
         const persisted = upsertTalentRecord_('lesson', nickname, latest, actor.nickname);
@@ -516,12 +545,54 @@ function updateTalentAppStatus(params) {
   const nickname = String(params.nickname || actor && actor.nickname || '').trim();
   const row = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', String(params.lesson_id || ''));
   if (!row || row.record_type !== 'lesson' || row.nickname !== nickname) return { ok: false, error: '找不到本人課堂紀錄' };
-  if (actor.role !== 'admin' && actor.nickname !== nickname) return { ok: false, error: '只能更新自己的 APP 狀態' };
+  if (!actor || (actor.role !== 'admin' && actor.nickname !== nickname)) return { ok: false, error: '只能更新自己的 APP 狀態' };
   const lesson = talentRecordObject_(row);
-  lesson.appStatus = params.status === 'published' ? 'published' : 'pending';
+  if (lesson.lessonStatus === 'cancelled' || lesson.siteType === 'partner') {
+    lesson.appStatus = 'not_required';
+    lesson.appFiles = [];
+    lesson.appUpdatedAt = '';
+    lesson.appPublishedAt = '';
+    return { ok: true, lesson: upsertTalentRecord_('lesson', nickname, lesson, actor.nickname), exempt: true };
+  }
+  if (params.status !== 'published') return { ok: false, error: '請上傳發布完成截圖後再確認' };
+  lesson.appFiles = talentAppEvidence_(params.app_files, true);
+  lesson.appStatus = 'published';
   lesson.appUpdatedAt = nowIso();
-  const saved = upsertTalentRecord_('lesson', nickname, lesson, actor.nickname);
-  return { ok: true, lesson: saved };
+  lesson.appPublishedAt = lesson.appUpdatedAt;
+  lesson.contentRevision = lesson.appUpdatedAt;
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: '系統正在儲存其他課堂，請稍後重試' };
+  let saved;
+  try {
+    saved = upsertTalentRecord_('lesson', nickname, lesson, actor.nickname);
+  } finally {
+    lock.releaseLock();
+  }
+
+  let warning = '';
+  try {
+    const user = findUserByNickname(nickname);
+    const pdf = generateTalentLessonPdf_(saved, user);
+    const pdfLock = LockService.getScriptLock();
+    if (!pdfLock.tryLock(10000)) throw new Error('APP 證據已儲存，日報連結稍後更新');
+    try {
+      const latestRow = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', saved.id);
+      const latest = latestRow ? talentRecordObject_(latestRow) : null;
+      if (!latest || latest.contentRevision !== saved.contentRevision) throw new Error('課堂已在其他裝置更新，日報將由系統自動補成最新版本');
+      latest.reportUrl = pdf.url;
+      latest.reportFileId = pdf.fileId;
+      latest.reportFolderUrl = pdf.folderUrl || latest.reportFolderUrl || '';
+      latest.reportGeneratedAt = nowIso();
+      latest.reportRevision = latest.contentRevision;
+      saved = upsertTalentRecord_('lesson', nickname, latest, actor.nickname);
+    } finally {
+      pdfLock.releaseLock();
+    }
+  } catch (error) {
+    warning = 'APP 證據已儲存；雲端 PDF 稍後自動更新：' + String(error.message || error);
+  }
+  logSystem(actor.nickname, 'save_talent_app_evidence', lesson.id, { teacher: nickname, files: lesson.appFiles.length });
+  return { ok: true, lesson: saved, warning: warning };
 }
 
 function saveTalentScore(params) {
@@ -679,6 +750,12 @@ function generateTalentLessonPdf_(lesson, user) {
     html += '<h3>孩子反應／學習證據</h3><div class="box">' + talentHtmlEsc_(lesson.response) + '</div>';
     html += '<h3>課程問題與下次優化</h3><div class="box">' + talentHtmlEsc_(lesson.issue) + '</div>';
     html += '<h3>親師溝通</h3><div class="box">' + talentHtmlEsc_(lesson.parentStatus === 'complete' ? '全班回報完成' : lesson.parentStatus === 'followup' ? '有個別追蹤' : '尚未完成') + (lesson.parentFollowup ? '<br>' + talentHtmlEsc_(lesson.parentFollowup) : '') + '</div>';
+    if (lesson.siteType === 'partner') {
+      html += '<h3>家長 APP 發布確認</h3><div class="box">合作校課程免發布，不列入缺件。</div>';
+    } else {
+      html += '<h3>家長 APP 發布確認</h3><div class="box">' + (lesson.appStatus === 'published' && Array.isArray(lesson.appFiles) && lesson.appFiles.length ? '已上傳發布完成截圖' : '尚未上傳發布完成截圖') + '</div>';
+      html += talentAttachmentLinks_('家長 APP 發布完成截圖', lesson.appFiles);
+    }
     if (lesson.employment === 'pt') html += '<h3>本堂鐘點試算</h3><div class="box">計薪人數 ' + Number(lesson.present || 0) + '＋補課 ' + Number(lesson.makeup || 0) + '；' + talentHtmlEsc_(lesson.payTier || '') + '；本堂 NT$' + Number(lesson.pay || 0).toLocaleString('en-US') + '</div>';
     if (lesson.siteType === 'self' && (Number(lesson.newCount || 0) || Number(lesson.renewalCount || 0))) html += '<h3>新生／續報申報</h3><div class="box">新生 ' + Number(lesson.newCount || 0) + ' 人；續報 ' + Number(lesson.renewalCount || 0) + ' 人；狀態：' + talentHtmlEsc_(lesson.bonusApproval === 'approved' ? '已核准' : '待核准') + '</div>';
     html += talentAttachmentLinks_('點名簿', lesson.attendanceFiles);
@@ -723,6 +800,7 @@ function regenerateTalentLessonReport(params) {
     const pdf = generateTalentLessonPdf_(latest, user);
     latest.reportUrl = pdf.url;
     latest.reportFileId = pdf.fileId;
+    latest.reportFolderUrl = pdf.folderUrl || latest.reportFolderUrl || '';
     latest.reportGeneratedAt = nowIso();
     latest.reportRevision = latest.contentRevision || latest.updatedAt;
     const saved = upsertTalentRecord_('lesson', row.nickname, latest, actor.nickname);
@@ -764,6 +842,7 @@ function repairMissingTalentLessonReportsAuto() {
         const hadReport = Boolean(lesson.reportUrl);
         lesson.reportUrl = pdf.url;
         lesson.reportFileId = pdf.fileId;
+        lesson.reportFolderUrl = pdf.folderUrl || lesson.reportFolderUrl || '';
         lesson.reportGeneratedAt = nowIso();
         lesson.reportRevision = sourceRevision;
         const saved = upsertTalentRecord_('lesson', row.nickname, lesson, 'system');

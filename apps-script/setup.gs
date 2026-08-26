@@ -138,9 +138,10 @@ function migrateTalentUserProfiles_() {
     { nickname: '柏翰', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll'] },
     { nickname: '酸酸', employment_type: 'manager', work_assignments: ['anqin-manager'] },
     { nickname: '小魚', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll'] },
-    { nickname: '柳丁', employment_type: 'manager', work_assignments: ['talent-manager'] },
+    { nickname: '柳丁', role: 'manager', department: '才藝部門', status: 'pending', employment_type: 'manager', work_assignments: ['talent-manager'] },
     { nickname: '浩浩', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'], rest_days: ['週一', '週日'] },
     { nickname: 'RITA', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'], rest_days: ['週二', '週日'] },
+    { nickname: '毛毛', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'] },
     { nickname: '皮皮老師', employment_type: 'pt', work_assignments: ['talent-pt'], schedule_json: [{ weekday: 4, label: '週四', time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }] },
     { nickname: '紅豆', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'], schedule_json: [1, 3, 4, 5].map(function (weekday) { return { weekday: weekday, label: '週' + ['日', '一', '二', '三', '四', '五', '六'][weekday], time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }; }) },
     { nickname: '小明', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'], schedule_json: [{ weekday: 3, label: '週三', time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }] },
@@ -213,6 +214,24 @@ function migrateTalentUserProfiles_() {
 function migrateTalentUserProfiles() {
   migrateTalentUserProfiles_();
   return { ok: true, message: '才藝工作身分與排班已補齊' };
+}
+
+/** 正式交付前執行一次：未交付帳號維持待開通，才藝缺件自 2026/09/01 起計。 */
+function prepareTalentSeptemberLaunch() {
+  const pendingNames = ['柳丁', '浩浩', '毛毛'];
+  const sheet = getSheet(SHEET_NAMES.USERS);
+  const users = sheetToObjects(SHEET_NAMES.USERS);
+  const changed = [];
+  pendingNames.forEach(function (nickname) {
+    const user = users.filter(function (item) { return item.nickname === nickname; })[0];
+    if (!user || user.status === 'pending') return;
+    if (user.status === 'deleted') throw new Error(nickname + ' 已刪除，不能改為待開通');
+    updateRow(SHEET_NAMES.USERS, user._row, { status: 'pending' });
+    changed.push(nickname);
+  });
+  PropertiesService.getScriptProperties().setProperty('TALENT_PT_STRICT_START', '2026-09-01');
+  invalidateKpiDriveAccess_();
+  return { ok: true, pending: pendingNames, changed: changed, effective_from: '2026-09-01' };
 }
 
 /**

@@ -150,7 +150,7 @@ window.API = (function () {
     saveTalentDraft: (nickname, draft) => call('saveTalentDraft', { nickname, draft }),
     saveTalentPrep: (nickname, prep) => call('saveTalentPrep', { nickname, prep }),
     reviewTalentPrep: (prepId, result, note) => call('reviewTalentPrep', { prep_id: prepId, result, note }),
-    updateTalentAppStatus: (nickname, lessonId, status) => call('updateTalentAppStatus', { nickname, lesson_id: lessonId, status }),
+    updateTalentAppStatus: (nickname, lessonId, status, appFiles = []) => call('updateTalentAppStatus', { nickname, lesson_id: lessonId, status, app_files: appFiles }),
     saveTalentScore: (nickname, month, score) => call('saveTalentScore', { nickname, month, score }),
     addTalentMessage: (nickname, month, text) => call('addTalentMessage', { nickname, month, text }),
     approveTalentBonus: (lessonId, approvedNewCount, approvedRenewalCount, note = '') => call('approveTalentBonus', {

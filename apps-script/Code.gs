@@ -199,14 +199,14 @@ const INITIAL_USERS = [
   { nickname: '柏翰',     role: 'admin',       department: '總部',     status: 'active', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll'] },
   { nickname: '酸酸',     role: 'manager',     department: '東橋教室', status: 'active', employment_type: 'manager', work_assignments: ['anqin-manager'] },
   { nickname: '小魚',     role: 'manager',     department: '北區教室', status: 'active', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll'] },
-  { nickname: '柳丁',     role: 'manager',     department: '才藝部門', status: 'active', employment_type: 'manager', work_assignments: ['talent-manager'] },
+  { nickname: '柳丁',     role: 'manager',     department: '才藝部門', status: 'pending', employment_type: 'manager', work_assignments: ['talent-manager'] },
   { nickname: '松鼠',     role: 'teacher',     department: '東橋教室', status: 'active' },
   { nickname: '羊羊',     role: 'teacher',     department: '東橋教室', status: 'active' },
   { nickname: '紅豆',     role: 'teacher',     department: '東橋教室', status: 'active', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'] },
   { nickname: '江江',     role: 'teacher',     department: '北區教室', status: 'active' },
   { nickname: '小明',     role: 'teacher',     department: '北區教室', status: 'active', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'] },
-  { nickname: '浩浩',     role: 'teacher',     department: '才藝部門', status: 'active', employment_type: 'fulltime', work_assignments: ['talent-fulltime'] },
-  { nickname: '毛毛',     role: 'teacher',     department: '才藝部門', status: 'active' },
+  { nickname: '浩浩',     role: 'teacher',     department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'] },
+  { nickname: '毛毛',     role: 'teacher',     department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'] },
   // 行政美編行銷（歸北區教室，由小魚評核）
   { nickname: '皮皮老師', role: 'admin_staff', department: '北區教室', status: 'active', subtype: 'marketing', employment_type: 'pt', work_assignments: ['talent-pt'] },
 ];

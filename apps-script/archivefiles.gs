@@ -331,12 +331,42 @@ function talentReportStatsByTeacher_() {
     if (row.record_type !== 'lesson' || row.status !== 'submitted') return;
     const lesson = talentRecordObject_(row);
     if (!lesson.reportUrl) return;
-    if (!stats[row.nickname]) stats[row.nickname] = { count: 0, latest: '' };
+    if (!stats[row.nickname]) stats[row.nickname] = { count: 0, latest: '', folderUrl: '', reportFileId: '' };
     stats[row.nickname].count += 1;
     const date = String(row.record_date || lesson.date || '').slice(0, 10);
-    if (date > stats[row.nickname].latest) stats[row.nickname].latest = date;
+    if (date >= stats[row.nickname].latest) {
+      stats[row.nickname].latest = date;
+      stats[row.nickname].folderUrl = String(lesson.reportFolderUrl || stats[row.nickname].folderUrl || '');
+      stats[row.nickname].reportFileId = String(lesson.reportFileId || stats[row.nickname].reportFileId || '');
+    }
   });
   return stats;
+}
+
+function talentIndexedReportFolder_(stats, openTeacherFolder) {
+  if (!stats || !stats.count) return null;
+  if (stats.folderUrl) {
+    const match = String(stats.folderUrl).match(/\/folders\/([a-zA-Z0-9_-]+)/);
+    if (match) {
+      if (!openTeacherFolder) return { targetUrl: stats.folderUrl, targetId: match[1], workUrl: stats.folderUrl };
+      const workFolder = DriveApp.getFolderById(match[1]);
+      const parents = workFolder.getParents();
+      const target = parents.hasNext() ? parents.next() : workFolder;
+      return { targetUrl: target.getUrl(), targetId: target.getId(), workUrl: workFolder.getUrl() };
+    }
+  }
+  if (!stats.reportFileId) return null;
+  const file = DriveApp.getFileById(stats.reportFileId);
+  const monthParents = file.getParents();
+  if (!monthParents.hasNext()) return null;
+  const monthFolder = monthParents.next();
+  const workParents = monthFolder.getParents();
+  if (!workParents.hasNext()) return null;
+  const workFolder = workParents.next();
+  if (!openTeacherFolder) return { targetUrl: workFolder.getUrl(), targetId: workFolder.getId(), workUrl: workFolder.getUrl() };
+  const teacherParents = workFolder.getParents();
+  const target = teacherParents.hasNext() ? teacherParents.next() : workFolder;
+  return { targetUrl: target.getUrl(), targetId: target.getId(), workUrl: workFolder.getUrl() };
 }
 
 /**
@@ -354,19 +384,50 @@ function listTeacherReportFolders(params) {
     if (scope === 'talent' && assignments.indexOf('talent-manager') < 0) return { ok: false, error: '沒有才藝日報查看權限' };
     if (scope === 'anqin' && assignments.indexOf('anqin-manager') < 0) return { ok: false, error: '沒有安親日報查看權限' };
   }
-  const root = getKpiPdfRootFolder_();
+  const cacheKey = 'teacher-folders-v4-' + scope + '-' + normalizeTalentNickname_(viewer.nickname) + '-' + viewer.role;
+  const cache = CacheService.getScriptCache();
+  if (!params.refresh) {
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        parsed.cached = true;
+        return parsed;
+      } catch (error) {}
+    }
+  }
   const talentStats = scope === 'talent' ? talentReportStatsByTeacher_() : {};
+  const root = scope === 'anqin' ? getKpiPdfRootFolder_() : null;
   const canOpenTeacherRoot = viewer.role === 'admin' || isGlobalManager_(viewer);
   const folders = teacherReportUsersFor_(viewer, scope).map(function (user) {
     const department = normalizeDepartment_(user.department) || '未分部門';
-    const departmentFolder = existingChildFolder_(root, department);
-    const teacherFolder = existingChildFolder_(departmentFolder, user.nickname);
-    const workFolderName = scope === 'talent' ? '才藝' : '安親';
-    const workFolder = existingChildFolder_(teacherFolder, workFolderName);
     const stats = scope === 'talent'
-      ? (talentStats[user.nickname] || { count: 0, latest: '' })
-      : (workFolder ? teacherFolderPdfStats_(workFolder) : { count: 0, latest: '' });
-    const targetFolder = canOpenTeacherRoot ? teacherFolder : workFolder;
+      ? (talentStats[user.nickname] || { count: 0, latest: '', folderUrl: '', reportFileId: '' })
+      : { count: 0, latest: '' };
+    let targetFolder = null;
+    let workFolder = null;
+    let targetUrl = '';
+    let targetId = '';
+    let workspaceUrl = '';
+    if (scope === 'talent') {
+      try {
+        const indexed = talentIndexedReportFolder_(stats, canOpenTeacherRoot);
+        targetUrl = indexed && indexed.targetUrl || '';
+        targetId = indexed && indexed.targetId || '';
+        workspaceUrl = indexed && indexed.workUrl || '';
+      } catch (error) {}
+    } else {
+      const departmentFolder = existingChildFolder_(root, department);
+      const teacherFolder = existingChildFolder_(departmentFolder, user.nickname);
+      workFolder = existingChildFolder_(teacherFolder, '安親');
+      const anqinStats = workFolder ? teacherFolderPdfStats_(workFolder) : { count: 0, latest: '' };
+      stats.count = anqinStats.count;
+      stats.latest = anqinStats.latest;
+      targetFolder = canOpenTeacherRoot ? teacherFolder : workFolder;
+      targetUrl = targetFolder ? targetFolder.getUrl() : '';
+      targetId = targetFolder ? targetFolder.getId() : '';
+      workspaceUrl = workFolder ? workFolder.getUrl() : '';
+    }
     return {
       nickname: user.nickname,
       department: department,
@@ -375,10 +436,10 @@ function listTeacherReportFolders(params) {
       deletedAt: user.deleted_at || '',
       reportCount: stats.count,
       latestDate: stats.latest,
-      url: targetFolder ? targetFolder.getUrl() : '',
-      folderId: targetFolder ? targetFolder.getId() : '',
-      workspaceUrl: workFolder ? workFolder.getUrl() : '',
-      opensTeacherFolder: Boolean(canOpenTeacherRoot && teacherFolder),
+      url: targetUrl,
+      folderId: targetId,
+      workspaceUrl: workspaceUrl,
+      opensTeacherFolder: Boolean(canOpenTeacherRoot && targetUrl),
     };
   }).filter(function (folder) {
     return folder.status === 'active' || folder.reportCount > 0;
@@ -386,7 +447,9 @@ function listTeacherReportFolders(params) {
   folders.sort(function (left, right) {
     return left.department.localeCompare(right.department, 'zh-TW') || left.nickname.localeCompare(right.nickname, 'zh-TW');
   });
-  return { ok: true, scope: scope, rootUrl: root.getUrl(), folders: folders };
+  const result = { ok: true, scope: scope, rootUrl: '', folders: folders, cached: false };
+  try { cache.put(cacheKey, JSON.stringify(result), 300); } catch (error) {}
+  return result;
 }
 
 /**

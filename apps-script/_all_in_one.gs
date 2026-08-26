@@ -210,14 +210,14 @@ const INITIAL_USERS = [
   { nickname: '柏翰',     role: 'admin',       department: '總部',     status: 'active', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll'] },
   { nickname: '酸酸',     role: 'manager',     department: '東橋教室', status: 'active', employment_type: 'manager', work_assignments: ['anqin-manager'] },
   { nickname: '小魚',     role: 'manager',     department: '北區教室', status: 'active', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll'] },
-  { nickname: '柳丁',     role: 'manager',     department: '才藝部門', status: 'active', employment_type: 'manager', work_assignments: ['talent-manager'] },
+  { nickname: '柳丁',     role: 'manager',     department: '才藝部門', status: 'pending', employment_type: 'manager', work_assignments: ['talent-manager'] },
   { nickname: '松鼠',     role: 'teacher',     department: '東橋教室', status: 'active' },
   { nickname: '羊羊',     role: 'teacher',     department: '東橋教室', status: 'active' },
   { nickname: '紅豆',     role: 'teacher',     department: '東橋教室', status: 'active', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'] },
   { nickname: '江江',     role: 'teacher',     department: '北區教室', status: 'active' },
   { nickname: '小明',     role: 'teacher',     department: '北區教室', status: 'active', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'] },
-  { nickname: '浩浩',     role: 'teacher',     department: '才藝部門', status: 'active', employment_type: 'fulltime', work_assignments: ['talent-fulltime'] },
-  { nickname: '毛毛',     role: 'teacher',     department: '才藝部門', status: 'active' },
+  { nickname: '浩浩',     role: 'teacher',     department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'] },
+  { nickname: '毛毛',     role: 'teacher',     department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'] },
   // 行政美編行銷（歸北區教室，由小魚評核）
   { nickname: '皮皮老師', role: 'admin_staff', department: '北區教室', status: 'active', subtype: 'marketing', employment_type: 'pt', work_assignments: ['talent-pt'] },
 ];
@@ -449,9 +449,10 @@ function migrateTalentUserProfiles_() {
     { nickname: '柏翰', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll'] },
     { nickname: '酸酸', employment_type: 'manager', work_assignments: ['anqin-manager'] },
     { nickname: '小魚', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll'] },
-    { nickname: '柳丁', employment_type: 'manager', work_assignments: ['talent-manager'] },
+    { nickname: '柳丁', role: 'manager', department: '才藝部門', status: 'pending', employment_type: 'manager', work_assignments: ['talent-manager'] },
     { nickname: '浩浩', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'], rest_days: ['週一', '週日'] },
     { nickname: 'RITA', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'], rest_days: ['週二', '週日'] },
+    { nickname: '毛毛', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'] },
     { nickname: '皮皮老師', employment_type: 'pt', work_assignments: ['talent-pt'], schedule_json: [{ weekday: 4, label: '週四', time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }] },
     { nickname: '紅豆', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'], schedule_json: [1, 3, 4, 5].map(function (weekday) { return { weekday: weekday, label: '週' + ['日', '一', '二', '三', '四', '五', '六'][weekday], time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }; }) },
     { nickname: '小明', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'], schedule_json: [{ weekday: 3, label: '週三', time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }] },
@@ -524,6 +525,24 @@ function migrateTalentUserProfiles_() {
 function migrateTalentUserProfiles() {
   migrateTalentUserProfiles_();
   return { ok: true, message: '才藝工作身分與排班已補齊' };
+}
+
+/** 正式交付前執行一次：未交付帳號維持待開通，才藝缺件自 2026/09/01 起計。 */
+function prepareTalentSeptemberLaunch() {
+  const pendingNames = ['柳丁', '浩浩', '毛毛'];
+  const sheet = getSheet(SHEET_NAMES.USERS);
+  const users = sheetToObjects(SHEET_NAMES.USERS);
+  const changed = [];
+  pendingNames.forEach(function (nickname) {
+    const user = users.filter(function (item) { return item.nickname === nickname; })[0];
+    if (!user || user.status === 'pending') return;
+    if (user.status === 'deleted') throw new Error(nickname + ' 已刪除，不能改為待開通');
+    updateRow(SHEET_NAMES.USERS, user._row, { status: 'pending' });
+    changed.push(nickname);
+  });
+  PropertiesService.getScriptProperties().setProperty('TALENT_PT_STRICT_START', '2026-09-01');
+  invalidateKpiDriveAccess_();
+  return { ok: true, pending: pendingNames, changed: changed, effective_from: '2026-09-01' };
 }
 
 /**
@@ -4040,12 +4059,42 @@ function talentReportStatsByTeacher_() {
     if (row.record_type !== 'lesson' || row.status !== 'submitted') return;
     const lesson = talentRecordObject_(row);
     if (!lesson.reportUrl) return;
-    if (!stats[row.nickname]) stats[row.nickname] = { count: 0, latest: '' };
+    if (!stats[row.nickname]) stats[row.nickname] = { count: 0, latest: '', folderUrl: '', reportFileId: '' };
     stats[row.nickname].count += 1;
     const date = String(row.record_date || lesson.date || '').slice(0, 10);
-    if (date > stats[row.nickname].latest) stats[row.nickname].latest = date;
+    if (date >= stats[row.nickname].latest) {
+      stats[row.nickname].latest = date;
+      stats[row.nickname].folderUrl = String(lesson.reportFolderUrl || stats[row.nickname].folderUrl || '');
+      stats[row.nickname].reportFileId = String(lesson.reportFileId || stats[row.nickname].reportFileId || '');
+    }
   });
   return stats;
+}
+
+function talentIndexedReportFolder_(stats, openTeacherFolder) {
+  if (!stats || !stats.count) return null;
+  if (stats.folderUrl) {
+    const match = String(stats.folderUrl).match(/\/folders\/([a-zA-Z0-9_-]+)/);
+    if (match) {
+      if (!openTeacherFolder) return { targetUrl: stats.folderUrl, targetId: match[1], workUrl: stats.folderUrl };
+      const workFolder = DriveApp.getFolderById(match[1]);
+      const parents = workFolder.getParents();
+      const target = parents.hasNext() ? parents.next() : workFolder;
+      return { targetUrl: target.getUrl(), targetId: target.getId(), workUrl: workFolder.getUrl() };
+    }
+  }
+  if (!stats.reportFileId) return null;
+  const file = DriveApp.getFileById(stats.reportFileId);
+  const monthParents = file.getParents();
+  if (!monthParents.hasNext()) return null;
+  const monthFolder = monthParents.next();
+  const workParents = monthFolder.getParents();
+  if (!workParents.hasNext()) return null;
+  const workFolder = workParents.next();
+  if (!openTeacherFolder) return { targetUrl: workFolder.getUrl(), targetId: workFolder.getId(), workUrl: workFolder.getUrl() };
+  const teacherParents = workFolder.getParents();
+  const target = teacherParents.hasNext() ? teacherParents.next() : workFolder;
+  return { targetUrl: target.getUrl(), targetId: target.getId(), workUrl: workFolder.getUrl() };
 }
 
 /**
@@ -4063,19 +4112,50 @@ function listTeacherReportFolders(params) {
     if (scope === 'talent' && assignments.indexOf('talent-manager') < 0) return { ok: false, error: '沒有才藝日報查看權限' };
     if (scope === 'anqin' && assignments.indexOf('anqin-manager') < 0) return { ok: false, error: '沒有安親日報查看權限' };
   }
-  const root = getKpiPdfRootFolder_();
+  const cacheKey = 'teacher-folders-v4-' + scope + '-' + normalizeTalentNickname_(viewer.nickname) + '-' + viewer.role;
+  const cache = CacheService.getScriptCache();
+  if (!params.refresh) {
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        parsed.cached = true;
+        return parsed;
+      } catch (error) {}
+    }
+  }
   const talentStats = scope === 'talent' ? talentReportStatsByTeacher_() : {};
+  const root = scope === 'anqin' ? getKpiPdfRootFolder_() : null;
   const canOpenTeacherRoot = viewer.role === 'admin' || isGlobalManager_(viewer);
   const folders = teacherReportUsersFor_(viewer, scope).map(function (user) {
     const department = normalizeDepartment_(user.department) || '未分部門';
-    const departmentFolder = existingChildFolder_(root, department);
-    const teacherFolder = existingChildFolder_(departmentFolder, user.nickname);
-    const workFolderName = scope === 'talent' ? '才藝' : '安親';
-    const workFolder = existingChildFolder_(teacherFolder, workFolderName);
     const stats = scope === 'talent'
-      ? (talentStats[user.nickname] || { count: 0, latest: '' })
-      : (workFolder ? teacherFolderPdfStats_(workFolder) : { count: 0, latest: '' });
-    const targetFolder = canOpenTeacherRoot ? teacherFolder : workFolder;
+      ? (talentStats[user.nickname] || { count: 0, latest: '', folderUrl: '', reportFileId: '' })
+      : { count: 0, latest: '' };
+    let targetFolder = null;
+    let workFolder = null;
+    let targetUrl = '';
+    let targetId = '';
+    let workspaceUrl = '';
+    if (scope === 'talent') {
+      try {
+        const indexed = talentIndexedReportFolder_(stats, canOpenTeacherRoot);
+        targetUrl = indexed && indexed.targetUrl || '';
+        targetId = indexed && indexed.targetId || '';
+        workspaceUrl = indexed && indexed.workUrl || '';
+      } catch (error) {}
+    } else {
+      const departmentFolder = existingChildFolder_(root, department);
+      const teacherFolder = existingChildFolder_(departmentFolder, user.nickname);
+      workFolder = existingChildFolder_(teacherFolder, '安親');
+      const anqinStats = workFolder ? teacherFolderPdfStats_(workFolder) : { count: 0, latest: '' };
+      stats.count = anqinStats.count;
+      stats.latest = anqinStats.latest;
+      targetFolder = canOpenTeacherRoot ? teacherFolder : workFolder;
+      targetUrl = targetFolder ? targetFolder.getUrl() : '';
+      targetId = targetFolder ? targetFolder.getId() : '';
+      workspaceUrl = workFolder ? workFolder.getUrl() : '';
+    }
     return {
       nickname: user.nickname,
       department: department,
@@ -4084,10 +4164,10 @@ function listTeacherReportFolders(params) {
       deletedAt: user.deleted_at || '',
       reportCount: stats.count,
       latestDate: stats.latest,
-      url: targetFolder ? targetFolder.getUrl() : '',
-      folderId: targetFolder ? targetFolder.getId() : '',
-      workspaceUrl: workFolder ? workFolder.getUrl() : '',
-      opensTeacherFolder: Boolean(canOpenTeacherRoot && teacherFolder),
+      url: targetUrl,
+      folderId: targetId,
+      workspaceUrl: workspaceUrl,
+      opensTeacherFolder: Boolean(canOpenTeacherRoot && targetUrl),
     };
   }).filter(function (folder) {
     return folder.status === 'active' || folder.reportCount > 0;
@@ -4095,7 +4175,9 @@ function listTeacherReportFolders(params) {
   folders.sort(function (left, right) {
     return left.department.localeCompare(right.department, 'zh-TW') || left.nickname.localeCompare(right.nickname, 'zh-TW');
   });
-  return { ok: true, scope: scope, rootUrl: root.getUrl(), folders: folders };
+  const result = { ok: true, scope: scope, rootUrl: '', folders: folders, cached: false };
+  try { cache.put(cacheKey, JSON.stringify(result), 300); } catch (error) {}
+  return result;
 }
 
 /**
@@ -4678,6 +4760,8 @@ function deleteCoursePrep(params) {
  * 所有權限、PT 當日限制與鐘點計算都由後端重算，不能只信任前端。
  */
 
+const TALENT_EFFECTIVE_DATE_ = '2026-09-01';
+
 function ensureTalentRecordsSheet_() {
   const ss = getSS();
   let sheet = ss.getSheetByName(SHEET_NAMES.TALENT_RECORDS);
@@ -4823,6 +4907,16 @@ function talentAttachments_(items, required) {
   return cleaned;
 }
 
+function talentAppEvidence_(items, required) {
+  const files = talentAttachments_(items, required);
+  if (files.some(function (item) {
+    return !/^image\//i.test(String(item.mimeType || '')) && !/\.(?:jpe?g|png|webp|gif|heic|heif)$/i.test(String(item.fileName || ''));
+  })) {
+    throw new Error('家長 APP 發布證據只接受圖片');
+  }
+  return files;
+}
+
 function talentRecordObject_(row) {
   const data = parseJsonField(row.data_json) || {};
   data.id = data.id || row.record_id;
@@ -4932,7 +5026,10 @@ function getTalentWorkspaceData(params) {
     pending_users: pendingUsers.map(talentPublicUser_),
     archived_users: historicalUsers.map(talentPublicUser_),
     settings: {
-      ptStrictStart: PropertiesService.getScriptProperties().getProperty('TALENT_PT_STRICT_START') || '2026-08-26'
+      ptStrictStart: (function () {
+        const configured = PropertiesService.getScriptProperties().getProperty('TALENT_PT_STRICT_START') || TALENT_EFFECTIVE_DATE_;
+        return configured > TALENT_EFFECTIVE_DATE_ ? configured : TALENT_EFFECTIVE_DATE_;
+      })()
     }
   };
 }
@@ -5002,7 +5099,7 @@ function saveTalentLesson(params) {
   const initialExisting = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lesson.id);
   const initialLesson = initialExisting && initialExisting.record_type === 'lesson' && initialExisting.nickname === nickname
     ? talentRecordObject_(initialExisting) : null;
-  ['reportUrl', 'reportFileId', 'reportGeneratedAt', 'reportRevision'].forEach(function (key) {
+  ['reportUrl', 'reportFileId', 'reportFolderUrl', 'reportGeneratedAt', 'reportRevision'].forEach(function (key) {
     lesson[key] = initialLesson ? initialLesson[key] || '' : '';
   });
   if (initialLesson && initialLesson.createdAt) lesson.createdAt = initialLesson.createdAt;
@@ -5032,6 +5129,9 @@ function saveTalentLesson(params) {
     lesson.payRate = 0;
     lesson.payTier = '停課';
     lesson.appStatus = 'not_required';
+    lesson.appFiles = [];
+    lesson.appUpdatedAt = '';
+    lesson.appPublishedAt = '';
     lesson.backfilled = lesson.date !== todayStr();
   } else {
     ['courseType', 'courseName', 'siteType', 'site', 'prepId', 'completed', 'response', 'issue', 'parentStatus'].forEach(function (key) {
@@ -5060,7 +5160,17 @@ function saveTalentLesson(params) {
     lesson.payRate = pay.rate;
     lesson.payTier = pay.tier;
     lesson.payRequiresReview = pay.requiresReview;
-    lesson.appStatus = lesson.appStatus === 'published' ? 'published' : 'pending';
+    if (lesson.siteType === 'partner') {
+      lesson.appStatus = 'not_required';
+      lesson.appFiles = [];
+      lesson.appUpdatedAt = '';
+      lesson.appPublishedAt = '';
+    } else {
+      lesson.appFiles = talentAppEvidence_(initialLesson && initialLesson.appFiles || lesson.appFiles || [], false);
+      lesson.appStatus = lesson.appFiles.length ? 'published' : 'pending';
+      lesson.appUpdatedAt = initialLesson && initialLesson.appUpdatedAt || lesson.appUpdatedAt || '';
+      lesson.appPublishedAt = initialLesson && initialLesson.appPublishedAt || lesson.appPublishedAt || '';
+    }
     lesson.backfilled = false;
     const bonusCountsChanged = initialLesson && (
       Number(initialLesson.newCount || 0) !== lesson.newCount || Number(initialLesson.renewalCount || 0) !== lesson.renewalCount
@@ -5116,6 +5226,7 @@ function saveTalentLesson(params) {
         const latest = talentRecordObject_(latestRow);
         latest.reportUrl = pdf.url;
         latest.reportFileId = pdf.fileId;
+        latest.reportFolderUrl = pdf.folderUrl || latest.reportFolderUrl || '';
         latest.reportGeneratedAt = nowIso();
         latest.reportRevision = saved.contentRevision;
         const persisted = upsertTalentRecord_('lesson', nickname, latest, actor.nickname);
@@ -5190,12 +5301,54 @@ function updateTalentAppStatus(params) {
   const nickname = String(params.nickname || actor && actor.nickname || '').trim();
   const row = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', String(params.lesson_id || ''));
   if (!row || row.record_type !== 'lesson' || row.nickname !== nickname) return { ok: false, error: '找不到本人課堂紀錄' };
-  if (actor.role !== 'admin' && actor.nickname !== nickname) return { ok: false, error: '只能更新自己的 APP 狀態' };
+  if (!actor || (actor.role !== 'admin' && actor.nickname !== nickname)) return { ok: false, error: '只能更新自己的 APP 狀態' };
   const lesson = talentRecordObject_(row);
-  lesson.appStatus = params.status === 'published' ? 'published' : 'pending';
+  if (lesson.lessonStatus === 'cancelled' || lesson.siteType === 'partner') {
+    lesson.appStatus = 'not_required';
+    lesson.appFiles = [];
+    lesson.appUpdatedAt = '';
+    lesson.appPublishedAt = '';
+    return { ok: true, lesson: upsertTalentRecord_('lesson', nickname, lesson, actor.nickname), exempt: true };
+  }
+  if (params.status !== 'published') return { ok: false, error: '請上傳發布完成截圖後再確認' };
+  lesson.appFiles = talentAppEvidence_(params.app_files, true);
+  lesson.appStatus = 'published';
   lesson.appUpdatedAt = nowIso();
-  const saved = upsertTalentRecord_('lesson', nickname, lesson, actor.nickname);
-  return { ok: true, lesson: saved };
+  lesson.appPublishedAt = lesson.appUpdatedAt;
+  lesson.contentRevision = lesson.appUpdatedAt;
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: '系統正在儲存其他課堂，請稍後重試' };
+  let saved;
+  try {
+    saved = upsertTalentRecord_('lesson', nickname, lesson, actor.nickname);
+  } finally {
+    lock.releaseLock();
+  }
+
+  let warning = '';
+  try {
+    const user = findUserByNickname(nickname);
+    const pdf = generateTalentLessonPdf_(saved, user);
+    const pdfLock = LockService.getScriptLock();
+    if (!pdfLock.tryLock(10000)) throw new Error('APP 證據已儲存，日報連結稍後更新');
+    try {
+      const latestRow = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', saved.id);
+      const latest = latestRow ? talentRecordObject_(latestRow) : null;
+      if (!latest || latest.contentRevision !== saved.contentRevision) throw new Error('課堂已在其他裝置更新，日報將由系統自動補成最新版本');
+      latest.reportUrl = pdf.url;
+      latest.reportFileId = pdf.fileId;
+      latest.reportFolderUrl = pdf.folderUrl || latest.reportFolderUrl || '';
+      latest.reportGeneratedAt = nowIso();
+      latest.reportRevision = latest.contentRevision;
+      saved = upsertTalentRecord_('lesson', nickname, latest, actor.nickname);
+    } finally {
+      pdfLock.releaseLock();
+    }
+  } catch (error) {
+    warning = 'APP 證據已儲存；雲端 PDF 稍後自動更新：' + String(error.message || error);
+  }
+  logSystem(actor.nickname, 'save_talent_app_evidence', lesson.id, { teacher: nickname, files: lesson.appFiles.length });
+  return { ok: true, lesson: saved, warning: warning };
 }
 
 function saveTalentScore(params) {
@@ -5353,6 +5506,12 @@ function generateTalentLessonPdf_(lesson, user) {
     html += '<h3>孩子反應／學習證據</h3><div class="box">' + talentHtmlEsc_(lesson.response) + '</div>';
     html += '<h3>課程問題與下次優化</h3><div class="box">' + talentHtmlEsc_(lesson.issue) + '</div>';
     html += '<h3>親師溝通</h3><div class="box">' + talentHtmlEsc_(lesson.parentStatus === 'complete' ? '全班回報完成' : lesson.parentStatus === 'followup' ? '有個別追蹤' : '尚未完成') + (lesson.parentFollowup ? '<br>' + talentHtmlEsc_(lesson.parentFollowup) : '') + '</div>';
+    if (lesson.siteType === 'partner') {
+      html += '<h3>家長 APP 發布確認</h3><div class="box">合作校課程免發布，不列入缺件。</div>';
+    } else {
+      html += '<h3>家長 APP 發布確認</h3><div class="box">' + (lesson.appStatus === 'published' && Array.isArray(lesson.appFiles) && lesson.appFiles.length ? '已上傳發布完成截圖' : '尚未上傳發布完成截圖') + '</div>';
+      html += talentAttachmentLinks_('家長 APP 發布完成截圖', lesson.appFiles);
+    }
     if (lesson.employment === 'pt') html += '<h3>本堂鐘點試算</h3><div class="box">計薪人數 ' + Number(lesson.present || 0) + '＋補課 ' + Number(lesson.makeup || 0) + '；' + talentHtmlEsc_(lesson.payTier || '') + '；本堂 NT$' + Number(lesson.pay || 0).toLocaleString('en-US') + '</div>';
     if (lesson.siteType === 'self' && (Number(lesson.newCount || 0) || Number(lesson.renewalCount || 0))) html += '<h3>新生／續報申報</h3><div class="box">新生 ' + Number(lesson.newCount || 0) + ' 人；續報 ' + Number(lesson.renewalCount || 0) + ' 人；狀態：' + talentHtmlEsc_(lesson.bonusApproval === 'approved' ? '已核准' : '待核准') + '</div>';
     html += talentAttachmentLinks_('點名簿', lesson.attendanceFiles);
@@ -5397,6 +5556,7 @@ function regenerateTalentLessonReport(params) {
     const pdf = generateTalentLessonPdf_(latest, user);
     latest.reportUrl = pdf.url;
     latest.reportFileId = pdf.fileId;
+    latest.reportFolderUrl = pdf.folderUrl || latest.reportFolderUrl || '';
     latest.reportGeneratedAt = nowIso();
     latest.reportRevision = latest.contentRevision || latest.updatedAt;
     const saved = upsertTalentRecord_('lesson', row.nickname, latest, actor.nickname);
@@ -5438,6 +5598,7 @@ function repairMissingTalentLessonReportsAuto() {
         const hadReport = Boolean(lesson.reportUrl);
         lesson.reportUrl = pdf.url;
         lesson.reportFileId = pdf.fileId;
+        lesson.reportFolderUrl = pdf.folderUrl || lesson.reportFolderUrl || '';
         lesson.reportGeneratedAt = nowIso();
         lesson.reportRevision = sourceRevision;
         const saved = upsertTalentRecord_('lesson', row.nickname, lesson, 'system');

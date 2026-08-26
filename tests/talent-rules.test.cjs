@@ -65,6 +65,8 @@ assert.equal(context.talentCanAccessHistoricalUser_(adminActor, deletedTeacher),
 const driveAttachment = context.talentAttachments_([{ fileName: 'photo.jpg', url: 'https://drive.google.com/file/d/abc/view' }], true);
 assert.equal(driveAttachment[0].url, 'https://drive.google.com/file/d/abc/view');
 assert.throws(() => context.talentAttachments_([{ fileName: 'fake.jpg', url: 'https://example.com/fake.jpg' }], true), /尚未完整上傳/);
+assert.equal(context.talentAppEvidence_([{ fileName: 'app.png', mimeType: 'image/png', url: 'https://drive.google.com/file/d/app/view' }], true).length, 1);
+assert.throws(() => context.talentAppEvidence_([{ fileName: 'app.pdf', mimeType: 'application/pdf', url: 'https://drive.google.com/file/d/app/view' }], true), /只接受圖片/);
 
 const archiveSource = fs.readFileSync(path.join(root, 'apps-script/archivefiles.gs'), 'utf8');
 const setupSource = fs.readFileSync(path.join(root, 'apps-script/setup.gs'), 'utf8');
@@ -82,11 +84,18 @@ assert.match(archiveSource, /function revokeKpiDriveUserAccess_\(/, '刪除員�
 assert.match(archiveSource, /\['active', 'suspended', 'deleted'\]/, '雲端日報需保留離職人員歷史索引');
 const folderListSource = archiveSource.slice(archiveSource.indexOf('function listTeacherReportFolders('), archiveSource.indexOf('/**', archiveSource.indexOf('function listTeacherReportFolders(')));
 assert.doesNotMatch(folderListSource, /getOrCreateChildFolder_/, '開啟雲端清單不得建立空白資料夾或拖慢頁面');
-assert.match(folderListSource, /canOpenTeacherRoot \? teacherFolder : workFolder/, '全域管理員應開啟老師根資料夾，區域主管只開工作區資料夾');
+assert.match(archiveSource, /function talentIndexedReportFolder_\(/, '才藝雲端日報應使用已保存的資料夾索引');
+assert.match(folderListSource, /CacheService\.getScriptCache\(\)/, '雲端日報清單需使用短期快取避免重複掃描 Drive');
+assert.match(folderListSource, /params\.refresh/, '主管需要能在背景強制更新快取');
 assert.doesNotMatch(folderListSource, /secureKpiReportPath_/, '雲端清單讀取不得同步重掃整批 Drive 權限');
 assert.match(setupSource, /'deleted_at', 'deleted_by'/, '使用者資料表需保存刪除稽核欄位');
 assert.match(setupSource, /mergedAssignments\.indexOf\(assignment\) < 0/, '既有安親身分必須合併才藝工作身分，不能覆蓋或漏加');
 assert.match(setupSource, /function migrateTalentUserProfiles\(\)/, '才藝帳號遷移需可獨立執行，避免完整初始化逾時');
+assert.match(setupSource, /function prepareTalentSeptemberLaunch\(\)/, '正式上線前需有一次性人員狀態與生效日校正');
+assert.match(setupSource, /TALENT_PT_STRICT_START.*2026-09-01/s, '才藝制度必須自 2026/09/01 起才判定缺件');
+assert.match(codeSource, /nickname: '柳丁'.*status: 'pending'/, '尚未交付的柳丁帳號不可提前啟用');
+assert.match(codeSource, /nickname: '浩浩'.*status: 'pending'/, '尚未交付的浩浩帳號不可提前啟用');
+assert.match(codeSource, /nickname: '毛毛'.*status: 'pending'/, '尚未交付的毛毛帳號不可提前啟用');
 assert.match(setupSource, /nickname: '黑豹'.*schedule_json: \[1, 4\].*19:00–20:30/s, '黑豹固定班表需為週一、週四 19:00–20:30');
 assert.doesNotMatch(setupSource, /findUserByNickname\(profile\.nickname\)/, '才藝帳號遷移不得逐人重讀整張使用者表');
 assert.match(setupSource, /createTextFinder\('永康教室'\)/, '舊部門名稱遷移不得掃描並重寫整欄大量資料');
@@ -118,6 +127,14 @@ assert.match(backendSource, /talentCanAccessHistoricalUser_\(actor, user\)/, '�
 assert.match(talentUiSource, /離職保留/);
 assert.match(anqinUiSource, /route: 'cloud-reports', label: '雲端日報'/);
 assert.match(talentUiSource, /type="file"[^>]*multiple/);
+assert.match(talentUiSource, /route: 'weekly', label: '家長 APP'/, 'PT 與正職都要有家長 APP 發布確認入口');
+assert.match(talentUiSource, /data-app-evidence-id=/, 'APP 發布確認必須上傳圖片證據，不能只切換狀態');
+assert.match(talentUiSource, /function appEvidenceRequired\(/);
+assert.match(talentUiSource, /item\?\.siteType === 'self'.*TALENT_EFFECTIVE_DATE/s, '只有 9/1 起的自營教室課堂列入 APP 缺件');
+assert.match(talentUiSource, /appMissing/, 'PT 續報資格與月結需納入 APP 證據缺件');
+assert.match(backendSource, /lesson\.siteType === 'partner'[\s\S]*lesson\.appStatus = 'not_required'/, '合作校課程後端必須強制免發布');
+assert.match(backendSource, /talentAppEvidence_\(params\.app_files, true\)/, '後端必須驗證 APP 圖片已上傳至 Drive');
+assert.match(backendSource, /家長 APP 發布完成截圖/, '正式 PDF 需收錄 APP 發布證據');
 assert.match(adminDashboardSource, /測試老師視角（唯讀）/);
 assert.match(adminDashboardSource, /KPI_WORKSPACES\.hrefFor\(workspaceId\)/, '測試入口需導向老師真正使用的新版工作區');
 
