@@ -1982,7 +1982,20 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--brand); }
 .operation-status-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 10px 35px; padding: 8px 10px; background: var(--surface-soft); border-radius: 6px; }
 .operation-proof-decision { display: flex; flex-direction: column; justify-content: center; gap: 7px; padding: 9px 10px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 6px; }
 .segmented.compact { width: min(260px, 100%); }
+.operation-photo-field { position: relative; }
 .operation-photo-control { display: block; cursor: pointer; }
+.operation-photo-remove {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 2;
+  width: 30px;
+  height: 30px;
+  color: var(--red);
+  background: rgba(255, 255, 255, .96);
+  border-color: #e5b2ad;
+}
+.operation-photo-field:has(.operation-photo-remove) .operation-photo-preview { padding-right: 42px; }
 .operation-photo-preview {
   min-height: 42px;
   display: grid;

@@ -435,7 +435,12 @@
 
   function renderMobileNav() {
     const items = navItems();
-    const visible = items.length <= 5 ? items : items.slice(0, 4);
+    const teacherPriority = ['today', 'prep', 'records', items.some(item => item.route === 'pay') ? 'pay' : 'performance'];
+    const visible = items.length <= 5
+      ? items
+      : isTeacher()
+        ? teacherPriority.map(route => items.find(item => item.route === route)).filter(Boolean)
+        : items.slice(0, 4);
     const buttons = visible.map(item => `<button type="button" class="mobile-nav-button ${state.ui.route === item.route ? 'active' : ''}" data-action="navigate" data-route="${item.route}">${icon(item.icon, 19)}<span>${esc(item.label)}</span></button>`);
     if (items.length > 5) buttons.push(`<button type="button" class="mobile-nav-button" data-action="more-nav">${icon('menu', 19)}<span>更多</span></button>`);
     return buttons.join('');
@@ -528,7 +533,7 @@
     return `<article class="record-row">
       <div class="record-date"><strong>${formatDate(item.date)}</strong><span>${esc(item.duration)} 小時</span></div>
       <div class="record-main"><div class="record-title">${esc(item.courseName || item.courseType)} ${statusBadge(item.status)}</div><div class="record-meta">${esc(item.site)} · 計薪實到 ${count} 人 · ${esc(item.teacher)}</div><div class="record-note">${esc(item.completed)}</div></div>
-      <div class="record-side">${item.employment === 'pt' ? `<strong>${formatMoney(item.pay)}</strong><span>${appLabel}</span>` : `<strong>${appLabel}</strong><span>${item.siteType === 'partner' ? '合作校' : '最晚週六'}</span>`}${isTeacher() && item.date === todayIso() && normalizeName(item.teacher) === normalizeName(currentUser.nickname) ? `<button type="button" class="icon-button" data-action="edit-log" data-id="${item.id}" aria-label="補充今日紀錄" title="補充今日紀錄">${icon('pencil', 16)}</button>` : ''}<button type="button" class="icon-button" data-action="view-log" data-id="${item.id}" aria-label="查看紀錄">${icon('chevron-right', 18)}</button></div>
+      <div class="record-side">${item.employment === 'pt' ? `<strong>${formatMoney(item.pay)}</strong><span>${appLabel}</span>` : `<strong>${appLabel}</strong><span>${item.siteType === 'partner' ? '合作校' : '最晚週六'}</span>`}${isTeacher() && item.date === todayIso() && normalizeName(item.teacher) === normalizeName(currentUser.nickname) ? `<button type="button" class="icon-button" data-action="edit-log" data-id="${item.id}" aria-label="編輯今日紀錄" title="編輯今日紀錄">${icon('pencil', 16)}</button>` : ''}<button type="button" class="icon-button" data-action="view-log" data-id="${item.id}" aria-label="查看紀錄">${icon('chevron-right', 18)}</button></div>
     </article>`;
   }
 
@@ -979,8 +984,8 @@
     }
     return `${pageHead(isPt() ? 'PT 使用與規則' : modeRole() === 'fulltime' ? '正職使用與規則' : '才藝部制度規則', '將說明集中在這裡，正式填寫頁面只保留當下需要的提示。')}
       <section class="guide-grid">
-        <article class="guide-card"><span>${icon('route', 22)}</span><div><h2>一次填寫流程</h2><ol><li>課前建立備課教案並送審。</li><li>上課當天選擇固定班次與已核准版本。</li><li>上傳點名、學習證據與教室復原照片。</li><li>發布家長 APP 後，到「家長 APP」上傳完成截圖；合作校免上傳。</li></ol></div></article>
-        <article class="guide-card"><span>${icon('images', 22)}</span><div><h2>證據怎麼拍</h2><ul><li>點名簿要看得出日期、課程與圈記。</li><li>過程證據要看得出操作、討論或引導。</li><li>成果證據要能對應本堂目標，不以張數加分。</li><li>可一次多選照片與影片。</li></ul></div></article>
+        <article class="guide-card"><span>${icon('route', 22)}</span><div><h2>一次填寫流程</h2><ol><li>課前建立備課教案，可一次多選文件、照片或 15 MB 內的 MP4／MOV 備課影片，再送主管審查。</li><li>上課當天選擇固定班次與已核准版本。</li><li>上傳點名、學習證據與教室復原照片。</li><li>發布家長 APP 後，到「家長 APP」上傳完成截圖；合作校免上傳。</li><li>當日需要補充時，從「我的紀錄」開啟並按「更新紀錄」；PT 一般課堂跨日後不開放修改。</li></ol></div></article>
+        <article class="guide-card"><span>${icon('images', 22)}</span><div><h2>證據怎麼拍</h2><ul><li>點名簿要看得出日期、課程與圈記。</li><li>過程證據要看得出操作、討論或引導。</li><li>成果證據要能對應本堂目標，不以張數加分。</li><li>可一次多選照片與影片；選錯可先按叉號移除再送出。</li></ul></div></article>
         ${isPt() || ['manager', 'payroll'].includes(modeRole()) ? `<article class="guide-card"><span>${icon('badge-dollar-sign', 22)}</span><div><h2>PT 鐘點規則</h2><ul><li>制度自 2026/09/01 起正式判定。</li><li>2–4 人 500／小時；5–7 人 600／小時；8–10 人 800／小時。</li><li>體驗不計級距，補課計入。</li><li>正常上課若任一堂未於當日送出，當月續報獎金資格取消且不能補寫。</li><li>自營教室每堂需上傳家長 APP 發布截圖；合作校免上傳。</li><li>停課可補選過去排課日；需填原因，不計鐘點，也不算漏填。</li><li>黑豹善化合作校每堂固定 900，無續報獎金。</li><li>PT 沒有新生獎金；自營教室續報獎金須通過當月履約。</li></ul></div></article>` : ''}
         ${['fulltime', 'manager'].includes(modeRole()) ? `<article class="guide-card"><span>${icon('gauge', 22)}</span><div><h2>正職 KPI 獎金</h2><ul><li>80–84 分：符合職務標準，不另發。</li><li>85–89 分：1,000 元。</li><li>90–94 分：1,500 元。</li><li>95–100 分：2,500 元。</li></ul></div></article>` : ''}
         ${modeRole() === 'manager' ? `<article class="guide-card"><span>${icon('folder-open', 22)}</span><div><h2>雲端日報</h2><ul><li>正式送出後依老師與月份自動產生 PDF。</li><li>請用系統綁定的 Google 帳號開啟 Drive。</li><li>柳丁查看才藝老師；小魚與管理員依全域權限查看。</li></ul></div></article>` : ''}
@@ -1035,7 +1040,7 @@
     };
     const prepOptions = approvedPreps();
     openDrawer({
-      title: editing ? '補充本堂紀錄' : state.draftLog ? '繼續本堂紀錄' : '新增本堂紀錄',
+      title: editing ? '編輯本堂紀錄' : state.draftLog ? '繼續本堂紀錄' : '新增本堂紀錄',
       subtitle: editing ? '今日內更新同一筆，不會重複計薪。' : '同一頁完成一堂課，系統會自動草稿保留。',
       body: `<form id="log-form" novalidate><input type="hidden" name="id" value="${esc(draft.id || '')}"><input type="hidden" name="updatedAt" value="${esc(draft.updatedAt || '')}">
         <div class="draft-sync-status" data-draft-sync-status>${icon('circle-check', 16)}<span>輸入內容會自動暫存</span></div>
@@ -1099,7 +1104,7 @@
   }
 
   function selectedFileItems(category) {
-    return (pendingFiles[category] || []).map((item, index) => `<span class="selected-file"><span>${icon('paperclip', 13)}${esc(attachmentName(item))}</span><button type="button" data-action="remove-upload" data-category="${esc(category)}" data-index="${index}" aria-label="移除 ${esc(attachmentName(item))}" title="移除附件">${icon('x', 13)}</button></span>`).join('');
+    return (pendingFiles[category] || []).map((item, index) => `<span class="selected-file"><span>${icon(attachmentIcon(item), 13)}${esc(attachmentName(item))}</span><button type="button" data-action="remove-upload" data-category="${esc(category)}" data-index="${index}" aria-label="移除 ${esc(attachmentName(item))}" title="移除附件">${icon('x', 13)}</button></span>`).join('');
   }
 
   function refreshUploadControl(category) {
@@ -1113,6 +1118,14 @@
 
   function attachmentName(item) {
     return String(typeof item === 'string' ? item : item?.fileName || item?.name || '附件');
+  }
+
+  function attachmentIcon(item) {
+    const mimeType = String(typeof item === 'object' ? item?.mimeType || '' : '').toLowerCase();
+    const name = attachmentName(item).toLowerCase();
+    if (mimeType.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/.test(name)) return 'video';
+    if (mimeType.startsWith('image/') || /\.(jpe?g|png|gif|webp|heic|heif)$/.test(name)) return 'image';
+    return 'paperclip';
   }
 
   function attachmentText(items) {
@@ -1208,7 +1221,7 @@
     let source = file;
     const isImage = isImageFile(file);
     if (isImage) source = await compressImage(file);
-    if (!isImage && source.size > 15 * 1024 * 1024) throw new Error(`${file.name} 超過 15 MB，請縮小後再上傳`);
+    if (!isImage && source.size > 15 * 1024 * 1024) throw new Error(`${file.name} 超過 15 MB；備課影片請先剪短或壓縮後再上傳`);
     const base64 = await fileAsBase64(source);
     const result = isImage
       ? await API.uploadPhoto({ nickname: currentUser.nickname, date: todayIso(), kpi: `talent-${category}`, mimeType: source.type || 'image/jpeg', base64, description: category })
@@ -1532,7 +1545,7 @@
   function openPrepEditor(existing = null) {
     const prep = existing || state.draftPrep || {};
     pendingFiles.prep = prep.materials || [];
-    openDrawer({ title: existing ? '編輯備課教案' : '新增備課教案', subtitle: '先把原理、引導與遊戲設計建檔，授課當天不再重寫。', body: `<form id="prep-form" novalidate><input type="hidden" name="id" value="${esc(prep.id || '')}"><section class="form-section"><div class="section-title"><span class="section-number">1</span><div><h3>課程識別</h3></div></div><div class="form-grid">${selectField('課程類型', 'courseType', COURSE_TYPES, prep.courseType || COURSE_TYPES[1], true)}${field('課程名稱', 'courseName', 'text', prep.courseName || '', true, '例：齒輪轉速實驗')}${field('教案標題', 'title', 'text', prep.title || '', true, '例：齒輪轉速與傳動')}${field('版本', 'version', 'text', prep.version || 'v1.0', true)}</div></section><section class="form-section"><div class="section-title"><span class="section-number">2</span><div><h3>正式教案</h3><p>主管需能判讀這堂課教什麼、怎麼引導、孩子會做到什麼。</p></div></div><div class="form-grid">${textareaField('教學目標', 'objective', prep.objective || '', true, '寫學生下課前能完成、說明、操作或改造什麼。')}${textareaField('課程核心原理／技能', 'principle', prep.principle || '', true, '寫這堂課真正要理解的原理、程式邏輯或操作技能。')}${textareaField('引導方法', 'guidance', prep.guidance || '', true, '老師要問什麼、怎麼拆解、什麼時候給提示。')}${textareaField('遊戲／挑戰／改造設計', 'game', prep.game || '', true, '寫規則、關卡、分組、計分或改造；不適用可寫不適用與原因。')}${textareaField('教學流程', 'flow', prep.flow || '', true, '開場、示範、操作、挑戰、分享與收尾的時間安排。')}</div>${uploadField('教案與教材附件', 'prep', 'PPT、學習單、程式、示範作品或器材清單；可一次多選。', '*/*', true)}</section></form>`, footer: `<button type="button" class="btn" data-action="close-drawer">取消</button><button type="button" class="btn" data-action="save-prep-draft">${icon('save', 16)}儲存草稿</button><button type="button" data-action="submit-prep" class="btn btn-primary">${icon('send', 16)}送主管審查</button>` });
+    openDrawer({ title: existing ? '編輯備課教案' : '新增備課教案', subtitle: '先把原理、引導與遊戲設計建檔，授課當天不再重寫。', body: `<form id="prep-form" novalidate><input type="hidden" name="id" value="${esc(prep.id || '')}"><section class="form-section"><div class="section-title"><span class="section-number">1</span><div><h3>課程識別</h3></div></div><div class="form-grid">${selectField('課程類型', 'courseType', COURSE_TYPES, prep.courseType || COURSE_TYPES[1], true)}${field('課程名稱', 'courseName', 'text', prep.courseName || '', true, '例：齒輪轉速實驗')}${field('教案標題', 'title', 'text', prep.title || '', true, '例：齒輪轉速與傳動')}${field('版本', 'version', 'text', prep.version || 'v1.0', true)}</div></section><section class="form-section"><div class="section-title"><span class="section-number">2</span><div><h3>正式教案</h3><p>主管需能判讀這堂課教什麼、怎麼引導、孩子會做到什麼。</p></div></div><div class="form-grid">${textareaField('教學目標', 'objective', prep.objective || '', true, '寫學生下課前能完成、說明、操作或改造什麼。')}${textareaField('課程核心原理／技能', 'principle', prep.principle || '', true, '寫這堂課真正要理解的原理、程式邏輯或操作技能。')}${textareaField('引導方法', 'guidance', prep.guidance || '', true, '老師要問什麼、怎麼拆解、什麼時候給提示。')}${textareaField('遊戲／挑戰／改造設計', 'game', prep.game || '', true, '寫規則、關卡、分組、計分或改造；不適用可寫不適用與原因。')}${textareaField('教學流程', 'flow', prep.flow || '', true, '開場、示範、操作、挑戰、分享與收尾的時間安排。')}</div>${uploadField('教案、教材與備課影片佐證', 'prep', '可一次多選 PPT、學習單、程式、作品照片或 MP4／MOV 短片；影片單檔上限 15 MB。', 'image/*,video/mp4,video/quicktime,video/x-m4v,video/webm,.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.zip,.sb3', true)}</section></form>`, footer: `<button type="button" class="btn" data-action="close-drawer">取消</button><button type="button" class="btn" data-action="save-prep-draft">${icon('save', 16)}儲存草稿</button><button type="button" data-action="submit-prep" class="btn btn-primary">${icon('send', 16)}送主管審查</button>` });
   }
 
   async function runFormAction(form, action) {
@@ -1584,7 +1597,7 @@
   function detailAttachments(label, items) {
     const attachments = items || [];
     if (!attachments.length) return detailBlock(label, '無附件');
-    return `<section class="detail-block"><h3>${esc(label)}</h3><div class="detail-file-list">${attachments.map(item => { const name = attachmentName(item); const url = typeof item === 'object' ? item.url : ''; return url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${icon('paperclip', 14)}${esc(name)}${icon('external-link', 13)}</a>` : `<span>${icon('paperclip', 14)}${esc(name)}</span>`; }).join('')}</div></section>`;
+    return `<section class="detail-block"><h3>${esc(label)}</h3><div class="detail-file-list">${attachments.map(item => { const name = attachmentName(item); const url = typeof item === 'object' ? item.url : ''; const fileIcon = attachmentIcon(item); return url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${icon(fileIcon, 14)}${esc(name)}${icon('external-link', 13)}</a>` : `<span>${icon(fileIcon, 14)}${esc(name)}</span>`; }).join('')}</div></section>`;
   }
 
   function lessonReportBlock(item) {

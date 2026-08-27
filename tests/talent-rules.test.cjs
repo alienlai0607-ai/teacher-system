@@ -171,6 +171,14 @@ assert.match(backendSource, /talentCanAccessHistoricalUser_\(actor, user\)/, '�
 assert.match(talentUiSource, /離職保留/);
 assert.match(anqinUiSource, /route: 'cloud-reports', label: '雲端日報'/);
 assert.match(talentUiSource, /type="file"[^>]*multiple/);
+assert.match(talentUiSource, /教案、教材與備課影片佐證/, '才藝備課需明確提供影片佐證入口');
+assert.match(talentUiSource, /video\/mp4,video\/quicktime/, '才藝備課選檔需直接接受常用影片格式');
+assert.match(talentUiSource, /影片單檔上限 15 MB/, '影片上傳限制需在選檔前說清楚');
+assert.match(talentUiSource, /function attachmentIcon\([\s\S]*startsWith\('video\/'\)/, '老師與主管需能辨識影片附件');
+assert.match(talentUiSource, /data-action="remove-upload"/, '備課照片、影片與文件都需可逐檔移除');
+assert.match(talentUiSource, /route: 'records', label: '我的紀錄'/, '才藝老師查看過去內容的入口需直接命名為我的紀錄');
+assert.match(talentUiSource, /const teacherPriority = \['today', 'prep', 'records'/, '才藝手機底部需直接顯示我的紀錄，不得藏到更多');
+assert.match(talentUiSource, /aria-label="編輯今日紀錄"/, '才藝老師需能從我的紀錄直接編輯當日內容');
 assert.match(talentUiSource, /route: 'weekly', label: '家長 APP'/, 'PT 與正職都要有家長 APP 發布確認入口');
 assert.match(talentUiSource, /data-app-evidence-id=/, 'APP 發布確認必須上傳圖片證據，不能只切換狀態');
 assert.match(talentUiSource, /uploadField\('家長 APP 發布完成截圖', 'app'/, '本堂紀錄內也要有 APP 截圖上傳入口');

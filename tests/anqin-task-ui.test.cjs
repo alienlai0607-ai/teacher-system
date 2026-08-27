@@ -7,6 +7,7 @@ const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'review/anqin-v2/app.js'), 'utf8');
 const styles = fs.readFileSync(path.join(root, 'review/anqin-v2/styles.css'), 'utf8');
 const evaluationBackend = fs.readFileSync(path.join(root, 'apps-script/evaluation.gs'), 'utf8');
+const pdfReport = fs.readFileSync(path.join(root, 'apps-script/pdfreport.gs'), 'utf8');
 
 const taskRenderer = source.slice(source.indexOf('function taskPriorityMeta('), source.indexOf('function expectedBackendDepartment('));
 assert.match(taskRenderer, /function openTaskDetail\(/, '追蹤事項必須能開啟完整內容對話框');
@@ -74,4 +75,51 @@ assert.match(source, /if \(TEST_VIEW_MODE\)[\s\S]{0,220}表單流程正常，最
 assert.match(source, /TEST_VIEW_MODE && fileInput[\s\S]{0,220}不會上傳正式檔案/, '安親測試視角選擇附件後不得上傳正式檔案');
 assert.match(source, /可以開啟、輸入與切換完整流程/, '安親測試狀態需明確說明可互動範圍');
 
-console.log('PASS anqin task dialog, visible evaluation scores, and optional enrichment rules');
+const activityFormSource = source.slice(source.indexOf('function renderActivitySpecificFields('), source.indexOf('function renderEvidenceAttachmentList('));
+assert.match(activityFormSource, /if \(activityNeedsPrepSource\(type\)\) return '';/, '課業指導與學科外不得重複顯示舊課程內容欄位');
+assert.match(activityFormSource, /hideStudents: type !== 'classroom'/, '只有班級經營可顯示關聯學生');
+assert.match(activityFormSource, /function renderActivityResultSection\([\s\S]*activityNeedsPrepSource\(value\.type\)[\s\S]*renderActivityPrepFeedbackFields/, '課程紀錄只保留課後備課回饋');
+assert.doesNotMatch(source, /<option value="attendance">出席<\/option>/, '學生追蹤不得再提供出席類型');
+
+const activitySaveSource = source.slice(source.indexOf('function saveActivityForm('), source.indexOf('function saveWeeklyForm('));
+assert.match(activitySaveSource, /students: type === 'classroom' \? data\.getAll\('students'\) : \[\]/, '儲存時也只能讓班級經營保留學生');
+assert.match(activitySaveSource, /markDailyNeedsResubmit\(activity\.date, activity\.teacher\)/, '修改工作紀錄後需退回待重新送出');
+assert.match(activitySaveSource, /markDailyNeedsResubmit\(item\.date, item\.teacher\)/, '修改學生或親師紀錄後需退回待重新送出');
+const evidenceSaveSource = source.slice(source.indexOf('function saveEvidenceForm('), source.indexOf('function capturePlanForm('));
+assert.match(evidenceSaveSource, /markDailyNeedsResubmit\(linkedDailyDate, linkedDailyTeacher\)/, '修改成果照片後需退回待重新送出');
+assert.match(source, /submittedAt, status: 'pending'/, '重新送出後必須回到主管待審，不得停留在草稿或舊狀態');
+const resubmitSource = source.slice(source.indexOf('function markDailyNeedsResubmit('), source.indexOf('function todaySectionStatus('));
+const resubmitContext = vm.createContext({
+  state: {
+    context: { teacher: '羊羊老師' },
+    daily: { date: '2026-08-27', status: 'submitted', submittedAt: '2026-08-27T10:00:00.000Z' },
+    submissions: [{ date: '2026-08-27', teacher: '羊羊老師', status: 'accepted' }],
+  },
+});
+vm.runInContext(resubmitSource, resubmitContext);
+assert.equal(resubmitContext.markDailyNeedsResubmit(), true, '已送出內容修改時應回報需要重新送出');
+assert.equal(resubmitContext.state.daily.status, 'draft');
+assert.equal(resubmitContext.state.daily.submittedAt, '');
+assert.equal(resubmitContext.state.submissions[0].status, 'draft', '主管端不得繼續把舊快照視為最新正式版本');
+assert.equal(resubmitContext.state.submissions[0].previousStatus, 'accepted', '需保留修改前狀態供稽核判讀');
+assert.match(source, /needsResubmit \? '待重新送出'/, '老師歷史紀錄需明確標示修改後尚未重新送出');
+
+const parentFormSource = source.slice(source.indexOf('function renderTodayParents('), source.indexOf('function renderTodayOperations('));
+assert.match(parentFormSource, /無重要事項/, '親師溝通需提供無重要事項模式');
+assert.match(parentFormSource, /parent-handoff-confirmed/, '無重要事項仍須確認門口交接');
+assert.match(parentFormSource, /交接備註/, '無重要事項需留下必要備註');
+const contactEditorSource = source.slice(source.indexOf('function renderContactForm('), source.indexOf('function renderOperationsForm('));
+assert.match(contactEditorSource, /共識與後續行動/, '親師共識與後續行動需合併為一欄');
+assert.doesNotMatch(contactEditorSource, /name="nextAction"/, '親師表單不得要求重複填寫後續行動');
+
+assert.match(source, /route: 'weekly', label: '本週整理', icon: 'calendar-range', moreOnly: true/, '本週整理只放在更多功能');
+assert.match(source, /const primaryNav = nav\.filter\(item => !item\.moreOnly\)/, '主要導覽需排除更多功能項目');
+assert.match(source, /id="evidence-file" type="file" multiple/, '成果照片需可一次多選');
+assert.match(source, /data-action="remove-evidence-attachment"/, '每張成果照片都需可個別移除');
+assert.match(source, /data-action="remove-evidence-pin"/, '每個照片重點標記都需可個別移除');
+assert.match(source, /data-action="remove-operation-photo"/, '班務照片選錯時也需可移除');
+assert.match(styles, /\.operation-photo-remove/, '班務照片移除按鈕需有清楚可點擊樣式');
+assert.match(pdfReport, /教案／教材有效處/, '正式 PDF 需使用新的課後備課回饋欄位');
+assert.match(pdfReport, /parent_handoff_confirmed/, '正式 PDF 需保留無重要事項時的門口交接證據');
+
+console.log('PASS anqin task dialog, simplified course records, resubmission, multi-photo controls, and parent handoff rules');

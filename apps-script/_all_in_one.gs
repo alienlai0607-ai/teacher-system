@@ -4446,10 +4446,17 @@ function pdfLogCard_(l) {
   h += pdfRow_('🏫 班級狀況', k2.class_status);
 
   // 安親輔導
-  h += pdfRow_('📚 複習方式', k1.review_method);
-  h += pdfRow_('❗ 常錯重點', k1.error_points);
-  h += pdfRow_('💡 協助方法', k1.help_method);
-  h += pdfRow_('🎓 輔導成果', k1.outcome);
+  const hasPrepFeedback = Boolean(k1.prep_strengths || k1.student_resonance || k1.prep_changes);
+  if (hasPrepFeedback) {
+    h += pdfRow_('✅ 教案／教材有效處', k1.prep_strengths);
+    h += pdfRow_('✨ 孩子共鳴環節', k1.student_resonance);
+    h += pdfRow_('📝 教案／教材更新', k1.prep_changes);
+  } else {
+    h += pdfRow_('📚 複習方式', k1.review_method);
+    h += pdfRow_('❗ 常錯重點', k1.error_points);
+    h += pdfRow_('💡 協助方法', k1.help_method);
+    h += pdfRow_('🎓 輔導成果', k1.outcome);
+  }
 
   // 課程
   const courses = Array.isArray(k3.courses) ? k3.courses : [];
@@ -4458,9 +4465,15 @@ function pdfLogCard_(l) {
     if (c.name) bits.push(c.name);
     if (c.class) bits.push(c.class);
     h += '<div style="margin:6px 0 2px; font-weight:bold; color:#2C3E50;">📘 ' + pdfEsc_(c.type || '課程') + (bits.length ? '｜' + pdfEsc_(bits.join('｜')) : '') + '</div>';
-    h += pdfRow_('進度', c.progress);
-    h += pdfRow_('學習狀況', c.learning);
-    h += pdfRow_('下次計畫', c.next);
+    if (c.prep_strengths || c.student_resonance || c.prep_changes) {
+      h += pdfRow_('教案／教材有效處', c.prep_strengths);
+      h += pdfRow_('孩子共鳴環節', c.student_resonance);
+      h += pdfRow_('教案／教材更新', c.prep_changes);
+    } else {
+      h += pdfRow_('進度', c.progress);
+      h += pdfRow_('學習狀況', c.learning);
+      h += pdfRow_('下次計畫', c.next);
+    }
   });
   // 專案
   if (k3.project && (k3.project.progress || k3.project.done || k3.project.problem || k3.project.plan)) {
@@ -4471,6 +4484,7 @@ function pdfLogCard_(l) {
 
   // 親師
   if (k5.parent_contacted === true) h += pdfRow_('🤝 親師溝通', k5.parent_summary || '有聯繫');
+  else if (k5.parent_handoff_confirmed === true) h += pdfRow_('🚪 門口交接', k5.parent_handoff_note || '已親自完成交接');
   h += pdfRow_('👀 特別關注學生', (Array.isArray(k5.special_students) && k5.special_students.length ? k5.special_students.join('、') + '：' : '') + (k5.student_special || ''));
 
   // 工作紀錄
