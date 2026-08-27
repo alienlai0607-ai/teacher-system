@@ -292,8 +292,9 @@ function saveEval(params) {
 }
 
 function getEval(params) {
-  const { nickname, year_month, viewer } = params;
-  if (!nickname || !year_month || !viewer) return { ok: false, error: 'missing fields' };
+  const { nickname, viewer } = params;
+  const requestedMonth = String(params.year_month || '').trim();
+  if (!nickname || !viewer) return { ok: false, error: 'missing fields' };
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
   const viewerUser = findUserByNickname(viewer);
@@ -305,12 +306,25 @@ function getEval(params) {
   const isManager = user.role === 'manager';
   const sheetName = isManager ? SHEET_NAMES.MANAGER_EVAL : SHEET_NAMES.TEACHER_EVAL;
   const prefix = isManager ? 'MEVAL' : 'EVAL';
-  const eval_id = `${prefix}-${year_month}-${nickname}`;
-  const e = findObject(sheetName, 'eval_id', eval_id);
-  if (viewerUser.role === 'teacher' && e && e.status !== 'submitted') {
-    return { ok: true, eval: null };
+  const workerViewer = ['teacher', 'admin_staff'].includes(viewerUser.role);
+  const available = sheetToObjects(sheetName)
+    .filter(item => item.nickname === nickname)
+    .filter(item => !workerViewer || item.status === 'submitted')
+    .sort((a, b) => {
+      const monthCompare = String(b.year_month || '').localeCompare(String(a.year_month || ''));
+      if (monthCompare) return monthCompare;
+      return String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || ''));
+    });
+  const months = Array.from(new Set(available.map(item => String(item.year_month || '')).filter(Boolean)));
+  if (!requestedMonth || requestedMonth === 'latest') {
+    return { ok: true, eval: available[0] || null, months, selected_month: months[0] || '' };
   }
-  return { ok: true, eval: e };
+  const eval_id = `${prefix}-${requestedMonth}-${nickname}`;
+  const e = findObject(sheetName, 'eval_id', eval_id);
+  if (workerViewer && e && e.status !== 'submitted') {
+    return { ok: true, eval: null, months, selected_month: requestedMonth };
+  }
+  return { ok: true, eval: e, months, selected_month: requestedMonth };
 }
 
 function listEvals(params) {

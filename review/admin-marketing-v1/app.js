@@ -150,7 +150,7 @@
   function createSeed() {
     return {
       version: APP_VERSION,
-      ui: { route: workspace.start, month: currentMonth(), trialStatus: 'all', lastSavedAt: '' },
+      ui: { route: workspace.start, month: currentMonth(), performanceMonth: '', evaluationMonth: '', trialStatus: 'all', lastSavedAt: '' },
       records: [],
       users: [STAFF[0]],
       settings: { supervisor: '小魚', videoWeeklyTarget: 2, photoWeeklyTarget: 3, trialBonusAmount: TRIAL_BONUS_AMOUNT, kpi: KPI },
@@ -298,6 +298,24 @@
   function conversation(month = state.ui.month) {
     return workerRecords('message').find(item => item.month === month) || { messages: [] };
   }
+  function scoreMonths(publishedOnly = false) {
+    return Array.from(new Set(workerRecords('score')
+      .filter(item => !publishedOnly || item.published)
+      .map(item => String(item.month || ''))
+      .filter(Boolean)))
+      .sort((a, b) => b.localeCompare(a));
+  }
+  function selectedPerformanceMonth() {
+    const months = scoreMonths(true);
+    return months.includes(state.ui.performanceMonth) ? state.ui.performanceMonth : (months[0] || currentMonth());
+  }
+  function selectedEvaluationMonth() {
+    return state.ui.evaluationMonth || scoreMonths(false)[0] || currentMonth();
+  }
+  function evaluationHistoryControl(formId, selectedMonth, months, label = '其他月份') {
+    if (months.length < 2) return '';
+    return `<form id="${formId}" class="month-confirm-form"><label class="field compact-control"><span>${esc(label)}</span><select name="month" aria-label="${esc(label)}">${months.map(month => `<option value="${esc(month)}" ${month === selectedMonth ? 'selected' : ''}>${esc(month)}</option>`).join('')}</select></label><button class="button small" type="submit">確認查看</button></form>`;
+  }
 
   async function loadCloudData(notify = false) {
     if (PREVIEW_MODE) return { ok: true };
@@ -313,6 +331,8 @@
     state.records = Array.isArray(result.records) ? result.records : [];
     state.users = Array.isArray(result.users) ? result.users : [];
     state.settings = { ...state.settings, ...(result.settings || {}) };
+    if (!isManager && state.ui.route === 'performance') state.ui.performanceMonth = scoreMonths(true)[0] || currentMonth();
+    if (isManager && state.ui.route === 'evaluation') state.ui.evaluationMonth = scoreMonths(false)[0] || currentMonth();
     cloud = { status: 'ready', message: `已同步 ${state.records.length} 筆紀錄` };
     persist('雲端已同步');
     renderApp();
@@ -494,12 +514,14 @@
 
   function renderPerformancePage() {
     const weekly = weeklySummary();
-    const trials = trialMonthSummary();
-    const score = publishedScore();
-    const messages = conversation().messages || [];
-    return `<section class="page">${pageHead('我的 KPI', `${state.ui.month} · 系統彙整工作證據，主管評核公布後才能看到正式分數`)}
+    const month = selectedPerformanceMonth();
+    const trials = trialMonthSummary(month);
+    const score = publishedScore(month);
+    const messages = conversation(month).messages || [];
+    const historyControl = evaluationHistoryControl('performance-history-form', month, scoreMonths(true));
+    return `<section class="page">${pageHead('我的 KPI', `${month} · 已直接開啟最近一次公布的主管評核`, historyControl)}
       <div class="grid cols-4">${metric('影片宣傳', `${weekly.video}/2`, '本週完成並有證據', 'video')}${metric('照片宣傳', `${weekly.photo}/3`, '本週完成並有證據', 'images')}${metric('首報獎金', `$${trials.bonus}`, `${trials.approved.length} 人已核准 · ${trials.pending.length} 人待審`, 'badge-dollar-sign')}${metric('逾期交辦', weekly.overdue, weekly.overdue ? '請主動說明原因與新期限' : '目前沒有逾期', 'clock-alert')}</div>
-      <div class="grid cols-2 mt-16"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('gauge')}主管評核</div><div class="panel-subtitle">100 分制</div></div>${score ? `<span class="badge success">${score.total} 分</span>` : '<span class="badge warning">尚未公布</span>'}</div><div class="panel-body">${score ? renderKpiBars(score.scores) : emptyState('lock-keyhole', '主管尚未公布本月評核', '日誌與證據仍會持續自動彙整，不需要月底再次整理。')}</div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('messages-square')}與主管對話</div><div class="panel-subtitle">主管：小魚</div></div></div><div class="panel-body">${renderMessages(messages)}<form id="message-form" class="mt-16"><div class="field"><label for="message-text">回覆主管</label><textarea id="message-text" name="text" placeholder="補充進度、說明原因或回覆主管建議"></textarea></div><div class="record-actions"><button class="button teal" type="submit">${icon('send')}送出回覆</button></div></form></div></section></div>
+      <div class="grid cols-2 mt-16"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('gauge')}主管評核</div><div class="panel-subtitle">100 分制</div></div>${score ? `<span class="badge success">${score.total} 分</span>` : '<span class="badge warning">尚未公布</span>'}</div><div class="panel-body">${score ? renderKpiBars(score.scores) : emptyState('lock-keyhole', '主管尚未公布評核', '主管公布第一份評核後，系統會自動開啟最近一次結果。')}</div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('messages-square')}與主管對話</div><div class="panel-subtitle">主管：小魚</div></div></div><div class="panel-body">${renderMessages(messages)}<form id="message-form" class="mt-16"><input type="hidden" name="month" value="${esc(month)}"><div class="field"><label for="message-text">回覆主管</label><textarea id="message-text" name="text" placeholder="補充進度、說明原因或回覆主管建議"></textarea></div><div class="record-actions"><button class="button teal" type="submit">${icon('send')}送出回覆</button></div></form></div></section></div>
     </section>`;
   }
   function renderKpiBars(scores = {}) {
@@ -553,10 +575,12 @@
   }
 
   function renderEvaluationPage() {
-    const existing = workerRecords('score').find(item => item.month === state.ui.month) || { scores: {} };
-    const messages = conversation().messages || [];
-    return `<section class="page">${pageHead('月度評核', '工作數據由系統彙整，主管只評判品質、結果與需要改善的地方', `<label class="field" style="min-width:150px"><span class="visually-hidden">月份</span><input type="month" id="month-filter" value="${esc(state.ui.month)}"></label><button class="button" data-action="print">${icon('printer')}列印</button>`)}
-      <div class="grid cols-2"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}100 分評核</div><div class="panel-subtitle">分數輸入就在項目旁，不需橫向滑動</div></div><span class="badge ${existing.published ? 'success' : 'warning'}">${existing.published ? '已公布' : '草稿'}</span></div><div class="panel-body"><form id="score-form"><div class="stack">${KPI.map(item => `<div class="record-card"><div class="record-head"><div class="record-title"><strong>${esc(item.label)}</strong><small>滿分 ${item.max}</small></div><div class="field" style="width:92px"><label for="score-${item.key}">分數</label><input id="score-${item.key}" name="${item.key}" type="number" min="0" max="${item.max}" value="${Number(existing.scores?.[item.key] || 0)}" required></div></div></div>`).join('')}</div><div class="field full mt-16"><label for="score-comment">主管建議</label><textarea id="score-comment" name="comment" placeholder="寫出做得好的地方、需要改善的地方與下個月重點">${esc(existing.comment || '')}</textarea></div><label class="check-row mt-16"><input type="checkbox" name="published" ${existing.published ? 'checked' : ''}><span>公布給皮皮查看</span></label><div class="record-actions"><button class="button primary" type="submit">${icon('save')}儲存評核</button></div></form></div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('messages-square')}主管與行政對話</div><div class="panel-subtitle">公布評核後仍可來回補充</div></div></div><div class="panel-body">${renderMessages(messages)}<form id="message-form" class="mt-16"><div class="field"><label for="message-text">給皮皮的訊息</label><textarea id="message-text" name="text" placeholder="詢問進度、說明評核或提供修正方向"></textarea></div><div class="record-actions"><button class="button teal" type="submit">${icon('send')}送出訊息</button></div></form></div></section></div>
+    const month = selectedEvaluationMonth();
+    const existing = workerRecords('score').find(item => item.month === month) || { scores: {} };
+    const messages = conversation(month).messages || [];
+    const selection = `<form id="evaluation-selection-form" class="month-confirm-form"><label class="field compact-control"><span>評核月份</span><input type="month" name="month" value="${esc(month)}" max="${currentMonth()}"></label><button class="button small" type="submit">確認查看</button></form><button class="button" data-action="print">${icon('printer')}列印</button>`;
+    return `<section class="page">${pageHead('月度評核', '預設開啟最近一次評核；選擇其他月份後需確認才會切換', selection)}
+      <div class="grid cols-2"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}100 分評核</div><div class="panel-subtitle">${esc(month)} · 分數輸入就在項目旁</div></div><span class="badge ${existing.published ? 'success' : 'warning'}">${existing.published ? '已公布' : '草稿'}</span></div><div class="panel-body"><form id="score-form"><input type="hidden" name="month" value="${esc(month)}"><div class="stack">${KPI.map(item => `<div class="record-card"><div class="record-head"><div class="record-title"><strong>${esc(item.label)}</strong><small>滿分 ${item.max}</small></div><div class="field" style="width:92px"><label for="score-${item.key}">分數</label><input id="score-${item.key}" name="${item.key}" type="number" min="0" max="${item.max}" value="${Number(existing.scores?.[item.key] || 0)}" required></div></div></div>`).join('')}</div><div class="field full mt-16"><label for="score-comment">主管建議</label><textarea id="score-comment" name="comment" placeholder="寫出做得好的地方、需要改善的地方與下個月重點">${esc(existing.comment || '')}</textarea></div><label class="check-row mt-16"><input type="checkbox" name="published" ${existing.published ? 'checked' : ''}><span>公布給皮皮查看</span></label><div class="record-actions"><button class="button primary" type="submit">${icon('save')}儲存評核</button></div></form></div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('messages-square')}主管與行政對話</div><div class="panel-subtitle">公布評核後仍可來回補充</div></div></div><div class="panel-body">${renderMessages(messages)}<form id="message-form" class="mt-16"><input type="hidden" name="month" value="${esc(month)}"><div class="field"><label for="message-text">給皮皮的訊息</label><textarea id="message-text" name="text" placeholder="詢問進度、說明評核或提供修正方向"></textarea></div><div class="record-actions"><button class="button teal" type="submit">${icon('send')}送出訊息</button></div></form></div></section></div>
     </section>`;
   }
 
@@ -1039,15 +1063,16 @@
 
   async function handleScore(form) {
     const data = new FormData(form);
+    const month = String(data.get('month') || selectedEvaluationMonth());
     const scores = {};
     KPI.forEach(item => { scores[item.key] = Number(data.get(item.key) || 0); });
-    const score = { month: state.ui.month, scores, comment: String(data.get('comment') || '').trim(), published: data.get('published') === 'on' };
+    const score = { month, scores, comment: String(data.get('comment') || '').trim(), published: data.get('published') === 'on' };
     if (PREVIEW_MODE) {
       const total = KPI.reduce((sum,item) => sum + Math.max(0, Math.min(item.max, Number(scores[item.key] || 0))), 0);
-      upsertLocal({ id: `admin-marketing-score-${normalizeName(workerName)}-${state.ui.month}`, type: 'score', nickname: workerName, date: `${state.ui.month}-01`, month: state.ui.month, ...score, total, status: score.published ? 'published' : 'draft', updatedAt: new Date().toISOString() });
+      upsertLocal({ id: `admin-marketing-score-${normalizeName(workerName)}-${month}`, type: 'score', nickname: workerName, date: `${month}-01`, month, ...score, total, status: score.published ? 'published' : 'draft', updatedAt: new Date().toISOString() });
       persist();
     } else {
-      const result = await window.API.saveAdminMarketingScore(workerName, state.ui.month, score);
+      const result = await window.API.saveAdminMarketingScore(workerName, month, score);
       if (!result?.ok) throw new Error(result?.error || '評核儲存失敗');
       upsertLocal(result.score);
     }
@@ -1057,14 +1082,15 @@
   async function handleMessage(form) {
     const data = new FormData(form);
     const text = String(data.get('text') || '').trim();
+    const month = String(data.get('month') || (isManager ? selectedEvaluationMonth() : selectedPerformanceMonth()));
     if (!text) throw new Error('請輸入訊息');
     if (PREVIEW_MODE) {
-      const id = `admin-marketing-message-${normalizeName(workerName)}-${state.ui.month}`;
-      const item = state.records.find(record => record.id === id) || { id, type: 'message', nickname: workerName, date: `${state.ui.month}-01`, month: state.ui.month, messages: [], status: 'active' };
+      const id = `admin-marketing-message-${normalizeName(workerName)}-${month}`;
+      const item = state.records.find(record => record.id === id) || { id, type: 'message', nickname: workerName, date: `${month}-01`, month, messages: [], status: 'active' };
       item.messages.push({ id: uid('message'), author: currentUser.nickname, role: currentUser.role, text, at: new Date().toISOString() });
       upsertLocal(item); persist();
     } else {
-      const result = await window.API.addAdminMarketingMessage(workerName, state.ui.month, text);
+      const result = await window.API.addAdminMarketingMessage(workerName, month, text);
       if (!result?.ok) throw new Error(result?.error || '訊息送出失敗');
       upsertLocal(result.conversation);
     }
@@ -1082,6 +1108,8 @@
     const route = event.target.closest('[data-route]');
     if (route) {
       state.ui.route = route.dataset.route;
+      if (state.ui.route === 'performance') state.ui.performanceMonth = scoreMonths(true)[0] || currentMonth();
+      if (state.ui.route === 'evaluation') state.ui.evaluationMonth = scoreMonths(false)[0] || currentMonth();
       persist('頁面已切換');
       closeDialog(); renderApp();
       return;
@@ -1119,6 +1147,8 @@
   });
 
   document.addEventListener('input', event => {
+    const scoreForm = event.target.closest('#score-form');
+    if (scoreForm) scoreForm.dataset.dirty = 'true';
     if (event.target.matches('input[type="range"]')) {
       const label = $('#progress-value');
       if (label) label.textContent = `${event.target.value}%`;
@@ -1138,7 +1168,17 @@
   document.addEventListener('submit', event => {
     event.preventDefault();
     const form = event.target;
-    if (form.id === 'trial-form') runForm(handleTrial, form);
+    if (form.id === 'performance-history-form') {
+      state.ui.performanceMonth = String(new FormData(form).get('month') || selectedPerformanceMonth());
+      persist('評核月份已切換'); renderApp();
+    }
+    else if (form.id === 'evaluation-selection-form') {
+      const scoreForm = $('#score-form');
+      if (scoreForm?.dataset.dirty === 'true' && !window.confirm('目前評核尚未儲存，確定要切換月份嗎？')) return;
+      state.ui.evaluationMonth = String(new FormData(form).get('month') || selectedEvaluationMonth());
+      persist('評核月份已切換'); renderApp();
+    }
+    else if (form.id === 'trial-form') runForm(handleTrial, form);
     else if (form.id === 'no-trial-form') runForm(() => handleNoTrial(), form);
     else if (form.id === 'trial-bonus-form') runForm(handleTrialBonus, form);
     else if (form.id === 'work-item-form') runForm(handleWorkItem, form);
@@ -1152,6 +1192,8 @@
   });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') closeDialog(); });
 
+  if (!isManager && state.ui.route === 'performance') state.ui.performanceMonth = scoreMonths(true)[0] || currentMonth();
+  if (isManager && state.ui.route === 'evaluation') state.ui.evaluationMonth = scoreMonths(false)[0] || currentMonth();
   renderApp();
   if (!PREVIEW_MODE) loadCloudData();
 })();

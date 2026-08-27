@@ -2863,6 +2863,8 @@ html[data-visual-theme="calm"] .mobile-nav-button.active > svg { transform: none
   font-size: 12px;
   font-weight: 700;
 }
+.month-picker label { display: inline-flex; align-items: center; gap: 8px; }
+.month-picker .btn { min-height: 32px; white-space: nowrap; }
 .month-picker input,
 .month-picker select {
   width: 145px;
@@ -2933,6 +2935,11 @@ html[data-visual-theme="calm"] .mobile-nav-button.active > svg { transform: none
   .month-picker { width: 100%; justify-content: space-between; }
   .month-picker input,
   .month-picker select { width: 150px; }
+  .page-actions form.month-picker { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .page-actions form.month-picker label { min-width: 0; justify-content: space-between; }
+  .page-actions form.month-picker input,
+  .page-actions form.month-picker select { width: 100%; min-width: 0; }
+  .page-actions form.month-picker .btn { width: auto; padding: 0 12px; }
   .manager-evaluation-page .page-head { align-items: stretch; flex-direction: column; }
   .manager-evaluation-page .page-actions { width: 100%; flex-wrap: wrap; }
   .manager-evaluation-page .month-picker { flex: 1 1 100%; }

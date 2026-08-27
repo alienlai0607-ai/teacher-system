@@ -692,6 +692,7 @@
     taskSyncMessage: '',
     evaluationStatus: 'idle',
     evaluationMonth: '',
+    evaluationMonths: [],
     evaluation: null,
     evaluationMessage: '',
     managerEvaluationStatus: 'idle',
@@ -2203,7 +2204,7 @@
     </div>`;
   }
 
-  async function loadTeacherEvaluation(month = state.daily.date.slice(0, 7)) {
+  async function loadTeacherEvaluation(month = 'latest') {
     const session = legacySession();
     if (!session || session.role !== 'teacher' || session.nickname !== backendNickname(state.context.teacher)) {
       integrationRuntime.evaluationStatus = 'restricted';
@@ -2212,12 +2213,16 @@
       return;
     }
     integrationRuntime.evaluationStatus = 'loading';
-    integrationRuntime.evaluationMonth = month;
+    if (month !== 'latest') integrationRuntime.evaluationMonth = month;
     integrationRuntime.evaluationMessage = '正在讀取主管評核';
     renderApp();
     const result = await API.getEval({ nickname: session.nickname, year_month: month, viewer: session.nickname });
     integrationRuntime.evaluationStatus = result?.ok ? 'saved' : 'error';
     integrationRuntime.evaluation = result?.ok ? (result.eval || null) : null;
+    integrationRuntime.evaluationMonths = result?.ok && Array.isArray(result.months) ? result.months : [];
+    integrationRuntime.evaluationMonth = result?.ok
+      ? (result.eval?.year_month || result.selected_month || (month === 'latest' ? state.daily.date.slice(0, 7) : month))
+      : (month === 'latest' ? state.daily.date.slice(0, 7) : month);
     integrationRuntime.evaluationMessage = result?.ok ? (result.eval ? '已讀取主管評核' : '這個月份尚未公布評核') : (result?.error || '評核讀取失敗');
     renderApp();
   }
@@ -2226,7 +2231,11 @@
     const month = integrationRuntime.evaluationMonth || state.daily.date.slice(0, 7);
     const evaluation = integrationRuntime.evaluation;
     const loading = integrationRuntime.evaluationStatus === 'loading';
-    const actions = `<label class="month-picker"><span>月份</span><input type="month" value="${esc(month)}" data-change="evaluation-month" aria-label="評核月份"></label>`;
+    const months = integrationRuntime.evaluationMonths || [];
+    const monthOptions = months.map(value => `<option value="${esc(value)}" ${value === month ? 'selected' : ''}>${esc(value)}</option>`).join('');
+    const actions = months.length > 1
+      ? `<form class="month-picker" data-form="evaluation-history"><label><span>其他月份</span><select name="month" aria-label="其他評核月份">${monthOptions}</select></label><button type="submit" class="btn btn-small">確認查看</button></form>`
+      : '';
     if (loading) return `<div class="page">${pageHead('主管評核', '查看每月評分與主管建議', actions)}<section class="panel"><div class="panel-body"><div class="integration-empty-state">${icon('loader-circle', 24)}<div><strong>正在讀取</strong></div></div></div></section></div>`;
     if (!evaluation) return `<div class="page">${pageHead('主管評核', '查看每月評分與主管建議', actions)}<section class="panel"><div class="panel-body"><div class="empty-state"><div><div class="empty-icon">${icon('clipboard-list', 22)}</div><div class="empty-title">${esc(integrationRuntime.evaluationMessage || '這個月份尚未公布評核')}</div></div></div></div></section></div>`;
     const granted = ![false, 'FALSE', 'false'].includes(evaluation.bonus_granted);
@@ -2299,6 +2308,29 @@
     renderApp();
   }
 
+  async function loadLatestManagerEvaluation() {
+    const session = legacySession();
+    const teachers = managerEvaluationTeachers();
+    if (!session || !['manager', 'admin'].includes(session.role) || !teachers.length) {
+      await loadManagerEvaluation();
+      return;
+    }
+    const result = await API.listEvals({ role: 'teacher', viewer: session.nickname });
+    const teacherMap = new Map(teachers.map(person => [normalizeReviewNickname(backendNickname(person.nickname)), person.nickname]));
+    const latest = (result?.ok && Array.isArray(result.evals) ? result.evals : [])
+      .filter(item => teacherMap.has(normalizeReviewNickname(item.nickname)))
+      .sort((a, b) => {
+        const monthCompare = String(b.year_month || '').localeCompare(String(a.year_month || ''));
+        if (monthCompare) return monthCompare;
+        return String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || ''));
+      })[0];
+    if (latest) {
+      await loadManagerEvaluation(teacherMap.get(normalizeReviewNickname(latest.nickname)), latest.year_month);
+      return;
+    }
+    await loadManagerEvaluation(teachers[0].nickname, state.daily.date.slice(0, 7));
+  }
+
   function managerEvaluationValues() {
     const evaluation = integrationRuntime.managerEvaluation;
     const suggestion = integrationRuntime.managerEvaluationEvidence?.suggestion || {};
@@ -2317,7 +2349,7 @@
     const evidence = integrationRuntime.managerEvaluationEvidence;
     const evaluation = integrationRuntime.managerEvaluation;
     const teacherOptions = teachers.map(person => `<option value="${esc(person.nickname)}" ${selectedTeacher === person.nickname ? 'selected' : ''}>${esc(person.nickname)} · ${esc(person.department)}</option>`).join('');
-    const actions = `<label class="month-picker"><span>老師</span><select aria-label="評核老師" data-change="manager-evaluation-teacher">${teacherOptions}</select></label><label class="month-picker"><span>月份</span><input type="month" value="${esc(selectedMonth)}" data-change="manager-evaluation-month" aria-label="評核月份"></label>`;
+    const actions = `<form class="month-picker" data-form="manager-evaluation-selection"><label><span>老師</span><select name="teacher" aria-label="評核老師">${teacherOptions}</select></label><label><span>月份</span><input name="month" type="month" value="${esc(selectedMonth)}" aria-label="評核月份"></label><button type="submit" class="btn btn-small">確認查看</button></form>`;
     if (!teachers.length) return `<div class="page manager-evaluation-page">${pageHead('月度評核', '依紀錄、證據、觀課與工作表現完成評分', '')}<section class="panel"><div class="panel-body">${renderEmpty('user-x', '目前沒有可評核的老師', '請先到人員管理完成老師帳號與部門設定。')}</div></section></div>`;
     if (loading) return `<div class="page manager-evaluation-page">${pageHead('月度評核', `${esc(selectedMonth)} · ${esc(selectedTeacher)}`, actions)}<section class="panel"><div class="panel-body"><div class="integration-empty-state">${icon('loader-circle', 24)}<div><strong>正在彙整評核資料</strong></div></div></div></section></div>`;
     if (!evidence) return `<div class="page manager-evaluation-page">${pageHead('月度評核', `${esc(selectedMonth)} · ${esc(selectedTeacher)}`, actions)}<section class="panel"><div class="panel-body"><div class="empty-state"><div><div class="empty-icon">${icon('cloud-alert', 22)}</div><div class="empty-title">${esc(integrationRuntime.managerEvaluationMessage || '尚未讀取評核資料')}</div><button type="button" class="btn mt-12" data-action="reload-manager-evaluation">重新讀取</button></div></div></div></section></div>`;
@@ -5580,10 +5612,10 @@
       window.setTimeout(() => refreshTaskCloudData(true), 0);
     }
     if (route === 'evaluation') {
-      window.setTimeout(() => loadTeacherEvaluation(integrationRuntime.evaluationMonth || state.daily.date.slice(0, 7)), 0);
+      window.setTimeout(() => loadTeacherEvaluation('latest'), 0);
     }
     if (route === 'evaluations' && ['manager', 'admin'].includes(session?.role)) {
-      window.setTimeout(() => loadManagerEvaluation(), 0);
+      window.setTimeout(() => loadLatestManagerEvaluation(), 0);
     }
     if (route === 'dashboard' && ['manager', 'admin'].includes(session?.role) && integrationRuntime.managerSyncStatus === 'idle') {
       window.setTimeout(syncManagerCloudData, 0);
@@ -6221,6 +6253,18 @@
     if (!form) return;
     event.preventDefault();
     const type = form.dataset.form;
+    if (type === 'evaluation-history') {
+      const month = String(new FormData(form).get('month') || '');
+      if (month) await loadTeacherEvaluation(month);
+      return;
+    }
+    if (type === 'manager-evaluation-selection') {
+      const currentForm = $('#manager-evaluation-form');
+      if (currentForm?.dataset.dirty === 'true' && !window.confirm('目前評核尚未儲存，確定要切換查看對象嗎？')) return;
+      const data = new FormData(form);
+      await loadManagerEvaluation(String(data.get('teacher') || ''), String(data.get('month') || ''));
+      return;
+    }
     if (type === 'activity') saveActivityForm(form);
     if (type === 'course-prep') await saveCoursePrepForm(form);
     if (type === 'student-case') saveStudentCaseForm(form);
@@ -6676,15 +6720,6 @@
       integrationRuntime.legacyArchiveMonth = control.value;
       renderApp();
     }
-    if (change === 'evaluation-month') await loadTeacherEvaluation(control.value);
-    if (change === 'manager-evaluation-teacher') {
-      integrationRuntime.managerEvaluationTeacher = control.value;
-      await loadManagerEvaluation(control.value, integrationRuntime.managerEvaluationMonth);
-    }
-    if (change === 'manager-evaluation-month') {
-      integrationRuntime.managerEvaluationMonth = control.value;
-      await loadManagerEvaluation(integrationRuntime.managerEvaluationTeacher, control.value);
-    }
     if (change === 'activity-plan') refreshActivityPlanStatus(control.value);
     if (change === 'activity-prep-source') refreshActivityPrepSource(control.value);
     if (change === 'cloud-sync-enabled') {
@@ -6750,6 +6785,8 @@
   });
 
   document.addEventListener('input', event => {
+    const managerEvaluationForm = event.target.closest('#manager-evaluation-form');
+    if (managerEvaluationForm) managerEvaluationForm.dataset.dirty = 'true';
     if (event.target.closest('#activity-form, #evidence-form, #plan-form, [data-draft-form]')) scheduleCurrentDrawerDraft();
     const dailyForm = event.target.closest('#daily-summary-form');
     if (dailyForm) {
@@ -6848,11 +6885,11 @@
   if (state.ui.route === 'records') window.setTimeout(loadLegacyArchiveFiles, 0);
   if (initialSession?.role === 'teacher') window.setTimeout(() => syncTeacherCloudData(openedFromNotification), 0);
   if (initialSession?.role === 'teacher' && state.ui.route === 'evaluation') {
-    window.setTimeout(() => loadTeacherEvaluation(state.daily.date.slice(0, 7)), 0);
+    window.setTimeout(() => loadTeacherEvaluation('latest'), 0);
   }
   if (initialSession?.role === 'teacher' && state.integration.dailyDraftSyncPending) window.setTimeout(scheduleDailyCloudDraftSync, 1200);
   if (['manager', 'admin'].includes(initialSession?.role)) window.setTimeout(() => syncManagerCloudData(openedFromNotification), 0);
   if (['manager', 'admin'].includes(initialSession?.role) && state.ui.route === 'evaluations') {
-    window.setTimeout(() => loadManagerEvaluation(), 0);
+    window.setTimeout(() => loadLatestManagerEvaluation(), 0);
   }
 })();

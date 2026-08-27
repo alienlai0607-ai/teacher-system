@@ -145,5 +145,12 @@ assert.match(uiSource, /每位學生終身只核發一次/, '使用規則需寫�
 assert.match(uiSource, /此學生已有試上追蹤紀錄，請更新原紀錄/, '前端需在重複新增時立即阻擋');
 assert.match(uiSource, /列印月報/, '主管需能列印每月獎金明細');
 assert.match(uiSource, /actionNode\.classList\.contains\('dialog-backdrop'\) && event\.target !== actionNode/, '點擊表單內按鈕不得被背景誤判為關閉對話框');
+assert.match(uiSource, /function selectedPerformanceMonth\(\)/, '行政查看 KPI 應使用獨立的評核月份');
+assert.match(uiSource, /scoreMonths\(true\)\[0\]/, '行政進入 KPI 時必須直接開啟最近一次已公布評核');
+assert.match(uiSource, /if \(!isManager && state\.ui\.route === 'performance'\) state\.ui\.performanceMonth = scoreMonths\(true\)\[0\] \|\| currentMonth\(\);/, '重新進入行政 KPI 仍須回到最近一次評核');
+assert.match(uiSource, /evaluationHistoryControl\('performance-history-form'/, '行政歷史評核需有確認查看按鈕');
+assert.match(uiSource, /id="evaluation-selection-form"/, '主管切換評核月份需有確認查看按鈕');
+assert.match(uiSource, /目前評核尚未儲存，確定要切換月份嗎/, '行政主管切換月份前需保護尚未儲存的評核');
+assert.doesNotMatch(uiSource, /id="month-filter"[^>]*[\s\S]{0,120}月度評核/, '月度評核不得沿用一選即切換的通用月份欄位');
 
 console.log('PASS admin marketing validation, trial tracking, first-term bonus, roles, targets, evidence, deadlines, project stages, manager conversation, Drive access, and fast test view');

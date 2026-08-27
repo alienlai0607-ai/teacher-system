@@ -245,6 +245,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .file-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .compact-control { min-width: 154px; }
 .compact-control input, .compact-control select { min-height: 42px; }
+.month-confirm-form { display: flex; align-items: flex-end; gap: 8px; }
 .trial-list { display: grid; }
 .trial-row { padding: 16px 18px; border-bottom: 1px solid var(--line); background: var(--paper); }
 .trial-row:last-child { border-bottom: 0; }
@@ -379,6 +380,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .trial-row { padding: 14px; }
   .detail-grid { grid-template-columns: 1fr; }
   .compact-control { width: 100%; }
+  .month-confirm-form { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .month-confirm-form .compact-control { min-width: 0; }
+  .page-actions .month-confirm-form .button { width: auto; }
   .review-ribbon { justify-content: flex-start; overflow-x: auto; white-space: nowrap; }
 }
 

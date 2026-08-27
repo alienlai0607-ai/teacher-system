@@ -162,7 +162,7 @@
     const date = todayIso();
     return {
       version: APP_VERSION,
-      ui: { route: workspace.start, lastSavedAt: '', month },
+      ui: { route: workspace.start, lastSavedAt: '', month, performanceMonth: '', scoringMonth: '' },
       settings: { ptStrictStart: TALENT_EFFECTIVE_DATE, ptExceptions: [] },
       users: PREVIEW_MODE ? STAFF.filter(person => person.status !== 'pending') : [],
       pendingUsers: PREVIEW_MODE ? STAFF.filter(person => person.status === 'pending') : [],
@@ -268,6 +268,8 @@
     state.pendingUsers = Array.isArray(result.pending_users) ? result.pending_users : [];
     state.archivedUsers = Array.isArray(result.archived_users) ? result.archived_users : [];
     state.settings = { ...state.settings, ...(result.settings || {}) };
+    if (state.ui.route === 'performance') state.ui.performanceMonth = scoreMonthsFor(currentUser.nickname, true)[0] || currentMonth();
+    if (state.ui.route === 'scoring') state.ui.scoringMonth = allScoreMonths()[0] || currentMonth();
     if (!TEST_VIEW_MODE && result.draft && !state.draftLog) state.draftLog = result.draft;
     const profile = (result.users || []).find(user => normalizeName(user.nickname) === normalizeName(currentUser.nickname));
     if (profile) {
@@ -602,19 +604,47 @@
       <section class="panel"><div class="panel-head"><div><h2>本月課堂</h2><p>每堂截圖直接綁定日期與課程</p></div></div><div class="panel-body">${logs.length ? logs.map(renderAppEvidenceRow).join('') : renderEmpty('本月尚無課堂', '完成本堂紀錄後，將自動出現在這裡。', 'images')}</div></section>`;
   }
 
-  function scoreFor(teacher) {
-    return state.scores.find(item => normalizeName(item.teacher) === normalizeName(teacher) && item.month === state.ui.month)
-      || { teacher, month: state.ui.month, scores: Object.fromEntries(KPI_DIMENSIONS.map(item => [item.key, 0])), reason: '', published: false };
+  function scoreFor(teacher, month = state.ui.month) {
+    return state.scores.find(item => normalizeName(item.teacher) === normalizeName(teacher) && item.month === month)
+      || { teacher, month, scores: Object.fromEntries(KPI_DIMENSIONS.map(item => [item.key, 0])), reason: '', published: false };
+  }
+
+  function scoreMonthsFor(teacher, publishedOnly = false) {
+    return Array.from(new Set(state.scores
+      .filter(item => normalizeName(item.teacher) === normalizeName(teacher))
+      .filter(item => !publishedOnly || item.published === true)
+      .map(item => String(item.month || ''))
+      .filter(Boolean)))
+      .sort((a, b) => b.localeCompare(a));
+  }
+
+  function allScoreMonths() {
+    return Array.from(new Set(state.scores.map(item => String(item.month || '')).filter(Boolean))).sort((a, b) => b.localeCompare(a));
+  }
+
+  function selectedPerformanceMonth() {
+    const months = scoreMonthsFor(currentUser.nickname, true);
+    return months.includes(state.ui.performanceMonth) ? state.ui.performanceMonth : (months[0] || currentMonth());
+  }
+
+  function selectedScoringMonth() {
+    return state.ui.scoringMonth || allScoreMonths()[0] || currentMonth();
+  }
+
+  function scoreHistoryControl(selectedMonth, months) {
+    if (months.length < 2) return '';
+    return `<form id="performance-history-form" class="month-confirm-form"><label class="month-control"><span>其他月份</span><select name="month" aria-label="其他評核月份">${months.map(month => `<option value="${esc(month)}" ${month === selectedMonth ? 'selected' : ''}>${esc(month)}</option>`).join('')}</select></label><button type="submit" class="btn btn-small">確認查看</button></form>`;
   }
 
   function scoreTotal(record) { return KPI_DIMENSIONS.reduce((sum, item) => sum + Number(record?.scores?.[item.key] || 0), 0); }
   function kpiBonus(score) { return score >= 95 ? 2500 : score >= 90 ? 1500 : score >= 85 ? 1000 : 0; }
 
   function renderPerformance() {
-    const record = scoreFor(currentUser.nickname);
+    const month = selectedPerformanceMonth();
+    const record = scoreFor(currentUser.nickname, month);
     const published = record.published === true;
     const total = published ? scoreTotal(record) : 0;
-    const logs = ownLogs().filter(item => item.date.slice(0, 7) === state.ui.month && item.siteType === 'self' && item.lessonStatus !== 'cancelled');
+    const logs = ownLogs().filter(item => item.date.slice(0, 7) === month && item.siteType === 'self' && item.lessonStatus !== 'cancelled');
     const reportedNew = logs.reduce((sum, item) => sum + Number(item.newCount || 0), 0);
     const reportedRenewal = logs.reduce((sum, item) => sum + Number(item.renewalCount || 0), 0);
     const approvedLogs = logs.filter(item => item.bonusApproval === 'approved');
@@ -622,10 +652,10 @@
     const renewalCount = approvedLogs.reduce((sum, item) => sum + Number(item.approvedRenewalCount || 0), 0);
     const pendingCount = logs.filter(item => (Number(item.newCount || 0) || Number(item.renewalCount || 0)) && item.bonusApproval !== 'approved').length;
     const totalBonus = (published ? kpiBonus(total) : 0) + (newCount + renewalCount) * 200;
-    return `${pageHead('KPI 與獎金', '主管公布後可查看各構面、評分說明與獎金結果。')}
-      <section class="hero-summary"><div><span>${state.ui.month} 月度結果</span><strong>${published ? total : '待公布'}${published ? '<small> / 100</small>' : ''}</strong><p>${published ? '主管已公布' : '主管尚未公布本月評分'}</p></div><div class="bonus-total"><span>目前核定獎金</span><strong>${formatMoney(totalBonus)}</strong><small>KPI ${published ? formatMoney(kpiBonus(total)) : '待公布'} ＋ 新生／續報 ${formatMoney((newCount + renewalCount) * 200)}</small></div></section>
+    return `${pageHead('KPI 與獎金', '已直接開啟最近一次公布的主管評核。', scoreHistoryControl(month, scoreMonthsFor(currentUser.nickname, true)))}
+      <section class="hero-summary"><div><span>${month} 月度結果</span><strong>${published ? total : '待公布'}${published ? '<small> / 100</small>' : ''}</strong><p>${published ? '主管已公布' : '主管尚未公布評分'}</p></div><div class="bonus-total"><span>目前核定獎金</span><strong>${formatMoney(totalBonus)}</strong><small>KPI ${published ? formatMoney(kpiBonus(total)) : '待公布'} ＋ 新生／續報 ${formatMoney((newCount + renewalCount) * 200)}</small></div></section>
       ${published ? `<section class="panel"><div class="panel-head"><div><h2>100 分 KPI 構面</h2><p>主管已依系統證據完成本月評分。</p></div></div><div class="panel-body"><div class="score-list">${KPI_DIMENSIONS.map(item => renderScoreRow(item, record.scores[item.key])).join('')}</div><div class="review-note"><strong>主管評分說明</strong><span>${esc(record.reason || '主管未另外補充說明')}</span></div></div></section>` : '<div class="notice info"><span>' + icon('clock-3', 19) + '</span><div><strong>評分仍在主管審查中</strong><span>公布前不顯示草稿分數、主管意見，也不提前列入獎金。</span></div></div>'}
-      <section class="two-column"><article class="panel"><div class="panel-head"><div><h2>獎金明細</h2><p>核准人數／老師申報人數</p></div></div><div class="panel-body money-lines"><div><span>KPI 獎金</span><strong>${published ? formatMoney(kpiBonus(total)) : '待公布'}</strong></div><div><span>新生 ${newCount}／${reportedNew} 人</span><strong>${formatMoney(newCount * 200)}</strong></div><div><span>續報 ${renewalCount}／${reportedRenewal} 人</span><strong>${formatMoney(renewalCount * 200)}</strong></div>${pendingCount ? `<small class="text-danger">尚有 ${pendingCount} 堂新生／續報資料待行政核准，未列入目前金額。</small>` : ''}</div></article>${renderConversation(currentUser.nickname)}</section>`;
+      <section class="two-column"><article class="panel"><div class="panel-head"><div><h2>獎金明細</h2><p>核准人數／老師申報人數</p></div></div><div class="panel-body money-lines"><div><span>KPI 獎金</span><strong>${published ? formatMoney(kpiBonus(total)) : '待公布'}</strong></div><div><span>新生 ${newCount}／${reportedNew} 人</span><strong>${formatMoney(newCount * 200)}</strong></div><div><span>續報 ${renewalCount}／${reportedRenewal} 人</span><strong>${formatMoney(renewalCount * 200)}</strong></div>${pendingCount ? `<small class="text-danger">尚有 ${pendingCount} 堂新生／續報資料待行政核准，未列入目前金額。</small>` : ''}</div></article>${renderConversation(currentUser.nickname, month)}</section>`;
   }
 
   function renderScoreRow(item, value) {
@@ -634,12 +664,12 @@
     return `<div class="score-row"><div class="score-copy"><strong>${esc(item.label)}</strong><span>${esc(item.description)}</span></div><div class="score-progress"><div><span style="width:${width}%"></span></div><strong>${number} / ${item.max}</strong></div></div>`;
   }
 
-  function renderConversation(teacher) {
-    const thread = state.conversations.find(item => normalizeName(item.teacher) === normalizeName(teacher) && item.month === state.ui.month);
-    const score = scoreFor(teacher);
+  function renderConversation(teacher, month = state.ui.month) {
+    const thread = state.conversations.find(item => normalizeName(item.teacher) === normalizeName(teacher) && item.month === month);
+    const score = scoreFor(teacher, month);
     const canReply = !isTeacher() || score.published;
     const visibleThread = canReply ? thread : null;
-    return `<article class="panel"><div class="panel-head"><div><h2>主管意見與回覆</h2><p>評分公布後仍可在同一串對話</p></div></div><div class="panel-body"><div class="conversation">${visibleThread?.messages?.length ? visibleThread.messages.map(message => `<div class="message ${message.role === 'teacher' ? 'mine' : ''}"><strong>${esc(message.author)}</strong><p>${esc(message.text)}</p><span>${formatTime(message.at)}</span></div>`).join('') : `<div class="empty-inline">${canReply ? '尚無主管意見' : '評分公布後顯示主管意見'}</div>`}</div>${canReply ? `<form id="reply-form" class="reply-form"><input type="hidden" name="teacher" value="${esc(teacher)}"><label class="sr-only" for="reply-text">回覆內容</label><input id="reply-text" name="text" required placeholder="${isTeacher() ? '回覆主管…' : '寫給老師的具體意見…'}"><button type="submit" class="btn btn-primary">${icon('send', 16)}送出</button></form>` : '<div class="empty-inline">主管公布本月評分後即可回覆</div>'}</div></article>`;
+    return `<article class="panel"><div class="panel-head"><div><h2>主管意見與回覆</h2><p>評分公布後仍可在同一串對話</p></div></div><div class="panel-body"><div class="conversation">${visibleThread?.messages?.length ? visibleThread.messages.map(message => `<div class="message ${message.role === 'teacher' ? 'mine' : ''}"><strong>${esc(message.author)}</strong><p>${esc(message.text)}</p><span>${formatTime(message.at)}</span></div>`).join('') : `<div class="empty-inline">${canReply ? '尚無主管意見' : '評分公布後顯示主管意見'}</div>`}</div>${canReply ? `<form id="reply-form" class="reply-form"><input type="hidden" name="teacher" value="${esc(teacher)}"><input type="hidden" name="month" value="${esc(month)}"><label class="sr-only" for="reply-text">回覆內容</label><input id="reply-text" name="text" required placeholder="${isTeacher() ? '回覆主管…' : '寫給老師的具體意見…'}"><button type="submit" class="btn btn-primary">${icon('send', 16)}送出</button></form>` : '<div class="empty-inline">主管公布本月評分後即可回覆</div>'}</div></article>`;
   }
 
   function monthEndIso(month) {
@@ -769,8 +799,10 @@
 
   function renderScoring() {
     const fulltime = talentStaff().filter(person => person.employment === 'fulltime');
-    return `${pageHead('KPI 評分', '僅正職使用 100 分 KPI；PT 不出現在本頁。')}
-      <section class="panel"><div class="panel-head"><div><h2>${state.ui.month} 評分</h2><p>主管人工調整需填理由，公布後老師可回覆。</p></div></div><div class="panel-body">${fulltime.map(person => { const record = scoreFor(person.nickname); const total = scoreTotal(record); return `<article class="score-person"><div class="teacher-status"><span class="mini-avatar">${esc(person.nickname.slice(0, 2))}</span><div><strong>${esc(person.nickname)}</strong><span>${record.published ? '已公布' : '草稿'}</span></div></div><div class="score-number"><strong>${total}</strong><span>/ 100 · ${formatMoney(kpiBonus(total))}</span></div><button type="button" class="btn" data-action="edit-score" data-teacher="${esc(person.nickname)}">${icon('pencil', 16)}查看與評分</button></article>`; }).join('')}</div></section>`;
+    const month = selectedScoringMonth();
+    const selection = `<form id="scoring-selection-form" class="month-confirm-form"><label class="month-control"><span>評核月份</span><input type="month" name="month" value="${esc(month)}" max="${currentMonth()}"></label><button type="submit" class="btn btn-small">確認查看</button></form>`;
+    return `${pageHead('KPI 評分', '預設開啟最近一次評核；選擇其他月份後需確認才會切換。', selection)}
+      <section class="panel"><div class="panel-head"><div><h2>${month} 評分</h2><p>主管人工調整需填理由，公布後老師可回覆。</p></div></div><div class="panel-body">${fulltime.map(person => { const record = scoreFor(person.nickname, month); const total = scoreTotal(record); return `<article class="score-person"><div class="teacher-status"><span class="mini-avatar">${esc(person.nickname.slice(0, 2))}</span><div><strong>${esc(person.nickname)}</strong><span>${record.published ? '已公布' : '草稿'}</span></div></div><div class="score-number"><strong>${total}</strong><span>/ 100 · ${formatMoney(kpiBonus(total))}</span></div><button type="button" class="btn" data-action="edit-score" data-teacher="${esc(person.nickname)}">${icon('pencil', 16)}查看與評分</button></article>`; }).join('')}</div></section>`;
   }
 
   function settlementRows() {
@@ -1542,8 +1574,9 @@
   }
 
   function openScoreEditor(teacher) {
-    const record = scoreFor(teacher);
-    openDrawer({ title: `${teacher}｜${state.ui.month} KPI`, subtitle: '每個分數都必須能回到系統證據。', body: `<form id="score-form"><input type="hidden" name="teacher" value="${esc(teacher)}"><div class="score-editor">${KPI_DIMENSIONS.map(item => `<label><span><strong>${esc(item.label)}</strong><small>${esc(item.description)}</small></span><input type="number" name="${item.key}" min="0" max="${item.max}" value="${Number(record.scores[item.key] || 0)}" required><em>/ ${item.max}</em></label>`).join('')}</div><label class="form-field span-all"><span>評分說明／調分理由 <b>*</b></span><textarea name="reason" required>${esc(record.reason || '')}</textarea></label><label class="publish-check"><input type="checkbox" name="published" ${record.published ? 'checked disabled' : ''}><span>${record.published ? '已公布；後續修正會保留版本並直接更新給老師' : '公布給老師查看與回覆'}</span></label></form><div class="drawer-conversation">${renderConversation(teacher)}</div>`, footer: `<button type="button" class="btn" data-action="close-drawer">取消</button><button type="submit" form="score-form" class="btn btn-primary">${icon('save', 16)}儲存評分</button>` });
+    const month = selectedScoringMonth();
+    const record = scoreFor(teacher, month);
+    openDrawer({ title: `${teacher}｜${month} KPI`, subtitle: '每個分數都必須能回到系統證據。', body: `<form id="score-form"><input type="hidden" name="teacher" value="${esc(teacher)}"><input type="hidden" name="month" value="${esc(month)}"><div class="score-editor">${KPI_DIMENSIONS.map(item => `<label><span><strong>${esc(item.label)}</strong><small>${esc(item.description)}</small></span><input type="number" name="${item.key}" min="0" max="${item.max}" value="${Number(record.scores[item.key] || 0)}" required><em>/ ${item.max}</em></label>`).join('')}</div><label class="form-field span-all"><span>評分說明／調分理由 <b>*</b></span><textarea name="reason" required>${esc(record.reason || '')}</textarea></label><label class="publish-check"><input type="checkbox" name="published" ${record.published ? 'checked disabled' : ''}><span>${record.published ? '已公布；後續修正會保留版本並直接更新給老師' : '公布給老師查看與回覆'}</span></label></form><div class="drawer-conversation">${renderConversation(teacher, month)}</div>`, footer: `<button type="button" class="btn" data-action="close-drawer">取消</button><button type="submit" form="score-form" class="btn btn-primary">${icon('save', 16)}儲存評分</button>` });
   }
 
   function openProfile() {
@@ -1666,7 +1699,10 @@
       return;
     }
     if (action === 'navigate') {
-      state.ui.route = control.dataset.route; closeDialog(); closeDrawer(); persist(); renderApp();
+      state.ui.route = control.dataset.route;
+      if (state.ui.route === 'performance') state.ui.performanceMonth = scoreMonthsFor(currentUser.nickname, true)[0] || currentMonth();
+      if (state.ui.route === 'scoring') state.ui.scoringMonth = allScoreMonths()[0] || currentMonth();
+      closeDialog(); closeDrawer(); persist(); renderApp();
       if (state.ui.route === 'cloud-reports' && cloudRuntime.foldersStatus === 'idle') window.setTimeout(loadCloudFolders, 0);
     }
     else if (action === 'more-nav') moreNav();
@@ -1791,6 +1827,18 @@
 
   document.addEventListener('submit', async event => {
     event.preventDefault();
+    if (event.target.id === 'performance-history-form') {
+      state.ui.performanceMonth = String(new FormData(event.target).get('month') || selectedPerformanceMonth());
+      persist('評核月份已切換'); renderApp();
+      return;
+    }
+    if (event.target.id === 'scoring-selection-form') {
+      const scoreForm = $('#score-form');
+      if (scoreForm?.dataset.dirty === 'true' && !window.confirm('目前評核尚未儲存，確定要切換月份嗎？')) return;
+      state.ui.scoringMonth = String(new FormData(event.target).get('month') || selectedScoringMonth());
+      persist('評核月份已切換'); closeDrawer(); renderApp();
+      return;
+    }
     if (TEST_VIEW_MODE) {
       toast('目前是柏翰測試視角，表單不會送出', 'warning');
       return;
@@ -1802,30 +1850,30 @@
     submittedForm.dataset.submitting = 'true';
     try {
     if (event.target.id === 'reply-form') {
-      const data = new FormData(event.target); const text = String(data.get('text') || '').trim(); const teacher = String(data.get('teacher') || '');
+      const data = new FormData(event.target); const text = String(data.get('text') || '').trim(); const teacher = String(data.get('teacher') || ''); const month = String(data.get('month') || state.ui.month);
       if (!text) return;
-      const result = PREVIEW_MODE ? null : await API.addTalentMessage(teacher, state.ui.month, text);
+      const result = PREVIEW_MODE ? null : await API.addTalentMessage(teacher, month, text);
       if (!PREVIEW_MODE && !result?.ok) { toast(`回覆未送出：${result?.error || '請稍後重試'}`, 'danger'); return; }
       if (result?.conversation) {
         const index = state.conversations.findIndex(item => item.id === result.conversation.id);
         if (index >= 0) state.conversations[index] = result.conversation; else state.conversations.push(result.conversation);
       } else {
-        let thread = state.conversations.find(item => normalizeName(item.teacher) === normalizeName(teacher) && item.month === state.ui.month);
-        if (!thread) { thread = { id: uid('chat'), teacher, month: state.ui.month, messages: [] }; state.conversations.push(thread); }
+        let thread = state.conversations.find(item => normalizeName(item.teacher) === normalizeName(teacher) && item.month === month);
+        if (!thread) { thread = { id: uid('chat'), teacher, month, messages: [] }; state.conversations.push(thread); }
         thread.messages.push({ author: currentUser.nickname, role: isTeacher() ? 'teacher' : 'manager', text, at: new Date().toISOString() });
       }
       persist(); renderApp(); toast('回覆已送出');
     }
     if (event.target.id === 'score-form') {
-      const data = new FormData(event.target); const teacher = String(data.get('teacher'));
+      const data = new FormData(event.target); const teacher = String(data.get('teacher')); const month = String(data.get('month') || selectedScoringMonth());
       const scores = Object.fromEntries(KPI_DIMENSIONS.map(item => [item.key, Number(data.get(item.key) || 0)]));
       const reason = String(data.get('reason') || '').trim();
       if (!reason) { toast('請填寫評分說明', 'danger'); return; }
       const scorePayload = { scores, reason, published: Boolean(event.target.elements.published.checked) };
-      const result = PREVIEW_MODE ? null : await API.saveTalentScore(teacher, state.ui.month, scorePayload);
+      const result = PREVIEW_MODE ? null : await API.saveTalentScore(teacher, month, scorePayload);
       if (!PREVIEW_MODE && !result?.ok) { toast(`評分未儲存：${result?.error || '請稍後重試'}`, 'danger'); return; }
-      let record = state.scores.find(item => normalizeName(item.teacher) === normalizeName(teacher) && item.month === state.ui.month);
-      const saved = result?.score || { teacher, month: state.ui.month, ...scorePayload };
+      let record = state.scores.find(item => normalizeName(item.teacher) === normalizeName(teacher) && item.month === month);
+      const saved = result?.score || { teacher, month, ...scorePayload };
       if (!record) { state.scores.push(saved); record = saved; }
       else Object.assign(record, saved);
       persist(); closeDrawer(); renderApp(); toast('月度 KPI 評分已儲存');
@@ -1855,6 +1903,8 @@
   });
 
   document.addEventListener('input', event => {
+    const scoreForm = event.target.closest('#score-form');
+    if (scoreForm) scoreForm.dataset.dirty = 'true';
     if (TEST_VIEW_MODE) return;
     if (event.target.closest('#log-form')) {
       event.target.closest('#log-form').dataset.dirty = 'true';
@@ -1907,6 +1957,8 @@
     if (form?.dataset.dirty === 'true') captureLogDraft(false);
   });
 
+  if (state.ui.route === 'performance') state.ui.performanceMonth = scoreMonthsFor(currentUser.nickname, true)[0] || currentMonth();
+  if (state.ui.route === 'scoring') state.ui.scoringMonth = allScoreMonths()[0] || currentMonth();
   renderApp();
   if (!PREVIEW_MODE) window.setTimeout(loadCloudData, 0);
 })();

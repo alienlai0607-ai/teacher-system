@@ -375,7 +375,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .text-danger { color: var(--red); font-weight: 900; }
 .month-control { min-width: 166px; display: grid; gap: 2px; }
 .month-control span { color: var(--muted); font-size: 9px; font-weight: 800; }
-.month-control input { min-height: 40px; padding: 6px 9px; background: var(--surface); font-size: 12px; font-weight: 850; }
+.month-control input, .month-control select { min-height: 40px; padding: 6px 9px; background: var(--surface); font-size: 12px; font-weight: 850; }
+.month-confirm-form { display: flex; align-items: flex-end; gap: 8px; }
 
 .print-sheet { color: #27221e; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
 .statement-head { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 2px solid var(--ink); }
@@ -621,6 +622,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--blue); outline: 
   .page-actions .btn { width: 100%; }
   .page-actions { align-items: stretch; flex-direction: column; }
   .month-control { width: 100%; }
+  .month-confirm-form { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .page-actions .month-confirm-form .btn { width: auto; }
   .panel-head { align-items: flex-start; }
   .filter-bar { align-items: flex-start; flex-direction: column; }
   .record-row { grid-template-columns: 54px minmax(0, 1fr); }
