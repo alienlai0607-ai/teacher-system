@@ -369,14 +369,31 @@ function talentIndexedReportFolder_(stats, openTeacherFolder) {
   return { targetUrl: target.getUrl(), targetId: target.getId(), workUrl: workFolder.getUrl() };
 }
 
+function ensureTeacherReportFolderViewer_(folderId, viewer) {
+  const email = String(viewer && viewer.email || '').trim().toLowerCase();
+  if (!folderId || !email || viewer.role === 'admin') return;
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'teacher-folder-viewer-v1-' + folderId + '-' + email;
+  if (cache.get(cacheKey)) return;
+  try {
+    DriveApp.getFolderById(folderId).addViewer(email);
+    cache.put(cacheKey, '1', 21600);
+  } catch (error) {}
+}
+
 /**
  * 主管專用雲端日報入口。回傳的老師資料夾已依登入者權限與工作區篩選；
  * 東橋主管不會拿到北區或才藝資料夾，才藝主管只會拿到才藝工作成員。
  */
 function listTeacherReportFolders(params) {
-  const viewer = params && params.viewer ? findUserByNickname(params.viewer) : null;
-  if (!viewer || viewer.status !== 'active' || ['admin', 'manager'].indexOf(viewer.role) < 0) {
+  const actor = params && params.__actor ? params.__actor : (params && params.viewer ? findUserByNickname(params.viewer) : null);
+  if (!actor || actor.status !== 'active' || ['admin', 'manager'].indexOf(actor.role) < 0) {
     return { ok: false, error: '只有主管可查看雲端日報資料夾' };
+  }
+  let viewer = actor;
+  if (actor.role === 'admin' && String(params.view_as || '').trim()) {
+    const requestedViewer = findUserByNickname(String(params.view_as || '').trim());
+    if (requestedViewer && ['admin', 'manager'].indexOf(requestedViewer.role) >= 0) viewer = requestedViewer;
   }
   const scope = String(params.scope || '') === 'talent' ? 'talent' : 'anqin';
   const assignments = talentAssignments_(viewer);
@@ -384,7 +401,7 @@ function listTeacherReportFolders(params) {
     if (scope === 'talent' && assignments.indexOf('talent-manager') < 0) return { ok: false, error: '沒有才藝日報查看權限' };
     if (scope === 'anqin' && assignments.indexOf('anqin-manager') < 0) return { ok: false, error: '沒有安親日報查看權限' };
   }
-  const cacheKey = 'teacher-folders-v4-' + scope + '-' + normalizeTalentNickname_(viewer.nickname) + '-' + viewer.role;
+  const cacheKey = 'teacher-folders-v5-' + scope + '-' + normalizeTalentNickname_(viewer.nickname) + '-' + viewer.role + '-actor-' + normalizeTalentNickname_(actor.nickname);
   const cache = CacheService.getScriptCache();
   if (!params.refresh) {
     const cached = cache.get(cacheKey);
@@ -428,6 +445,7 @@ function listTeacherReportFolders(params) {
       targetId = targetFolder ? targetFolder.getId() : '';
       workspaceUrl = workFolder ? workFolder.getUrl() : '';
     }
+    if (targetId && actor.nickname === viewer.nickname) ensureTeacherReportFolderViewer_(targetId, actor);
     return {
       nickname: user.nickname,
       department: department,

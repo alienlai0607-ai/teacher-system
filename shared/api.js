@@ -134,10 +134,14 @@ window.API = (function () {
       ...params,
       viewer: params.viewer || window.AUTH?.getSession?.()?.nickname || '',
     }),
-    listTeacherReportFolders: (params = {}) => call('listTeacherReportFolders', {
-      ...params,
-      viewer: params.viewer || window.AUTH?.getSession?.()?.nickname || '',
-    }),
+    listTeacherReportFolders: (params = {}) => {
+      const session = window.AUTH?.getSession?.() || {};
+      return call('listTeacherReportFolders', {
+        ...params,
+        viewer: params.viewer || session.nickname || '',
+        view_as: window.AUTH?.isImpersonating?.() ? session.nickname || '' : '',
+      });
+    },
     archiveMonthlyCsv: (data) => call('archiveMonthlyCsv', data),
     saveCoursePrep: (data) => call('saveCoursePrep', data),
     listCoursePreps: (params) => call('listCoursePreps', params),

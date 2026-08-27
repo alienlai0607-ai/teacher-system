@@ -88,6 +88,45 @@ assert.match(archiveSource, /function talentIndexedReportFolder_\(/, '才藝雲�
 assert.match(folderListSource, /CacheService\.getScriptCache\(\)/, '雲端日報清單需使用短期快取避免重複掃描 Drive');
 assert.match(folderListSource, /params\.refresh/, '主管需要能在背景強制更新快取');
 assert.doesNotMatch(folderListSource, /secureKpiReportPath_/, '雲端清單讀取不得同步重掃整批 Drive 權限');
+assert.match(archiveSource, /function ensureTeacherReportFolderViewer_\(/, '才藝主管開啟既有日報時需補齊該資料夾的查看權限');
+assert.match(folderListSource, /params\.view_as/, '柏翰測試柳丁介面時需套用才藝主管的資料範圍');
+assert.match(folderListSource, /actor\.nickname === viewer\.nickname/, '測試視角不可把待開通帳號誤加為正式 Drive 查看者');
+
+const folderUsers = [
+  { nickname: '柏翰', role: 'admin', status: 'active', email: 'admin@example.com', work_assignments: ['talent-payroll'] },
+  { nickname: '柳丁', role: 'manager', status: 'pending', email: 'manager@example.com', work_assignments: ['talent-manager'] },
+  { nickname: '浩浩', role: 'teacher', status: 'active', email: 'hao@example.com', work_assignments: ['talent-fulltime'], department: '才藝部門' },
+  { nickname: '黑豹', role: 'teacher', status: 'active', email: 'panther@example.com', work_assignments: ['talent-pt'], department: '才藝部門' },
+];
+const folderRows = folderUsers.filter(user => user.role === 'teacher').map((user, index) => ({
+  record_type: 'lesson', status: 'submitted', nickname: user.nickname, record_date: `2026-09-0${index + 1}`,
+  reportFolderUrl: `https://drive.google.com/drive/folders/folder-${index + 1}`,
+}));
+const folderCache = new Map();
+const addedFolderViewers = [];
+const archiveContext = vm.createContext({
+  Array, Boolean, Date, JSON, Math, Number, Object, RegExp, String,
+  SHEET_NAMES: { USERS: 'Users', TALENT_RECORDS: 'TalentRecords' },
+  CacheService: { getScriptCache: () => ({ get: key => folderCache.get(key) || null, put: (key, value) => folderCache.set(key, value) }) },
+  DriveApp: { getFolderById: id => ({ addViewer: email => addedFolderViewers.push({ id, email }) }) },
+  findUserByNickname: nickname => folderUsers.find(user => user.nickname === nickname) || null,
+  sheetToObjects: name => name === 'Users' ? folderUsers : folderRows,
+  talentAssignments_: user => Array.isArray(user?.work_assignments) ? user.work_assignments : [],
+  talentRecordObject_: row => ({ reportUrl: 'https://drive.google.com/file/report', reportFolderUrl: row.reportFolderUrl }),
+  normalizeTalentNickname_: value => String(value || '').trim().toLowerCase(),
+  normalizeDepartment_: value => String(value || ''),
+  sameDepartment_: (left, right) => left === right,
+  isGlobalManager_: () => false,
+});
+vm.runInContext(archiveSource, archiveContext);
+const simulatedFolders = archiveContext.listTeacherReportFolders({ __actor: folderUsers[0], viewer: '柏翰', view_as: '柳丁', scope: 'talent' });
+assert.equal(simulatedFolders.ok, true);
+assert.equal(simulatedFolders.folders.length, 2, '柏翰測試柳丁時應看到才藝老師，不是管理員的全工作區資料夾');
+assert.equal(addedFolderViewers.length, 0, '測試待開通柳丁時不可提前授權其 Google 帳號');
+folderUsers[1].status = 'active';
+const managerFolders = archiveContext.listTeacherReportFolders({ __actor: folderUsers[1], viewer: '柳丁', scope: 'talent' });
+assert.equal(managerFolders.ok, true);
+assert.equal(addedFolderViewers.length, 2, '柳丁正式登入後需補齊兩位老師既有日報資料夾的查看權限');
 assert.match(setupSource, /'deleted_at', 'deleted_by'/, '使用者資料表需保存刪除稽核欄位');
 assert.match(setupSource, /mergedAssignments\.indexOf\(assignment\) < 0/, '既有安親身分必須合併才藝工作身分，不能覆蓋或漏加');
 assert.match(setupSource, /function migrateTalentUserProfiles\(\)/, '才藝帳號遷移需可獨立執行，避免完整初始化逾時');
@@ -112,10 +151,15 @@ assert.match(backendSource, /target\.status !== 'active'.*不能新增或修改�
 assert.match(apiSource, /deleteUser: \(nickname, confirmNickname\)/);
 assert.match(apiSource, /READ_ONLY_TEST_VIEW/, '切換老師視角時 API 必須全面禁止寫入');
 assert.match(apiSource, /IMPERSONATION_READ_ACTIONS/, '測試視角只能呼叫明確允許的讀取 API');
+assert.match(apiSource, /view_as: window\.AUTH\?\.isImpersonating/, '測試視角讀取雲端日報時需告知後端目前模擬的主管');
 assert.match(adminUsersSource, /顯示已刪除人員/);
 assert.match(adminUsersSource, /刪除員工/);
 assert.match(adminUsersSource, /歷史日報、薪資與評分會保留/);
 assert.match(talentUiSource, /route: 'cloud-reports', label: '雲端日報'/);
+assert.match(talentUiSource, /refresh: forceRefresh/, '首次開啟雲端日報應優先使用後端快取，只有手動重新整理才強制更新');
+assert.match(talentUiSource, /data-action="select-prep-review-teacher"/, '備課審查需先選老師');
+assert.match(talentUiSource, /data-action="view-prep-review"/, '選老師後需再選單一教案，不能一次展開全部內容');
+assert.match(talentUiSource, /function openPrepReviewDetail\(/, '主管需先閱讀單一教案完整內容再進行審查');
 assert.match(talentUiSource, /pending_users/, '主管人員頁需顯示待開通的黑豹');
 assert.match(backendSource, /function talentCanAccessPendingUser_\(/, '待開通才藝人員只能由授權主管查看');
 assert.match(talentUiSource, /function visibleTalentStaff\(\)/, '主管總覽與排班需同時顯示已啟用及待開通才藝人員');
@@ -129,6 +173,10 @@ assert.match(anqinUiSource, /route: 'cloud-reports', label: '雲端日報'/);
 assert.match(talentUiSource, /type="file"[^>]*multiple/);
 assert.match(talentUiSource, /route: 'weekly', label: '家長 APP'/, 'PT 與正職都要有家長 APP 發布確認入口');
 assert.match(talentUiSource, /data-app-evidence-id=/, 'APP 發布確認必須上傳圖片證據，不能只切換狀態');
+assert.match(talentUiSource, /uploadField\('家長 APP 發布完成截圖', 'app'/, '本堂紀錄內也要有 APP 截圖上傳入口');
+assert.match(talentUiSource, /截圖需同時看得到發布日期與課程名稱/, 'APP 截圖規則需明確要求日期與課程名稱');
+assert.match(talentUiSource, /appFiles, appStatus: siteType === 'partner'/, '本堂送出時需一併保存已選擇的 APP 截圖');
+assert.match(talentUiSource, /app-publish-fields.*siteType !== 'self'/s, '合作校必須隱藏 APP 截圖欄位');
 assert.match(talentUiSource, /function appEvidenceRequired\(/);
 assert.match(talentUiSource, /function selectedPerformanceMonth\(\)/, '才藝老師 KPI 應使用獨立評核月份');
 assert.match(talentUiSource, /scoreMonthsFor\(currentUser\.nickname, true\)\[0\]/, '才藝老師進入 KPI 時必須直接開啟最近一次已公布評核');
