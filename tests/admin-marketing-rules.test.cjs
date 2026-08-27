@@ -54,6 +54,47 @@ assert.throws(() => context.validateAdminMarketingRecord_('project', {
   stages: [{ name: '企劃', status: 'active', dueDate: '', actualDate: '' }],
 }), /企劃階段必須設定完成日期/);
 
+const trial = context.validateAdminMarketingRecord_('trial', {
+  id: 'trial-1', date: '2026-08-26', studentName: '小布', course: '機器人試上', teacher: '皮皮老師',
+  contactRef: '0912-345-678', interest: 'medium', owner: '皮皮老師', nextFollowupDate: '2026-08-27',
+  status: 'waiting_contact', followups: [], paymentEvidence: [],
+});
+assert.equal(trial.status, 'waiting_contact');
+assert.equal(context.adminMarketingTrialIdentity_(trial), '小布|0912345678');
+
+assert.throws(() => context.validateAdminMarketingRecord_('trial', {
+  ...trial, id: 'trial-missing-next', nextFollowupDate: '', status: 'considering',
+}), /下一次追蹤日期/);
+assert.throws(() => context.validateAdminMarketingRecord_('trial', {
+  ...trial, id: 'trial-bad-next', nextFollowupDate: '2026-08-25', status: 'considering',
+}), /不可早於試上日期/);
+
+const convertedTrial = context.validateAdminMarketingRecord_('trial', {
+  ...trial, id: 'trial-converted', status: 'converted', nextFollowupDate: '', firstEnrollment: true,
+  enrollmentDate: '2026-08-26', paymentDate: '2026-08-26', enrollmentCourse: '機器人一期',
+  followups: [{ id: 'followup-1', date: '2026-08-26', method: 'line', note: '家長確認報名一期' }],
+  paymentEvidence: driveEvidence,
+});
+assert.equal(context.adminMarketingTrialBonusEligibility_(convertedTrial).eligible, true);
+assert.equal(context.adminMarketingTrialBonusEligibility_(convertedTrial).amount, 50);
+assert.throws(() => context.validateAdminMarketingRecord_('trial', {
+  ...convertedTrial, id: 'trial-future-payment', paymentDate: '2026-08-27',
+}), /不可晚於今天/);
+
+assert.throws(() => context.validateAdminMarketingRecord_('trial', {
+  ...convertedTrial, id: 'trial-no-proof', paymentEvidence: [],
+}), /完成證據/);
+
+const renewal = context.validateAdminMarketingRecord_('trial', {
+  ...convertedTrial, id: 'trial-renewal', firstEnrollment: false, paymentEvidence: [],
+});
+assert.equal(context.adminMarketingTrialBonusEligibility_(renewal).eligible, false);
+assert.match(context.adminMarketingTrialBonusEligibility_(renewal).error, /不是首次/);
+
+assert.equal(context.validateAdminMarketingRecord_('trial_day', {
+  id: 'trial-day-1', date: '2026-08-26', noTrial: true,
+}).status, 'confirmed');
+
 assert.equal(vm.runInContext('ADMIN_MARKETING_KPI_.reduce((sum, item) => sum + item.max, 0)', context), 100);
 
 const workspacesSource = fs.readFileSync(path.join(root, 'shared/workspaces.js'), 'utf8');
@@ -72,9 +113,11 @@ assert.match(setupSource, /nickname: '皮皮老師'.*role: 'admin_staff'.*subtyp
 assert.match(authSource, /admin-marketing-manager/, '後端帳號管理需允許行政美宣主管工作區');
 assert.match(codeSource, /'getAdminMarketingWorkspaceData'/);
 assert.match(codeSource, /'getAdminMarketingDriveFolders'/);
+assert.match(codeSource, /'reviewAdminMarketingTrialBonus'/);
 assert.match(apiSource, /getAdminMarketingWorkspaceData/);
 assert.match(apiSource, /getAdminMarketingDriveFolders/);
 assert.match(apiSource, /saveAdminMarketingRecord/);
+assert.match(apiSource, /reviewAdminMarketingTrialBonus/);
 assert.match(uiSource, /type="file" multiple/, '證據需可一次選多個檔案');
 assert.match(uiSource, /API\.uploadPhoto/, '圖片證據需進入 KPI 證據資料夾');
 assert.match(uiSource, /API\.uploadFile/, '影片、PDF 與簡報需保留在檔案與素材資料夾');
@@ -95,5 +138,12 @@ assert.doesNotMatch(adminDashboardSource, /test-view-grid/, '測試入口不得�
 assert.match(sharedUiSource, /admin\/dashboard\.html\?v=20260827-test-view-fast-1#test-view/, '離開測試視角需直接回快速切換頁');
 assert.match(uiSource, /data-action="open-test-view"/, '行政美宣主管視角需能進入快速測試');
 assert.match(uiSource, /data-action="exit-impersonation"/, '行政美宣測試視角需能一鍵換老師');
+assert.match(uiSource, /route: 'trials', label: '試上追蹤'/, '行政需有獨立試上追蹤頁');
+assert.match(uiSource, /route: 'trials', label: '試上與獎金'/, '主管需有首報獎金審核頁');
+assert.match(uiSource, /今日無試上/, '需區分無試上與忘記填寫');
+assert.match(uiSource, /每位學生終身只核發一次/, '使用規則需寫明防重複原則');
+assert.match(uiSource, /此學生已有試上追蹤紀錄，請更新原紀錄/, '前端需在重複新增時立即阻擋');
+assert.match(uiSource, /列印月報/, '主管需能列印每月獎金明細');
+assert.match(uiSource, /actionNode\.classList\.contains\('dialog-backdrop'\) && event\.target !== actionNode/, '點擊表單內按鈕不得被背景誤判為關閉對話框');
 
-console.log('PASS admin marketing validation, roles, targets, evidence, deadlines, project stages, manager conversation, Drive access, and fast test view');
+console.log('PASS admin marketing validation, trial tracking, first-term bonus, roles, targets, evidence, deadlines, project stages, manager conversation, Drive access, and fast test view');

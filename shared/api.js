@@ -180,6 +180,11 @@ window.API = (function () {
       result,
       note,
     }),
+    reviewAdminMarketingTrialBonus: (recordId, result, note = '') => call('reviewAdminMarketingTrialBonus', {
+      record_id: recordId,
+      result,
+      note,
+    }),
     saveAdminMarketingScore: (nickname, month, score) => call('saveAdminMarketingScore', { nickname, month, score }),
     addAdminMarketingMessage: (nickname, month, text) => call('addAdminMarketingMessage', { nickname, month, text }),
     setConfig: (data) => call('setConfig', data),

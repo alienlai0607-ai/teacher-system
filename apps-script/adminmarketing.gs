@@ -3,7 +3,8 @@
  * 以 record_type 分流每日工作、週二追蹤、環境、專案、主管交辦、評分與對話。
  */
 
-const ADMIN_MARKETING_RECORD_TYPES_ = ['daily', 'tuesday', 'environment', 'project', 'assignment', 'score', 'message'];
+const ADMIN_MARKETING_RECORD_TYPES_ = ['daily', 'tuesday', 'environment', 'project', 'trial', 'trial_day', 'assignment', 'score', 'message'];
+const ADMIN_MARKETING_TRIAL_BONUS_ = 50;
 const ADMIN_MARKETING_KPI_ = [
   { key: 'daily', label: '每日行政與訊息處理', max: 20 },
   { key: 'promotion', label: '每週美宣產出與完成證據', max: 25 },
@@ -108,6 +109,23 @@ function adminMarketingAttachments_(items, required) {
     throw new Error('完成證據尚未完整上傳到雲端');
   }
   return files;
+}
+
+function adminMarketingTrialIdentity_(data) {
+  const name = adminMarketingText_(data && data.studentName, 160).replace(/\s+/g, '').toLowerCase();
+  const contact = adminMarketingText_(data && data.contactRef, 160).replace(/[\s\-()]/g, '').toLowerCase();
+  return name && contact ? name + '|' + contact : '';
+}
+
+function adminMarketingTrialBonusEligibility_(data) {
+  if (!data || data.status !== 'converted') return { eligible: false, error: '尚未完成首次一期報名' };
+  if (data.firstEnrollment !== true) return { eligible: false, error: '不是首次正式報名' };
+  if (!data.enrollmentDate || !data.paymentDate || !data.enrollmentCourse) {
+    return { eligible: false, error: '報名、繳費日期或正式課程尚未完整' };
+  }
+  if (!Array.isArray(data.followups) || !data.followups.length) return { eligible: false, error: '尚未留下家長追蹤紀錄' };
+  if (!Array.isArray(data.paymentEvidence) || !data.paymentEvidence.length) return { eligible: false, error: '尚未附報名或繳費證明' };
+  return { eligible: true, amount: ADMIN_MARKETING_TRIAL_BONUS_ };
 }
 
 function adminMarketingWeekKey_(dateValue) {
@@ -256,6 +274,69 @@ function validateAdminMarketingProject_(data) {
   return data;
 }
 
+function validateAdminMarketingTrial_(data) {
+  data.date = adminMarketingDate_(data.date, true);
+  if (data.date > todayStr()) throw new Error('試上日期不可晚於今天');
+  data.studentName = adminMarketingText_(data.studentName, 160);
+  data.course = adminMarketingText_(data.course, 220);
+  data.teacher = adminMarketingText_(data.teacher, 160);
+  data.contactRef = adminMarketingText_(data.contactRef, 160);
+  data.interest = ['high', 'medium', 'low', 'unknown'].indexOf(data.interest) >= 0 ? data.interest : 'unknown';
+  data.owner = adminMarketingText_(data.owner || data.nickname, 160);
+  data.note = adminMarketingText_(data.note, 1800);
+  data.nextFollowupDate = adminMarketingDate_(data.nextFollowupDate, false);
+  data.status = ['waiting_contact', 'contacted', 'considering', 'followup_scheduled', 'converted', 'not_enrolled'].indexOf(data.status) >= 0
+    ? data.status : 'waiting_contact';
+  if (!data.studentName || !data.course || !data.teacher || !data.contactRef || !data.owner) {
+    throw new Error('學生姓名、試上課程、授課老師、家長識別資料與負責人皆為必填');
+  }
+  if (['waiting_contact', 'contacted', 'considering', 'followup_scheduled'].indexOf(data.status) >= 0 && !data.nextFollowupDate) {
+    throw new Error('尚未結案的試上學生必須設定下一次追蹤日期');
+  }
+  if (data.nextFollowupDate && data.nextFollowupDate < data.date) throw new Error('下一次追蹤日期不可早於試上日期');
+  data.followups = (Array.isArray(data.followups) ? data.followups : []).slice(0, 100).map(function (raw) {
+    const item = raw || {};
+    const cleaned = {
+      id: adminMarketingText_(item.id || Utilities.getUuid(), 160),
+      date: adminMarketingDate_(item.date || todayStr(), true),
+      method: ['line', 'phone', 'in_person', 'other'].indexOf(item.method) >= 0 ? item.method : 'line',
+      note: adminMarketingText_(item.note, 1800),
+      nextDate: adminMarketingDate_(item.nextDate, false),
+      author: adminMarketingText_(item.author, 160),
+      at: adminMarketingText_(item.at, 80),
+    };
+    if (!cleaned.note) throw new Error('每次家長追蹤都要留下處理結果');
+    if (cleaned.date > todayStr()) throw new Error('家長追蹤日期不可晚於今天');
+    return cleaned;
+  });
+  data.enrollmentDate = adminMarketingDate_(data.enrollmentDate, false);
+  data.paymentDate = adminMarketingDate_(data.paymentDate, false);
+  data.enrollmentCourse = adminMarketingText_(data.enrollmentCourse, 220);
+  data.firstEnrollment = data.firstEnrollment === true;
+  data.paymentEvidence = adminMarketingAttachments_(data.paymentEvidence, data.status === 'converted' && data.firstEnrollment);
+  data.lateReason = adminMarketingText_(data.lateReason, 1000);
+  if (data.enrollmentDate > todayStr() || data.paymentDate > todayStr()) throw new Error('報名與繳費日期不可晚於今天');
+  if ((data.enrollmentDate && data.enrollmentDate < data.date) || (data.paymentDate && data.paymentDate < data.date)) {
+    throw new Error('報名與繳費日期不可早於試上日期');
+  }
+  if (data.status === 'converted') {
+    if (!data.enrollmentDate || !data.paymentDate || !data.enrollmentCourse) {
+      throw new Error('已報名一期必須填寫報名日期、繳費日期與正式課程');
+    }
+    if (data.firstEnrollment && !data.followups.length) throw new Error('首報獎金需至少有一筆家長追蹤紀錄');
+  }
+  return data;
+}
+
+function validateAdminMarketingTrialDay_(data) {
+  data.date = adminMarketingDate_(data.date, true);
+  if (data.date > todayStr()) throw new Error('不可預先登記未來的試上狀態');
+  data.noTrial = data.noTrial === true;
+  data.note = adminMarketingText_(data.note, 500);
+  data.status = data.noTrial ? 'confirmed' : 'superseded';
+  return data;
+}
+
 function validateAdminMarketingRecord_(type, value) {
   if (ADMIN_MARKETING_RECORD_TYPES_.indexOf(type) < 0) throw new Error('行政美宣紀錄類型不正確');
   const data = adminMarketingPayload_(value);
@@ -266,6 +347,8 @@ function validateAdminMarketingRecord_(type, value) {
   if (type === 'tuesday') return validateAdminMarketingTuesday_(data);
   if (type === 'environment') return validateAdminMarketingEnvironment_(data);
   if (type === 'project') return validateAdminMarketingProject_(data);
+  if (type === 'trial') return validateAdminMarketingTrial_(data);
+  if (type === 'trial_day') return validateAdminMarketingTrialDay_(data);
   return data;
 }
 
@@ -326,6 +409,8 @@ function getAdminMarketingWorkspaceData(params) {
       supervisor: '小魚',
       videoWeeklyTarget: 2,
       photoWeeklyTarget: 3,
+      trialBonusAmount: ADMIN_MARKETING_TRIAL_BONUS_,
+      trialBonusRule: '首次試上轉一期並完成繳費，每位 50 元',
       kpi: ADMIN_MARKETING_KPI_,
     },
   };
@@ -362,17 +447,125 @@ function getAdminMarketingDriveFolders(params) {
   return { ok: true, folders: folders };
 }
 
+function adminMarketingTrialRows_(nickname) {
+  return sheetToObjects(SHEET_NAMES.ADMIN_MARKETING_RECORDS).filter(function (row) {
+    return row.record_type === 'trial' && (!nickname || row.nickname === nickname);
+  });
+}
+
+function adminMarketingFindDuplicateTrial_(nickname, data, excludeId) {
+  const identity = adminMarketingTrialIdentity_(data);
+  if (!identity) return null;
+  const rows = adminMarketingTrialRows_(nickname);
+  for (let i = 0; i < rows.length; i += 1) {
+    if (rows[i].record_id === excludeId) continue;
+    const item = adminMarketingRecordObject_(rows[i]);
+    if (adminMarketingTrialIdentity_(item) === identity) return item;
+  }
+  return null;
+}
+
+function adminMarketingAppendTrialHistory_(data, original, actor, summary) {
+  data.history = original && Array.isArray(original.history) ? original.history.slice(-99) : [];
+  data.history.push({
+    id: Utilities.getUuid(),
+    author: actor.nickname,
+    role: actor.role,
+    at: nowIso(),
+    summary: adminMarketingText_(summary, 500),
+  });
+  return data;
+}
+
 function saveAdminMarketingRecord(params) {
   const actor = params.__actor;
   const nickname = String(params.nickname || actor && actor.nickname || '').trim();
   const target = findUserByNickname(nickname);
+  const type = String(params.record_type || '');
+  const managerTrialEntry = type === 'trial' && actor && adminMarketingManagerCanReview_(actor) && target && adminMarketingCanAccessUser_(actor, target);
   if (!actor || !target || adminMarketingAssignments_(target).indexOf('admin-marketing') < 0 ||
-      (actor.role !== 'admin' && actor.nickname !== target.nickname)) {
+      (actor.role !== 'admin' && actor.nickname !== target.nickname && !managerTrialEntry)) {
     return { ok: false, error: '只能儲存自己的行政美宣紀錄' };
   }
-  const type = String(params.record_type || '');
-  if (['daily', 'tuesday', 'environment', 'project'].indexOf(type) < 0) return { ok: false, error: '此紀錄類型不可由行政端儲存' };
-  const saved = upsertAdminMarketingRecord_(type, nickname, validateAdminMarketingRecord_(type, params.record), actor.nickname);
+  if (['daily', 'tuesday', 'environment', 'project', 'trial', 'trial_day'].indexOf(type) < 0) {
+    return { ok: false, error: '此紀錄類型不可由行政端儲存' };
+  }
+  let data = validateAdminMarketingRecord_(type, params.record);
+  const existingRow = findObject(SHEET_NAMES.ADMIN_MARKETING_RECORDS, 'record_id', data.id);
+  const original = existingRow ? adminMarketingRecordObject_(existingRow) : null;
+  if (type === 'trial') {
+    if (!original && data.date !== todayStr()) {
+      if (!managerTrialEntry || !data.lateReason) return { ok: false, error: '試上學生需於當日登錄；補登請由小魚或柏翰填寫原因' };
+    }
+    const duplicate = adminMarketingFindDuplicateTrial_('', data, data.id);
+    if (duplicate) return { ok: false, error: '此學生已有試上追蹤紀錄，請更新原紀錄，不要重複新增' };
+    if (original && original.bonusStatus === 'approved') {
+      const locked = ['studentName', 'contactRef', 'status', 'firstEnrollment', 'enrollmentDate', 'paymentDate', 'enrollmentCourse'];
+      const changed = locked.some(function (key) { return String(original[key] == null ? '' : original[key]) !== String(data[key] == null ? '' : data[key]); });
+      if (changed) return { ok: false, error: '此筆首報獎金已核准，報名與學生資料已鎖定；需修正請由主管處理' };
+    }
+    const eligible = adminMarketingTrialBonusEligibility_(data);
+    data.bonusStatus = original && ['approved', 'rejected'].indexOf(original.bonusStatus) >= 0
+      ? original.bonusStatus : (eligible.eligible ? 'pending_review' : 'not_eligible');
+    data.bonusAmount = data.bonusStatus === 'approved' ? ADMIN_MARKETING_TRIAL_BONUS_ : 0;
+    data.bonusReviewedBy = original && original.bonusReviewedBy || '';
+    data.bonusReviewedAt = original && original.bonusReviewedAt || '';
+    data.bonusReviewNote = original && original.bonusReviewNote || '';
+    adminMarketingAppendTrialHistory_(data, original, actor, original ? '更新試上追蹤' : (data.lateReason ? '主管補登試上紀錄：' + data.lateReason : '建立試上紀錄'));
+    const markerRow = sheetToObjects(SHEET_NAMES.ADMIN_MARKETING_RECORDS).filter(function (row) {
+      return row.record_type === 'trial_day' && row.nickname === nickname && row.record_date === data.date;
+    })[0];
+    if (markerRow) {
+      const marker = adminMarketingRecordObject_(markerRow);
+      if (marker.noTrial === true) {
+        marker.noTrial = false;
+        marker.status = 'superseded';
+        upsertAdminMarketingRecord_('trial_day', nickname, marker, actor.nickname);
+      }
+    }
+  }
+  if (type === 'trial_day') {
+    if (data.date !== todayStr() && actor.role !== 'admin') return { ok: false, error: '「今日無試上」只能在當日確認' };
+    const hasTrial = adminMarketingTrialRows_(nickname).some(function (row) {
+      return row.record_date === data.date && row.record_id !== data.id;
+    });
+    if (data.noTrial && hasTrial) return { ok: false, error: '今天已有試上學生，不能標記為無試上' };
+  }
+  const saved = upsertAdminMarketingRecord_(type, nickname, data, actor.nickname);
+  return { ok: true, record: saved };
+}
+
+function reviewAdminMarketingTrialBonus(params) {
+  const actor = params.__actor;
+  if (!adminMarketingManagerCanReview_(actor)) return { ok: false, error: '只有行政美宣主管可審核首報獎金' };
+  const existing = findObject(SHEET_NAMES.ADMIN_MARKETING_RECORDS, 'record_id', String(params.record_id || ''));
+  if (!existing || existing.record_type !== 'trial') return { ok: false, error: '找不到試上追蹤紀錄' };
+  const target = findUserByNickname(existing.nickname);
+  if (!target || !adminMarketingCanAccessUser_(actor, target)) return { ok: false, error: '無首報獎金審核權限' };
+  const result = ['approved', 'rejected'].indexOf(params.result) >= 0 ? params.result : '';
+  const note = adminMarketingText_(params.note, 1800);
+  if (!result) return { ok: false, error: '請選擇通過或不符合' };
+  if (result === 'rejected' && !note) return { ok: false, error: '判定不符合時必須寫明原因' };
+  const data = adminMarketingRecordObject_(existing);
+  if (result === 'approved') {
+    const eligibility = adminMarketingTrialBonusEligibility_(data);
+    if (!eligibility.eligible) return { ok: false, error: eligibility.error };
+    const identity = adminMarketingTrialIdentity_(data);
+    const duplicateApproved = adminMarketingTrialRows_().some(function (row) {
+      if (row.record_id === data.id) return false;
+      const other = adminMarketingRecordObject_(row);
+      return other.bonusStatus === 'approved' && adminMarketingTrialIdentity_(other) === identity;
+    });
+    if (duplicateApproved) return { ok: false, error: '此學生過去已有核准的首報獎金，不能重複發放' };
+  }
+  data.bonusStatus = result;
+  data.bonusAmount = result === 'approved' ? ADMIN_MARKETING_TRIAL_BONUS_ : 0;
+  data.bonusReviewedBy = actor.nickname;
+  data.bonusReviewedAt = nowIso();
+  data.bonusReviewNote = note;
+  adminMarketingAppendTrialHistory_(data, data, actor, result === 'approved' ? '核准首報獎金 50 元' : '首報獎金不符合：' + note);
+  const saved = upsertAdminMarketingRecord_('trial', existing.nickname, data, actor.nickname);
+  updateRow(SHEET_NAMES.ADMIN_MARKETING_RECORDS, existing._row, { reviewed_at: data.bonusReviewedAt });
   return { ok: true, record: saved };
 }
 

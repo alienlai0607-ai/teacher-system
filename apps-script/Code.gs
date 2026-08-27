@@ -95,6 +95,7 @@ function handleRequest(e, method) {
       'saveAdminMarketingRecord': () => saveAdminMarketingRecord(params),
       'saveAdminMarketingAssignment': () => saveAdminMarketingAssignment(params),
       'reviewAdminMarketingRecord': () => reviewAdminMarketingRecord(params),
+      'reviewAdminMarketingTrialBonus': () => reviewAdminMarketingTrialBonus(params),
       'saveAdminMarketingScore': () => saveAdminMarketingScore(params),
       'addAdminMarketingMessage': () => addAdminMarketingMessage(params),
 
