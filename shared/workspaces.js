@@ -58,6 +58,24 @@
       icon: 'calculator',
       path: 'review/talent-v2/index.html?workspace=talent-payroll',
     },
+    'admin-marketing': {
+      id: 'admin-marketing',
+      group: 'admin-marketing',
+      label: '行政美宣',
+      shortLabel: '行政美宣',
+      description: '行政日誌、美宣產出與期限追蹤',
+      icon: 'megaphone',
+      path: 'review/admin-marketing-v1/index.html?workspace=admin-marketing',
+    },
+    'admin-marketing-manager': {
+      id: 'admin-marketing-manager',
+      group: 'admin-marketing',
+      label: '行政美宣主管',
+      shortLabel: '行政美宣主管',
+      description: '期限管理、週 KPI 與主管評核',
+      icon: 'clipboard-list',
+      path: 'review/admin-marketing-v1/index.html?workspace=admin-marketing-manager',
+    },
   };
 
   const ASSIGNMENT_ALIASES = {
@@ -71,12 +89,14 @@
     talent_pt: 'talent-pt',
     talent_manager: 'talent-manager',
     talent_payroll: 'talent-payroll',
+    admin_marketing: 'admin-marketing',
+    admin_marketing_manager: 'admin-marketing-manager',
   };
 
   // 正式後端提供 work_assignments 時會優先採用；此表供審查版與既有帳號過渡使用。
   const LEGACY_ASSIGNMENTS = {
-    '柏翰': ['anqin-manager', 'talent-payroll'],
-    '小魚': ['anqin-manager', 'talent-payroll'],
+    '柏翰': ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'],
+    '小魚': ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'],
     '酸酸': ['anqin-manager'],
     '柳丁': ['talent-manager'],
     '浩浩': ['talent-fulltime'],
@@ -85,7 +105,7 @@
     rita: ['talent-fulltime'],
     '紅豆': ['anqin-teacher', 'talent-pt'],
     '小明': ['anqin-teacher', 'talent-pt'],
-    '皮皮': ['talent-pt'],
+    '皮皮': ['talent-pt', 'admin-marketing'],
     '黑豹': ['talent-pt'],
   };
 
@@ -139,7 +159,10 @@
     const role = String(user.role || '').trim();
     const department = String(user.department || '').trim();
     const subtype = String(user.subtype || user.employment_type || '').toLowerCase();
-    if (role === 'admin') return ['anqin-manager', 'talent-manager'];
+    if (role === 'admin') return ['anqin-manager', 'talent-manager', 'admin-marketing-manager'];
+    if (role === 'admin_staff' && String(user.subtype || '').toLowerCase() === 'marketing') {
+      return ['admin-marketing'];
+    }
     if (department.includes('才藝')) {
       if (role === 'manager') return ['talent-manager'];
       return [subtype.includes('pt') || subtype.includes('兼職') ? 'talent-pt' : 'talent-fulltime'];
@@ -170,6 +193,9 @@
     }
     if (path.includes('/talent-v2/')) {
       return assignments.find(item => item.group === 'talent')?.id || '';
+    }
+    if (path.includes('/admin-marketing-v1/')) {
+      return assignments.find(item => item.group === 'admin-marketing')?.id || '';
     }
     return '';
   }

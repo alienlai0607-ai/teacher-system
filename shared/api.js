@@ -10,6 +10,8 @@ window.API = (function () {
     'getEvalEvidence', 'getEval', 'listEvals', 'listStudents',
     'getDashboard', 'getMyKpiPreview', 'listArchivedKpiFiles',
     'listTeacherReportFolders', 'listCoursePreps', 'getTalentWorkspaceData',
+    'getAdminMarketingWorkspaceData',
+    'getAdminMarketingDriveFolders',
     'getSystemReadiness',
   ]);
 
@@ -159,6 +161,27 @@ window.API = (function () {
       approved_renewal_count: approvedRenewalCount,
       note,
     }),
+    getAdminMarketingWorkspaceData: (params = {}) => call('getAdminMarketingWorkspaceData', {
+      ...params,
+      viewer: params.viewer || window.AUTH?.getSession?.()?.nickname || '',
+    }),
+    getAdminMarketingDriveFolders: (params = {}) => call('getAdminMarketingDriveFolders', {
+      ...params,
+      viewer: params.viewer || window.AUTH?.getSession?.()?.nickname || '',
+    }),
+    saveAdminMarketingRecord: (nickname, recordType, record) => call('saveAdminMarketingRecord', {
+      nickname,
+      record_type: recordType,
+      record,
+    }),
+    saveAdminMarketingAssignment: (nickname, assignment) => call('saveAdminMarketingAssignment', { nickname, assignment }),
+    reviewAdminMarketingRecord: (recordId, result, note = '') => call('reviewAdminMarketingRecord', {
+      record_id: recordId,
+      result,
+      note,
+    }),
+    saveAdminMarketingScore: (nickname, month, score) => call('saveAdminMarketingScore', { nickname, month, score }),
+    addAdminMarketingMessage: (nickname, month, text) => call('addAdminMarketingMessage', { nickname, month, text }),
     setConfig: (data) => call('setConfig', data),
     getSystemReadiness: (operator) => call('getSystemReadiness', { operator }),
     setupSystemAutomation: (operator) => call('setupSystemAutomation', { operator }),

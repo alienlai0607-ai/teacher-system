@@ -93,6 +93,11 @@ function setupSheets() {
       'year_month', 'status', 'data_json', 'created_by', 'updated_by',
       'created_at', 'updated_at', 'submitted_at'
     ],
+    [SHEET_NAMES.ADMIN_MARKETING_RECORDS]: [
+      'record_id', 'record_type', 'nickname', 'department', 'record_date',
+      'year_week', 'year_month', 'status', 'data_json', 'created_by', 'updated_by',
+      'created_at', 'updated_at', 'reviewed_at'
+    ],
   };
 
   Object.entries(schemas).forEach(([name, headers]) => {
@@ -135,14 +140,14 @@ function setupSheets() {
  */
 function migrateTalentUserProfiles_() {
   const profiles = [
-    { nickname: '柏翰', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll'] },
+    { nickname: '柏翰', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'] },
     { nickname: '酸酸', employment_type: 'manager', work_assignments: ['anqin-manager'] },
-    { nickname: '小魚', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll'] },
+    { nickname: '小魚', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'] },
     { nickname: '柳丁', role: 'manager', department: '才藝部門', status: 'pending', employment_type: 'manager', work_assignments: ['talent-manager'] },
     { nickname: '浩浩', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'], rest_days: ['週一', '週日'] },
     { nickname: 'RITA', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'], rest_days: ['週二', '週日'] },
     { nickname: '毛毛', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'] },
-    { nickname: '皮皮老師', employment_type: 'pt', work_assignments: ['talent-pt'], schedule_json: [{ weekday: 4, label: '週四', time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }] },
+    { nickname: '皮皮老師', role: 'admin_staff', department: '北區教室', subtype: 'marketing', employment_type: 'pt', work_assignments: ['talent-pt', 'admin-marketing'], schedule_json: [{ weekday: 4, label: '週四', time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }] },
     { nickname: '紅豆', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'], schedule_json: [1, 3, 4, 5].map(function (weekday) { return { weekday: weekday, label: '週' + ['日', '一', '二', '三', '四', '五', '六'][weekday], time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }; }) },
     { nickname: '小明', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'], schedule_json: [{ weekday: 3, label: '週三', time: '19:00-20:30', siteType: 'self', site: '布拉克自營教室' }] },
     { nickname: '黑豹', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'pt', work_assignments: ['talent-pt'], schedule_json: [1, 4].map(function (weekday) { return { weekday: weekday, label: weekday === 1 ? '週一' : '週四', time: '19:00–20:30', siteType: 'partner', site: '善化合作校' }; }) },
@@ -205,6 +210,15 @@ function migrateTalentUserProfiles_() {
         changed = true;
       }
     });
+    if (profile.nickname === '皮皮老師') {
+      ['role', 'department', 'subtype'].forEach(function (key) {
+        const index = indexes[key];
+        if (index >= 0 && profile[key] !== undefined && row[index] !== profile[key]) {
+          row[index] = profile[key];
+          changed = true;
+        }
+      });
+    }
   });
   if (changed) sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
   invalidateKpiDriveAccess_();
@@ -214,6 +228,28 @@ function migrateTalentUserProfiles_() {
 function migrateTalentUserProfiles() {
   migrateTalentUserProfiles_();
   return { ok: true, message: '才藝工作身分與排班已補齊' };
+}
+
+/** 行政美宣上線前執行一次：建立資料表並補齊皮皮、小魚、柏翰的工作區。 */
+function prepareAdminMarketingLaunch() {
+  migrateTalentUserProfiles_();
+  ensureAdminMarketingRecordsSheet_();
+  const expected = {
+    '皮皮老師': ['talent-pt', 'admin-marketing'],
+    '小魚': ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'],
+    '柏翰': ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'],
+  };
+  const result = {};
+  Object.keys(expected).forEach(function (nickname) {
+    const user = findUserByNickname(nickname);
+    if (!user) throw new Error('找不到人員：' + nickname);
+    const assignments = parseUserListField_(user.work_assignments);
+    const missing = expected[nickname].filter(function (item) { return assignments.indexOf(item) < 0; });
+    if (missing.length) throw new Error(nickname + ' 尚缺工作區：' + missing.join('、'));
+    result[nickname] = assignments;
+  });
+  invalidateKpiDriveAccess_();
+  return { ok: true, users: result, supervisor: '小魚', worker: '皮皮老師' };
 }
 
 /** 正式交付前執行一次：未交付帳號維持待開通，才藝缺件自 2026/09/01 起計。 */
@@ -458,44 +494,41 @@ function seedKpiConfig() {
     ]},
   ];
 
-  // 行政宣傳 KPI（美萱）
+  // 行政美宣 KPI（皮皮老師，由小魚主管評核）
   const ADMIN_MARKETING_KPI = [
-    { kpi: 1, max: 15, name: '社群內容產出', items: [
-      { name: 'FB粉專貼文(週≥3篇)', max: 4 },
-      { name: 'IG貼文與限動(週≥3篇+每日限動)', max: 4 },
-      { name: '影片/Reels短影音(月≥2支)', max: 3 },
+    { kpi: 1, max: 20, name: '每日行政與訊息處理', items: [
+      { name: '家長訊息、官方 LINE 與班級群組確認', max: 6 },
+      { name: '每日工作日誌完整度', max: 6 },
+      { name: '未完成事項具備進度與新期限', max: 4 },
+      { name: '需主管確認事項主動回報', max: 4 },
+    ]},
+    { kpi: 2, max: 25, name: '每週美宣產出與完成證據', items: [
+      { name: '完成影片每週至少 2 支', max: 10 },
+      { name: '照片宣傳每週至少 3 則', max: 9 },
+      { name: '發布、排程或成品證據完整', max: 4 },
       { name: '內容品質與品牌一致性', max: 2 },
-      { name: '節慶與時事連動', max: 2 },
     ]},
-    { kpi: 2, max: 15, name: '社群成效與互動', items: [
-      { name: '粉專追蹤數淨增(月≥30人)', max: 3 },
-      { name: 'IG追蹤數淨增(月≥20人)', max: 3 },
-      { name: '平均互動率', max: 3 },
-      { name: '觸及人數成長(月對月)', max: 3 },
-      { name: '私訊/留言回覆時效(2小時內)', max: 3 },
+    { kpi: 3, max: 15, name: '繳費與家長事項追蹤', items: [
+      { name: '每週二完成繳費與到期名單確認', max: 6 },
+      { name: '未繳費、續課與家長事項持續追蹤', max: 5 },
+      { name: '每筆未結案事項具備下次追蹤日', max: 2 },
+      { name: '特殊狀況主動回報', max: 2 },
     ]},
-    { kpi: 3, max: 15, name: '招生與轉換漏斗', items: [
-      { name: '線上諮詢量', max: 3 },
-      { name: '諮詢→體驗 轉換率(≥40%)', max: 4 },
-      { name: '體驗→報名 轉換率(≥60%)', max: 4 },
-      { name: '招生活動素材製作', max: 2 },
-      { name: '招生數據紀錄與分析', max: 2 },
+    { kpi: 4, max: 20, name: '期限與活動專案管理', items: [
+      { name: '主管交辦期限與進度更新', max: 7 },
+      { name: '逾期前主動說明並提出新期限', max: 4 },
+      { name: '活動專案八階段排程', max: 6 },
+      { name: '完成日期與證據可追溯', max: 3 },
     ]},
-    { kpi: 4, max: 10, name: '活動宣傳與現場支援', items: [
-      { name: '活動預熱宣傳(前2週開跑)', max: 3 },
-      { name: '活動直播/紀錄', max: 3 },
-      { name: '活動後成果發布(72小時內)', max: 2 },
-      { name: '活動現場行政支援', max: 2 },
+    { kpi: 5, max: 10, name: '環境、公告與素材管理', items: [
+      { name: '東橋一樓內外環境與物品定位', max: 5 },
+      { name: '過期公告撤除與最新資訊更新', max: 2 },
+      { name: '照片、影片與宣傳素材分類', max: 3 },
     ]},
-    { kpi: 5, max: 10, name: '設計與素材管理', items: [
-      { name: '文宣設計品質', max: 3 },
-      { name: '素材庫整理', max: 2 },
-      { name: '品牌素材使用規範', max: 2 },
-      { name: '跨部門設計需求支援', max: 3 },
-    ]},
-    { kpi: 6, max: 5, name: '個人工作態度與表現', items: [
-      { name: '出勤/時間觀念', max: 3 },
-      { name: '主動性/工作態度', max: 2 },
+    { kpi: 6, max: 10, name: '主管評核', items: [
+      { name: '工作正確性與可直接使用程度', max: 4 },
+      { name: '主動性與風險回報', max: 3 },
+      { name: '溝通、協作與改善速度', max: 3 },
     ]},
   ];
 
@@ -521,6 +554,16 @@ function seedKpiConfig() {
 
 function getGradeRules(role, kpi, max) {
   // 通用評分區間（依比例）
+  if (max === 25) return [
+    { range: '22-25', label: '優秀' },
+    { range: '18-21', label: '基本達成' },
+    { range: '≤17', label: '需加強' }
+  ];
+  if (max === 20) return [
+    { range: '18-20', label: '優秀' },
+    { range: '14-17', label: '基本達成' },
+    { range: '≤13', label: '需加強' }
+  ];
   if (max === 15) return [
     { range: '12-15', label: '優秀' },
     { range: '8-11', label: '基本達成' },

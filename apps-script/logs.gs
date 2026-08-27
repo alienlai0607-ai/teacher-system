@@ -442,11 +442,15 @@ function uploadPhoto(params) {
     : 'jpg';
 
   // 資料夾：KPI證據 / 部門 / 暱稱 / 年月
-  const scope = String(kpi || '').indexOf('talent-') === 0 ? 'talent' : 'anqin';
+  const scopeKey = String(kpi || '');
+  const scope = scopeKey.indexOf('talent-') === 0 ? 'talent'
+    : scopeKey.indexOf('admin-marketing') === 0 ? 'admin-marketing'
+    : 'anqin';
   const root = getEvidenceRootFolder_();
   const deptF = getOrCreateChildFolder_(root, normalizeDepartment_(user.department) || '未分部門');
   const userF = getOrCreateChildFolder_(deptF, nickname);
-  const workF = getOrCreateChildFolder_(userF, scope === 'talent' ? '才藝' : '安親');
+  const workLabel = scope === 'talent' ? '才藝' : scope === 'admin-marketing' ? '行政美宣' : '安親';
+  const workF = getOrCreateChildFolder_(userF, workLabel);
   const ymF = getOrCreateChildFolder_(workF, ym);
 
   const bytes = Utilities.base64Decode(base64);
@@ -485,11 +489,15 @@ function uploadFile(params) {
   const bytes = Utilities.base64Decode(base64);
   const blob = Utilities.newBlob(bytes, mimeType || 'application/octet-stream', uniqueName);
 
-  const scope = String(params.category || '').indexOf('talent-') === 0 ? 'talent' : 'anqin';
+  const categoryKey = String(params.category || '');
+  const scope = categoryKey.indexOf('talent-') === 0 ? 'talent'
+    : categoryKey.indexOf('admin-marketing') === 0 ? 'admin-marketing'
+    : 'anqin';
   const root = getMaterialRootFolder_();
   const deptF = getOrCreateChildFolder_(root, normalizeDepartment_(user.department) || '未分部門');
   const userF = getOrCreateChildFolder_(deptF, nickname);
-  const workF = getOrCreateChildFolder_(userF, scope === 'talent' ? '才藝' : '安親');
+  const workLabel = scope === 'talent' ? '才藝' : scope === 'admin-marketing' ? '行政美宣' : '安親';
+  const workF = getOrCreateChildFolder_(userF, workLabel);
   const ymF = getOrCreateChildFolder_(workF, ym);
   const file = ymF.createFile(blob);
   secureKpiReportPath_(root, deptF, userF, workF, ymF, user, scope, []);

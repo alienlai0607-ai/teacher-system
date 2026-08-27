@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="../shared/style.css?v=20260624k">
 <script src="../shared/config.js?v=20260825-production-audit-2"></script>
 <script src="../shared/auth.js?v=20260825-production-audit-2"></script>
-<script src="../shared/api.js?v=20260826-employee-delete-1"></script>
+<script src="../shared/api.js?v=20260827-admin-marketing-1"></script>
 <script src="../shared/ui.js?v=20260825-production-audit-2"></script>
 <script src="../shared/pwa.js?v=20260825-production-audit-2"></script>
 <script src="../shared/push.js?v=20260825-production-audit-2"></script>
@@ -103,6 +103,8 @@
           <label><input type="checkbox" value="talent-pt">才藝 PT</label>
           <label><input type="checkbox" value="talent-manager">才藝主管</label>
           <label><input type="checkbox" value="talent-payroll">才藝薪資</label>
+          <label><input type="checkbox" value="admin-marketing">行政美宣</label>
+          <label><input type="checkbox" value="admin-marketing-manager">行政美宣主管</label>
         </div>
       </div>
       <section class="talent-settings" id="n-pt-settings" hidden>
@@ -355,7 +357,7 @@ async function editUser(nickname) {
     : String(u.work_assignments || '').replace(/[\[\]"]/g, '');
   const newEmployment = prompt('才藝聘用身分（fulltime/pt/manager/admin；不適用請留空）：', u.employment_type || '');
   if (newEmployment === null) return;
-  const newAssignments = prompt('工作區（可用逗號分隔多個）：\nanqin-teacher, anqin-manager, talent-fulltime, talent-pt, talent-manager, talent-payroll', currentAssignments);
+  const newAssignments = prompt('工作區（可用逗號分隔多個）：\nanqin-teacher, anqin-manager, talent-fulltime, talent-pt, talent-manager, talent-payroll, admin-marketing, admin-marketing-manager', currentAssignments);
   if (newAssignments === null) return;
   payload.employment_type = newEmployment.trim();
   payload.work_assignments = newAssignments.split(/[,、;|]/).map(item => item.trim()).filter(Boolean);

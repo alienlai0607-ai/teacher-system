@@ -89,6 +89,15 @@ function handleRequest(e, method) {
       'addTalentMessage': () => addTalentMessage(params),
       'approveTalentBonus': () => approveTalentBonus(params),
 
+      // 行政美宣：皮皮執行、小魚主管審查
+      'getAdminMarketingWorkspaceData': () => getAdminMarketingWorkspaceData(params),
+      'getAdminMarketingDriveFolders': () => getAdminMarketingDriveFolders(params),
+      'saveAdminMarketingRecord': () => saveAdminMarketingRecord(params),
+      'saveAdminMarketingAssignment': () => saveAdminMarketingAssignment(params),
+      'reviewAdminMarketingRecord': () => reviewAdminMarketingRecord(params),
+      'saveAdminMarketingScore': () => saveAdminMarketingScore(params),
+      'addAdminMarketingMessage': () => addAdminMarketingMessage(params),
+
       // 週報
       'saveWeekly': () => saveWeekly(params),
       'getWeekly': () => getWeekly(params),
@@ -186,6 +195,7 @@ const SHEET_NAMES = {
   TASKS: 'Tasks',
   COURSE_PREP: 'CoursePrep',
   TALENT_RECORDS: 'TalentRecords',
+  ADMIN_MARKETING_RECORDS: 'AdminMarketingRecords',
 };
 
 const DEPARTMENTS = ['東橋教室', '北區教室', '才藝部門', '總部'];
@@ -196,9 +206,9 @@ const ROLES = ['admin', 'manager', 'teacher', 'admin_staff'];
 const ADMIN_STAFF_SUBTYPES = ['general', 'marketing'];
 
 const INITIAL_USERS = [
-  { nickname: '柏翰',     role: 'admin',       department: '總部',     status: 'active', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll'] },
+  { nickname: '柏翰',     role: 'admin',       department: '總部',     status: 'active', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'] },
   { nickname: '酸酸',     role: 'manager',     department: '東橋教室', status: 'active', employment_type: 'manager', work_assignments: ['anqin-manager'] },
-  { nickname: '小魚',     role: 'manager',     department: '北區教室', status: 'active', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll'] },
+  { nickname: '小魚',     role: 'manager',     department: '北區教室', status: 'active', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'] },
   { nickname: '柳丁',     role: 'manager',     department: '才藝部門', status: 'pending', employment_type: 'manager', work_assignments: ['talent-manager'] },
   { nickname: '松鼠',     role: 'teacher',     department: '東橋教室', status: 'active' },
   { nickname: '羊羊',     role: 'teacher',     department: '東橋教室', status: 'active' },
@@ -208,7 +218,7 @@ const INITIAL_USERS = [
   { nickname: '浩浩',     role: 'teacher',     department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'] },
   { nickname: '毛毛',     role: 'teacher',     department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'] },
   // 行政美編行銷（歸北區教室，由小魚評核）
-  { nickname: '皮皮老師', role: 'admin_staff', department: '北區教室', status: 'active', subtype: 'marketing', employment_type: 'pt', work_assignments: ['talent-pt'] },
+  { nickname: '皮皮老師', role: 'admin_staff', department: '北區教室', status: 'active', subtype: 'marketing', employment_type: 'pt', work_assignments: ['talent-pt', 'admin-marketing'] },
 ];
 
 const INITIAL_STUDENT_ROSTER = [

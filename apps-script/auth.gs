@@ -125,6 +125,12 @@ function validateUserWorkConfiguration_(role, employment, assignments, schedule)
   if (work.indexOf('talent-payroll') >= 0 && role !== 'manager' && role !== 'admin') {
     throw new Error('才藝薪資工作區只可指派給主管或管理員');
   }
+  if (work.indexOf('admin-marketing') >= 0 && role !== 'admin_staff' && role !== 'admin') {
+    throw new Error('行政美宣工作區只可指派給行政美宣人員');
+  }
+  if (work.indexOf('admin-marketing-manager') >= 0 && role !== 'manager' && role !== 'admin') {
+    throw new Error('行政美宣主管工作區只可指派給主管或管理員');
+  }
 }
 
 /** 驗證首次 Google 登入，或用尚未過期的後端工作階段重新核對身分。 */
@@ -317,6 +323,8 @@ function authorizeApiAction_(action, params, actor) {
   const viewerActions = [
     'listLogs', 'getEvidenceLog', 'listWeekly', 'listCoursePreps',
     'listArchivedKpiFiles', 'listTeacherReportFolders', 'getTalentWorkspaceData',
+    'getAdminMarketingWorkspaceData',
+    'getAdminMarketingDriveFolders',
     'getEvalEvidence', 'getEval', 'listEvals',
     'listTasks', 'getDashboard'
   ];
@@ -330,6 +338,37 @@ function authorizeApiAction_(action, params, actor) {
 
   if (action === 'getTalentWorkspaceData') {
     params.viewer = actor.nickname;
+    return;
+  }
+
+  if (action === 'getAdminMarketingWorkspaceData') {
+    params.viewer = actor.nickname;
+    return;
+  }
+
+  if (action === 'getAdminMarketingDriveFolders') {
+    requireApiRole_(actor, ['admin', 'manager']);
+    params.viewer = actor.nickname;
+    return;
+  }
+
+  if (action === 'saveAdminMarketingRecord') {
+    const target = requireApiUserScope_(actor, params.nickname || actor.nickname);
+    if (target.status !== 'active') throw new Error('此員工帳號已停用，不能新增或修改行政美宣資料');
+    params.nickname = target.nickname;
+    if (actor.role !== 'admin' && target.nickname !== actor.nickname) throw new Error('只能修改自己的行政美宣紀錄');
+    return;
+  }
+
+  if (action === 'saveAdminMarketingAssignment' || action === 'addAdminMarketingMessage') {
+    requireApiUserScope_(actor, params.nickname);
+    params.operator = actor.nickname;
+    return;
+  }
+
+  if (action === 'reviewAdminMarketingRecord' || action === 'saveAdminMarketingScore') {
+    requireApiRole_(actor, ['admin', 'manager']);
+    params.operator = actor.nickname;
     return;
   }
 
@@ -603,7 +642,7 @@ function addUser(params) {
     return { ok: false, error: 'invalid employment_type' };
   }
   const workAssignments = parseUserListField_(params.work_assignments);
-  const allowedAssignments = ['anqin-teacher', 'anqin-manager', 'talent-fulltime', 'talent-pt', 'talent-manager', 'talent-payroll'];
+  const allowedAssignments = ['anqin-teacher', 'anqin-manager', 'talent-fulltime', 'talent-pt', 'talent-manager', 'talent-payroll', 'admin-marketing', 'admin-marketing-manager'];
   if (workAssignments.some(function (item) { return allowedAssignments.indexOf(item) < 0; })) {
     return { ok: false, error: 'invalid work_assignments' };
   }
@@ -680,7 +719,7 @@ function updateUser(params) {
   if (updates.employment_type !== undefined && updates.employment_type && !['fulltime', 'pt', 'manager', 'admin'].includes(String(updates.employment_type))) return { ok: false, error: 'invalid employment_type' };
   if (updates.work_assignments !== undefined) {
     const assignments = parseUserListField_(updates.work_assignments);
-    const allowed = ['anqin-teacher', 'anqin-manager', 'talent-fulltime', 'talent-pt', 'talent-manager', 'talent-payroll'];
+    const allowed = ['anqin-teacher', 'anqin-manager', 'talent-fulltime', 'talent-pt', 'talent-manager', 'talent-payroll', 'admin-marketing', 'admin-marketing-manager'];
     if (assignments.some(function (item) { return allowed.indexOf(item) < 0; })) return { ok: false, error: 'invalid work_assignments' };
     updates.work_assignments = assignments;
   }
