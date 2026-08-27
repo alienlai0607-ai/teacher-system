@@ -57,6 +57,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 }
 .review-ribbon img { width: 20px; height: 20px; border-radius: 5px; }
 .review-ribbon span { width: 1px; height: 14px; background: #d8b55f; }
+.test-view-exit { min-height:28px; border:1px solid #d8b55f; border-radius:7px; background:#fff; padding:3px 10px; font-weight:800; cursor:pointer; }
 
 .app-shell { min-height: 100vh; }
 .topbar {

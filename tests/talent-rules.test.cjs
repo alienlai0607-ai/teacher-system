@@ -135,7 +135,7 @@ assert.match(talentUiSource, /appMissing/, 'PT 續報資格與月結需納入 AP
 assert.match(backendSource, /lesson\.siteType === 'partner'[\s\S]*lesson\.appStatus = 'not_required'/, '合作校課程後端必須強制免發布');
 assert.match(backendSource, /talentAppEvidence_\(params\.app_files, true\)/, '後端必須驗證 APP 圖片已上傳至 Drive');
 assert.match(backendSource, /家長 APP 發布完成截圖/, '正式 PDF 需收錄 APP 發布證據');
-assert.match(adminDashboardSource, /測試老師視角（唯讀）/);
+assert.match(adminDashboardSource, /快速測試老師畫面/);
 assert.match(adminDashboardSource, /KPI_WORKSPACES\.hrefFor\(workspaceId\)/, '測試入口需導向老師真正使用的新版工作區');
 
 console.log('PASS talent rules, schedules, attachments, employee deletion, historical payroll, cloud-report access, and multi-file controls');

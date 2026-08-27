@@ -6483,11 +6483,11 @@
       const realRole = window.AUTH?.getRealRole?.();
       window.AUTH?.exitImpersonate?.();
       const root = window.AUTH?.relativeRoot?.() || '../../';
-      window.location.href = realRole === 'admin' ? `${root}admin/dashboard.html#test-view` : `${root}manager/dashboard.html`;
+      window.location.href = realRole === 'admin' ? `${root}admin/dashboard.html?v=20260827-test-view-fast-1#test-view` : `${root}manager/dashboard.html`;
     }
     else if (action === 'open-test-view') {
       const root = window.AUTH?.relativeRoot?.() || '../../';
-      window.location.href = `${root}admin/dashboard.html#test-view`;
+      window.location.href = `${root}admin/dashboard.html?v=20260827-test-view-fast-1#test-view`;
     }
     else if (action === 'open-health' || action === 'run-health-check') openHealthDialog();
     else if (action === 'check-integrations') await checkIntegrations();

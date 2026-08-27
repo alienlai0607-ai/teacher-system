@@ -150,7 +150,7 @@ window.UI = (function () {
     div.id = 'impersonate-banner';
     div.innerHTML = `
       🎭 <strong>測試模式</strong>：你正在以 <strong>${user.nickname}</strong>（${roleLabel(user.role)} · ${user.department}）身份檢視
-      <button class="btn-exit-impersonate" onclick="UI.exitImpersonateBack()">離開 →</button>
+      <button class="btn-exit-impersonate" onclick="UI.exitImpersonateBack()">換老師</button>
     `;
     document.body.insertBefore(div, document.body.firstChild);
   }
@@ -161,7 +161,7 @@ window.UI = (function () {
     AUTH.exitImpersonate();
     const root = AUTH.relativeRoot();
     if (realRole === 'manager') window.location.href = root + 'manager/dashboard.html';
-    else window.location.href = root + 'admin/dashboard.html'; // 預設 admin
+    else window.location.href = root + 'admin/dashboard.html?v=20260827-test-view-fast-1#test-view'; // 預設 admin
   }
 
   return { toast, loading, confirmDialog, modal, formatDate, formatDateTime, renderHeader, mountHeader, roleLabel, exitImpersonateBack };

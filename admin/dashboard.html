@@ -9,7 +9,7 @@
 <script src="../shared/auth.js?v=20260826-test-view-1"></script>
 <script src="../shared/workspaces.js?v=20260826-test-view-1"></script>
 <script src="../shared/api.js?v=20260826-test-view-1"></script>
-<script src="../shared/ui.js?v=20260825-production-audit-2"></script>
+<script src="../shared/ui.js?v=20260827-test-view-fast-1"></script>
 <script src="../shared/pwa.js?v=20260825-production-audit-2"></script>
 <script src="../shared/push.js?v=20260825-production-audit-2"></script>
 <style>
@@ -25,16 +25,20 @@
   .dept-name { font-size: 18px; font-weight: 700; color: var(--primary); margin-bottom: 8px; }
   .dept-stat { font-size: 14px; margin: 4px 0; }
   .dept-score { font-size: 32px; font-weight: 800; color: var(--accent); }
-  .test-view-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
-  .test-user { border:1px solid var(--border); border-radius:10px; padding:14px; background:#fff; }
-  .test-user-head { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; margin-bottom:10px; }
-  .test-user-head strong { display:block; }
-  .test-user-head small { color:var(--muted); }
-  .test-status { font-size:12px; border-radius:999px; padding:3px 8px; background:#e8f6ed; color:#256b3d; white-space:nowrap; }
-  .test-status.pending { background:#fff1c9; color:#795100; }
-  .test-workspaces { display:flex; flex-wrap:wrap; gap:7px; }
-  .test-workspaces .btn { margin:0; }
-  @media (max-width: 680px) { .test-view-grid { grid-template-columns:1fr; } }
+  .test-view-card { border-top:4px solid var(--primary); }
+  .test-view-controls { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) auto; gap:12px; align-items:end; }
+  .test-view-field { display:grid; gap:6px; margin:0; }
+  .test-view-field span { color:var(--muted); font-size:13px; font-weight:700; }
+  .test-view-field select { width:100%; min-height:44px; border:1px solid var(--border); border-radius:8px; background:#fff; padding:8px 12px; color:var(--text); }
+  .test-view-start { min-height:44px; margin:0; white-space:nowrap; }
+  .test-view-summary { margin-top:12px; padding:10px 12px; border-radius:8px; background:#f6faf8; color:var(--muted); font-size:13px; }
+  .test-view-loading { padding:14px 0; color:var(--muted); }
+  body.test-view-only .dashboard-content { display:none !important; }
+  body.test-view-only #test-view { max-width:780px; margin:20px auto; }
+  @media (max-width: 680px) {
+    .test-view-controls { grid-template-columns:1fr; }
+    .test-view-start { width:100%; }
+  }
 </style>
 </head>
 <body>
@@ -58,17 +62,23 @@
 </style>
 
 <div class="container">
-  <h2>👑 全機構總覽 · <span id="ym"></span></h2>
+  <h2 class="dashboard-content">👑 全機構總覽 · <span id="ym"></span></h2>
+
+  <div class="card test-view-card" id="test-view">
+    <div class="card-title">快速測試老師畫面</div>
+    <div class="muted text-sm mb-2">選老師與工作區後立即查看。測試模式只能閱讀，不會修改正式資料。</div>
+    <div id="impersonate-list"><div class="test-view-loading">正在準備老師名單…</div></div>
+  </div>
 
   <!-- 即時訊息匡（點了彈出明細）-->
-  <div id="notify-banner" style="display:none;" onclick="goNotify()">
+  <div id="notify-banner" class="dashboard-content" style="display:none;" onclick="goNotify()">
     <span><span class="bell">🔔</span> 你有 <span class="pill"><span id="notify-count">0</span> 則</span> 事項通知</span>
     <span class="go">點我看 ›</span>
   </div>
 
-  <div class="dept-grid" id="dept-grid"></div>
+  <div class="dept-grid dashboard-content" id="dept-grid"></div>
 
-  <div class="card mt-2">
+  <div class="card mt-2 dashboard-content">
     <div class="card-title">📊 機構統計</div>
     <div class="stat-grid">
       <div class="stat-box"><div class="stat-num" id="total-users">—</div><div class="stat-label">總人數</div></div>
@@ -77,16 +87,11 @@
     </div>
   </div>
 
-  <div class="card" id="notify-box">
+  <div class="card dashboard-content" id="notify-box">
     <div class="card-title">🔔 布拉克星球事項通知欄</div>
     <ul id="todos" style="margin:0; padding-left:20px;"></ul>
   </div>
 
-  <div class="card" id="test-view">
-    <div class="card-title">測試老師視角（唯讀）</div>
-    <div class="muted text-sm mb-2">選擇人員與工作區後，會開啟對方真正看到的新版介面。測試期間無法上傳、儲存或送出正式資料。</div>
-    <div id="impersonate-list"></div>
-  </div>
 </div>
 
 <!-- 訊息明細彈窗 -->
@@ -105,13 +110,19 @@
 const session = AUTH.requireRole(['admin']);
 let notifyItems = [];
 let testViewUsers = [];
+const TEST_VIEW_CACHE_KEY = 'kpi_test_view_users_v2';
+const TEST_VIEW_LAST_KEY = 'kpi_test_view_last_v2';
 
 window.addEventListener('load', async () => {
   UI.mountHeader(session);
   document.getElementById('ym').textContent = new Date().toISOString().slice(0, 7);
-  await loadDashboard();
-  await loadImpersonateList();
-  if (window.location.hash === '#test-view') document.getElementById('test-view')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const focusedTestView = window.location.hash === '#test-view' && normalizedNickname(session.nickname) === '柏翰';
+  if (focusedTestView) {
+    document.body.classList.add('test-view-only');
+    await loadImpersonateList();
+    return;
+  }
+  await Promise.allSettled([loadDashboard(), loadImpersonateList()]);
 });
 
 function safeText(value) {
@@ -128,29 +139,91 @@ async function loadImpersonateList() {
     wrap.innerHTML = '<div class="muted">此功能只開放柏翰管理員使用。</div>';
     return;
   }
-  const res = await API.listUsers();
-  if (!res.ok) {
-    wrap.innerHTML = `<div class="muted">${safeText(res.error || '無法讀取人員名單')}</div>`;
+  const cached = readTestViewCache();
+  if (cached.length) {
+    testViewUsers = cached;
+    renderImpersonateControls();
+  } else {
+    wrap.innerHTML = '<div class="test-view-loading">正在讀取老師名單…</div>';
+  }
+  try {
+    const res = await API.listUsers();
+    if (!res.ok) throw new Error(res.error || '無法讀取人員名單');
+    testViewUsers = res.users
+      .filter(user => ['active', 'pending'].includes(user.status) && user.role !== 'admin')
+      .filter(user => KPI_WORKSPACES.getAssignments(user).length)
+      .sort((a, b) => String(a.department || '').localeCompare(String(b.department || ''), 'zh-Hant') || String(a.nickname || '').localeCompare(String(b.nickname || ''), 'zh-Hant'));
+    sessionStorage.setItem(TEST_VIEW_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), users: testViewUsers }));
+    renderImpersonateControls();
+  } catch (error) {
+    if (!cached.length) wrap.innerHTML = `<div class="muted">${safeText(error.message || '無法讀取人員名單')}</div>`;
+  }
+}
+
+function readTestViewCache() {
+  try {
+    const cached = JSON.parse(sessionStorage.getItem(TEST_VIEW_CACHE_KEY) || 'null');
+    return cached && Date.now() - Number(cached.savedAt || 0) < 10 * 60 * 1000 && Array.isArray(cached.users) ? cached.users : [];
+  } catch (error) { return []; }
+}
+
+function getLastTestView() {
+  try { return JSON.parse(localStorage.getItem(TEST_VIEW_LAST_KEY) || 'null') || {}; }
+  catch (error) { return {}; }
+}
+
+function renderImpersonateControls() {
+  const wrap = document.getElementById('impersonate-list');
+  if (!testViewUsers.length) {
+    wrap.innerHTML = '<div class="muted">目前沒有可測試的人員。</div>';
     return;
   }
-  testViewUsers = res.users.filter(user => ['active', 'pending'].includes(user.status) && user.role !== 'admin');
-  wrap.innerHTML = `<div class="test-view-grid">${testViewUsers.map(user => {
-    const assignments = KPI_WORKSPACES.getAssignments(user);
-    return `<article class="test-user"><div class="test-user-head"><span><strong>${safeText(user.nickname)}</strong><small>${safeText(user.department)} · ${user.role === 'manager' ? '主管' : user.role === 'admin_staff' ? '行政' : '老師'}</small></span><span class="test-status ${user.status === 'pending' ? 'pending' : ''}">${user.status === 'pending' ? '待開通，可測試' : '使用中'}</span></div><div class="test-workspaces">${assignments.length ? assignments.map(item => `<button type="button" class="btn btn-sm" data-test-nickname="${safeText(user.nickname)}" data-test-workspace="${safeText(item.id)}">查看${safeText(item.shortLabel)}</button>`).join('') : '<span class="muted text-sm">尚未設定工作區</span>'}</div></article>`;
-  }).join('')}</div>`;
+  const last = getLastTestView();
+  const selected = testViewUsers.find(user => user.nickname === last.nickname) || testViewUsers[0];
+  wrap.innerHTML = `<div class="test-view-controls">
+    <label class="test-view-field"><span>老師／主管</span><select id="test-user-select">${testViewUsers.map(user => `<option value="${safeText(user.nickname)}" ${user.nickname === selected.nickname ? 'selected' : ''}>${safeText(user.nickname)}｜${safeText(user.department)}｜${user.role === 'manager' ? '主管' : user.role === 'admin_staff' ? '行政' : '老師'}</option>`).join('')}</select></label>
+    <label class="test-view-field"><span>工作區</span><select id="test-workspace-select"></select></label>
+    <button type="button" class="btn btn-primary test-view-start" id="test-view-start">立即查看</button>
+  </div><div class="test-view-summary" id="test-view-summary"></div>`;
+  updateWorkspaceOptions(last.workspaceId || '');
+}
+
+function updateWorkspaceOptions(preferredId = '') {
+  const userSelect = document.getElementById('test-user-select');
+  const workspaceSelect = document.getElementById('test-workspace-select');
+  const summary = document.getElementById('test-view-summary');
+  if (!userSelect || !workspaceSelect) return;
+  const target = testViewUsers.find(user => user.nickname === userSelect.value) || testViewUsers[0];
+  const assignments = KPI_WORKSPACES.getAssignments(target);
+  const selected = assignments.find(item => item.id === preferredId) || assignments[0];
+  workspaceSelect.innerHTML = assignments.map(item => `<option value="${safeText(item.id)}" ${item.id === selected?.id ? 'selected' : ''}>${safeText(item.label)}</option>`).join('');
+  if (summary) summary.textContent = `${target.nickname} · ${target.department} · ${selected?.label || '尚未設定工作區'} · 唯讀測試`;
 }
 
 function impersonateAs(nickname, workspaceId) {
   const target = testViewUsers.find(user => user.nickname === nickname);
   const allowed = target && KPI_WORKSPACES.getAssignments(target).some(item => item.id === workspaceId);
   if (!target || !allowed) { UI.toast('找不到可測試的工作區', 'danger'); return; }
+  localStorage.setItem(TEST_VIEW_LAST_KEY, JSON.stringify({ nickname, workspaceId }));
+  const button = document.getElementById('test-view-start');
+  if (button) { button.disabled = true; button.textContent = '正在切換…'; }
   AUTH.impersonate(target);
   window.location.href = KPI_WORKSPACES.hrefFor(workspaceId);
 }
 
 document.addEventListener('click', event => {
-  const button = event.target.closest('[data-test-workspace]');
-  if (button) impersonateAs(button.dataset.testNickname, button.dataset.testWorkspace);
+  const button = event.target.closest('#test-view-start');
+  if (button) impersonateAs(document.getElementById('test-user-select')?.value, document.getElementById('test-workspace-select')?.value);
+});
+
+document.addEventListener('change', event => {
+  if (event.target.id === 'test-user-select') updateWorkspaceOptions();
+  if (event.target.id === 'test-workspace-select') {
+    const target = testViewUsers.find(user => user.nickname === document.getElementById('test-user-select')?.value);
+    const workspace = KPI_WORKSPACES.getAssignments(target || {}).find(item => item.id === event.target.value);
+    const summary = document.getElementById('test-view-summary');
+    if (summary && target) summary.textContent = `${target.nickname} · ${target.department} · ${workspace?.label || ''} · 唯讀測試`;
+  }
 });
 
 async function loadDashboard() {

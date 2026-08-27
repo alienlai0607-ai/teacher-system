@@ -62,6 +62,8 @@ const codeSource = fs.readFileSync(path.join(root, 'apps-script/Code.gs'), 'utf8
 const setupSource = fs.readFileSync(path.join(root, 'apps-script/setup.gs'), 'utf8');
 const apiSource = fs.readFileSync(path.join(root, 'shared/api.js'), 'utf8');
 const uiSource = fs.readFileSync(path.join(root, 'review/admin-marketing-v1/app.js'), 'utf8');
+const adminDashboardSource = fs.readFileSync(path.join(root, 'admin/dashboard.html'), 'utf8');
+const sharedUiSource = fs.readFileSync(path.join(root, 'shared/ui.js'), 'utf8');
 
 assert.match(workspacesSource, /'皮皮': \['talent-pt', 'admin-marketing'\]/, '皮皮需同時保留才藝 PT 與行政美宣');
 assert.match(workspacesSource, /'小魚': \['anqin-manager', 'talent-payroll', 'admin-marketing-manager'\]/, '小魚需保留安親主管並增加行政美宣主管');
@@ -84,5 +86,14 @@ assert.match(uiSource, /route: 'cloud', label: '雲端資料'/);
 assert.match(uiSource, /皮皮老師的行政美宣素材與完成證據/);
 assert.match(uiSource, /completedOn: item\.actualDate \|\| record\.date/, '每週美宣成果應按實際完成日期歸週');
 assert.match(uiSource, /data-record-id/, '跨日未完成工作需能從原紀錄繼續更新');
+assert.match(adminDashboardSource, /id="test-user-select"/, '快速測試只需選擇老師');
+assert.match(adminDashboardSource, /id="test-workspace-select"/, '快速測試需自動列出該老師的工作區');
+assert.match(adminDashboardSource, /body\.classList\.add\('test-view-only'\)/, '測試入口不得先載入複雜主管總覽');
+assert.match(adminDashboardSource, /sessionStorage\.setItem\(TEST_VIEW_CACHE_KEY/, '老師名單需快取以縮短重複切換等待');
+assert.match(adminDashboardSource, /Promise\.allSettled\(\[loadDashboard\(\), loadImpersonateList\(\)\]\)/, '一般總覽內兩份資料需平行載入');
+assert.doesNotMatch(adminDashboardSource, /test-view-grid/, '測試入口不得再使用大量老師卡片');
+assert.match(sharedUiSource, /admin\/dashboard\.html\?v=20260827-test-view-fast-1#test-view/, '離開測試視角需直接回快速切換頁');
+assert.match(uiSource, /data-action="open-test-view"/, '行政美宣主管視角需能進入快速測試');
+assert.match(uiSource, /data-action="exit-impersonation"/, '行政美宣測試視角需能一鍵換老師');
 
-console.log('PASS admin marketing validation, roles, targets, evidence, deadlines, project stages, manager conversation, and Drive access');
+console.log('PASS admin marketing validation, roles, targets, evidence, deadlines, project stages, manager conversation, Drive access, and fast test view');

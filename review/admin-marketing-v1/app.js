@@ -122,8 +122,13 @@
   }
   window.KPI_REVIEW_USER = currentUser;
   const TEST_VIEW_MODE = Boolean(identity.session?.impersonate);
+  const canOpenTestView = !TEST_VIEW_MODE && currentUser.role === 'admin' && normalizeName(currentUser.nickname) === '柏翰';
   const isManager = workspace.role === 'manager';
   const workerName = '皮皮老師';
+  if (reviewRibbon && TEST_VIEW_MODE) {
+    reviewRibbon.hidden = false;
+    reviewRibbon.innerHTML = `<img src="../../shared/icons/logo.png" alt="" aria-hidden="true"><strong>柏翰測試視角</strong><span aria-hidden="true"></span>目前查看：${esc(currentUser.nickname)} · 唯讀 <button type="button" class="test-view-exit" data-action="exit-impersonation">換老師</button>`;
+  }
 
   function weekBounds(dateValue = todayIso()) {
     const date = new Date(`${dateValue}T12:00:00+08:00`);
@@ -611,7 +616,10 @@
 
   function profileDialog() {
     const labels = (window.KPI_WORKSPACES?.getAssignments?.(currentUser) || []).map(item => item.shortLabel || item.label).join('、');
-    const body = `<div class="record-card"><div class="record-title"><strong>${esc(currentUser.nickname)}</strong><small>${esc(workspace.label)} · ${esc(currentUser.department || '')}</small></div></div>${window.KPI_WORKSPACES?.renderQuickSwitcher?.(currentUser, { currentId: workspaceId }) || ''}${TEST_VIEW_MODE ? '<div class="notice warning mt-16">目前為唯讀測試視角，不能寫入正式資料。</div>' : ''}`;
+    const testAction = TEST_VIEW_MODE
+      ? `<button type="button" class="button primary" data-action="exit-impersonation">${icon('undo-2')}換一位老師</button>`
+      : canOpenTestView ? `<button type="button" class="button primary" data-action="open-test-view">${icon('scan-eye')}測試老師畫面</button>` : '';
+    const body = `<div class="record-card"><div class="record-title"><strong>${esc(currentUser.nickname)}</strong><small>${esc(workspace.label)} · ${esc(currentUser.department || '')}</small></div></div>${window.KPI_WORKSPACES?.renderQuickSwitcher?.(currentUser, { currentId: workspaceId }) || ''}${TEST_VIEW_MODE ? '<div class="notice warning mt-16">目前為唯讀測試視角，不能寫入正式資料。</div>' : ''}${testAction ? `<div class="record-actions mt-16">${testAction}</div>` : ''}`;
     showDialog(dialogShell('帳號與工作切換', `不需重新登入，可切換：${labels || workspace.label}`, body, '', ''), false);
   }
   function moreNavDialog() {
@@ -863,6 +871,15 @@
     else if (action === 'open-assignment' || action === 'update-assignment') openAssignment(actionNode.dataset.id || '');
     else if (action === 'review-record') openReview(actionNode.dataset.id || '');
     else if (action === 'profile') profileDialog();
+    else if (action === 'open-test-view') {
+      const root = window.AUTH?.relativeRoot?.() || '../../';
+      window.location.href = `${root}admin/dashboard.html?v=20260827-test-view-fast-1#test-view`;
+    }
+    else if (action === 'exit-impersonation') {
+      window.AUTH?.exitImpersonate?.();
+      const root = window.AUTH?.relativeRoot?.() || '../../';
+      window.location.href = `${root}admin/dashboard.html?v=20260827-test-view-fast-1#test-view`;
+    }
     else if (action === 'more-nav') moreNavDialog();
     else if (action === 'retry-cloud') loadCloudData(true);
     else if (action === 'refresh-drive') loadDriveFolders(true);

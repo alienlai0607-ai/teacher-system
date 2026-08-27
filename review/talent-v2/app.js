@@ -1654,11 +1654,11 @@
     const action = control.dataset.action;
     if (action === 'exit-impersonation') {
       window.AUTH?.exitImpersonate?.();
-      window.location.href = `${window.AUTH?.relativeRoot?.() || '../../'}admin/dashboard.html#test-view`;
+      window.location.href = `${window.AUTH?.relativeRoot?.() || '../../'}admin/dashboard.html?v=20260827-test-view-fast-1#test-view`;
       return;
     }
     if (action === 'open-test-view') {
-      window.location.href = `${window.AUTH?.relativeRoot?.() || '../../'}admin/dashboard.html#test-view`;
+      window.location.href = `${window.AUTH?.relativeRoot?.() || '../../'}admin/dashboard.html?v=20260827-test-view-fast-1#test-view`;
       return;
     }
     if (TEST_VIEW_MODE && TEST_VIEW_MUTATION_ACTIONS.has(action)) {
