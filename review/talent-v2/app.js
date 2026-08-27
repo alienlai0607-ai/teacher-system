@@ -154,7 +154,7 @@
   if (TEST_VIEW_MODE && reviewRibbon) {
     reviewRibbon.hidden = false;
     reviewRibbon.classList.add('test-view');
-    reviewRibbon.innerHTML = `${icon('scan-eye', 15)}<strong>柏翰測試視角</strong><span class="review-separator" aria-hidden="true"></span>目前查看：${esc(currentUser.nickname)} · 唯讀，不會寫入正式資料 <button type="button" class="test-view-exit" data-action="exit-impersonation">回到管理頁</button>`;
+    reviewRibbon.innerHTML = `${icon('scan-eye', 15)}<strong>柏翰互動測試</strong><span class="review-separator" aria-hidden="true"></span>目前查看：${esc(currentUser.nickname)} · 可操作完整頁面，不會寫入正式資料 <button type="button" class="test-view-exit" data-action="exit-impersonation">回到管理頁</button>`;
   }
 
   function createSeed() {
@@ -1646,7 +1646,7 @@
 
   function openProfile() {
     const assignments = window.KPI_WORKSPACES?.getAssignments?.(currentUser) || [];
-    const testNotice = TEST_VIEW_MODE ? `<div class="notice info">${icon('scan-eye', 19)}<div><strong>柏翰正在測試 ${esc(currentUser.nickname)} 的畫面</strong><span>所有新增、上傳、儲存、送出與通知功能都已停用。</span></div></div>` : '';
+    const testNotice = TEST_VIEW_MODE ? `<div class="notice info">${icon('scan-eye', 19)}<div><strong>柏翰正在測試 ${esc(currentUser.nickname)} 的完整操作流程</strong><span>可以開啟、輸入與切換所有頁面；最後的儲存、送出、核准、上傳與通知會被攔截。</span></div></div>` : '';
     const sessionActions = TEST_VIEW_MODE
       ? `<button type="button" class="btn btn-primary" data-action="exit-impersonation">${icon('undo-2', 16)}回到測試人員清單</button>`
       : identity.session
@@ -1735,11 +1735,10 @@
     toast('PT 逐堂月結 CSV 已匯出');
   }
 
-  const TEST_VIEW_MUTATION_ACTIONS = new Set([
-    'new-log', 'edit-log', 'submit-log', 'save-log-draft', 'discard-log-draft',
-    'new-prep', 'submit-prep', 'edit-prep', 'save-prep-draft', 'remove-upload',
-    'retry-report', 'review-prep', 'finish-prep-review', 'edit-score',
-    'open-bonus-approval', 'setup-automation', 'enable-push', 'test-notifications',
+  const TEST_VIEW_WRITE_ACTIONS = new Set([
+    'submit-log', 'save-log-draft', 'submit-prep', 'save-prep-draft',
+    'retry-report', 'finish-prep-review', 'setup-automation', 'enable-push',
+    'test-notifications',
   ]);
 
   document.addEventListener('click', async event => {
@@ -1759,8 +1758,8 @@
       window.location.href = `${window.AUTH?.relativeRoot?.() || '../../'}admin/dashboard.html?v=20260827-test-view-fast-1#test-view`;
       return;
     }
-    if (TEST_VIEW_MODE && TEST_VIEW_MUTATION_ACTIONS.has(action)) {
-      toast('目前是柏翰測試視角，只能查看，不能修改正式資料', 'warning');
+    if (TEST_VIEW_MODE && TEST_VIEW_WRITE_ACTIONS.has(action)) {
+      toast('測試模式：已走到正式寫入步驟，本次不會儲存、送出或通知', 'warning');
       return;
     }
     if (action === 'navigate') {
@@ -1911,7 +1910,7 @@
       return;
     }
     if (TEST_VIEW_MODE) {
-      toast('目前是柏翰測試視角，表單不會送出', 'warning');
+      toast('測試模式：表單流程正常，最後送出已攔截，不會寫入正式資料', 'warning');
       return;
     }
     if (event.target.id === 'log-form') { await runFormAction(event.target, () => submitLog(event.target)); return; }
@@ -1995,7 +1994,7 @@
     if (appEvidenceInput) {
       if (TEST_VIEW_MODE) {
         appEvidenceInput.value = '';
-        toast('測試視角不能上傳正式附件', 'warning');
+        toast('測試模式：已確認附件入口可用，但不會上傳正式檔案', 'warning');
         return;
       }
       await handleAppEvidence(appEvidenceInput);
@@ -2005,7 +2004,7 @@
     if (fileInput) {
       if (TEST_VIEW_MODE) {
         fileInput.value = '';
-        toast('測試視角不能上傳正式附件', 'warning');
+        toast('測試模式：已確認附件入口可用，但不會上傳正式檔案', 'warning');
         return;
       }
       const form = fileInput.closest('#log-form');

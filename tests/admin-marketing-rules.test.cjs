@@ -152,5 +152,8 @@ assert.match(uiSource, /evaluationHistoryControl\('performance-history-form'/, '
 assert.match(uiSource, /id="evaluation-selection-form"/, '主管切換評核月份需有確認查看按鈕');
 assert.match(uiSource, /目前評核尚未儲存，確定要切換月份嗎/, '行政主管切換月份前需保護尚未儲存的評核');
 assert.doesNotMatch(uiSource, /id="month-filter"[^>]*[\s\S]{0,120}月度評核/, '月度評核不得沿用一選即切換的通用月份欄位');
+assert.match(uiSource, /柏翰互動測試/, '行政美宣測試視角需清楚標示可操作完整流程');
+assert.match(uiSource, /personalStorageOwner = TEST_VIEW_MODE[\s\S]*_test_\$\{currentUser\.nickname\}/, '行政美宣測試草稿必須與真人使用者本機資料隔離');
+assert.match(uiSource, /else if \(TEST_VIEW_MODE\)[\s\S]*最後寫入已攔截[\s\S]*else if \(form\.id === 'trial-form'\)/, '行政美宣所有正式表單需在處理器執行前被測試模式攔截');
 
 console.log('PASS admin marketing validation, trial tracking, first-term bonus, roles, targets, evidence, deadlines, project stages, manager conversation, Drive access, and fast test view');

@@ -191,5 +191,11 @@ assert.match(backendSource, /talentAppEvidence_\(params\.app_files, true\)/, '�
 assert.match(backendSource, /家長 APP 發布完成截圖/, '正式 PDF 需收錄 APP 發布證據');
 assert.match(adminDashboardSource, /快速測試老師畫面/);
 assert.match(adminDashboardSource, /KPI_WORKSPACES\.hrefFor\(workspaceId\)/, '測試入口需導向老師真正使用的新版工作區');
+const talentTestWriteActions = talentUiSource.slice(talentUiSource.indexOf('const TEST_VIEW_WRITE_ACTIONS'), talentUiSource.indexOf("document.addEventListener('click'"));
+assert.match(talentUiSource, /柏翰互動測試/, '測試視角需清楚標示為可互動沙盒');
+assert.match(talentTestWriteActions, /'submit-log'/, '正式送出仍須在測試視角攔截');
+assert.match(talentTestWriteActions, /'finish-prep-review'/, '主管核准仍須在測試視角攔截');
+assert.doesNotMatch(talentTestWriteActions, /'new-log'|'edit-log'|'new-prep'|'review-prep'|'edit-score'|'open-bonus-approval'/, '測試視角必須能開啟新增、編輯與審查介面');
+assert.match(talentUiSource, /表單流程正常，最後送出已攔截/, '按到最後一步時需明確說明未寫入正式資料');
 
 console.log('PASS talent rules, schedules, attachments, employee deletion, historical payroll, cloud-report access, and multi-file controls');

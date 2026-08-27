@@ -8,6 +8,7 @@
       return null;
     }
   })();
+  const TEST_VIEW_MODE = INITIAL_AUTH_SESSION?.impersonate === true;
   const STORAGE_SCOPE = INITIAL_AUTH_SESSION?.nickname
     ? encodeURIComponent(INITIAL_AUTH_SESSION.impersonate
       ? `impersonation:${INITIAL_AUTH_SESSION.impersonated_by || 'reviewer'}:${INITIAL_AUTH_SESSION.nickname}`
@@ -914,7 +915,7 @@
     const session = legacySession();
     if (!session) return '尚未登入正式帳號';
     if (session.status === 'suspended') return '帳號已停用';
-    if (session.impersonate === true) return `${session.impersonated_by || '主管'}正在代看 ${session.nickname}，不能代替送出`;
+    if (session.impersonate === true) return `${session.impersonated_by || '主管'}正在互動測試 ${session.nickname}，正式送出會被攔截`;
     if (session.role !== 'teacher') return `目前登入為${sessionRoleLabel(session.role)}`;
     if (session.nickname !== backendNickname(state.context.teacher)) return `目前登入為 ${session.nickname}`;
     return `${session.nickname} 已登入`;
@@ -1439,7 +1440,7 @@
   function renderSystemStatusNotice() {
     const session = legacySession();
     if (session?.impersonate === true) {
-      return `<div class="system-status-notice"><div class="notice-band info">${icon('scan-eye', 19)}<div><div class="notice-title">${esc(session.impersonated_by || '柏翰')}測試視角：${esc(session.nickname)}</div><div class="notice-copy">目前只能查看；新增、上傳、儲存與正式送出皆已停用。</div></div><button type="button" class="btn btn-small" data-action="exit-impersonation">回到測試人員清單</button></div></div>`;
+      return `<div class="system-status-notice"><div class="notice-band info">${icon('scan-eye', 19)}<div><div class="notice-title">${esc(session.impersonated_by || '柏翰')}互動測試：${esc(session.nickname)}</div><div class="notice-copy">可以開啟、輸入與切換完整流程；儲存、送出、核准、上傳與通知不會寫入正式資料。</div></div><button type="button" class="btn btn-small" data-action="exit-impersonation">回到測試人員清單</button></div></div>`;
     }
     const message = runtimeHealth.persistError || runtimeHealth.loadIssue;
     if (message) return `<div class="system-status-notice"><div class="notice-band danger">${icon('database-zap', 19)}<div><div class="notice-title">資料安全提醒</div><div class="notice-copy">${esc(message)}</div></div><button type="button" class="btn btn-small" data-action="open-health">健康檢查</button></div></div>`;
@@ -6248,6 +6249,16 @@
     closeDrawer(); persist(); renderApp(); toast(kind.includes('accept') || kind.includes('approve') ? '審查已完成' : '已建立補充待辦', 'success');
   }
 
+  const TEST_VIEW_WRITE_ACTIONS = new Set([
+    'send-feedback-message', 'accept-operation', 'request-operation-clarify',
+    'submit-daily', 'submit-weekly', 'submit-plan-review', 'approve-plan',
+    'request-plan-changes', 'accept-submission', 'request-submission-clarify',
+    'accept-evidence', 'request-evidence-clarify', 'enable-push',
+    'setup-system-automation', 'test-all-notifications', 'save-manager-evaluation',
+    'test-app-notification', 'copy-line-binding', 'confirm-delete',
+    'retry-draft-sync', 'export-monthly-archive',
+  ]);
+
   document.addEventListener('submit', async event => {
     const form = event.target.closest('form[data-form]');
     if (!form) return;
@@ -6263,6 +6274,10 @@
       if (currentForm?.dataset.dirty === 'true' && !window.confirm('目前評核尚未儲存，確定要切換查看對象嗎？')) return;
       const data = new FormData(form);
       await loadManagerEvaluation(String(data.get('teacher') || ''), String(data.get('month') || ''));
+      return;
+    }
+    if (TEST_VIEW_MODE) {
+      toast('測試模式：表單流程正常，最後寫入已攔截，不會儲存、送出或上傳正式資料', 'warning');
       return;
     }
     if (type === 'activity') saveActivityForm(form);
@@ -6282,6 +6297,10 @@
     if (!control || control.disabled) return;
     const action = control.dataset.action;
     if ((action === 'backdrop-close-drawer' || action === 'backdrop-close-dialog') && event.target !== control) return;
+    if (TEST_VIEW_MODE && TEST_VIEW_WRITE_ACTIONS.has(action)) {
+      toast('測試模式：已走到正式寫入步驟，本次不會儲存、送出、核准或通知', 'warning');
+      return;
+    }
 
     if (action === 'close-drawer' || action === 'backdrop-close-drawer') closeDrawer();
     else if (action === 'close-dialog' || action === 'backdrop-close-dialog') closeDialog();
@@ -6702,6 +6721,12 @@
   });
 
   document.addEventListener('change', async event => {
+    const fileInput = event.target.closest('input[type="file"]');
+    if (TEST_VIEW_MODE && fileInput) {
+      fileInput.value = '';
+      toast('測試模式：已確認附件入口可用，但不會上傳正式檔案', 'warning');
+      return;
+    }
     const control = event.target.closest('[data-change]');
     if (event.target.closest('#activity-form, #evidence-form, #plan-form, [data-draft-form]')) scheduleCurrentDrawerDraft();
     if (!control) return;

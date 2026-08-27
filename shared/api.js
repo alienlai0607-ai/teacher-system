@@ -36,7 +36,7 @@ window.API = (function () {
       return {
         ok: false,
         code: 'READ_ONLY_TEST_VIEW',
-        error: '目前是柏翰測試視角，只能查看，不能寫入、上傳或送出正式資料',
+        error: '目前是柏翰互動測試，已攔截正式寫入、上傳或送出',
       };
     }
     const payload = { action, ...params };

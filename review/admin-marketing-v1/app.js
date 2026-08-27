@@ -134,7 +134,7 @@
   const workerName = '皮皮老師';
   if (reviewRibbon && TEST_VIEW_MODE) {
     reviewRibbon.hidden = false;
-    reviewRibbon.innerHTML = `<img src="../../shared/icons/logo.png" alt="" aria-hidden="true"><strong>柏翰測試視角</strong><span aria-hidden="true"></span>目前查看：${esc(currentUser.nickname)} · 唯讀 <button type="button" class="test-view-exit" data-action="exit-impersonation">換老師</button>`;
+    reviewRibbon.innerHTML = `<img src="../../shared/icons/logo.png" alt="" aria-hidden="true"><strong>柏翰互動測試</strong><span aria-hidden="true"></span>目前查看：${esc(currentUser.nickname)} · 可操作完整頁面，不會寫入正式資料 <button type="button" class="test-view-exit" data-action="exit-impersonation">換老師</button>`;
   }
 
   function weekBounds(dateValue = todayIso()) {
@@ -158,7 +158,10 @@
     };
   }
   const sharedStorageKey = 'bp_admin_marketing_v1_shared';
-  const personalStorageKey = `bp_admin_marketing_v1_personal_${encodeURIComponent(currentUser.nickname)}_${workspaceId}`;
+  const personalStorageOwner = TEST_VIEW_MODE
+    ? `${identity.session?.impersonated_by || '柏翰'}_test_${currentUser.nickname}`
+    : currentUser.nickname;
+  const personalStorageKey = `bp_admin_marketing_v1_personal_${encodeURIComponent(personalStorageOwner)}_${workspaceId}`;
   function loadState() {
     const seed = createSeed();
     if (!PREVIEW_MODE) return seed;
@@ -782,7 +785,7 @@
     const testAction = TEST_VIEW_MODE
       ? `<button type="button" class="button primary" data-action="exit-impersonation">${icon('undo-2')}換一位老師</button>`
       : canOpenTestView ? `<button type="button" class="button primary" data-action="open-test-view">${icon('scan-eye')}測試老師畫面</button>` : '';
-    const body = `<div class="record-card"><div class="record-title"><strong>${esc(currentUser.nickname)}</strong><small>${esc(workspace.label)} · ${esc(currentUser.department || '')}</small></div></div>${window.KPI_WORKSPACES?.renderQuickSwitcher?.(currentUser, { currentId: workspaceId }) || ''}${TEST_VIEW_MODE ? '<div class="notice warning mt-16">目前為唯讀測試視角，不能寫入正式資料。</div>' : ''}${testAction ? `<div class="record-actions mt-16">${testAction}</div>` : ''}`;
+    const body = `<div class="record-card"><div class="record-title"><strong>${esc(currentUser.nickname)}</strong><small>${esc(workspace.label)} · ${esc(currentUser.department || '')}</small></div></div>${window.KPI_WORKSPACES?.renderQuickSwitcher?.(currentUser, { currentId: workspaceId }) || ''}${TEST_VIEW_MODE ? '<div class="notice warning mt-16">目前為互動測試：可以開啟、輸入與切換完整流程；儲存、送出、核准、上傳與通知不會寫入正式資料。</div>' : ''}${testAction ? `<div class="record-actions mt-16">${testAction}</div>` : ''}`;
     showDialog(dialogShell('帳號與工作切換', `不需重新登入，可切換：${labels || workspace.label}`, body, '', ''), false);
   }
   function moreNavDialog() {
@@ -1177,6 +1180,9 @@
       if (scoreForm?.dataset.dirty === 'true' && !window.confirm('目前評核尚未儲存，確定要切換月份嗎？')) return;
       state.ui.evaluationMonth = String(new FormData(form).get('month') || selectedEvaluationMonth());
       persist('評核月份已切換'); renderApp();
+    }
+    else if (TEST_VIEW_MODE) {
+      toast('測試模式：表單流程正常，最後寫入已攔截，不會儲存、送出或上傳正式資料', 'warning');
     }
     else if (form.id === 'trial-form') runForm(handleTrial, form);
     else if (form.id === 'no-trial-form') runForm(() => handleNoTrial(), form);

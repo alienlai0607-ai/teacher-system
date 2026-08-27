@@ -68,5 +68,10 @@ assert.match(source, /tracks\.enrichment\.covered && !enrichmentReady/, '若已�
 assert.match(source, /學科內必填；學科外有課才填/, '主管審查頁必須使用相同規則說明');
 assert.match(source, /id="activity-track-indicator">\$\{renderActivityTrackIndicator\(value\.type\)\}/, '特色課程表單內要再次顯示有課才填、填了要完整的規則');
 assert.match(styles, /\.daily-track-row\.is-optional:not\(\.is-covered\)/, '選填的特色課程不得以紅色缺件樣式呈現');
+assert.match(source, /const TEST_VIEW_MODE = INITIAL_AUTH_SESSION\?\.impersonate === true/, '安親需以登入代看狀態啟用互動測試');
+assert.match(source, /const TEST_VIEW_WRITE_ACTIONS = new Set\([\s\S]*'send-feedback-message'[\s\S]*'confirm-delete'[\s\S]*'export-monthly-archive'/, '安親測試視角必須攔截對話、刪除與正式歸檔');
+assert.match(source, /if \(TEST_VIEW_MODE\)[\s\S]{0,220}表單流程正常，最後寫入已攔截/, '安親表單需在正式寫入前由測試模式攔截');
+assert.match(source, /TEST_VIEW_MODE && fileInput[\s\S]{0,220}不會上傳正式檔案/, '安親測試視角選擇附件後不得上傳正式檔案');
+assert.match(source, /可以開啟、輸入與切換完整流程/, '安親測試狀態需明確說明可互動範圍');
 
 console.log('PASS anqin task dialog, visible evaluation scores, and optional enrichment rules');
