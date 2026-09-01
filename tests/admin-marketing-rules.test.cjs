@@ -118,6 +118,7 @@ const apiSource = fs.readFileSync(path.join(root, 'shared/api.js'), 'utf8');
 const uiSource = fs.readFileSync(path.join(root, 'review/admin-marketing-v1/app.js'), 'utf8');
 const uiCssSource = fs.readFileSync(path.join(root, 'review/admin-marketing-v1/styles.css'), 'utf8');
 const uiHtmlSource = fs.readFileSync(path.join(root, 'review/admin-marketing-v1/index.html'), 'utf8');
+const workspacesCssSource = fs.readFileSync(path.join(root, 'shared/workspaces.css'), 'utf8');
 const adminDashboardSource = fs.readFileSync(path.join(root, 'admin/dashboard.html'), 'utf8');
 const sharedUiSource = fs.readFileSync(path.join(root, 'shared/ui.js'), 'utf8');
 
@@ -173,6 +174,13 @@ assert.match(uiCssSource, /\.dialog > form \{[^}]*min-height: 0;[^}]*display: fl
 assert.match(uiCssSource, /\.dialog-body \{[^}]*min-height: 0;[^}]*overflow-y: auto;/, '所有行政彈窗內容需可獨立向下捲動');
 assert.match(uiCssSource, /\.dialog-foot \{[^}]*flex: 0 0 auto;/, '行政彈窗底部操作需固定留在畫面內');
 assert.match(uiCssSource, /\.file-chip, \.selected-file \{[^}]*max-width: 100%;/, '長檔名不得撐破手機版面');
+assert.match(workspacesCssSource, /\.workspace-quick-switch \{[^}]*flex-wrap: wrap;/, '多工作身分列需依容器寬度換行');
+assert.match(workspacesCssSource, /\.workspace-quick-options \{[^}]*flex: 1 1 280px;[^}]*flex-wrap: wrap;/, '工作身分按鈕群不得撐破行政側欄');
+assert.match(workspacesCssSource, /\.workspace-quick-option \{[^}]*max-width: 100%;[^}]*flex: 1 1 112px;/, '單一工作身分按鈕不得超出容器');
+assert.match(workspacesCssSource, /@media \(max-width: 820px\)[\s\S]*\.workspace-quick-switch \{[^}]*flex-direction: column;[^}]*flex-wrap: nowrap;/, '手機直向排列不得因換行規則產生多餘高度');
+assert.match(workspacesCssSource, /\.workspace-quick-title \{[^}]*width: 100%;[^}]*flex: 0 0 auto;/, '手機工作身分標題高度需依內容決定');
+assert.match(workspacesCssSource, /grid-template-columns: repeat\(auto-fit, minmax\(136px, 1fr\)\)/, '手機三身分按鈕需保留可讀寬度');
+assert.match(uiHtmlSource, /workspaces\.css\?v=20260901-workspace-wrap-1/, '行政頁需載入防溢出的工作身分樣式');
 assert.match(uiHtmlSource, /app\.js\?v=20260901-admin-future-trial-1/, '行政新表單需使用獨立快取版本');
 assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=admin-marketing(?:-manager)?&v=20260901-admin-future-trial-1/g) || []).length, 2, '行政與主管入口都需避開舊版快取');
 assert.match(uiSource, /此學生已有試上追蹤紀錄，請更新原紀錄/, '前端需在重複新增時立即阻擋');
