@@ -46,6 +46,7 @@ function handleRequest(e, method) {
       // 認證
       'ping': () => ({ ok: true, time: new Date().toISOString() }),
       'whoami': () => whoami(params),
+      'getSessionIdentity': () => getSessionIdentity(params),
 
       // 使用者管理（admin）
       'listUsers': () => listUsers(params),

@@ -3,7 +3,7 @@ window.API = (function () {
   const URL = window.APP_CONFIG.API_URL;
   let authRedirectScheduled = false;
   const IMPERSONATION_READ_ACTIONS = new Set([
-    'ping', 'whoami', 'listUsers',
+    'ping', 'whoami', 'getSessionIdentity', 'listUsers',
     'getLog', 'getTodayLog', 'listLogs', 'getEvidenceLog', 'getMakeupQuota',
     'listTasks', 'getWeekly', 'listWeekly', 'listFeedback', 'listFeedbackThread',
     'listObservations', 'listPosts', 'getWeekPostCount', 'getOKR',
@@ -63,6 +63,7 @@ window.API = (function () {
   return {
     ping: () => call('ping'),
     whoami: (email, credential = '') => call('whoami', { email, credential }),
+    getSessionIdentity: () => call('getSessionIdentity'),
 
     listUsers: (operator) => call('listUsers', { operator: operator || window.AUTH?.getSession?.()?.nickname || '' }),
     addUser: (data) => call('addUser', data),

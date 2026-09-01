@@ -57,6 +57,7 @@ function handleRequest(e, method) {
       // 認證
       'ping': () => ({ ok: true, time: new Date().toISOString() }),
       'whoami': () => whoami(params),
+      'getSessionIdentity': () => getSessionIdentity(params),
 
       // 使用者管理（admin）
       'listUsers': () => listUsers(params),
@@ -1104,7 +1105,7 @@ function logSystem(nickname, action, target, detail) {
  * 流程：
  * 1. 前端用 Google Identity Services 取得 ID token
  * 2. 後端向 Google 驗證 ID token，再依 email 查使用者
- * 3. 後端簽發 12 小時工作階段；其餘 API 每次都驗簽與重新核對帳號狀態
+ * 3. 後端簽發 24 小時工作階段；其餘 API 每次都驗簽與重新核對帳號狀態
  * 4. 新人由管理員預先建立 email 綁定，避免未綁定暱稱被陌生帳號認領
  */
 
@@ -1145,6 +1146,28 @@ function whoami(params) {
       rest_days: parseUserListField_(user.rest_days)
     },
     session_token: user.status === 'active' ? issueSessionToken_(user) : ''
+  };
+}
+
+function getSessionIdentity(params) {
+  const user = params && params.__actor;
+  if (!user || user.status !== 'active') {
+    return { ok: false, error: '登入狀態已失效，請重新登入', code: 'AUTH_REQUIRED' };
+  }
+  return {
+    ok: true,
+    user: {
+      nickname: user.nickname,
+      email: user.email,
+      role: user.role,
+      department: normalizeDepartment_(user.department),
+      status: user.status,
+      subtype: user.subtype || '',
+      employment_type: user.employment_type || '',
+      work_assignments: parseUserListField_(user.work_assignments),
+      schedule_json: parseUserListField_(user.schedule_json),
+      rest_days: parseUserListField_(user.rest_days)
+    }
   };
 }
 

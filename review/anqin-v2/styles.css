@@ -2323,6 +2323,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--brand); }
 @media (max-width: 520px) {
   .review-separator, .review-ribbon span + span { display: none; }
   .brand-name { font-size: 13px; }
+  .brand-name-full { display: none; }
+  .brand-name-short { display: inline; }
   .role-switch { width: 126px; }
   .role-switch button { padding-right: 4px; padding-left: 4px; font-size: 11px; }
   .status-cell { padding: 13px 14px; }

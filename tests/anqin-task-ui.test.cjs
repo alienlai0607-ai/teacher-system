@@ -8,6 +8,9 @@ const source = fs.readFileSync(path.join(root, 'review/anqin-v2/app.js'), 'utf8'
 const styles = fs.readFileSync(path.join(root, 'review/anqin-v2/styles.css'), 'utf8');
 const workspaces = fs.readFileSync(path.join(root, 'shared/workspaces.js'), 'utf8');
 const sharedAuth = fs.readFileSync(path.join(root, 'shared/auth.js'), 'utf8');
+const sharedApi = fs.readFileSync(path.join(root, 'shared/api.js'), 'utf8');
+const apiRouter = fs.readFileSync(path.join(root, 'apps-script/Code.gs'), 'utf8');
+const authBackend = fs.readFileSync(path.join(root, 'apps-script/auth.gs'), 'utf8');
 const evaluationBackend = fs.readFileSync(path.join(root, 'apps-script/evaluation.gs'), 'utf8');
 const pdfReport = fs.readFileSync(path.join(root, 'apps-script/pdfreport.gs'), 'utf8');
 const coursePrepBackend = fs.readFileSync(path.join(root, 'apps-script/courseprep.gs'), 'utf8');
@@ -77,8 +80,8 @@ assert.match(source, /const TEST_VIEW_WRITE_ACTIONS = new Set\([\s\S]*'send-feed
 assert.match(source, /if \(TEST_VIEW_MODE\)[\s\S]{0,220}表單流程正常，最後寫入已攔截/, '安親表單需在正式寫入前由測試模式攔截');
 assert.match(source, /TEST_VIEW_MODE && fileInput[\s\S]{0,220}不會上傳正式檔案/, '安親測試視角選擇附件後不得上傳正式檔案');
 assert.match(source, /可以開啟、輸入與切換完整流程/, '安親測試狀態需明確說明可互動範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260901-upload-pipeline-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260901-upload-pipeline-1/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260901-identity-evidence-repair-2/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260901-identity-evidence-repair-2/, '登入備援路徑也必須避開舊版快取');
 
 const activityFormSource = source.slice(source.indexOf('function renderActivitySpecificFields('), source.indexOf('function renderEvidenceAttachmentList('));
 assert.match(activityFormSource, /if \(activityNeedsPrepSource\(type\)\) return '';/, '課業指導與學科外不得重複顯示舊課程內容欄位');
@@ -155,7 +158,48 @@ assert.match(evidenceSaveSource, /status: evidenceReady\(draft\) \? 'pending' : 
 const evidenceFormSource = source.slice(source.indexOf('function renderEvidenceAttachmentList('), source.indexOf('function weeklySourceData('));
 assert.doesNotMatch(evidenceFormSource, /這張要主管看什麼|主管請看哪裡|name="observation"[^>]*required|evidence-quality">/, '成果表單不得重複要求老師說明主管觀看位置或顯示自動品質分數');
 assert.match(evidenceFormSource, /主管將依內容的完整性、清楚度與可判讀性進行判斷與評分/, '成果表單需清楚說明內容品質由主管判斷');
-assert.match(source, /function evidenceReady\(data\)[\s\S]{0,120}evidenceAttachments\(data\)\.some\(attachmentAvailable\)/, '成果送出門檻只能確認至少有一份實際可讀附件');
+assert.match(source, /function attachmentRecorded\(item\)/, '成果需區分已登記附件與目前裝置可否預覽');
+assert.match(source, /function evidenceReady\(data\)[\s\S]{0,120}evidenceAttachments\(data\)\.some\(attachmentRecorded\)/, '既有附件紀錄不得因裝置無法預覽而被誤判缺成果');
+assert.doesNotMatch(evidenceSaveSource, /份檔案尚未完成上傳，請重新選擇後再儲存/, '既有檔名附件不得阻擋老師儲存成果紀錄');
+assert.match(source, /function hydrateCloudSnapshotAttachments\(/, '讀取舊日報時需從雲端附件清單修復快照連結');
+assert.match(source, /importCloudSnapshot\(log\?\.kpi6_data\?\.v2_snapshot, log\?\.attachments \|\| \[\]\)/, '老師讀取日報時需一併回填雲端附件');
+assert.match(source, /activityId, evidenceId, attachmentId/, '新上傳附件需保存活動、證據與附件識別碼');
+assert.match(source, /function ensureCloudTeacherIdentity\([\s\S]{0,1200}API\.getSessionIdentity/, '前端需向後端重新確認正式老師身分');
+assert.match(sharedApi, /getSessionIdentity: \(\) => call\('getSessionIdentity'\)/, '共用 API 需提供工作階段身分校正');
+assert.match(apiRouter, /'getSessionIdentity': \(\) => getSessionIdentity\(params\)/, 'Apps Script 路由需提供工作階段身分校正');
+assert.match(authBackend, /function getSessionIdentity\(params\)/, '後端需由驗簽結果回傳目前正式身分');
+assert.match(source, /if \(dailySubmitInFlight\) return/, '日結送出需防止連點產生重複請求');
+assert.match(source, /duplicate = Array\.from\(root\.children\)/, '相同提示不得在畫面上重複堆疊');
+
+const evidenceRuntime = vm.createContext({
+  materialCloudUrl: item => String(item?.cloudUrl || item?.url || ''),
+  clone: value => JSON.parse(JSON.stringify(value)),
+});
+vm.runInContext(source.slice(source.indexOf('function normalizeEvidenceRecord('), source.indexOf('function normalizeOperationPhotoRecord(')), evidenceRuntime);
+vm.runInContext(source.slice(source.indexOf('function evidenceAttachments('), source.indexOf('function evidencePrimaryAttachment(')), evidenceRuntime);
+vm.runInContext(source.slice(source.indexOf('function hydrateCloudSnapshotAttachments('), source.indexOf('function importCloudSnapshot(')), evidenceRuntime);
+const legacyEvidence = {
+  id: 'evidence_old',
+  attachments: [
+    { id: 'attachment_old_1', fileName: 'IMG_4297.jpeg', placeholder: true },
+    { id: 'attachment_old_2', fileName: 'IMG_4298.jpeg', placeholder: true },
+    { id: 'attachment_old_3', fileName: 'IMG_4300.jpeg', placeholder: true },
+    { id: 'attachment_old_4', fileName: 'IMG_4301.jpeg', placeholder: true },
+  ],
+};
+assert.equal(evidenceRuntime.attachmentAvailable(legacyEvidence.attachments[0]), false, '舊附件目前不可預覽時需保留真實狀態');
+assert.equal(evidenceRuntime.evidenceReady(legacyEvidence), true, '四張既有附件不得再被誤判為缺成果');
+const repairedSnapshot = evidenceRuntime.hydrateCloudSnapshotAttachments({
+  schema: 'anqin-v2',
+  submission: { activitySnapshots: [{ id: 'activity_1', type: 'tutoring', evidence: [legacyEvidence] }] },
+}, [{
+  url: 'https://drive.google.com/file/d/file-4297/view',
+  fileId: 'file-4297',
+  fileName: 'IMG_4297.jpeg',
+  forType: 'v2-tutoring',
+}]);
+assert.equal(repairedSnapshot.submission.activitySnapshots[0].evidence[0].attachments[0].cloudFileId, 'file-4297', '舊快照需恢復雲端檔案編號');
+assert.equal(repairedSnapshot.submission.activitySnapshots[0].evidence[0].attachments[0].placeholder, false, '成功回填後不得繼續顯示為待修復附件');
 assert.match(source, /submittedAt, status: 'pending'/, '重新送出後必須回到主管待審，不得停留在草稿或舊狀態');
 const resubmitSource = source.slice(source.indexOf('function markDailyNeedsResubmit('), source.indexOf('function todaySectionStatus('));
 const resubmitContext = vm.createContext({

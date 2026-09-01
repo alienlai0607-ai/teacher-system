@@ -26,7 +26,7 @@
     && (['127.0.0.1', 'localhost'].includes(window.location.hostname)
       || window.location.hostname.endsWith('.trycloudflare.com'))
     && Boolean(LOCAL_REVIEW_NICKNAME);
-  const APP_VERSION = 20;
+  const APP_VERSION = 21;
   const MAX_EVIDENCE_FILES = 8;
   const MAX_DOCUMENT_FILE_BYTES = 25 * 1024 * 1024;
   const MAX_IMAGE_SOURCE_BYTES = 25 * 1024 * 1024;
@@ -476,9 +476,12 @@
       const cloudFileId = attachment.cloudFileId || attachment.fileId || '';
       const hasCloudCopy = Boolean(cloudUrl || cloudFileId);
       const dataUrl = hasCloudCopy ? '' : (attachment.dataUrl || '');
+      const recorded = attachment.recorded !== undefined
+        ? Boolean(attachment.recorded)
+        : Boolean(attachment.fileName || attachment.name || dataUrl || hasCloudCopy);
       return {
         id: attachment.id || `attachment_${record.id || 'item'}_${index + 1}`,
-        fileName: attachment.fileName || `成果檔案 ${index + 1}`,
+        fileName: attachment.fileName || attachment.name || (recorded ? `成果檔案 ${index + 1}` : ''),
         mimeType: attachment.mimeType || 'application/octet-stream',
         dataUrl,
         size: attachment.size || '',
@@ -489,6 +492,7 @@
         uploadStatus: attachment.uploadStatus || (hasCloudCopy ? 'uploaded' : dataUrl ? 'local' : 'incomplete'),
         uploadError: attachment.uploadError || '',
         placeholder: Boolean(!hasCloudCopy && !dataUrl),
+        recorded,
       };
     });
     const primary = record.attachments.find(item => item.id === record.primaryAttachmentId) || record.attachments[0];
@@ -781,6 +785,8 @@
   let currentDrawerDraftDirty = false;
   let restoredDraftAt = '';
   let lastStorageToastAt = 0;
+  let dailySubmitInFlight = false;
+  let weeklySubmitInFlight = false;
   let runtimeHealth = {
     loadIssue: loadStateIssue,
     persistError: '',
@@ -881,6 +887,32 @@
     const session = legacySession();
     if (!session || session.status === 'suspended' || session.impersonate === true) return false;
     return session.role === 'teacher' && sameReviewIdentity(session.nickname, state.context.teacher);
+  }
+
+  async function ensureCloudTeacherIdentity() {
+    const current = legacySession();
+    if (cloudIdentityReady()) return { ok: true, user: current };
+    if (!current) return { ok: false, error: '尚未登入正式帳號' };
+    if (current.impersonate === true) {
+      return { ok: false, error: '目前為主管互動測試，正式寫入已停用' };
+    }
+    if (!current.session_token) return { ok: false, error: '登入資料不完整，請重新登入' };
+    if (!window.API?.getSessionIdentity) return { ok: false, error: '帳號驗證服務尚未載入，請重新整理' };
+
+    const result = await API.getSessionIdentity();
+    if (!result?.ok || !result.user) return { ok: false, error: result?.error || '無法確認登入帳號' };
+    const user = result.user;
+    if (user.role !== 'teacher') {
+      return { ok: false, error: `目前正式登入為${sessionRoleLabel(user.role)} ${user.nickname || ''}`.trim() };
+    }
+    if (!sameReviewIdentity(user.nickname, state.context.teacher)) {
+      return { ok: false, error: `目前正式登入為 ${user.nickname}，畫面是 ${state.context.teacher}` };
+    }
+    window.AUTH?.setSession?.({ ...current, ...user, session_token: current.session_token });
+    applyLegacySessionContext();
+    return cloudIdentityReady()
+      ? { ok: true, user: legacySession(), repaired: true }
+      : { ok: false, error: '登入帳號已確認，但老師工作區仍不一致，請重新登入' };
   }
 
   function applyLegacySessionContext() {
@@ -1606,8 +1638,14 @@
   function toast(message, type = '') {
     const root = $('#toast-root');
     if (!root) return;
+    const duplicate = Array.from(root.children).find(item => item.dataset.message === String(message));
+    if (duplicate) {
+      duplicate.className = `toast ${type}`.trim();
+      return;
+    }
     const node = document.createElement('div');
     node.className = `toast ${type}`.trim();
+    node.dataset.message = String(message);
     node.innerHTML = `${icon(type === 'danger' ? 'circle-alert' : type === 'warning' ? 'triangle-alert' : 'circle-check', 17)}<span>${esc(message)}</span>`;
     root.appendChild(node);
     hydrateIcons();
@@ -1659,7 +1697,7 @@
         <div class="brand-block">
           <img class="brand-logo" src="assets/kpi-logo.png" alt="布拉克星球 KPI Logo">
           <div class="brand-copy">
-            <div class="brand-name"><span class="brand-name-full">布拉克星球KPI系統</span><span class="brand-name-short">布拉克星球KPI系統</span></div>
+            <div class="brand-name"><span class="brand-name-full">布拉克星球KPI系統</span><span class="brand-name-short">KPI</span></div>
             <div class="brand-product">安親工作台</div>
           </div>
         </div>
@@ -1915,7 +1953,7 @@
 
   function operationProofCount(operation) {
     const proof = operation.evidenceByCheck || {};
-    return Object.keys(OPERATION_CHECKS).filter(key => proof[key]?.fileName && attachmentAvailable(proof[key]) && ['normal', 'exception'].includes(proof[key]?.status)).length;
+    return Object.keys(OPERATION_CHECKS).filter(key => attachmentRecorded(proof[key]) && ['normal', 'exception'].includes(proof[key]?.status)).length;
   }
 
   function operationExceptionCount(operation) {
@@ -1967,7 +2005,7 @@
     if (respectDutyOwner && operation.dutyOwner !== state.context.teacher) return true;
     const proof = operation.evidenceByCheck || {};
     const items = Object.keys(OPERATION_CHECKS).map(key => proof[key]);
-    return Boolean(operation.confirmedAt) && items.every(item => item && item.fileName && attachmentAvailable(item) && ['normal', 'exception'].includes(item.status) && (item.status !== 'exception' || String(item.action || '').trim().length >= 8));
+    return Boolean(operation.confirmedAt) && items.every(item => attachmentRecorded(item) && ['normal', 'exception'].includes(item.status) && (item.status !== 'exception' || String(item.action || '').trim().length >= 8));
   }
 
   function markDailyNeedsResubmit(date = state.daily.date, teacher = state.context.teacher) {
@@ -2077,6 +2115,7 @@
   function renderActivityRow(activity) {
     const config = ACTIVITY_TYPES[activity.type] || ACTIVITY_TYPES.tutoring;
     const evidence = activity.evidence || [];
+    const evidenceFileCount = evidence.reduce((count, item) => count + evidenceAttachments(item).filter(attachmentRecorded).length, 0);
     const prepSource = prepSourceById(activity.prepSourceId);
     const isCrossDay = activity.type === 'lessonprep';
     const feedbackOnly = activityNeedsPrepSource(activity.type);
@@ -2103,7 +2142,7 @@
         <div class="activity-meta">${esc(config.label)} · ${isCrossDay ? `${formatDate(activity.date)} 建立` : contextMeta}</div>
         <div class="activity-glance"><strong>${isCrossDay ? '本日進度' : feedbackOnly ? '課後備課回饋' : '今日成果'}</strong><span>${esc(truncate(resultPreview || '尚未填寫', 100))}</span></div>
         ${missing.length ? `<div class="activity-missing activity-missing-compact">${icon('triangle-alert', 14)}<strong>待補：</strong>${esc(missing.map(item => item.label).join('、'))}</div>` : ''}
-        <div class="activity-quick-meta"><span class="badge ${evidence.some(evidenceReady) ? 'blue' : 'red'}">${icon('scan-line', 12)}${isCrossDay ? '本日產出' : '成果'} ${evidence.length} 份</span>${activity.nextAction ? `<span class="badge outline">${icon('calendar-clock', 12)}${formatShortDate(activity.dueDate)} ${isCrossDay ? '下一步' : '追蹤'}</span>` : ''}</div>
+        <div class="activity-quick-meta"><span class="badge ${evidence.some(evidenceReady) ? 'blue' : 'red'}">${icon('scan-line', 12)}${isCrossDay ? '本日產出' : '成果檔案'} ${evidenceFileCount} 份</span>${activity.nextAction ? `<span class="badge outline">${icon('calendar-clock', 12)}${formatShortDate(activity.dueDate)} ${isCrossDay ? '下一步' : '追蹤'}</span>` : ''}</div>
         <details class="activity-record-details"><summary>${icon('list-tree', 14)}<span>完整紀錄</span>${icon('chevron-down', 14)}</summary><div class="activity-record-details-body">${detailSummary ? `<div class="activity-detail-summary">${detailSummary}</div>` : ''}${feedbackOnly ? `<div class="activity-prep-line"><strong>備課檔案：</strong>${esc(prepSource ? `${prepSource.title} · ${formatDate(prepSource.date)} 建立` : '尚未連結')}</div>` : ''}${feedbackDetails}</div></details>
       </div>
       <div class="activity-actions">
@@ -2977,8 +3016,13 @@
     return Boolean(item && (item.dataUrl || materialCloudUrl(item) || item.cloudFileId));
   }
 
+  function attachmentRecorded(item) {
+    if (!item) return false;
+    return attachmentAvailable(item) || (item.recorded !== false && Boolean(String(item.fileName || item.name || '').trim()));
+  }
+
   function evidenceReady(data) {
-    return evidenceAttachments(data).some(attachmentAvailable);
+    return evidenceAttachments(data).some(attachmentRecorded);
   }
 
   function evidencePrimaryAttachment(data) {
@@ -3611,10 +3655,64 @@
     return remoteActivity;
   }
 
-  function importCloudSnapshot(snapshot) {
+  function hydrateCloudSnapshotAttachments(snapshot, cloudAttachments = []) {
+    const hydrated = clone(snapshot);
+    const available = (Array.isArray(cloudAttachments) ? cloudAttachments : [])
+      .filter(item => materialCloudUrl(item) || item?.fileId || item?.cloudFileId);
+    const used = new Set();
+    const claim = (predicate) => {
+      const index = available.findIndex((item, position) => !used.has(position) && predicate(item));
+      if (index < 0) return null;
+      used.add(index);
+      return available[index];
+    };
+    const applyCloudFile = (target, cloudFile) => {
+      if (!target || !cloudFile) return;
+      target.cloudUrl = materialCloudUrl(cloudFile);
+      target.cloudFileId = cloudFile.cloudFileId || cloudFile.fileId || '';
+      target.mimeType = target.mimeType || cloudFile.mimeType || 'application/octet-stream';
+      target.fileName = target.fileName || cloudFile.fileName || '成果檔案';
+      target.uploadStatus = 'uploaded';
+      target.uploadError = '';
+      target.placeholder = false;
+      target.recorded = true;
+      target.dataUrl = '';
+    };
+
+    (hydrated?.submission?.activitySnapshots || []).forEach(activity => {
+      (activity.evidence || []).forEach(evidence => {
+        normalizeEvidenceRecord(evidence);
+        evidence.attachments.forEach(attachment => {
+          if (attachmentAvailable(attachment)) return;
+          const expectedType = `v2-${activity.type}`;
+          const cloudFile = claim(item => item.attachmentId && item.attachmentId === attachment.id)
+            || claim(item => item.evidenceId && item.evidenceId === evidence.id && item.fileName === attachment.fileName)
+            || claim(item => item.forType === expectedType && item.fileName === attachment.fileName)
+            || claim(item => item.fileName === attachment.fileName)
+            || claim(item => item.forType === expectedType);
+          applyCloudFile(attachment, cloudFile);
+        });
+        normalizeEvidenceRecord(evidence);
+      });
+    });
+
+    const operation = hydrated?.operation;
+    Object.entries(operation?.evidenceByCheck || {}).forEach(([key, photo]) => {
+      normalizeOperationPhotoRecord(photo);
+      if (attachmentAvailable(photo)) return;
+      const cloudFile = claim(item => item.forType === `env_${key}`)
+        || claim(item => item.fileName && item.fileName === photo.fileName);
+      applyCloudFile(photo, cloudFile);
+      normalizeOperationPhotoRecord(photo);
+    });
+    return hydrated;
+  }
+
+  function importCloudSnapshot(snapshot, cloudAttachments = []) {
     if (!snapshot || snapshot.schema !== 'anqin-v2' || !snapshot.submission) return false;
-    const remoteSubmission = clone(snapshot.submission);
-    remoteSubmission.cloudSavedAt = snapshot.savedAt || remoteSubmission.cloudSavedAt || remoteSubmission.submittedAt || '';
+    const hydratedSnapshot = hydrateCloudSnapshotAttachments(snapshot, cloudAttachments);
+    const remoteSubmission = clone(hydratedSnapshot.submission);
+    remoteSubmission.cloudSavedAt = hydratedSnapshot.savedAt || remoteSubmission.cloudSavedAt || remoteSubmission.submittedAt || '';
     remoteSubmission.activitySnapshots = Array.isArray(remoteSubmission.activitySnapshots) ? remoteSubmission.activitySnapshots : [];
     remoteSubmission.studentCaseSnapshots = Array.isArray(remoteSubmission.studentCaseSnapshots) ? remoteSubmission.studentCaseSnapshots : [];
     remoteSubmission.contactSnapshots = Array.isArray(remoteSubmission.contactSnapshots) ? remoteSubmission.contactSnapshots : [];
@@ -3623,7 +3721,22 @@
     const remoteStamp = String(remoteSubmission.cloudSavedAt || remoteSubmission.submittedAt || '');
     const localStamp = String(existingSubmission?.cloudSavedAt || existingSubmission?.submittedAt || '');
     const remoteIsNewer = !existingSubmission || remoteStamp > localStamp;
-    if (!remoteIsNewer) return false;
+    if (!remoteIsNewer) {
+      remoteSubmission.activitySnapshots.forEach(remoteActivity => {
+        const localActivity = state.activities.find(item => item.id === remoteActivity.id);
+        if (localActivity) preserveActivityMedia(remoteActivity, localActivity);
+        const localSnapshot = (existingSubmission?.activitySnapshots || []).find(item => item.id === remoteActivity.id);
+        if (localSnapshot) preserveActivityMedia(remoteActivity, localSnapshot);
+      });
+      if (hydratedSnapshot.operation?.id) {
+        const localOperation = operationRecordById(hydratedSnapshot.operation.id);
+        Object.entries(hydratedSnapshot.operation.evidenceByCheck || {}).forEach(([key, remotePhoto]) => {
+          preserveAttachmentMedia(remotePhoto, localOperation?.evidenceByCheck?.[key]);
+          if (localOperation?.evidenceByCheck?.[key]) normalizeOperationPhotoRecord(localOperation.evidenceByCheck[key]);
+        });
+      }
+      return false;
+    }
     if (existingSubmission) Object.assign(existingSubmission, remoteSubmission);
     else state.submissions.unshift(remoteSubmission);
 
@@ -3636,14 +3749,14 @@
         else state[key].push(clone(item));
       });
     };
-    mergeCollection('activities', [...remoteSubmission.activitySnapshots, ...(snapshot.prepSources || [])]);
+    mergeCollection('activities', [...remoteSubmission.activitySnapshots, ...(hydratedSnapshot.prepSources || [])]);
     mergeCollection('studentCases', remoteSubmission.studentCaseSnapshots);
     mergeCollection('contacts', remoteSubmission.contactSnapshots);
-    mergeCollection('lessonPlans', snapshot.lessonPlans || []);
+    mergeCollection('lessonPlans', hydratedSnapshot.lessonPlans || []);
     reconcileLegacyPlans(state);
-    if (snapshot.operation?.id) {
-      const incomingOperation = clone(snapshot.operation);
-      const current = operationRecordById(snapshot.operation.id);
+    if (hydratedSnapshot.operation?.id) {
+      const incomingOperation = clone(hydratedSnapshot.operation);
+      const current = operationRecordById(hydratedSnapshot.operation.id);
       if (current) {
         Object.entries(incomingOperation.evidenceByCheck || {}).forEach(([key, remotePhoto]) => {
           preserveAttachmentMedia(current.evidenceByCheck?.[key], remotePhoto);
@@ -3653,14 +3766,14 @@
       }
       else state.operationHistory.push(incomingOperation);
     }
-    if (snapshot.daily && state.ui.role === 'teacher' && remoteSubmission.teacher === state.context.teacher && remoteSubmission.date === state.daily.date) {
-      state.daily.parentStatus = snapshot.daily.parentStatus || '';
-      state.daily.parentHandoffConfirmed = Boolean(snapshot.daily.parentHandoffConfirmed);
-      state.daily.parentHandoffNote = snapshot.daily.parentHandoffNote || '';
-      state.daily.noStudentFollowupConfirmed = Boolean(snapshot.daily.noStudentFollowupConfirmed);
-      state.daily.summary = { ...state.daily.summary, ...(snapshot.daily.summary || {}) };
-      state.daily.status = snapshot.daily.status || state.daily.status;
-      state.daily.submittedAt = snapshot.daily.submittedAt || state.daily.submittedAt;
+    if (hydratedSnapshot.daily && state.ui.role === 'teacher' && remoteSubmission.teacher === state.context.teacher && remoteSubmission.date === state.daily.date) {
+      state.daily.parentStatus = hydratedSnapshot.daily.parentStatus || '';
+      state.daily.parentHandoffConfirmed = Boolean(hydratedSnapshot.daily.parentHandoffConfirmed);
+      state.daily.parentHandoffNote = hydratedSnapshot.daily.parentHandoffNote || '';
+      state.daily.noStudentFollowupConfirmed = Boolean(hydratedSnapshot.daily.noStudentFollowupConfirmed);
+      state.daily.summary = { ...state.daily.summary, ...(hydratedSnapshot.daily.summary || {}) };
+      state.daily.status = hydratedSnapshot.daily.status || state.daily.status;
+      state.daily.submittedAt = hydratedSnapshot.daily.submittedAt || state.daily.submittedAt;
     }
     return true;
   }
@@ -3720,7 +3833,8 @@
 
   async function saveCoursePrepToCloud(activity) {
     if (!state.integration.cloudSyncEnabled) return { ok: true, localOnly: true };
-    if (!cloudIdentityReady()) throw new Error('請先登入目前老師的正式帳號');
+    const identity = await ensureCloudTeacherIdentity();
+    if (!identity.ok) throw new Error(identity.error || '請先登入目前老師的正式帳號');
     if (!window.API?.saveCoursePrep) throw new Error('備課雲端服務尚未載入');
     activity.cloudSyncStatus = 'saving';
     persist();
@@ -3824,9 +3938,10 @@
   }
 
   async function syncTeacherCloudData(notify = true) {
+    const identity = await ensureCloudTeacherIdentity();
     const session = legacySession();
-    if (!session || session.role !== 'teacher' || !sameReviewIdentity(session.nickname, state.context.teacher)) {
-      if (notify) toast('請先登入目前老師的正式帳號', 'danger');
+    if (!identity.ok || !session || session.role !== 'teacher' || !sameReviewIdentity(session.nickname, state.context.teacher)) {
+      if (notify) toast(identity.error || '請先登入目前老師的正式帳號', 'danger');
       return;
     }
     integrationRuntime.cloudStatus = 'loading';
@@ -3848,7 +3963,7 @@
     }
     let imported = 0;
     (result.logs || []).forEach(log => {
-      if (importCloudSnapshot(log?.kpi6_data?.v2_snapshot)) imported += 1;
+      if (importCloudSnapshot(log?.kpi6_data?.v2_snapshot, log?.attachments || [])) imported += 1;
     });
     const prepSync = await syncCoursePrepsFromCloud(session);
     const taskSync = await syncTasksFromCloud(session);
@@ -3897,7 +4012,7 @@
     (result.logs || []).forEach(log => {
       const snapshot = log?.kpi6_data?.v2_snapshot;
       if (snapshot?.submission && !managerScopeMatches(snapshot.submission.teacher, snapshot.submission.department || log.department)) return;
-      if (importCloudSnapshot(snapshot)) imported += 1;
+      if (importCloudSnapshot(snapshot, log?.attachments || [])) imported += 1;
     });
     const prepSync = await syncCoursePrepsFromCloud(session);
     const threads = await syncCloudFeedback(session);
@@ -4335,7 +4450,7 @@
 
   function renderArchivedActivityRow(activity, submissionId) {
     const config = ACTIVITY_TYPES[activity.type] || ACTIVITY_TYPES.tutoring;
-    const evidenceCount = (activity.evidence || []).length;
+    const evidenceCount = (activity.evidence || []).reduce((count, item) => count + evidenceAttachments(item).filter(attachmentRecorded).length, 0);
     return `<button type="button" class="archived-activity-row" data-action="view-archived-activity" data-submission-id="${esc(submissionId)}" data-activity-id="${esc(activity.id)}"><span class="activity-icon ${config.tone}">${icon(config.icon, 19)}</span><span class="archived-activity-main"><strong>${esc(activity.title)}</strong><small>${esc(config.label)} · ${esc(activity.className || '未指定班級')}</small><span>${esc(truncate(activityFeedbackSummary(activity, '尚未填寫課後回饋'), 100))}</span></span><span class="archived-activity-meta"><span class="badge ${evidenceCount ? 'blue' : 'red'}">成果 ${evidenceCount} 份</span>${icon('chevron-right', 17)}</span></button>`;
   }
 
@@ -4382,18 +4497,22 @@
     const attachments = evidenceAttachments(evidence);
     const primary = evidencePrimaryAttachment(evidence);
     const primaryPreviewUrl = attachmentPreviewUrl(primary);
+    const primaryCloudUrl = materialCloudUrl(primary);
+    const noPreviewCopy = primaryCloudUrl
+      ? '此裝置無法直接預覽，請從下方開啟雲端原檔。'
+      : '附件紀錄已保留；雲端原檔待修復，不影響送出，主管將依目前可讀內容判斷。';
     const managerMode = state.ui.role === 'manager';
     const threadKey = feedbackThreadKey('evidence', activity.id, evidence.id);
     const showThread = managerMode || feedbackThreadMessages(threadKey).length > 0;
     const linkedResult = activityFeedbackSummary(activity);
     const checks = [
-      ['已上傳成果檔案', evidenceReady(evidence)],
+      ['已登記成果檔案', evidenceReady(evidence)],
       ['對應工作紀錄可追溯', Boolean(linkedResult || evidence.claim)],
       ['課程／班級可追溯', Boolean(activity.className)],
       ['隱私確認完成', Boolean(evidence.privacy)],
     ];
     return `<div class="stack"><div class="detail-split">
-      <div><div class="annotation-canvas ${primaryPreviewUrl ? 'has-image' : ''}">${primaryPreviewUrl ? `<img src="${esc(primaryPreviewUrl)}" alt="${esc(evidence.title)}">${renderPins(evidence.pins)}` : `<div><div class="empty-icon">${icon(primary?.mimeType === 'application/pdf' ? 'file-text' : evidence.type === 'plan_asset' ? 'archive' : 'image', 28)}</div><div class="empty-title">${esc(primary?.fileName || evidence.fileName)}</div><div class="empty-copy">此裝置沒有可顯示的預覽，請開啟原檔查看內容。</div></div>`}</div><div class="pin-list">${(evidence.pins || []).length ? renderPinList(evidence.pins).replaceAll('data-action="remove-evidence-pin"', 'disabled') : ''}</div>${attachments.length ? `<div class="evidence-detail-files"><div class="text-small text-strong">全部成果（${attachments.length} 份）</div>${attachments.map((attachment, index) => { const previewUrl = attachmentPreviewUrl(attachment, 180); const cloudUrl = materialCloudUrl(attachment); const thumb = previewUrl ? `<img src="${esc(previewUrl)}" alt="${esc(attachment.fileName)}">` : icon(attachment.mimeType === 'application/pdf' ? 'file-text' : 'file-check-2', 20); const legacyNote = attachment.note || (index === 0 ? evidence.observation : ''); return `<article class="evidence-detail-file"><span class="evidence-detail-thumb">${cloudUrl ? `<a href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer" aria-label="開啟 ${esc(attachment.fileName)}">${thumb}</a>` : thumb}</span><div><strong>${index + 1}. ${esc(attachment.fileName)}</strong>${legacyNote ? `<small>舊版補充說明：${esc(legacyNote)}</small>` : ''}</div>${cloudUrl ? `<a class="btn btn-small" href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer">${icon('external-link', 14)}開啟原檔</a>` : attachment.id === evidence.primaryAttachmentId ? '<span class="badge blue">標註主圖</span>' : ''}</article>`; }).join('')}</div>` : ''}</div>
+      <div><div class="annotation-canvas ${primaryPreviewUrl ? 'has-image' : ''}">${primaryPreviewUrl ? `<img src="${esc(primaryPreviewUrl)}" alt="${esc(evidence.title)}">${renderPins(evidence.pins)}` : `<div><div class="empty-icon">${icon(primary?.mimeType === 'application/pdf' ? 'file-text' : evidence.type === 'plan_asset' ? 'archive' : 'image', 28)}</div><div class="empty-title">${esc(primary?.fileName || evidence.fileName)}</div><div class="empty-copy">${esc(noPreviewCopy)}</div></div>`}</div><div class="pin-list">${(evidence.pins || []).length ? renderPinList(evidence.pins).replaceAll('data-action="remove-evidence-pin"', 'disabled') : ''}</div>${attachments.length ? `<div class="evidence-detail-files"><div class="text-small text-strong">全部成果（${attachments.length} 份）</div>${attachments.map((attachment, index) => { const previewUrl = attachmentPreviewUrl(attachment, 180); const cloudUrl = materialCloudUrl(attachment); const thumb = previewUrl ? `<img src="${esc(previewUrl)}" alt="${esc(attachment.fileName)}">` : icon(attachment.mimeType === 'application/pdf' ? 'file-text' : 'file-check-2', 20); const legacyNote = attachment.note || (index === 0 ? evidence.observation : ''); return `<article class="evidence-detail-file"><span class="evidence-detail-thumb">${cloudUrl ? `<a href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer" aria-label="開啟 ${esc(attachment.fileName)}">${thumb}</a>` : thumb}</span><div><strong>${index + 1}. ${esc(attachment.fileName)}</strong>${legacyNote ? `<small>舊版補充說明：${esc(legacyNote)}</small>` : ''}</div>${cloudUrl ? `<a class="btn btn-small" href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer">${icon('external-link', 14)}開啟原檔</a>` : attachment.id === evidence.primaryAttachmentId ? '<span class="badge blue">標註主圖</span>' : ''}</article>`; }).join('')}</div>` : ''}</div>
       <div class="stack">
         <div class="notice-band info">${icon('badge-check', 18)}<div><div class="notice-title">由主管直接判讀內容品質</div><div class="notice-copy">請依完整性、清楚度與可判讀性進行判斷與評分；系統不以老師撰寫的說明代替審查。</div></div></div>
         <div class="metadata-list"><div class="metadata-row"><div class="metadata-label">工作</div><div class="metadata-value">${esc(activity.title)}</div></div><div class="metadata-row"><div class="metadata-label">支持 KPI</div><div class="metadata-value">${esc(config.kpi)}</div></div><div class="metadata-row"><div class="metadata-label">類型</div><div class="metadata-value">${esc(EVIDENCE_TYPES[evidence.type] || evidence.type)}</div></div><div class="metadata-row"><div class="metadata-label">對應工作結果</div><div class="metadata-value">${esc(evidence.claim)}</div></div>${evidence.observation ? `<div class="metadata-row"><div class="metadata-label">舊版補充說明</div><div class="metadata-value">${esc(evidence.observation)}</div></div>` : ''}<div class="metadata-row"><div class="metadata-label">關聯學生</div><div class="metadata-value">${esc((evidence.students || []).join('、') || '全班／未指定')}</div></div></div>
@@ -5361,11 +5480,6 @@
       toast('請先選擇照片或檔案', 'danger');
       return;
     }
-    const unavailableFiles = attachments.filter(item => !attachmentAvailable(item));
-    if (state.integration.cloudSyncEnabled && unavailableFiles.length) {
-      toast(`${unavailableFiles.length} 份檔案尚未完成上傳，請重新選擇後再儲存`, 'danger');
-      return;
-    }
     const score = evidenceQuality(draft);
     const item = {
       id: draft.id || uid('ev'), fileName: draft.fileName, mimeType: draft.mimeType, dataUrl: draft.dataUrl || '', type: draft.type,
@@ -5496,7 +5610,8 @@
   async function uploadPlanMaterial(file) {
     if (file.size > MAX_DOCUMENT_FILE_BYTES) throw new Error(`${file.name} 超過 25 MB 上限`);
     if (!state.integration.cloudSyncEnabled) throw new Error('請先到「帳號與通知」啟用雲端送出');
-    if (!cloudIdentityReady()) throw new Error('請先登入目前老師的正式帳號');
+    const identity = await ensureCloudTeacherIdentity();
+    if (!identity.ok) throw new Error(identity.error || '請先登入目前老師的正式帳號');
     if (!window.API?.uploadFile) throw new Error('教材雲端服務尚未載入');
 
     const dataUrl = await readFileAsDataUrl(file);
@@ -5602,11 +5717,11 @@
   async function uploadFormalEvidence() {
     const nickname = cloudTeacherNickname();
     const attachments = [];
-    const upload = async ({ item, kpi, description, forType }) => {
+    const upload = async ({ item, kpi, description, forType, activityId = '', evidenceId = '', attachmentId = '' }) => {
       const existingCloudUrl = materialCloudUrl(item);
       const isImage = String(item.mimeType || '').startsWith('image/');
       if (existingCloudUrl) {
-        attachments.push({ type: isImage ? 'photo' : 'file', url: existingCloudUrl, fileId: item.cloudFileId || '', fileName: item.fileName || '成果附件', kpi, description, forType });
+        attachments.push({ type: isImage ? 'photo' : 'file', url: existingCloudUrl, fileId: item.cloudFileId || '', fileName: item.fileName || '成果附件', mimeType: item.mimeType || '', kpi, description, forType, activityId, evidenceId, attachmentId: attachmentId || item.id || '' });
         return;
       }
       const payload = dataUrlPayload(item.dataUrl);
@@ -5622,19 +5737,19 @@
       item.dataUrl = '';
       item.placeholder = false;
       item.uploadStatus = 'uploaded';
-      attachments.push({ type: isImage ? 'photo' : 'file', url: result.url, fileId: result.fileId, fileName: item.fileName || '成果附件', kpi, description, forType });
+      attachments.push({ type: isImage ? 'photo' : 'file', url: result.url, fileId: result.fileId, fileName: item.fileName || '成果附件', mimeType: item.mimeType || payload.mimeType || '', kpi, description, forType, activityId, evidenceId, attachmentId: attachmentId || item.id || '' });
     };
     for (const activity of todayActivities()) {
       for (const evidence of activity.evidence || []) {
         for (const item of evidenceAttachments(evidence)) {
-          await upload({ item, kpi: activityKpiNumber(activity), description: item.note || evidence.observation || evidence.title, forType: `v2-${activity.type}` });
+          await upload({ item, kpi: activityKpiNumber(activity), description: item.note || evidence.observation || evidence.title, forType: `v2-${activity.type}`, activityId: activity.id, evidenceId: evidence.id, attachmentId: item.id });
         }
       }
     }
     if (state.operations?.date === state.daily.date && state.operations?.dutyOwner === state.context.teacher) {
       for (const [key, config] of Object.entries(OPERATION_CHECKS)) {
         const item = state.operations.evidenceByCheck?.[key];
-        if (item) await upload({ item, kpi: 6, description: `${config.label}${item.action ? `：${item.action}` : ''}`, forType: `env_${key}` });
+        if (item) await upload({ item, kpi: 6, description: `${config.label}${item.action ? `：${item.action}` : ''}`, forType: `env_${key}`, attachmentId: item.id || `env_${key}` });
       }
     }
     return attachments;
@@ -5769,6 +5884,16 @@
   }
 
   async function submitDaily() {
+    if (dailySubmitInFlight) return;
+    dailySubmitInFlight = true;
+    try {
+      return await submitDailyRequest();
+    } finally {
+      dailySubmitInFlight = false;
+    }
+  }
+
+  async function submitDailyRequest() {
     window.clearTimeout(cloudDraftTimer);
     const form = $('#daily-summary-form');
     if (form) saveDailySummaryForm(form, false);
@@ -5780,8 +5905,9 @@
     const existing = state.submissions.find(item => item.date === state.daily.date && item.teacher === state.context.teacher);
     const submission = createDailySubmissionRecord(existing);
     if (state.integration.cloudSyncEnabled) {
-      if (!cloudIdentityReady()) {
-        toast('正式送出前，請登入目前老師的帳號', 'danger');
+      const identity = await ensureCloudTeacherIdentity();
+      if (!identity.ok) {
+        toast(`無法正式送出：${identity.error || '請重新登入目前老師的帳號'}`, 'danger');
         return;
       }
       if (!window.API?.saveLog || !window.API?.uploadPhoto || !window.API?.uploadFile) {
@@ -5843,11 +5969,22 @@
   }
 
   async function submitWeekly() {
+    if (weeklySubmitInFlight) return;
+    weeklySubmitInFlight = true;
+    try {
+      return await submitWeeklyRequest();
+    } finally {
+      weeklySubmitInFlight = false;
+    }
+  }
+
+  async function submitWeeklyRequest() {
     const form = $('#weekly-form');
     if (form) saveWeeklyForm(form, false);
     if (state.integration.cloudSyncEnabled) {
-      if (!cloudIdentityReady()) {
-        toast('正式送出前，請登入目前老師的帳號', 'danger');
+      const identity = await ensureCloudTeacherIdentity();
+      if (!identity.ok) {
+        toast(`無法正式送出：${identity.error || '請重新登入目前老師的帳號'}`, 'danger');
         return;
       }
       const result = await API.saveWeekly({
@@ -6090,7 +6227,8 @@
 
   async function uploadCompressedPhoto(dataUrl, { kpi, description = '' } = {}) {
     if (!state.integration.cloudSyncEnabled) return null;
-    if (!cloudIdentityReady()) throw new Error('登入狀態已失效，請重新登入後再選擇照片');
+    const identity = await ensureCloudTeacherIdentity();
+    if (!identity.ok) throw new Error(identity.error || '登入狀態已失效，請重新登入後再選擇照片');
     if (!window.API?.uploadPhoto) throw new Error('照片雲端服務尚未載入，請重新整理後再試');
     const payload = dataUrlPayload(dataUrl);
     if (!payload) throw new Error('照片無法讀取，請改選原始照片');
@@ -6877,7 +7015,7 @@
         refreshEvidencePins();
       }
     }
-    else if (action === 'submit-daily') submitDaily();
+    else if (action === 'submit-daily') await submitDaily();
     else if (action === 'submit-weekly') await submitWeekly();
     else if (action === 'open-plan') openActivityEditor(undefined, '', 'lessonprep');
     else if (action === 'create-activity-plan') {
