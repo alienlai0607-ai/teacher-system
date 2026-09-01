@@ -342,6 +342,11 @@ function authorizeApiAction_(action, params, actor) {
     return;
   }
 
+  if (action === 'getAttachmentPreviews') {
+    params.viewer = actor.nickname;
+    return;
+  }
+
   const viewerActions = [
     'listLogs', 'getEvidenceLog', 'listWeekly', 'listCoursePreps',
     'listArchivedKpiFiles', 'listTeacherReportFolders', 'getTalentWorkspaceData',

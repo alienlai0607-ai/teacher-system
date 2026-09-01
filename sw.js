@@ -1,6 +1,6 @@
 // 布拉克星球 KPI 系統 — Service Worker
 // 策略：網路優先（避免舊快取問題），離線時才用快取備援
-const CACHE = 'bp-kpi-20260901-identity-evidence-repair-2';
+const CACHE = 'bp-kpi-20260901-cloud-photo-preview-1';
 const SHELL = ['/index.html', '/shared/style.css', '/shared/icons/icon-192.png'];
 
 self.addEventListener('install', e => {

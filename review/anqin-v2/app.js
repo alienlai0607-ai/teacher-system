@@ -26,7 +26,7 @@
     && (['127.0.0.1', 'localhost'].includes(window.location.hostname)
       || window.location.hostname.endsWith('.trycloudflare.com'))
     && Boolean(LOCAL_REVIEW_NICKNAME);
-  const APP_VERSION = 21;
+  const APP_VERSION = 22;
   const MAX_EVIDENCE_FILES = 8;
   const MAX_DOCUMENT_FILE_BYTES = 25 * 1024 * 1024;
   const MAX_IMAGE_SOURCE_BYTES = 25 * 1024 * 1024;
@@ -473,7 +473,7 @@
     }
     record.attachments = attachments.map((attachment, index) => {
       const cloudUrl = attachment.cloudUrl || attachment.url || '';
-      const cloudFileId = attachment.cloudFileId || attachment.fileId || '';
+      const cloudFileId = attachment.cloudFileId || attachment.fileId || driveFileId(cloudUrl);
       const hasCloudCopy = Boolean(cloudUrl || cloudFileId);
       const dataUrl = hasCloudCopy ? '' : (attachment.dataUrl || '');
       const recorded = attachment.recorded !== undefined
@@ -515,7 +515,7 @@
   function normalizeOperationPhotoRecord(record) {
     if (!record || typeof record !== 'object') return record;
     record.cloudUrl = record.cloudUrl || record.url || '';
-    record.cloudFileId = record.cloudFileId || record.fileId || '';
+    record.cloudFileId = record.cloudFileId || record.fileId || driveFileId(record.cloudUrl);
     if (record.cloudUrl || record.cloudFileId) record.dataUrl = '';
     record.uploadStatus = record.uploadStatus || (record.cloudUrl || record.cloudFileId ? 'uploaded' : record.dataUrl ? 'local' : 'incomplete');
     record.placeholder = Boolean(record.fileName && !record.dataUrl && !record.cloudUrl && !record.cloudFileId);
@@ -787,6 +787,10 @@
   let lastStorageToastAt = 0;
   let dailySubmitInFlight = false;
   let weeklySubmitInFlight = false;
+  const cloudPreviewCache = new Map();
+  const cloudPreviewPending = new Set();
+  const cloudPreviewFailedAt = new Map();
+  let cloudPreviewHydrationTimer = null;
   let runtimeHealth = {
     loadIssue: loadStateIssue,
     persistError: '',
@@ -1740,6 +1744,7 @@
     `;
     hydrateIcons();
     markRequiredFields(app);
+    scheduleCloudPreviewHydration();
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
 
@@ -2282,7 +2287,7 @@
   function renderOperationPhoto(item, key, label) {
     const hasPhoto = Boolean(item.fileName);
     const previewUrl = attachmentPreviewUrl(item);
-    return `<div id="operation-preview-${key}" class="operation-photo-preview ${previewUrl ? 'has-image' : ''}">${previewUrl ? `<img src="${esc(previewUrl)}" alt="${esc(label)}證據預覽">` : `<span>${icon('image-plus', 17)}</span>`}<div><strong id="operation-photo-name-${key}">${hasPhoto ? '更換照片' : '選擇照片'}</strong><small>${hasPhoto ? `${esc(item.fileName)} · ${esc(item.size || '已加入')}` : '每項一張'}</small></div></div>`;
+    return `<div id="operation-preview-${key}" class="operation-photo-preview ${previewUrl ? 'has-image' : ''}">${previewUrl ? `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(item)} alt="${esc(label)}證據預覽">` : `<span>${icon('image-plus', 17)}</span>`}<div><strong id="operation-photo-name-${key}">${hasPhoto ? '更換照片' : '選擇照片'}</strong><small>${hasPhoto ? `${esc(item.fileName)} · ${esc(item.size || '已加入')}` : '每項一張'}</small></div></div>`;
   }
 
   function renderTodayOperations() {
@@ -3030,11 +3035,75 @@
     return attachments.find(item => item.id === data.primaryAttachmentId) || attachments[0] || null;
   }
 
+  function attachmentCloudFileId(attachment) {
+    return String(attachment?.cloudFileId || attachment?.fileId || driveFileId(materialCloudUrl(attachment))).trim();
+  }
+
+  function cloudPreviewImageAttrs(attachment) {
+    const fileId = attachmentCloudFileId(attachment);
+    return fileId ? ` data-cloud-preview-id="${esc(fileId)}"` : '';
+  }
+
   function attachmentPreviewUrl(attachment, size = 420) {
     if (!attachment) return '';
     if (attachment.dataUrl) return attachment.dataUrl;
-    if (attachment.cloudFileId) return `https://drive.google.com/thumbnail?id=${encodeURIComponent(attachment.cloudFileId)}&sz=w${size}`;
+    const fileId = attachmentCloudFileId(attachment);
+    if (fileId && cloudPreviewCache.has(fileId)) return cloudPreviewCache.get(fileId);
+    if (fileId) return `https://drive.google.com/thumbnail?id=${encodeURIComponent(fileId)}&sz=w${size}`;
     return '';
+  }
+
+  function applyCloudPreview(fileId, dataUrl) {
+    if (!fileId || !dataUrl) return;
+    cloudPreviewCache.set(fileId, dataUrl);
+    $$('img[data-cloud-preview-id]').forEach(image => {
+      if (image.dataset.cloudPreviewId !== fileId || image.src === dataUrl) return;
+      image.src = dataUrl;
+      image.classList.remove('cloud-preview-loading', 'cloud-preview-error');
+    });
+  }
+
+  async function hydrateCloudPreviews() {
+    const images = $$('img[data-cloud-preview-id]');
+    if (!images.length) return;
+    images.forEach(image => {
+      const cached = cloudPreviewCache.get(image.dataset.cloudPreviewId);
+      if (cached && image.src !== cached) image.src = cached;
+    });
+    if (!window.API?.getAttachmentPreviews) return;
+    const now = Date.now();
+    const fileIds = [...new Set(images.map(image => image.dataset.cloudPreviewId).filter(Boolean))]
+      .filter(fileId => !cloudPreviewCache.has(fileId) && !cloudPreviewPending.has(fileId)
+        && now - Number(cloudPreviewFailedAt.get(fileId) || 0) > 60000)
+      .slice(0, 12);
+    if (!fileIds.length) return;
+    fileIds.forEach(fileId => cloudPreviewPending.add(fileId));
+    images.forEach(image => {
+      if (fileIds.includes(image.dataset.cloudPreviewId)) image.classList.add('cloud-preview-loading');
+    });
+    try {
+      const result = await API.getAttachmentPreviews(fileIds);
+      if (!result?.ok) throw new Error(result?.error || '照片預覽讀取失敗');
+      (result.previews || []).forEach(item => applyCloudPreview(String(item.fileId || ''), String(item.dataUrl || '')));
+      const loaded = new Set((result.previews || []).map(item => String(item.fileId || '')));
+      fileIds.filter(fileId => !loaded.has(fileId)).forEach(fileId => cloudPreviewFailedAt.set(fileId, Date.now()));
+    } catch (error) {
+      fileIds.forEach(fileId => cloudPreviewFailedAt.set(fileId, Date.now()));
+    } finally {
+      fileIds.forEach(fileId => cloudPreviewPending.delete(fileId));
+      $$('img[data-cloud-preview-id]').forEach(image => {
+        if (!fileIds.includes(image.dataset.cloudPreviewId)) return;
+        image.classList.remove('cloud-preview-loading');
+        if (!cloudPreviewCache.has(image.dataset.cloudPreviewId) && (!image.complete || image.naturalWidth === 0)) {
+          image.classList.add('cloud-preview-error');
+        }
+      });
+    }
+  }
+
+  function scheduleCloudPreviewHydration() {
+    window.clearTimeout(cloudPreviewHydrationTimer);
+    cloudPreviewHydrationTimer = window.setTimeout(() => hydrateCloudPreviews(), 40);
   }
 
   function syncEvidencePrimaryFields(data) {
@@ -3056,7 +3125,7 @@
       const primary = attachment.id === data.primaryAttachmentId;
       const previewUrl = attachmentPreviewUrl(attachment, 240);
       const preview = previewUrl
-        ? `<img src="${esc(previewUrl)}" alt="${esc(attachment.fileName)}">`
+        ? `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(attachment)} alt="${esc(attachment.fileName)}">`
         : `<span class="evidence-attachment-file">${icon(attachment.mimeType === 'application/pdf' ? 'file-text' : 'file-check-2', 24)}</span>`;
       const cloudUrl = materialCloudUrl(attachment);
       const fileName = cloudUrl
@@ -3075,7 +3144,7 @@
     const primary = evidencePrimaryAttachment(data);
     if (!primary) return '<div><div class="empty-icon">' + icon('image-plus', 24) + '</div><div class="empty-title">尚未選擇檔案</div><div class="empty-copy">加入照片後即可預覽；重點位置標記為選用功能。</div></div>';
     const previewUrl = attachmentPreviewUrl(primary);
-    if (previewUrl) return `<img src="${esc(previewUrl)}" alt="證據預覽">${renderPins(data.pins)}`;
+    if (previewUrl) return `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(primary)} alt="證據預覽">${renderPins(data.pins)}`;
     return `<div><div class="empty-icon">${icon(primary.mimeType === 'application/pdf' ? 'file-text' : 'file-check-2', 24)}</div><div class="empty-title">${esc(primary.fileName)}</div><div class="empty-copy">檔案已加入；主管可直接開啟原檔查看內容。</div></div>`;
   }
 
@@ -3669,7 +3738,7 @@
     const applyCloudFile = (target, cloudFile) => {
       if (!target || !cloudFile) return;
       target.cloudUrl = materialCloudUrl(cloudFile);
-      target.cloudFileId = cloudFile.cloudFileId || cloudFile.fileId || '';
+      target.cloudFileId = cloudFile.cloudFileId || cloudFile.fileId || driveFileId(target.cloudUrl);
       target.mimeType = target.mimeType || cloudFile.mimeType || 'application/octet-stream';
       target.fileName = target.fileName || cloudFile.fileName || '成果檔案';
       target.uploadStatus = 'uploaded';
@@ -4136,7 +4205,7 @@
     const previewUrl = attachmentPreviewUrl(primary);
     const status = evidence.status === 'accepted' ? ['已採認', 'green'] : evidence.status === 'clarify' ? ['待補充', 'red'] : ['待審查', 'yellow'];
     return `<article class="evidence-card">
-      <div class="evidence-thumb">${previewUrl ? `<img src="${esc(previewUrl)}" alt="${esc(evidence.title)}">${renderPins(evidence.pins)}` : icon(primary?.mimeType === 'application/pdf' ? 'file-text' : evidence.type === 'plan_asset' ? 'archive' : 'image', 44)}<span class="badge blue quality-pill">${icon('images', 12)}${attachments.length} 份</span></div>
+      <div class="evidence-thumb">${previewUrl ? `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(primary)} alt="${esc(evidence.title)}">${renderPins(evidence.pins)}` : icon(primary?.mimeType === 'application/pdf' ? 'file-text' : evidence.type === 'plan_asset' ? 'archive' : 'image', 44)}<span class="badge blue quality-pill">${icon('images', 12)}${attachments.length} 份</span></div>
       <div class="evidence-card-body"><div class="evidence-title">${esc(evidence.title)}</div><div class="evidence-caption">${esc(truncate(evidence.claim, 82))}</div><div class="evidence-meta"><span class="badge ${status[1]}">${status[0]}</span><button type="button" class="btn btn-small" data-action="inspect-evidence" data-activity-id="${activity.id}" data-evidence-id="${evidence.id}">判讀</button></div></div>
     </article>`;
   }
@@ -4200,7 +4269,7 @@
         const item = proof[key] || {};
         const isException = item.status === 'exception';
         const previewUrl = attachmentPreviewUrl(item);
-        return `<article class="operation-review-card ${isException ? 'is-exception' : ''}"><div class="operation-review-card-head"><span class="operation-proof-index">${index + 1}</span><div><strong>${esc(config.label)}</strong><small>${isException ? '異常面向' : '正常面向'}</small></div>${statusBadge(isException ? '異常' : '正常', isException ? 'red' : 'green')}</div><div class="operation-review-media">${previewUrl ? `<img src="${esc(previewUrl)}" alt="${esc(config.label)}班務證據">` : `<span>${icon('image', 32)}</span><div><strong>${esc(item.fileName || '缺少照片')}</strong><small>${esc(item.size || '尚無可預覽原圖')}</small></div>`}</div>${isException ? `<div class="operation-review-copy danger"><span>異常狀況與處理安排</span><p>${esc(item.action || '尚未填寫')}</p></div>` : ''}</article>`;
+        return `<article class="operation-review-card ${isException ? 'is-exception' : ''}"><div class="operation-review-card-head"><span class="operation-proof-index">${index + 1}</span><div><strong>${esc(config.label)}</strong><small>${isException ? '異常面向' : '正常面向'}</small></div>${statusBadge(isException ? '異常' : '正常', isException ? 'red' : 'green')}</div><div class="operation-review-media">${previewUrl ? `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(item)} alt="${esc(config.label)}班務證據">` : `<span>${icon('image', 32)}</span><div><strong>${esc(item.fileName || '缺少照片')}</strong><small>${esc(item.size || '尚無可預覽原圖')}</small></div>`}</div>${isException ? `<div class="operation-review-copy danger"><span>異常狀況與處理安排</span><p>${esc(item.action || '尚未填寫')}</p></div>` : ''}</article>`;
       }).join('')}</div>
       ${renderFeedbackThread(threadKey)}
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}本次稽核結論</div><div class="panel-subtitle">退回時請指出面向、照片或缺少的交接資訊</div></div></div><div class="panel-body"><div class="form-field"><label class="form-label" for="operation-review-feedback">通過說明或補充要求</label><textarea id="operation-review-feedback" placeholder="例：教具櫃照片看不到右側缺件標示；請補拍近照並填入行政接手人與預計補齊日。"></textarea></div></div></section>
@@ -4469,7 +4538,7 @@
     ];
     const contextCopy = feedbackOnly ? '課後備課回饋' : (activity.students || []).length ? `${activity.students.length} 位關聯學生` : '全班紀錄';
     const detailSection = details ? `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('list-tree')}依工作類型填寫</div></div></div><div class="panel-body"><div class="metadata-list">${details}</div></div></section>` : '';
-    return `<div class="stack"><div class="notice-band info">${icon(config.icon, 19)}<div><div class="notice-title">${esc(config.label)} · ${esc(activity.className || '未指定班級')}</div><div class="notice-copy">${formatDate(activity.date)} · ${esc(activity.teacher || state.context.teacher)} · ${esc(contextCopy)}</div></div></div><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}${feedbackOnly ? '課後備課回饋' : '完整填寫內容'}</div></div></div><div class="panel-body"><div class="metadata-list">${outcomeRows.map(([label, value]) => `<div class="metadata-row"><div class="metadata-label">${label}</div><div class="metadata-value">${nl2br(value || '未填寫')}</div></div>`).join('')}</div></div></section>${detailSection}<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('images')}成果證據</div><div class="panel-subtitle">${evidence.length} 筆證據</div></div></div><div class="panel-body">${evidence.length ? evidence.map(item => { const attachments = evidenceAttachments(item); return `<article class="archived-evidence-block"><div><strong>${esc(item.title)}</strong><p>${esc(item.claim)}</p>${item.observation ? `<small>舊版補充說明：${esc(item.observation)}</small>` : ''}</div><div class="archived-evidence-thumbs">${attachments.map(attachment => { const previewUrl = attachmentPreviewUrl(attachment, 180); const cloudUrl = materialCloudUrl(attachment); const media = previewUrl ? `<img src="${esc(previewUrl)}" alt="${esc(attachment.fileName)}">` : `<span>${icon('file-check-2', 18)}</span>`; return cloudUrl ? `<a href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer" aria-label="開啟 ${esc(attachment.fileName)}">${media}</a>` : media; }).join('')}</div></article>`; }).join('') : '<div class="text-small muted">此筆送出紀錄沒有成果證據。</div>'}</div></section></div>`;
+    return `<div class="stack"><div class="notice-band info">${icon(config.icon, 19)}<div><div class="notice-title">${esc(config.label)} · ${esc(activity.className || '未指定班級')}</div><div class="notice-copy">${formatDate(activity.date)} · ${esc(activity.teacher || state.context.teacher)} · ${esc(contextCopy)}</div></div></div><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}${feedbackOnly ? '課後備課回饋' : '完整填寫內容'}</div></div></div><div class="panel-body"><div class="metadata-list">${outcomeRows.map(([label, value]) => `<div class="metadata-row"><div class="metadata-label">${label}</div><div class="metadata-value">${nl2br(value || '未填寫')}</div></div>`).join('')}</div></div></section>${detailSection}<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('images')}成果證據</div><div class="panel-subtitle">${evidence.length} 筆證據</div></div></div><div class="panel-body">${evidence.length ? evidence.map(item => { const attachments = evidenceAttachments(item); return `<article class="archived-evidence-block"><div><strong>${esc(item.title)}</strong><p>${esc(item.claim)}</p>${item.observation ? `<small>舊版補充說明：${esc(item.observation)}</small>` : ''}</div><div class="archived-evidence-thumbs">${attachments.map(attachment => { const previewUrl = attachmentPreviewUrl(attachment, 180); const cloudUrl = materialCloudUrl(attachment); const media = previewUrl ? `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(attachment)} alt="${esc(attachment.fileName)}">` : `<span>${icon('file-check-2', 18)}</span>`; return cloudUrl ? `<a href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer" aria-label="開啟 ${esc(attachment.fileName)}">${media}</a>` : media; }).join('')}</div></article>`; }).join('') : '<div class="text-small muted">此筆送出紀錄沒有成果證據。</div>'}</div></section></div>`;
   }
 
   function renderSubmissionReview(submission, readOnly = false) {
@@ -4512,7 +4581,7 @@
       ['隱私確認完成', Boolean(evidence.privacy)],
     ];
     return `<div class="stack"><div class="detail-split">
-      <div><div class="annotation-canvas ${primaryPreviewUrl ? 'has-image' : ''}">${primaryPreviewUrl ? `<img src="${esc(primaryPreviewUrl)}" alt="${esc(evidence.title)}">${renderPins(evidence.pins)}` : `<div><div class="empty-icon">${icon(primary?.mimeType === 'application/pdf' ? 'file-text' : evidence.type === 'plan_asset' ? 'archive' : 'image', 28)}</div><div class="empty-title">${esc(primary?.fileName || evidence.fileName)}</div><div class="empty-copy">${esc(noPreviewCopy)}</div></div>`}</div><div class="pin-list">${(evidence.pins || []).length ? renderPinList(evidence.pins).replaceAll('data-action="remove-evidence-pin"', 'disabled') : ''}</div>${attachments.length ? `<div class="evidence-detail-files"><div class="text-small text-strong">全部成果（${attachments.length} 份）</div>${attachments.map((attachment, index) => { const previewUrl = attachmentPreviewUrl(attachment, 180); const cloudUrl = materialCloudUrl(attachment); const thumb = previewUrl ? `<img src="${esc(previewUrl)}" alt="${esc(attachment.fileName)}">` : icon(attachment.mimeType === 'application/pdf' ? 'file-text' : 'file-check-2', 20); const legacyNote = attachment.note || (index === 0 ? evidence.observation : ''); return `<article class="evidence-detail-file"><span class="evidence-detail-thumb">${cloudUrl ? `<a href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer" aria-label="開啟 ${esc(attachment.fileName)}">${thumb}</a>` : thumb}</span><div><strong>${index + 1}. ${esc(attachment.fileName)}</strong>${legacyNote ? `<small>舊版補充說明：${esc(legacyNote)}</small>` : ''}</div>${cloudUrl ? `<a class="btn btn-small" href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer">${icon('external-link', 14)}開啟原檔</a>` : attachment.id === evidence.primaryAttachmentId ? '<span class="badge blue">標註主圖</span>' : ''}</article>`; }).join('')}</div>` : ''}</div>
+      <div><div class="annotation-canvas ${primaryPreviewUrl ? 'has-image' : ''}">${primaryPreviewUrl ? `<img src="${esc(primaryPreviewUrl)}"${cloudPreviewImageAttrs(primary)} alt="${esc(evidence.title)}">${renderPins(evidence.pins)}` : `<div><div class="empty-icon">${icon(primary?.mimeType === 'application/pdf' ? 'file-text' : evidence.type === 'plan_asset' ? 'archive' : 'image', 28)}</div><div class="empty-title">${esc(primary?.fileName || evidence.fileName)}</div><div class="empty-copy">${esc(noPreviewCopy)}</div></div>`}</div><div class="pin-list">${(evidence.pins || []).length ? renderPinList(evidence.pins).replaceAll('data-action="remove-evidence-pin"', 'disabled') : ''}</div>${attachments.length ? `<div class="evidence-detail-files"><div class="text-small text-strong">全部成果（${attachments.length} 份）</div>${attachments.map((attachment, index) => { const previewUrl = attachmentPreviewUrl(attachment, 180); const cloudUrl = materialCloudUrl(attachment); const thumb = previewUrl ? `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(attachment)} alt="${esc(attachment.fileName)}">` : icon(attachment.mimeType === 'application/pdf' ? 'file-text' : 'file-check-2', 20); const legacyNote = attachment.note || (index === 0 ? evidence.observation : ''); return `<article class="evidence-detail-file"><span class="evidence-detail-thumb">${cloudUrl ? `<a href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer" aria-label="開啟 ${esc(attachment.fileName)}">${thumb}</a>` : thumb}</span><div><strong>${index + 1}. ${esc(attachment.fileName)}</strong>${legacyNote ? `<small>舊版補充說明：${esc(legacyNote)}</small>` : ''}</div>${cloudUrl ? `<a class="btn btn-small" href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer">${icon('external-link', 14)}開啟原檔</a>` : attachment.id === evidence.primaryAttachmentId ? '<span class="badge blue">標註主圖</span>' : ''}</article>`; }).join('')}</div>` : ''}</div>
       <div class="stack">
         <div class="notice-band info">${icon('badge-check', 18)}<div><div class="notice-title">由主管直接判讀內容品質</div><div class="notice-copy">請依完整性、清楚度與可判讀性進行判斷與評分；系統不以老師撰寫的說明代替審查。</div></div></div>
         <div class="metadata-list"><div class="metadata-row"><div class="metadata-label">工作</div><div class="metadata-value">${esc(activity.title)}</div></div><div class="metadata-row"><div class="metadata-label">支持 KPI</div><div class="metadata-value">${esc(config.kpi)}</div></div><div class="metadata-row"><div class="metadata-label">類型</div><div class="metadata-value">${esc(EVIDENCE_TYPES[evidence.type] || evidence.type)}</div></div><div class="metadata-row"><div class="metadata-label">對應工作結果</div><div class="metadata-value">${esc(evidence.claim)}</div></div>${evidence.observation ? `<div class="metadata-row"><div class="metadata-label">舊版補充說明</div><div class="metadata-value">${esc(evidence.observation)}</div></div>` : ''}<div class="metadata-row"><div class="metadata-label">關聯學生</div><div class="metadata-value">${esc((evidence.students || []).join('、') || '全班／未指定')}</div></div></div>
@@ -4532,6 +4601,7 @@
     document.body.style.overflow = 'hidden';
     hydrateIcons();
     markRequiredFields(root);
+    scheduleCloudPreviewHydration();
     window.setTimeout(() => {
       const first = $('input:not([type="hidden"]), textarea, select, button', root);
       if (first) first.focus({ preventScroll: true });
@@ -5598,6 +5668,12 @@
     return /^https:\/\/[^\s"'<>]+$/i.test(value) ? value : '';
   }
 
+  function driveFileId(value) {
+    const text = String(value || '').trim();
+    const match = text.match(/(?:\/d\/|[?&]id=)([A-Za-z0-9_-]{10,200})/);
+    return match ? match[1] : '';
+  }
+
   function readFileAsDataUrl(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -5734,6 +5810,7 @@
       if (!result?.ok) throw new Error(result?.error || `${item.fileName || '照片'}上傳失敗`);
       item.cloudUrl = result.url;
       item.cloudFileId = result.fileId;
+      if (isImage) applyCloudPreview(result.fileId, item.dataUrl);
       item.dataUrl = '';
       item.placeholder = false;
       item.uploadStatus = 'uploaded';
@@ -6271,6 +6348,7 @@
     updateEvidenceQualityFromForm();
     markRequiredFields($('#evidence-form') || document);
     hydrateIcons();
+    scheduleCloudPreviewHydration();
     scheduleCurrentDrawerDraft();
   }
 
@@ -6310,7 +6388,10 @@
             kpi: activity ? activityKpiNumber(activity) : 5,
             description: evidenceDraft.title || activity?.title || file.name,
           });
-          if (cloudFile) dataUrl = '';
+          if (cloudFile) {
+            applyCloudPreview(cloudFile.cloudFileId, dataUrl);
+            dataUrl = '';
+          }
         } else if (!isImage && state.integration.cloudSyncEnabled) {
           updateSaveIndicator('saving', `正在上傳 ${file.name}`);
           cloudFile = await uploadPlanMaterial(file);
@@ -6637,6 +6718,7 @@
       if (!dataUrl) throw new Error('照片無法壓縮');
       updateSaveIndicator('saving', `正在上傳${OPERATION_CHECKS[key].label}照片`);
       const cloudFile = await uploadCompressedPhoto(dataUrl, { kpi: 6, description: OPERATION_CHECKS[key].label });
+      if (cloudFile) applyCloudPreview(cloudFile.cloudFileId, dataUrl);
       state.operations.evidenceByCheck = state.operations.evidenceByCheck || {};
       const currentStatus = input.closest('.operation-proof-item')?.querySelector(`[name="status_${key}"]:checked`)?.value || 'normal';
       state.operations.evidenceByCheck[key] = {
@@ -6670,6 +6752,7 @@
       schedulePersist();
       scheduleDailyCloudDraftSync();
       hydrateIcons();
+      scheduleCloudPreviewHydration();
       toast(`${OPERATION_CHECKS[key].label}照片已上傳`, 'success');
     } catch (error) {
       input.value = '';

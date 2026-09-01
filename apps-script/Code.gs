@@ -62,6 +62,7 @@ function handleRequest(e, method) {
       'getTodayLog': () => getTodayLog(params),
       'uploadPhoto': () => uploadPhoto(params),
       'uploadFile': () => uploadFile(params),
+      'getAttachmentPreviews': () => getAttachmentPreviews(params),
       'getEvidenceLog': () => getEvidenceLog(params),
       'getMakeupQuota': () => getMakeupQuota(params),
       'cleanupDuplicateEvidence': () => cleanupDuplicateEvidence(params),

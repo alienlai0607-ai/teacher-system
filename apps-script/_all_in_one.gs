@@ -73,6 +73,7 @@ function handleRequest(e, method) {
       'getTodayLog': () => getTodayLog(params),
       'uploadPhoto': () => uploadPhoto(params),
       'uploadFile': () => uploadFile(params),
+      'getAttachmentPreviews': () => getAttachmentPreviews(params),
       'getEvidenceLog': () => getEvidenceLog(params),
       'getMakeupQuota': () => getMakeupQuota(params),
       'cleanupDuplicateEvidence': () => cleanupDuplicateEvidence(params),
@@ -1443,6 +1444,11 @@ function authorizeApiAction_(action, params, actor) {
     return;
   }
 
+  if (action === 'getAttachmentPreviews') {
+    params.viewer = actor.nickname;
+    return;
+  }
+
   const viewerActions = [
     'listLogs', 'getEvidenceLog', 'listWeekly', 'listCoursePreps',
     'listArchivedKpiFiles', 'listTeacherReportFolders', 'getTalentWorkspaceData',
@@ -2470,6 +2476,114 @@ function uploadFile(params) {
   const url = 'https://drive.google.com/file/d/' + fileId + '/view';
   logSystem(nickname, 'upload_material', fileId, { date: dateStr, fileName: originalName, category: params.category || '' });
   return { ok: true, url, fileId, fileName: originalName };
+}
+
+/**
+ * 私密雲端照片預覽。
+ * Drive 私密縮圖會受第三方 Cookie 影響，因此由已驗簽的 KPI 工作階段讀取，
+ * 並只回傳目前角色有權查看的影像。一次最多 12 張，避免單次回應過大。
+ */
+function getAttachmentPreviews(params) {
+  const actor = params && params.__actor;
+  if (!actor) return { ok: false, error: '請先登入再查看照片' };
+
+  const input = Array.isArray(params.file_ids)
+    ? params.file_ids
+    : String(params.file_ids || '').split(',');
+  const ids = [];
+  input.forEach(function (value) {
+    const id = String(value || '').trim();
+    if (!/^[A-Za-z0-9_-]{10,200}$/.test(id) || ids.indexOf(id) >= 0 || ids.length >= 12) return;
+    ids.push(id);
+  });
+  if (!ids.length) return { ok: true, previews: [], errors: [] };
+
+  let ownerByFileId = null;
+  function ownerForFile(fileId) {
+    if (!ownerByFileId) {
+      ownerByFileId = {};
+      sheetToObjects(SHEET_NAMES.EVIDENCE).forEach(function (row) {
+        const url = String(row.url || '');
+        ids.forEach(function (id) {
+          if (!ownerByFileId[id] && url.indexOf(id) >= 0) ownerByFileId[id] = String(row.nickname || '');
+        });
+      });
+      sheetToObjects(SHEET_NAMES.LOGS).forEach(function (row) {
+        const haystack = [
+          row.attachments, row.kpi1_data, row.kpi2_data, row.kpi3_data,
+          row.kpi4_data, row.kpi5_data, row.kpi6_data,
+        ].map(function (value) {
+          if (typeof value === 'string') return value;
+          try { return JSON.stringify(value || ''); } catch (error) { return ''; }
+        }).join('|');
+        ids.forEach(function (id) {
+          if (!ownerByFileId[id] && haystack.indexOf(id) >= 0) ownerByFileId[id] = String(row.nickname || '');
+        });
+      });
+    }
+    return String(ownerByFileId[fileId] || '');
+  }
+
+  function actorListedOnFile(file) {
+    if (actor.role === 'admin' || isGlobalManager_(actor)) return true;
+    const email = String(actor.email || '').trim().toLowerCase();
+    if (!email) return false;
+    try {
+      if (String(file.getOwner().getEmail() || '').trim().toLowerCase() === email) return true;
+    } catch (error) {}
+    try {
+      if (file.getViewers().some(function (user) {
+        return String(user.getEmail() || '').trim().toLowerCase() === email;
+      })) return true;
+    } catch (error) {}
+    try {
+      if (file.getEditors().some(function (user) {
+        return String(user.getEmail() || '').trim().toLowerCase() === email;
+      })) return true;
+    } catch (error) {}
+    return false;
+  }
+
+  const previews = [];
+  const errors = [];
+  ids.forEach(function (fileId) {
+    try {
+      const file = DriveApp.getFileById(fileId);
+      let allowed = actorListedOnFile(file);
+      if (!allowed) {
+        const ownerNickname = ownerForFile(fileId);
+        const owner = ownerNickname ? findUserByNickname(ownerNickname) : null;
+        allowed = Boolean(owner && actorCanAccessUser_(actor, owner));
+      }
+      if (!allowed) {
+        errors.push({ fileId: fileId, error: '無權查看此照片' });
+        return;
+      }
+      const sourceMimeType = String(file.getMimeType() || '');
+      if (sourceMimeType.indexOf('image/') !== 0) {
+        errors.push({ fileId: fileId, error: '此附件不是照片格式' });
+        return;
+      }
+      let blob = null;
+      try { blob = file.getThumbnail(); } catch (error) {}
+      if (!blob) blob = file.getBlob();
+      const bytes = blob.getBytes();
+      if (bytes.length > 1200 * 1024) {
+        errors.push({ fileId: fileId, error: '照片預覽過大，請開啟原檔' });
+        return;
+      }
+      const mimeType = String(blob.getContentType() || sourceMimeType || 'image/jpeg');
+      previews.push({
+        fileId: fileId,
+        fileName: file.getName(),
+        mimeType: mimeType,
+        dataUrl: 'data:' + mimeType + ';base64,' + Utilities.base64Encode(bytes),
+      });
+    } catch (error) {
+      errors.push({ fileId: fileId, error: '照片預覽讀取失敗' });
+    }
+  });
+  return { ok: true, previews: previews, errors: errors };
 }
 
 function getMaterialRootFolder_() {

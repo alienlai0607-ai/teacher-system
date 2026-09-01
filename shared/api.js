@@ -4,7 +4,7 @@ window.API = (function () {
   let authRedirectScheduled = false;
   const IMPERSONATION_READ_ACTIONS = new Set([
     'ping', 'whoami', 'getSessionIdentity', 'listUsers',
-    'getLog', 'getTodayLog', 'listLogs', 'getEvidenceLog', 'getMakeupQuota',
+    'getLog', 'getTodayLog', 'listLogs', 'getEvidenceLog', 'getMakeupQuota', 'getAttachmentPreviews',
     'listTasks', 'getWeekly', 'listWeekly', 'listFeedback', 'listFeedbackThread',
     'listObservations', 'listPosts', 'getWeekPostCount', 'getOKR',
     'getEvalEvidence', 'getEval', 'listEvals', 'listStudents',
@@ -77,6 +77,7 @@ window.API = (function () {
     listLogs: (params) => call('listLogs', params),
     uploadPhoto: (data) => call('uploadPhoto', data),
     uploadFile: (data) => call('uploadFile', data),
+    getAttachmentPreviews: (fileIds) => call('getAttachmentPreviews', { file_ids: fileIds }),
     getEvidenceLog: (params) => call('getEvidenceLog', params),
     getMakeupQuota: (nickname) => call('getMakeupQuota', { nickname }),
 

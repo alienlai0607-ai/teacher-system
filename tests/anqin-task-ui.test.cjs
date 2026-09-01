@@ -11,6 +11,7 @@ const sharedAuth = fs.readFileSync(path.join(root, 'shared/auth.js'), 'utf8');
 const sharedApi = fs.readFileSync(path.join(root, 'shared/api.js'), 'utf8');
 const apiRouter = fs.readFileSync(path.join(root, 'apps-script/Code.gs'), 'utf8');
 const authBackend = fs.readFileSync(path.join(root, 'apps-script/auth.gs'), 'utf8');
+const logsBackend = fs.readFileSync(path.join(root, 'apps-script/logs.gs'), 'utf8');
 const evaluationBackend = fs.readFileSync(path.join(root, 'apps-script/evaluation.gs'), 'utf8');
 const pdfReport = fs.readFileSync(path.join(root, 'apps-script/pdfreport.gs'), 'utf8');
 const coursePrepBackend = fs.readFileSync(path.join(root, 'apps-script/courseprep.gs'), 'utf8');
@@ -80,8 +81,8 @@ assert.match(source, /const TEST_VIEW_WRITE_ACTIONS = new Set\([\s\S]*'send-feed
 assert.match(source, /if \(TEST_VIEW_MODE\)[\s\S]{0,220}表單流程正常，最後寫入已攔截/, '安親表單需在正式寫入前由測試模式攔截');
 assert.match(source, /TEST_VIEW_MODE && fileInput[\s\S]{0,220}不會上傳正式檔案/, '安親測試視角選擇附件後不得上傳正式檔案');
 assert.match(source, /可以開啟、輸入與切換完整流程/, '安親測試狀態需明確說明可互動範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260901-identity-evidence-repair-2/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260901-identity-evidence-repair-2/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260901-cloud-photo-preview-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260901-cloud-photo-preview-1/, '登入備援路徑也必須避開舊版快取');
 
 const activityFormSource = source.slice(source.indexOf('function renderActivitySpecificFields('), source.indexOf('function renderEvidenceAttachmentList('));
 assert.match(activityFormSource, /if \(activityNeedsPrepSource\(type\)\) return '';/, '課業指導與學科外不得重複顯示舊課程內容欄位');
@@ -164,6 +165,15 @@ assert.doesNotMatch(evidenceSaveSource, /份檔案尚未完成上傳，請重新
 assert.match(source, /function hydrateCloudSnapshotAttachments\(/, '讀取舊日報時需從雲端附件清單修復快照連結');
 assert.match(source, /importCloudSnapshot\(log\?\.kpi6_data\?\.v2_snapshot, log\?\.attachments \|\| \[\]\)/, '老師讀取日報時需一併回填雲端附件');
 assert.match(source, /activityId, evidenceId, attachmentId/, '新上傳附件需保存活動、證據與附件識別碼');
+assert.match(source, /function hydrateCloudPreviews\(\)[\s\S]{0,1800}API\.getAttachmentPreviews\(fileIds\)/, '私密雲端照片需透過已登入 API 讀取，不可只依賴 Drive 第三方 Cookie');
+assert.match(source, /data-cloud-preview-id/, '所有雲端成果圖片都需標示檔案編號供預覽回填');
+assert.match(source, /applyCloudPreview\(cloudFile\.cloudFileId, dataUrl\)/, '照片剛上傳完成時需立即保留本次預覽，不得瞬間變空白');
+assert.match(sharedApi, /getAttachmentPreviews: \(fileIds\) => call\('getAttachmentPreviews'/, '共用 API 需提供私密照片預覽讀取');
+assert.match(apiRouter, /'getAttachmentPreviews': \(\) => getAttachmentPreviews\(params\)/, 'Apps Script 路由需提供私密照片預覽');
+assert.match(authBackend, /if \(action === 'getAttachmentPreviews'\)/, '私密照片預覽必須經過登入權限入口');
+assert.match(logsBackend, /function getAttachmentPreviews\(params\)/, '後端需能讀取授權範圍內的 Drive 照片');
+assert.match(logsBackend, /actorCanAccessUser_\(actor, owner\)/, '後端需依老師與主管資料範圍驗證照片權限');
+assert.match(logsBackend, /dataUrl: 'data:' \+ mimeType \+ ';base64,'/, '後端需回傳瀏覽器可直接顯示的圖片資料');
 assert.match(source, /function ensureCloudTeacherIdentity\([\s\S]{0,1200}API\.getSessionIdentity/, '前端需向後端重新確認正式老師身分');
 assert.match(sharedApi, /getSessionIdentity: \(\) => call\('getSessionIdentity'\)/, '共用 API 需提供工作階段身分校正');
 assert.match(apiRouter, /'getSessionIdentity': \(\) => getSessionIdentity\(params\)/, 'Apps Script 路由需提供工作階段身分校正');
@@ -173,6 +183,7 @@ assert.match(source, /duplicate = Array\.from\(root\.children\)/, '相同提示�
 
 const evidenceRuntime = vm.createContext({
   materialCloudUrl: item => String(item?.cloudUrl || item?.url || ''),
+  driveFileId: value => String(value || '').match(/(?:\/d\/|[?&]id=)([A-Za-z0-9_-]{10,200})/)?.[1] || '',
   clone: value => JSON.parse(JSON.stringify(value)),
 });
 vm.runInContext(source.slice(source.indexOf('function normalizeEvidenceRecord('), source.indexOf('function normalizeOperationPhotoRecord(')), evidenceRuntime);
@@ -248,7 +259,7 @@ assert.match(prepUploadSource, /相同檔案已略過/, '重複附件需略過�
 assert.match(prepUploadSource, /duplicateIndex >= 0/, '先前未完成的同一附件必須允許重新選擇並修復');
 const evidenceUploadSource = source.slice(source.indexOf('async function handleEvidenceFile('), source.indexOf('function placeEvidencePin('));
 assert.match(evidenceUploadSource, /uploadCompressedPhoto\(dataUrl/, '成果照片需在選取時壓縮並立即上傳');
-assert.match(evidenceUploadSource, /if \(cloudFile\) dataUrl = ''/, '照片成功上傳後不得再將大型內容塞進本機草稿');
+assert.match(evidenceUploadSource, /if \(cloudFile\) \{[\s\S]*?applyCloudPreview\([\s\S]*?dataUrl = '';[\s\S]*?\}/, '照片成功上傳後需保留當次預覽並清除本機草稿的大型內容');
 assert.match(evidenceUploadSource, /duplicateIndex >= 0/, '未完成的成果附件必須能由同一原檔重新上傳修復');
 assert.match(source, /const MAX_DOCUMENT_FILE_BYTES = 25 \* 1024 \* 1024/, '文件上限需提高至 25 MB');
 assert.match(source, /function sameReviewIdentity\(/, '登入暱稱需忽略老師或主管尾綴後再核對');
