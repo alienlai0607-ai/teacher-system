@@ -83,6 +83,7 @@ function handleRequest(e, method) {
       'regenerateTalentLessonReport': () => regenerateTalentLessonReport(params),
       'saveTalentDraft': () => saveTalentDraft(params),
       'saveTalentPrep': () => saveTalentPrep(params),
+      'deleteTalentPrep': () => deleteTalentPrep(params),
       'reviewTalentPrep': () => reviewTalentPrep(params),
       'updateTalentAppStatus': () => updateTalentAppStatus(params),
       'saveTalentScore': () => saveTalentScore(params),

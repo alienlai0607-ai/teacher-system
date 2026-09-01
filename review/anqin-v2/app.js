@@ -4389,7 +4389,7 @@
       title: isCoursePrep ? `${isExisting ? '編輯' : '新增'}備課檔案` : isExisting ? '編輯工作紀錄' : '新增工作紀錄',
       subtitle: isCoursePrep ? '填寫課程類型與名稱，並至少上傳一份教案或教材' : activityNeedsPrepSource(activityDraft.type) ? '選擇備課檔案，再記錄實際教學與課後回饋' : '記錄實際做法、結果、問題與後續行動',
       body: `${draftRecoveryNotice(draftContext.saved?.savedAt, draftContext.saved?.mediaOmitted)}${isCoursePrep ? renderCoursePrepForm(activityDraft) : renderActivityForm(activityDraft)}`,
-      footer: `${isExisting ? `<button type="button" class="btn btn-danger" style="margin-right:auto" data-action="delete-activity" data-activity-id="${activityDraft.id}">${icon('trash-2', 15)}刪除</button>` : ''}<button type="button" class="btn" data-action="close-drawer">稍後繼續</button><button type="submit" form="${isCoursePrep ? 'course-prep-form' : 'activity-form'}" class="btn btn-primary">${icon('save', 16)}${isCoursePrep ? '儲存備課檔案' : '儲存紀錄'}</button>`,
+      footer: `${isExisting ? `<button type="button" class="btn btn-danger" style="margin-right:auto" data-action="delete-activity" data-activity-id="${activityDraft.id}">${icon('trash-2', 15)}${isCoursePrep ? '刪除備課檔案' : '刪除'}</button>` : ''}<button type="button" class="btn" data-action="close-drawer">稍後繼續</button><button type="submit" form="${isCoursePrep ? 'course-prep-form' : 'activity-form'}" class="btn btn-primary">${icon('save', 16)}${isCoursePrep ? '儲存備課檔案' : '儲存紀錄'}</button>`,
     });
     if (!isCoursePrep) refreshActivityFormCopy(activityDraft.type);
   }
@@ -4872,7 +4872,20 @@
     }
     const data = new FormData(form);
     const id = String(data.get('id') || uid('prep'));
+    if (form.elements.id) form.elements.id.value = id;
+    if (activityDraft) activityDraft.id = id;
     const existing = state.activities.find(item => item.id === id && item.type === 'lessonprep');
+    const normalizedTitle = String(data.get('title') || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const normalizedCourseType = String(data.get('targetCourse') || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const duplicate = state.activities.find(item => item.type === 'lessonprep'
+      && item.id !== id
+      && backendNickname(item.teacher) === backendNickname(state.context.teacher)
+      && String(item.title || '').trim().replace(/\s+/g, ' ').toLowerCase() === normalizedTitle
+      && String(item.details?.targetCourse || '').trim().replace(/\s+/g, ' ').toLowerCase() === normalizedCourseType);
+    if (duplicate) {
+      toast('已有相同課程類型與名稱的備課檔案，請回到列表直接編輯原檔案', 'danger');
+      return;
+    }
     const planId = String(data.get('planId') || draft?.planId || '');
     const item = {
       id,
@@ -4908,6 +4921,15 @@
     try {
       await saveCoursePrepToCloud(item);
     } catch (error) {
+      if (!existing && /已有相同課程類型與名稱/.test(String(error.message || ''))) {
+        state.activities = state.activities.filter(activity => activity.id !== id);
+        if (form.elements.id) form.elements.id.value = '';
+        if (activityDraft) activityDraft.id = '';
+        persist();
+        updateSaveIndicator('error', '已有同名檔案，未重複建立');
+        toast(error.message, 'danger');
+        return;
+      }
       if (form.elements.id) form.elements.id.value = id;
       activityDraft = clone(item);
       updateSaveIndicator('error', '本機已保留，雲端尚未同步');
@@ -5815,6 +5837,16 @@
       });
       return;
     }
+    if (prep) {
+      const expectedName = String(prep.teacher || state.context.teacher || '').trim();
+      openDialog({
+        title: '刪除備課檔案',
+        body: `<div class="notice-band danger">${icon('triangle-alert', 19)}<div><div class="notice-title">刪除後無法復原</div><div class="notice-copy">「${esc(prep.title || '未命名課程')}」內的教案與教材附件會一併刪除。</div></div></div><div class="form-field"><label class="form-label" for="prep-delete-confirm-name">輸入「${esc(expectedName)}」確認刪除</label><input id="prep-delete-confirm-name" type="text" autocomplete="off" spellcheck="false" data-delete-confirm-name data-expected-name="${esc(expectedName)}" placeholder="請完整輸入自己的名稱"></div>`,
+        footer: `<button type="button" class="btn" data-action="close-dialog">取消</button><button type="button" class="btn btn-danger" data-action="confirm-delete" data-kind="${kind}" data-id="${esc(id)}" data-parent-id="${esc(parentId)}" disabled>${icon('trash-2', 15)}永久刪除</button>`,
+      });
+      window.setTimeout(() => $('#prep-delete-confirm-name')?.focus(), 0);
+      return;
+    }
     const labels = { activity: prep ? '備課檔案' : '工作紀錄', student: '學生追蹤', contact: '親師溝通', evidence: '證據', plan: '教案' };
     openDialog({
       title: `刪除${labels[kind] || '資料'}`,
@@ -5835,14 +5867,18 @@
     return { ok: true };
   }
 
-  async function confirmDelete(kind, id, parentId) {
+  async function confirmDelete(kind, id, parentId, confirmationName = '') {
     let dailyContentChanged = false;
     if (kind === 'activity') {
       const activity = state.activities.find(item => item.id === id);
       dailyContentChanged = Boolean(activity && activity.type !== 'lessonprep' && activity.date === state.daily.date && activity.teacher === state.context.teacher);
       const linkedPlanId = activity?.type === 'lessonprep' ? activity.planId : '';
+      if (activity?.type === 'lessonprep' && String(confirmationName || '').trim() !== String(activity.teacher || state.context.teacher || '').trim()) {
+        toast('姓名不一致，備課檔案未刪除', 'danger');
+        return;
+      }
       if (activity?.type === 'lessonprep' && state.integration.cloudSyncEnabled && cloudIdentityReady()) {
-        const result = await API.deleteCoursePrep(id, backendNickname(state.context.teacher));
+        const result = await API.deleteCoursePrep(id, backendNickname(state.context.teacher), confirmationName);
         if (!result?.ok) {
           toast(`備課檔案刪除失敗：${result?.error || '請稍後重試'}`, 'danger');
           return;
@@ -6217,20 +6253,27 @@
     if (!files.length) return;
     input.disabled = true;
     let uploaded = 0;
+    let skipped = 0;
     try {
       for (const file of files) {
+        const fileFingerprint = await hashFile(file);
+        const duplicate = (activityDraft.prepEvidence || []).some(item => item.fileFingerprint === fileFingerprint);
+        if (duplicate) {
+          skipped += 1;
+          continue;
+        }
         const cloudFile = await uploadPlanMaterial(file);
         activityDraft.prepEvidence = activityDraft.prepEvidence || [];
         activityDraft.prepEvidence.push({
           id: uid('prep'), fileName: cloudFile.name || file.name, size: cloudFile.size || formatFileSize(file.size),
           category: inferPrepCategory(file.name), note: '', addedAt: new Date().toISOString(),
-          mimeType: cloudFile.mimeType || file.type || '', cloudUrl: cloudFile.cloudUrl || '', cloudFileId: cloudFile.cloudFileId || '',
+          mimeType: cloudFile.mimeType || file.type || '', cloudUrl: cloudFile.cloudUrl || '', cloudFileId: cloudFile.cloudFileId || '', fileFingerprint,
         });
         uploaded += 1;
         updateSaveIndicator('saving', `附件已上傳 ${uploaded}/${files.length}`);
       }
       updateSaveIndicator('saved', '附件已歸檔');
-      toast(`${uploaded} 份附件已上傳`, 'success');
+      toast(skipped ? `${uploaded} 份附件已上傳；${skipped} 份相同檔案已略過` : `${uploaded} 份附件已上傳`, skipped ? 'warning' : 'success');
     } catch (error) {
       updateSaveIndicator('error', '附件上傳未完成');
       toast(`附件上傳未完成：${error.message || '請稍後重試'}`, 'danger');
@@ -6485,7 +6528,26 @@
       return;
     }
     if (type === 'activity') saveActivityForm(form);
-    if (type === 'course-prep') await saveCoursePrepForm(form);
+    if (type === 'course-prep') {
+      if (form.dataset.submitting === 'true') return;
+      form.dataset.submitting = 'true';
+      const submitButton = document.querySelector(`[type="submit"][form="${form.id}"]`);
+      const originalLabel = submitButton?.innerHTML || '';
+      if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.textContent = '正在儲存…';
+      }
+      try { await saveCoursePrepForm(form); }
+      finally {
+        delete form.dataset.submitting;
+        if (submitButton?.isConnected) {
+          submitButton.disabled = false;
+          submitButton.innerHTML = originalLabel;
+          hydrateIcons();
+        }
+      }
+      return;
+    }
     if (type === 'student-case') saveStudentCaseForm(form);
     if (type === 'contact') saveContactForm(form);
     if (type === 'operations') saveOperationsForm(form);
@@ -6922,7 +6984,7 @@
       runtimeHealth = { loadIssue: '', persistError: '', lastPersistOk: true, lastPersistAt: '' };
       closeDialog(); closeDrawer(); persist(); renderApp(); toast('審查資料已清空', 'success');
     }
-    else if (action === 'confirm-delete') await confirmDelete(control.dataset.kind, control.dataset.id, control.dataset.parentId);
+    else if (action === 'confirm-delete') await confirmDelete(control.dataset.kind, control.dataset.id, control.dataset.parentId, $('[data-delete-confirm-name]')?.value || '');
     else if (action === 'print-weekly') window.print();
     else if (action === 'export-records') openMonthlyExportDialog();
     else if (action === 'sync-teacher-records') await syncTeacherCloudData();
@@ -7037,6 +7099,10 @@
   });
 
   document.addEventListener('input', event => {
+    if (event.target.matches('[data-delete-confirm-name]')) {
+      const button = document.querySelector('[data-action="confirm-delete"]');
+      if (button) button.disabled = String(event.target.value || '').trim() !== String(event.target.dataset.expectedName || '').trim();
+    }
     const managerEvaluationForm = event.target.closest('#manager-evaluation-form');
     if (managerEvaluationForm) managerEvaluationForm.dataset.dirty = 'true';
     if (event.target.closest('#activity-form, #evidence-form, #plan-form, [data-draft-form]')) scheduleCurrentDrawerDraft();

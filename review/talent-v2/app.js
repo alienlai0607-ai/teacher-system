@@ -552,7 +552,7 @@
       <div class="prep-card-head"><span class="course-icon">${icon('notebook-tabs', 21)}</span><div><div class="record-title">${esc(prep.courseName || prep.title || '未命名課程')}</div><div class="record-meta">${esc(prep.courseType || '未分類')}${updated ? ` · ${formatDate(updated)} 更新` : ''}</div></div></div>
       ${note ? `<p>${esc(note)}</p>` : ''}
       <div class="tag-row"><span>${icon('paperclip', 14)}${Array.isArray(prep.materials) ? prep.materials.length : 0} 份附件</span><span>${icon(prepHasMaterial(prep) ? 'circle-check' : 'circle-alert', 14)}${prepHasMaterial(prep) ? '可直接選用' : '請補教案或教材'}</span></div>
-      <div class="card-actions"><button type="button" class="btn" data-action="view-prep" data-id="${prep.id}">${icon('eye', 16)}查看檔案</button>${isTeacher() ? `<button type="button" class="btn btn-primary" data-action="edit-prep" data-id="${prep.id}">${icon('pencil', 16)}編輯</button>` : ''}</div>
+      <div class="card-actions"><button type="button" class="btn" data-action="view-prep" data-id="${prep.id}">${icon('eye', 16)}查看檔案</button>${isTeacher() ? `<button type="button" class="btn btn-primary" data-action="edit-prep" data-id="${prep.id}">${icon('pencil', 16)}編輯</button><button type="button" class="btn btn-danger" data-action="open-delete-prep" data-id="${prep.id}">${icon('trash-2', 16)}刪除</button>` : ''}</div>
     </article>`;
   }
 
@@ -1187,6 +1187,25 @@
     });
   }
 
+  async function fileContentFingerprint(file) {
+    const buffer = await file.arrayBuffer();
+    if (window.crypto?.subtle) {
+      try {
+        const digest = await window.crypto.subtle.digest('SHA-256', buffer);
+        return Array.from(new Uint8Array(digest)).map(value => value.toString(16).padStart(2, '0')).join('');
+      } catch (error) {
+        // Continue with the content-based fallback below.
+      }
+    }
+    const bytes = new Uint8Array(buffer);
+    let hash = 2166136261;
+    bytes.forEach(value => {
+      hash ^= value;
+      hash = Math.imul(hash, 16777619);
+    });
+    return `content:${file.size}:${(hash >>> 0).toString(16)}`;
+  }
+
   function isImageFile(file) {
     return String(file?.type || '').startsWith('image/') || /\.(?:jpe?g|png|webp|gif|heic|heif)$/i.test(String(file?.name || ''));
   }
@@ -1252,15 +1271,28 @@
     input.disabled = true;
     if (summary) summary.textContent = `正在上傳 0 / ${files.length}`;
     const uploaded = [];
+    let skipped = 0;
     try {
       for (let index = 0; index < files.length; index += 1) {
         if (summary) summary.textContent = `正在上傳 ${index + 1} / ${files.length}：${files[index].name}`;
-        uploaded.push(await uploadTalentFile(files[index], category));
+        let fingerprint = '';
+        if (category === 'prep') {
+          fingerprint = await fileContentFingerprint(files[index]);
+          const duplicate = [...(pendingFiles[category] || []), ...uploaded].some(item => item.fingerprint === fingerprint);
+          if (duplicate) {
+            skipped += 1;
+            continue;
+          }
+        }
+        const uploadedFile = await uploadTalentFile(files[index], category);
+        uploadedFile.fingerprint = fingerprint;
+        uploadedFile.size = files[index].size;
+        uploaded.push(uploadedFile);
       }
       pendingFiles[category] = [...(pendingFiles[category] || []), ...uploaded];
       refreshUploadControl(category);
       if (input.closest('#log-form')) captureLogDraft();
-      toast(`${files.length} 個檔案已上傳`);
+      toast(skipped ? `${uploaded.length} 個檔案已上傳；${skipped} 個相同檔案已略過` : `${uploaded.length} 個檔案已上傳`, skipped ? 'warning' : 'success');
     } catch (error) {
       if (uploaded.length) pendingFiles[category] = [...(pendingFiles[category] || []), ...uploaded];
       const itemList = document.querySelector(`[data-file-items="${category}"]`);
@@ -1545,14 +1577,15 @@
   }
 
   function openPrepEditor(existing = null) {
-    const prep = existing || state.draftPrep || {};
+    const prep = existing || state.draftPrep || { id: uid('prep') };
+    if (!prep.id) prep.id = uid('prep');
     activePrepSource = prep;
     pendingFiles.prep = prep.materials || [];
     openDrawer({
       title: existing ? '編輯備課檔案' : '新增備課檔案',
       subtitle: '填寫課程名稱，並至少上傳一份教案或教材，不需主管審核。',
       body: `<form id="prep-form" novalidate><input type="hidden" name="id" value="${esc(prep.id || '')}"><section class="form-section"><div class="section-title"><span class="section-number">1</span><div><h3>課程資料</h3><p>儲存後即可在本堂紀錄直接選用。</p></div></div><div class="form-grid">${selectField('課程類型', 'courseType', COURSE_TYPES, prep.courseType || COURSE_TYPES[1], true)}${field('課程名稱', 'courseName', 'text', prep.courseName || prep.title || '', true, '例：齒輪轉速實驗')}${textareaField('上課內容／備課提醒（選填）', 'notes', prep.notes || prep.summary || '', false, '有需要再記錄本課重點、器材或上課提醒。')}</div>${uploadField('教案或教材附件', 'prep', '至少一份；可一次多選教案、簡報、學習單、照片或 MP4／MOV 備課影片，影片單檔上限 15 MB。', 'image/*,video/mp4,video/quicktime,video/x-m4v,video/webm,.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.zip,.sb3', true)}</section></form>`,
-      footer: `<button type="button" class="btn" data-action="close-drawer">取消</button><button type="button" data-action="save-prep" class="btn btn-primary">${icon('save', 16)}儲存備課檔案</button>`,
+      footer: `${existing ? `<button type="button" class="btn btn-danger" style="margin-right:auto" data-action="open-delete-prep" data-id="${esc(prep.id)}">${icon('trash-2', 16)}刪除備課檔案</button>` : ''}<button type="button" class="btn" data-action="close-drawer">取消</button><button type="button" data-action="save-prep" class="btn btn-primary">${icon('save', 16)}儲存備課檔案</button>`,
     });
   }
 
@@ -1581,7 +1614,34 @@
     if (!form.checkValidity()) { form.reportValidity(); toast('請選擇課程類型並填寫課程名稱', 'danger'); return; }
     if (!(pendingFiles.prep || []).length) { toast('請至少上傳一份教案或教材資料', 'danger'); return; }
     const item = capturePrep(form);
-    const result = PREVIEW_MODE ? { ok: true, prep: item } : await API.saveTalentPrep(currentUser.nickname, item);
+    if (form.elements.id) form.elements.id.value = item.id;
+    if (activePrepSource) activePrepSource.id = item.id;
+    const normalizedTitle = String(item.courseName || item.title || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const normalizedCourseType = String(item.courseType || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const duplicate = state.preps.find(prep => prep.id !== item.id
+      && normalizeName(prep.teacher) === normalizeName(currentUser.nickname)
+      && String(prep.courseName || prep.title || '').trim().replace(/\s+/g, ' ').toLowerCase() === normalizedTitle
+      && String(prep.courseType || '').trim().replace(/\s+/g, ' ').toLowerCase() === normalizedCourseType);
+    if (duplicate) {
+      toast('已有相同課程類型與名稱的備課檔案，請回到列表直接編輯原檔案', 'danger');
+      return;
+    }
+    const saveButton = document.querySelector('[data-action="save-prep"]');
+    const originalLabel = saveButton?.innerHTML || '';
+    if (saveButton) {
+      saveButton.disabled = true;
+      saveButton.textContent = '正在儲存…';
+    }
+    let result;
+    try {
+      result = PREVIEW_MODE ? { ok: true, prep: item } : await API.saveTalentPrep(currentUser.nickname, item);
+    } finally {
+      if (saveButton?.isConnected) {
+        saveButton.disabled = false;
+        saveButton.innerHTML = originalLabel;
+        hydrateIcons();
+      }
+    }
     if (!result?.ok) {
       toast(`備課檔案尚未儲存：${result?.error || '請稍後重試'}`, 'danger');
       return;
@@ -1595,6 +1655,60 @@
     closeDrawer(); renderApp(); toast('備課檔案已儲存，可直接用於本堂紀錄');
   }
 
+  function prepUsageCount(prepId) {
+    return state.logs.filter(item => String(item.prepId || '') === String(prepId || '')).length;
+  }
+
+  function openPrepDeleteDialog(prepId) {
+    const prep = state.preps.find(item => item.id === prepId);
+    if (!prep) return;
+    const usageCount = prepUsageCount(prepId);
+    if (usageCount) {
+      closeDrawer();
+      openDialog({
+        title: '無法刪除備課檔案',
+        body: `<div class="notice danger">${icon('link-2', 19)}<div><strong>已有 ${usageCount} 筆課堂紀錄使用這份檔案</strong><span>為保留過去日報與課堂內容，已使用的備課檔案不能刪除。</span></div></div>`,
+        footer: '<button type="button" class="btn btn-primary" data-action="close-dialog">知道了</button>',
+      });
+      return;
+    }
+    const expectedName = String(currentUser.nickname || '').trim();
+    closeDrawer();
+    openDialog({
+      title: '刪除備課檔案',
+      body: `<div class="notice danger">${icon('triangle-alert', 19)}<div><strong>刪除後無法復原</strong><span>「${esc(prep.courseName || prep.title || '未命名課程')}」及其中附件會一併刪除。</span></div></div><label class="form-field"><span>輸入「${esc(expectedName)}」確認刪除</span><input type="text" autocomplete="off" spellcheck="false" data-delete-prep-name data-expected-name="${esc(expectedName)}" placeholder="請完整輸入自己的名稱"></label>`,
+      footer: `<button type="button" class="btn" data-action="close-dialog">取消</button><button type="button" class="btn btn-danger" data-action="confirm-delete-prep" data-id="${esc(prepId)}" disabled>${icon('trash-2', 16)}永久刪除</button>`,
+    });
+    window.setTimeout(() => document.querySelector('[data-delete-prep-name]')?.focus(), 0);
+  }
+
+  async function deletePrep(prepId, confirmationName) {
+    const prep = state.preps.find(item => item.id === prepId);
+    if (!prep) return;
+    if (String(confirmationName || '').trim() !== String(currentUser.nickname || '').trim()) {
+      toast('姓名不一致，備課檔案未刪除', 'danger');
+      return;
+    }
+    if (prepUsageCount(prepId)) {
+      closeDialog();
+      openPrepDeleteDialog(prepId);
+      return;
+    }
+    const result = PREVIEW_MODE ? { ok: true, removed: true } : await API.deleteTalentPrep(prepId, confirmationName);
+    if (!result?.ok) {
+      toast(`備課檔案刪除失敗：${result?.error || '請稍後重試'}`, 'danger');
+      return;
+    }
+    state.preps = state.preps.filter(item => item.id !== prepId);
+    if (state.draftPrep?.id === prepId) state.draftPrep = null;
+    activePrepSource = null;
+    persist('備課檔案已刪除');
+    closeDialog();
+    closeDrawer();
+    renderApp();
+    toast('備課檔案已刪除');
+  }
+
   function openPrepView(prep) {
     const legacyDetails = [
       ['教學目標', prep.objective], ['核心原理／技能', prep.principle], ['引導方法', prep.guidance],
@@ -1604,7 +1718,7 @@
       title: prep.courseName || prep.title || '備課檔案',
       subtitle: `${prep.teacher} · ${prep.courseType || '未分類'}`,
       body: `<div class="detail-stack">${prep.notes || prep.summary ? detailBlock('上課內容／備課提醒', prep.notes || prep.summary) : ''}${detailAttachments('備課附件', prep.materials)}${legacyDetails.length ? `<details><summary>查看舊版詳細教案內容</summary><div class="detail-stack">${legacyDetails.map(([label, value]) => detailBlock(label, value)).join('')}</div></details>` : ''}</div>`,
-      footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button>${isTeacher() ? `<button type="button" class="btn btn-primary" data-action="edit-prep" data-id="${esc(prep.id)}">${icon('pencil', 16)}編輯</button>` : ''}`,
+      footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button>${isTeacher() ? `<button type="button" class="btn btn-danger" data-action="open-delete-prep" data-id="${esc(prep.id)}">${icon('trash-2', 16)}刪除</button><button type="button" class="btn btn-primary" data-action="edit-prep" data-id="${esc(prep.id)}">${icon('pencil', 16)}編輯</button>` : ''}`,
     });
   }
 
@@ -1764,7 +1878,7 @@
   }
 
   const TEST_VIEW_WRITE_ACTIONS = new Set([
-    'submit-log', 'save-log-draft', 'save-prep',
+    'submit-log', 'save-log-draft', 'save-prep', 'confirm-delete-prep',
     'retry-report', 'setup-automation', 'enable-push',
     'test-notifications',
   ]);
@@ -1838,6 +1952,8 @@
     else if (action === 'save-prep') await runFormAction($('#prep-form'), () => savePrep($('#prep-form')));
     else if (action === 'edit-prep') openPrepEditor(state.preps.find(item => item.id === control.dataset.id));
     else if (action === 'view-prep') { const prep = state.preps.find(item => item.id === control.dataset.id); if (prep) { closeDrawer(); openPrepView(prep); } }
+    else if (action === 'open-delete-prep') openPrepDeleteDialog(control.dataset.id);
+    else if (action === 'confirm-delete-prep') await deletePrep(control.dataset.id, document.querySelector('[data-delete-prep-name]')?.value || '');
     else if (action === 'view-log') { const item = state.logs.find(log => log.id === control.dataset.id); if (item) openLogView(item); }
     else if (action === 'remove-upload') {
       const category = String(control.dataset.category || '');
@@ -1984,6 +2100,10 @@
   });
 
   document.addEventListener('input', event => {
+    if (event.target.matches('[data-delete-prep-name]')) {
+      const button = document.querySelector('[data-action="confirm-delete-prep"]');
+      if (button) button.disabled = String(event.target.value || '').trim() !== String(event.target.dataset.expectedName || '').trim();
+    }
     const scoreForm = event.target.closest('#score-form');
     if (scoreForm) scoreForm.dataset.dirty = 'true';
     if (TEST_VIEW_MODE) return;

@@ -49,27 +49,40 @@ function saveCoursePrep(params) {
   });
   if (!hasArchivedMaterial) return { ok: false, error: '請至少上傳一份教案或教材資料' };
   const now = nowIso();
-  const existing = (() => {
-    ensureCoursePrepSheet_();
-    return findObject(SHEET_NAMES.COURSE_PREP, 'prep_id', prep.id);
-  })();
-  if (existing && existing.nickname !== nickname && user.role !== 'admin') {
-    return { ok: false, error: '不可覆蓋其他老師的備課檔案' };
-  }
+  ensureCoursePrepSheet_();
   const dataJson = JSON.stringify({ schema: 'anqin-course-prep-v1', prep: prep, plan: plan });
   if (dataJson.length > 45000) return { ok: false, error: '備課內容過大，請移除內嵌圖片後再試' };
-  upsertRow(SHEET_NAMES.COURSE_PREP, 'prep_id', {
-    prep_id: prep.id,
-    nickname: nickname,
-    department: normalizeDepartment_(user.department),
-    title: String(prep.title || '').trim(),
-    course_type: String(prep.details && prep.details.targetCourse || ''),
-    created_date: String(prep.date || todayStr()).slice(0, 10),
-    status: String(prep.status || 'draft'),
-    data_json: dataJson,
-    created_at: existing ? existing.created_at : now,
-    updated_at: now,
-  });
+  const normalizedTitle = String(prep.title || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const normalizedCourseType = String(prep.details && prep.details.targetCourse || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: '系統正在儲存其他備課檔案，請稍後再試' };
+  try {
+    const existing = findObject(SHEET_NAMES.COURSE_PREP, 'prep_id', prep.id);
+    if (existing && existing.nickname !== nickname && user.role !== 'admin') {
+      return { ok: false, error: '不可覆蓋其他老師的備課檔案' };
+    }
+    const duplicate = sheetToObjects(SHEET_NAMES.COURSE_PREP).some(function (row) {
+      return row.nickname === nickname
+        && String(row.prep_id || '') !== String(prep.id)
+        && String(row.title || '').trim().replace(/\s+/g, ' ').toLowerCase() === normalizedTitle
+        && String(row.course_type || '').trim().replace(/\s+/g, ' ').toLowerCase() === normalizedCourseType;
+    });
+    if (duplicate) return { ok: false, error: '已有相同課程類型與名稱的備課檔案，請直接編輯原檔案' };
+    upsertRow(SHEET_NAMES.COURSE_PREP, 'prep_id', {
+      prep_id: prep.id,
+      nickname: nickname,
+      department: normalizeDepartment_(user.department),
+      title: String(prep.title || '').trim(),
+      course_type: String(prep.details && prep.details.targetCourse || ''),
+      created_date: String(prep.date || todayStr()).slice(0, 10),
+      status: String(prep.status || 'draft'),
+      data_json: dataJson,
+      created_at: existing ? existing.created_at : now,
+      updated_at: now,
+    });
+  } finally {
+    lock.releaseLock();
+  }
   logSystem(nickname, 'save_course_prep', prep.id, { status: prep.status || 'draft' });
   return { ok: true, prep_id: prep.id, updated_at: now };
 }
@@ -109,6 +122,12 @@ function deleteCoursePrep(params) {
   const existing = findObject(SHEET_NAMES.COURSE_PREP, 'prep_id', params.prep_id);
   if (!existing) return { ok: true, removed: false };
   if (user.role !== 'admin' && existing.nickname !== operator) return { ok: false, error: '不可刪除其他老師的備課檔案' };
+  const normalizeName = function (value) {
+    return String(value || '').trim().replace(/\s+/g, '').replace(/(?:老師|主管)$/, '').toLowerCase();
+  };
+  if (normalizeName(params.confirmation_name) !== normalizeName(existing.nickname)) {
+    return { ok: false, error: '姓名確認不正確，未刪除備課檔案' };
+  }
   deleteRow(SHEET_NAMES.COURSE_PREP, existing._row);
   logSystem(operator, 'delete_course_prep', params.prep_id, {});
   return { ok: true, removed: true };

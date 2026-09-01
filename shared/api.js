@@ -145,7 +145,11 @@ window.API = (function () {
     archiveMonthlyCsv: (data) => call('archiveMonthlyCsv', data),
     saveCoursePrep: (data) => call('saveCoursePrep', data),
     listCoursePreps: (params) => call('listCoursePreps', params),
-    deleteCoursePrep: (prepId, operator) => call('deleteCoursePrep', { prep_id: prepId, operator }),
+    deleteCoursePrep: (prepId, operator, confirmationName) => call('deleteCoursePrep', {
+      prep_id: prepId,
+      operator,
+      confirmation_name: confirmationName,
+    }),
 
     getTalentWorkspaceData: (params = {}) => call('getTalentWorkspaceData', {
       ...params,
@@ -155,6 +159,10 @@ window.API = (function () {
     regenerateTalentLessonReport: (lessonId) => call('regenerateTalentLessonReport', { lesson_id: lessonId }),
     saveTalentDraft: (nickname, draft) => call('saveTalentDraft', { nickname, draft }),
     saveTalentPrep: (nickname, prep) => call('saveTalentPrep', { nickname, prep }),
+    deleteTalentPrep: (prepId, confirmationName) => call('deleteTalentPrep', {
+      prep_id: prepId,
+      confirmation_name: confirmationName,
+    }),
     reviewTalentPrep: (prepId, result, note) => call('reviewTalentPrep', { prep_id: prepId, result, note }),
     updateTalentAppStatus: (nickname, lessonId, status, appFiles = []) => call('updateTalentAppStatus', { nickname, lesson_id: lessonId, status, app_files: appFiles }),
     saveTalentScore: (nickname, month, score) => call('saveTalentScore', { nickname, month, score }),

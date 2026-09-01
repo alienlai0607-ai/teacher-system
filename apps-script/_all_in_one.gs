@@ -1,8 +1,8 @@
 /**
- * 布拉克星球 KPI 系統 - 合併版（All-in-One v7）
+ * 布拉克星球 KPI 系統 - 合併版（All-in-One v8）
  * 觸發詞：kpi系統
  * 此檔由 apps-script 各模組機械式合併，請勿單獨修改。
- * 合併日期：2026-08-27
+ * 合併日期：2026-09-01
  */
 
 // ════════════════════════════════════════════════════════════
@@ -94,6 +94,7 @@ function handleRequest(e, method) {
       'regenerateTalentLessonReport': () => regenerateTalentLessonReport(params),
       'saveTalentDraft': () => saveTalentDraft(params),
       'saveTalentPrep': () => saveTalentPrep(params),
+      'deleteTalentPrep': () => deleteTalentPrep(params),
       'reviewTalentPrep': () => reviewTalentPrep(params),
       'updateTalentAppStatus': () => updateTalentAppStatus(params),
       'saveTalentScore': () => saveTalentScore(params),
@@ -1476,6 +1477,11 @@ function authorizeApiAction_(action, params, actor) {
     if (target.status !== 'active') throw new Error('此員工帳號已停用或刪除，不能新增或修改才藝資料');
     params.nickname = target.nickname;
     if (actor.role !== 'admin' && target.nickname !== actor.nickname) throw new Error('只能修改自己的才藝資料');
+    return;
+  }
+
+  if (action === 'deleteTalentPrep' || action === 'deleteCoursePrep') {
+    params.operator = actor.nickname;
     return;
   }
 
@@ -4838,27 +4844,40 @@ function saveCoursePrep(params) {
   });
   if (!hasArchivedMaterial) return { ok: false, error: '請至少上傳一份教案或教材資料' };
   const now = nowIso();
-  const existing = (() => {
-    ensureCoursePrepSheet_();
-    return findObject(SHEET_NAMES.COURSE_PREP, 'prep_id', prep.id);
-  })();
-  if (existing && existing.nickname !== nickname && user.role !== 'admin') {
-    return { ok: false, error: '不可覆蓋其他老師的備課檔案' };
-  }
+  ensureCoursePrepSheet_();
   const dataJson = JSON.stringify({ schema: 'anqin-course-prep-v1', prep: prep, plan: plan });
   if (dataJson.length > 45000) return { ok: false, error: '備課內容過大，請移除內嵌圖片後再試' };
-  upsertRow(SHEET_NAMES.COURSE_PREP, 'prep_id', {
-    prep_id: prep.id,
-    nickname: nickname,
-    department: normalizeDepartment_(user.department),
-    title: String(prep.title || '').trim(),
-    course_type: String(prep.details && prep.details.targetCourse || ''),
-    created_date: String(prep.date || todayStr()).slice(0, 10),
-    status: String(prep.status || 'draft'),
-    data_json: dataJson,
-    created_at: existing ? existing.created_at : now,
-    updated_at: now,
-  });
+  const normalizedTitle = String(prep.title || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const normalizedCourseType = String(prep.details && prep.details.targetCourse || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: '系統正在儲存其他備課檔案，請稍後再試' };
+  try {
+    const existing = findObject(SHEET_NAMES.COURSE_PREP, 'prep_id', prep.id);
+    if (existing && existing.nickname !== nickname && user.role !== 'admin') {
+      return { ok: false, error: '不可覆蓋其他老師的備課檔案' };
+    }
+    const duplicate = sheetToObjects(SHEET_NAMES.COURSE_PREP).some(function (row) {
+      return row.nickname === nickname
+        && String(row.prep_id || '') !== String(prep.id)
+        && String(row.title || '').trim().replace(/\s+/g, ' ').toLowerCase() === normalizedTitle
+        && String(row.course_type || '').trim().replace(/\s+/g, ' ').toLowerCase() === normalizedCourseType;
+    });
+    if (duplicate) return { ok: false, error: '已有相同課程類型與名稱的備課檔案，請直接編輯原檔案' };
+    upsertRow(SHEET_NAMES.COURSE_PREP, 'prep_id', {
+      prep_id: prep.id,
+      nickname: nickname,
+      department: normalizeDepartment_(user.department),
+      title: String(prep.title || '').trim(),
+      course_type: String(prep.details && prep.details.targetCourse || ''),
+      created_date: String(prep.date || todayStr()).slice(0, 10),
+      status: String(prep.status || 'draft'),
+      data_json: dataJson,
+      created_at: existing ? existing.created_at : now,
+      updated_at: now,
+    });
+  } finally {
+    lock.releaseLock();
+  }
   logSystem(nickname, 'save_course_prep', prep.id, { status: prep.status || 'draft' });
   return { ok: true, prep_id: prep.id, updated_at: now };
 }
@@ -4898,6 +4917,12 @@ function deleteCoursePrep(params) {
   const existing = findObject(SHEET_NAMES.COURSE_PREP, 'prep_id', params.prep_id);
   if (!existing) return { ok: true, removed: false };
   if (user.role !== 'admin' && existing.nickname !== operator) return { ok: false, error: '不可刪除其他老師的備課檔案' };
+  const normalizeName = function (value) {
+    return String(value || '').trim().replace(/\s+/g, '').replace(/(?:老師|主管)$/, '').toLowerCase();
+  };
+  if (normalizeName(params.confirmation_name) !== normalizeName(existing.nickname)) {
+    return { ok: false, error: '姓名確認不正確，未刪除備課檔案' };
+  }
   deleteRow(SHEET_NAMES.COURSE_PREP, existing._row);
   logSystem(operator, 'delete_course_prep', params.prep_id, {});
   return { ok: true, removed: true };
@@ -5052,6 +5077,8 @@ function talentAttachments_(items, required) {
       fileId: String(item.fileId || '').slice(0, 160),
       mimeType: String(item.mimeType || item.type || '').slice(0, 120),
       category: String(item.category || '').slice(0, 80),
+      fingerprint: String(item.fingerprint || '').slice(0, 160),
+      size: Number(item.size || 0),
     };
   });
   if (required && (!cleaned.length || cleaned.some(function (item) { return !item.url; }))) {
@@ -5417,9 +5444,57 @@ function saveTalentPrep(params) {
   prep.status = 'ready';
   prep.date = String(prep.date || todayStr()).slice(0, 10);
   prep.materials = talentAttachments_(prep.materials, true);
-  const saved = upsertTalentRecord_('prep', nickname, prep, actor.nickname);
+  const normalizedTitle = String(prep.courseName || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const normalizedCourseType = String(prep.courseType || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: '系統正在儲存其他備課檔案，請稍後再試' };
+  let saved;
+  try {
+    const duplicate = sheetToObjects(SHEET_NAMES.TALENT_RECORDS).some(function (row) {
+      if (row.record_type !== 'prep' || row.nickname !== nickname || String(row.record_id || '') === String(prep.id)) return false;
+      const recorded = talentRecordObject_(row);
+      return String(recorded.courseName || recorded.title || '').trim().replace(/\s+/g, ' ').toLowerCase() === normalizedTitle
+        && String(recorded.courseType || '').trim().replace(/\s+/g, ' ').toLowerCase() === normalizedCourseType;
+    });
+    if (duplicate) return { ok: false, error: '已有相同課程類型與名稱的備課檔案，請直接編輯原檔案' };
+    saved = upsertTalentRecord_('prep', nickname, prep, actor.nickname);
+  } finally {
+    lock.releaseLock();
+  }
   logSystem(nickname, 'save_talent_prep', prep.id, { status: prep.status });
   return { ok: true, prep: saved };
+}
+
+function deleteTalentPrep(params) {
+  const actor = params.__actor;
+  const prepId = String(params.prep_id || '').trim();
+  if (!actor || actor.status !== 'active' || !prepId) return { ok: false, error: '無備課檔案刪除權限' };
+  ensureTalentRecordsSheet_();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, error: '系統正在處理其他備課檔案，請稍後再試' };
+  try {
+    const existing = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', prepId);
+    if (!existing) return { ok: true, removed: false };
+    if (existing.record_type !== 'prep') return { ok: false, error: '這筆資料不是備課檔案' };
+    if (actor.role !== 'admin' && existing.nickname !== actor.nickname) {
+      return { ok: false, error: '不可刪除其他老師的備課檔案' };
+    }
+    if (normalizeTalentNickname_(params.confirmation_name) !== normalizeTalentNickname_(existing.nickname)) {
+      return { ok: false, error: '姓名確認不正確，未刪除備課檔案' };
+    }
+    const usageCount = sheetToObjects(SHEET_NAMES.TALENT_RECORDS).filter(function (row) {
+      if (row.record_type !== 'lesson' || row.nickname !== existing.nickname) return false;
+      return String(talentRecordObject_(row).prepId || '') === prepId;
+    }).length;
+    if (usageCount) {
+      return { ok: false, error: '已有 ' + usageCount + ' 筆課堂紀錄使用這份檔案，為保留歷史資料不能刪除' };
+    }
+    deleteRow(SHEET_NAMES.TALENT_RECORDS, existing._row);
+  } finally {
+    lock.releaseLock();
+  }
+  logSystem(actor.nickname, 'delete_talent_prep', prepId, { owner: actor.nickname });
+  return { ok: true, removed: true };
 }
 
 function reviewTalentPrep(params) {

@@ -380,6 +380,11 @@ function authorizeApiAction_(action, params, actor) {
     return;
   }
 
+  if (action === 'deleteTalentPrep' || action === 'deleteCoursePrep') {
+    params.operator = actor.nickname;
+    return;
+  }
+
   if (action === 'regenerateTalentLessonReport') {
     params.operator = actor.nickname;
     return;

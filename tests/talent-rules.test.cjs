@@ -141,6 +141,7 @@ assert.match(setupSource, /createTextFinder\('永康教室'\)/, '舊部門名稱
 assert.match(taskSource, /function systemMaintenanceUser_\(params\)/, '排程設定需支援 Apps Script 編輯器直接執行');
 assert.match(taskSource, /Session\.getEffectiveUser\(\)\.getEmail\(\)/, '手動維運必須核對目前 Google 管理員');
 assert.match(codeSource, /'deleteUser': \(\) => deleteUser\(params\)/, 'API 路由必須提供刪除員工操作');
+assert.match(codeSource, /'deleteTalentPrep': \(\) => deleteTalentPrep\(params\)/, 'API 路由必須提供才藝備課刪除操作');
 assert.match(backendSource, /function deleteUser\(params\)/);
 assert.match(backendSource, /confirmation !== nickname/, '刪除前必須再次輸入完整暱稱');
 assert.match(backendSource, /operatorName !== '柏翰'/, '只有柏翰管理員可以執行刪除');
@@ -149,6 +150,7 @@ assert.match(backendSource, /status: 'deleted'/);
 assert.match(backendSource, /push_subscription_id: ''/, '刪除時必須清除 APP 綁定');
 assert.match(backendSource, /target\.status !== 'active'.*不能新增或修改才藝資料/s, '刪除後不得再寫入才藝資料');
 assert.match(apiSource, /deleteUser: \(nickname, confirmNickname\)/);
+assert.match(apiSource, /deleteTalentPrep: \(prepId, confirmationName\)/, '才藝前端 API 需傳送刪除姓名確認');
 assert.match(apiSource, /READ_ONLY_TEST_VIEW/, '切換老師視角時 API 必須全面禁止寫入');
 assert.match(apiSource, /IMPERSONATION_READ_ACTIONS/, '測試視角只能呼叫明確允許的讀取 API');
 assert.match(apiSource, /view_as: window\.AUTH\?\.isImpersonating/, '測試視角讀取雲端日報時需告知後端目前模擬的主管');
@@ -163,6 +165,10 @@ assert.match(talentUiSource, /此頁不需要核准或退回/, '主管備課頁�
 assert.doesNotMatch(talentUiSource, /data-action="review-prep"|data-action="finish-prep-review"/, '才藝主管不可再核准或退回備課檔案');
 assert.match(backendSource, /prep\.status = 'ready'/, '備課檔案儲存後應立即成為可用資料');
 assert.match(backendSource, /talentAttachments_\(prep\.materials, true\)/, '備課檔案必須至少有一份已上傳的教案或教材');
+assert.match(backendSource, /function deleteTalentPrep\(/, '才藝備課必須提供正式刪除流程');
+assert.match(backendSource, /normalizeTalentNickname_\(params\.confirmation_name\)/, '才藝備課刪除需由後端核對本人姓名');
+assert.match(backendSource, /已有 ' \+ usageCount \+ ' 筆課堂紀錄使用這份檔案/, '已被課堂紀錄使用的才藝備課不可刪除');
+assert.match(backendSource, /已有相同課程類型與名稱的備課檔案/, '才藝後端需阻擋重複建檔');
 assert.match(backendSource, /talentAttachments_\(selectedPrep\.materials, true\)/, '送出本堂紀錄時必須再驗證備課附件');
 assert.doesNotMatch(backendSource, /prepRow\.status !== 'approved'/, '本堂紀錄不可再受備課核准狀態阻擋');
 assert.match(backendSource, /備課檔案儲存後即可使用，不需要主管審核/, '舊審查 API 必須明確停用');
@@ -183,6 +189,13 @@ assert.match(talentUiSource, /video\/mp4,video\/quicktime/, '才藝備課選檔�
 assert.match(talentUiSource, /影片單檔上限 15 MB/, '影片上傳限制需在選檔前說清楚');
 assert.match(talentUiSource, /function attachmentIcon\([\s\S]*startsWith\('video\/'\)/, '老師與主管需能辨識影片附件');
 assert.match(talentUiSource, /data-action="remove-upload"/, '備課照片、影片與文件都需可逐檔移除');
+assert.match(talentUiSource, /function fileContentFingerprint\(/, '才藝備課附件需以實際內容建立指紋');
+assert.match(talentUiSource, /相同檔案已略過/, '才藝重複附件需略過並清楚告知老師');
+assert.match(backendSource, /fingerprint: String\(item\.fingerprint/, '附件內容指紋需保存到雲端供下次編輯繼續防重');
+assert.match(talentUiSource, /data-action="open-delete-prep"/, '老師需能直接從才藝備課檔案執行刪除');
+assert.match(talentUiSource, /data-delete-prep-name/, '才藝備課刪除前需完整輸入自己的名稱');
+assert.match(talentUiSource, /function prepUsageCount\(/, '刪除前需檢查是否已有課堂紀錄引用');
+assert.match(talentUiSource, /已有相同課程類型與名稱的備課檔案/, '才藝前端需立即提醒並阻擋重複建檔');
 assert.match(talentUiSource, /route: 'records', label: '我的紀錄'/, '才藝老師查看過去內容的入口需直接命名為我的紀錄');
 assert.match(talentUiSource, /const teacherPriority = \['today', 'prep', 'records'/, '才藝手機底部需直接顯示我的紀錄，不得藏到更多');
 assert.match(talentUiSource, /aria-label="編輯今日紀錄"/, '才藝老師需能從我的紀錄直接編輯當日內容');
@@ -210,6 +223,7 @@ const talentTestWriteActions = talentUiSource.slice(talentUiSource.indexOf('cons
 assert.match(talentUiSource, /柏翰互動測試/, '測試視角需清楚標示為可互動沙盒');
 assert.match(talentTestWriteActions, /'submit-log'/, '正式送出仍須在測試視角攔截');
 assert.match(talentTestWriteActions, /'save-prep'/, '備課儲存仍須在測試視角攔截');
+assert.match(talentTestWriteActions, /'confirm-delete-prep'/, '備課刪除確認仍須在測試視角攔截');
 assert.doesNotMatch(talentTestWriteActions, /'finish-prep-review'|'review-prep'/, '測試視角也不應保留已停用的主管備課審查');
 assert.doesNotMatch(talentTestWriteActions, /'new-log'|'edit-log'|'new-prep'|'edit-score'|'open-bonus-approval'/, '測試視角必須能開啟新增與編輯介面');
 assert.match(talentUiSource, /表單流程正常，最後送出已攔截/, '按到最後一步時需明確說明未寫入正式資料');

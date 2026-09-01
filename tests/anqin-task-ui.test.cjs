@@ -77,8 +77,8 @@ assert.match(source, /const TEST_VIEW_WRITE_ACTIONS = new Set\([\s\S]*'send-feed
 assert.match(source, /if \(TEST_VIEW_MODE\)[\s\S]{0,220}表單流程正常，最後寫入已攔截/, '安親表單需在正式寫入前由測試模式攔截');
 assert.match(source, /TEST_VIEW_MODE && fileInput[\s\S]{0,220}不會上傳正式檔案/, '安親測試視角選擇附件後不得上傳正式檔案');
 assert.match(source, /可以開啟、輸入與切換完整流程/, '安親測試狀態需明確說明可互動範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260901-required-materials-admin-ux-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260901-required-materials-admin-ux-1/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260901-prep-delete-confirm-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260901-prep-delete-confirm-1/, '登入備援路徑也必須避開舊版快取');
 
 const activityFormSource = source.slice(source.indexOf('function renderActivitySpecificFields('), source.indexOf('function renderEvidenceAttachmentList('));
 assert.match(activityFormSource, /if \(activityNeedsPrepSource\(type\)\) return '';/, '課業指導與學科外不得重複顯示舊課程內容欄位');
@@ -100,8 +100,17 @@ const prepSaveSource = source.slice(source.indexOf('async function saveCoursePre
 assert.match(prepSaveSource, /status: 'complete'/, '完成基本建檔後應直接可供工作紀錄選用');
 assert.doesNotMatch(prepSaveSource, /directPlanReady\(planId\)/, '儲存備課不得依賴舊版教案完成度');
 assert.match(prepSaveSource, /some\(item => materialCloudUrl\(item\)\)/, '前端儲存前必須確認至少一份附件已歸檔');
+assert.match(prepSaveSource, /form\.elements\.id\.value = id/, '第一次按下儲存時必須立即固定檔案編號，避免連點新增多份');
+assert.match(prepSaveSource, /已有相同課程類型與名稱的備課檔案/, '前端需攔截相同老師的同名同類型重複建檔');
 assert.match(coursePrepBackend, /hasArchivedMaterial/, '後端也必須驗證教案或教材附件');
 assert.match(coursePrepBackend, /請至少上傳一份教案或教材資料/, '後端缺附件時需回傳清楚訊息');
+assert.match(coursePrepBackend, /LockService\.getScriptLock\(\)/, '雲端儲存需加鎖，避免連點請求同時建立重複檔案');
+assert.match(coursePrepBackend, /請直接編輯原檔案/, '後端也需拒絕同名同類型的重複備課');
+assert.match(coursePrepBackend, /confirmation_name/, '刪除備課前後端必須驗證姓名');
+const prepDeleteSource = source.slice(source.indexOf('function openDeleteDialog('), source.indexOf('async function deleteDerivedTasks('));
+assert.match(prepDeleteSource, /data-delete-confirm-name/, '刪除備課檔案前需輸入自己的名稱');
+assert.match(prepDeleteSource, /已有 \$\{usageCount\} 筆授課紀錄使用這份檔案/, '已被授課紀錄引用的備課檔案不可刪除');
+assert.match(source, /form\.dataset\.submitting === 'true'/, '備課儲存期間需立即阻擋再次送出');
 const prepManagerSource = source.slice(source.indexOf('function renderPlanReviews('), source.indexOf('function renderTeamRosterTable('));
 assert.match(prepManagerSource, /此頁只做客觀查閱/, '主管備課頁必須明確定位為只讀查閱');
 assert.doesNotMatch(prepManagerSource, /data-action="(?:approve-plan|request-plan-changes|review-plan)"|完整度 \$\{|待審查/, '主管備課頁不得再出現審核與完成度判定');
@@ -177,6 +186,9 @@ assert.match(operationPhotoHandlerSource, /status: currentStatus/, '選圖時必
 const operationSaveSource = source.slice(source.indexOf('function saveOperationsForm('), source.indexOf('function saveDailySummaryForm('));
 assert.doesNotMatch(operationSaveSource, /fileNames|相同檔名/, '相同檔名但內容不同的手機照片不得被拒絕');
 assert.match(operationSaveSource, /fingerprints/, '真正相同的影像內容仍需阻擋跨面向重複使用');
+const prepUploadSource = source.slice(source.indexOf('async function handlePrepFiles('), source.indexOf('async function hashFile('));
+assert.match(prepUploadSource, /fileFingerprint = await hashFile\(file\)/, '安親備課附件需以內容指紋辨識重複選檔');
+assert.match(prepUploadSource, /相同檔案已略過/, '重複附件需略過並清楚告知老師');
 assert.match(pdfReport, /教案／教材有效處/, '正式 PDF 需使用新的課後備課回饋欄位');
 assert.match(pdfReport, /parent_handoff_confirmed/, '正式 PDF 需保留無重要事項時的門口交接證據');
 
