@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 2;
+  const APP_VERSION = 3;
   const PREVIEW_MODE = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
     || window.location.hostname.endsWith('.trycloudflare.com');
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -35,12 +35,12 @@
     { nickname: '柏翰', role: 'admin', department: '總部', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'] },
   ];
   const KPI = [
-    { key: 'daily', label: '每日行政與訊息處理', max: 20 },
-    { key: 'promotion', label: '每週美宣產出與完成證據', max: 25 },
-    { key: 'followup', label: '繳費與家長事項追蹤', max: 15 },
-    { key: 'deadline', label: '期限與活動專案管理', max: 20 },
-    { key: 'environment', label: '環境、公告與素材管理', max: 10 },
-    { key: 'supervisor', label: '正確性、主動回報與溝通', max: 10 },
+    { key: 'daily', label: '行政處理與工作留痕', max: 20, rubric: '18–20：工作日皆有紀錄且重要訊息無漏接；14–17：偶有延遲但能補正；10–13：紀錄或回覆不穩定；0–9：多次漏填或未處理。' },
+    { key: 'promotion', label: '美宣產出與發布品質', max: 25, rubric: '23–25：每週達成 2 支影片與 3 則照片宣傳，且證據可判讀；18–22：產量大致達標；13–17：多週缺件；0–12：產出或證據明顯不足。' },
+    { key: 'followup', label: '試上、繳費與家長追蹤', max: 15, rubric: '14–15：到期事項皆按時追蹤並結案；11–13：少量延遲但有補正；8–10：多筆逾期；0–7：追蹤失聯或資料不完整。' },
+    { key: 'deadline', label: '期限與專案推進', max: 20, rubric: '18–20：交辦與專案按期完成，變動會提前回報；14–17：少量延期且有新期限；10–13：多次被動追問；0–9：重大逾期或無進度。' },
+    { key: 'environment', label: '環境與資料維護', max: 10, rubric: '9–10：環境、公告與素材持續維持；7–8：問題能於期限改善；5–6：重複出現缺失；0–4：未檢核或未改善。' },
+    { key: 'supervisor', label: '正確性與主動回報', max: 10, rubric: '9–10：資料正確、異常提前回報；7–8：偶有疏漏但能主動修正；5–6：需主管多次提醒；0–4：隱匿、漏報或重複錯誤。' },
   ];
   const CATEGORIES = [
     ['message', '家長／LINE 訊息'], ['admin', '行政作業'], ['payment', '繳費追蹤'],
@@ -57,6 +57,14 @@
     ['shoeCabinet', '鞋櫃、鞋子與拖鞋定位'], ['entrance', '門口無垃圾與落葉'],
     ['outside', '外圍雜草、紙箱與雜物已整理'], ['signage', '招牌與宣傳物整齊'],
   ];
+  const ENVIRONMENT_GROUPS = [
+    ['counter_zone', '櫃檯與文件', ['counter', 'documents', 'supplies']],
+    ['classroom_zone', '教室與公共區', ['floor', 'furniture', 'cabinets', 'publicArea']],
+    ['notice_zone', '公告與宣傳物', ['announcements', 'signage']],
+    ['shoe_zone', '鞋櫃區', ['shoeCabinet']],
+    ['entrance_zone', '門口', ['entrance']],
+    ['outside_zone', '外圍環境', ['outside']],
+  ];
   const TRIAL_STATUSES = [
     ['waiting_contact', '待第一次詢問'], ['contacted', '已聯絡'], ['considering', '考慮中'],
     ['followup_scheduled', '已約下次聯絡'], ['converted', '已報名一期'], ['not_enrolled', '未報名／暫不考慮'],
@@ -64,25 +72,20 @@
   const TRIAL_BONUS_AMOUNT = 50;
   const NAV = {
     worker: [
-      { route: 'today', label: '今日總覽', icon: 'layout-dashboard' },
-      { route: 'trials', label: '試上追蹤', icon: 'user-round-search' },
-      { route: 'daily', label: '工作日誌', icon: 'notebook-pen' },
-      { route: 'tuesday', label: '週二追蹤', icon: 'calendar-check-2' },
-      { route: 'environment', label: '環境檢核', icon: 'sparkles' },
-      { route: 'projects', label: '專案進度', icon: 'gantt-chart-square' },
-      { route: 'performance', label: '我的 KPI', icon: 'gauge' },
-      { route: 'guide', label: '使用規則', icon: 'book-open-text' },
+      { route: 'today', label: '今日工作', icon: 'layout-dashboard' },
+      { route: 'trials', label: '家長追蹤', icon: 'user-round-search' },
+      { route: 'projects', label: '專案與交辦', icon: 'list-checks' },
+      { route: 'performance', label: '成果與評核', icon: 'gauge' },
+      { route: 'guide', label: '使用說明', icon: 'book-open-text' },
     ],
     manager: [
       { route: 'dashboard', label: '主管總覽', icon: 'layout-dashboard' },
-      { route: 'trials', label: '試上與獎金', icon: 'badge-dollar-sign' },
-      { route: 'reviews', label: '工作審查', icon: 'scan-search' },
-      { route: 'assignments', label: '交辦事項', icon: 'list-todo' },
-      { route: 'weekly', label: '每週 KPI', icon: 'chart-no-axes-column-increasing' },
-      { route: 'projects', label: '專案追蹤', icon: 'gantt-chart-square' },
+      { route: 'trials', label: '家長與獎金', icon: 'badge-dollar-sign' },
+      { route: 'reviews', label: '工作紀錄', icon: 'notebook-tabs' },
+      { route: 'assignments', label: '交辦與專案', icon: 'list-todo' },
       { route: 'evaluation', label: '月度評核', icon: 'clipboard-check' },
       { route: 'cloud', label: '雲端資料', icon: 'folder-open' },
-      { route: 'guide', label: '制度規則', icon: 'book-open-text' },
+      { route: 'guide', label: '評分標準', icon: 'book-open-text' },
     ],
   };
 
@@ -223,6 +226,19 @@
   function records(type) { return state.records.filter(item => item.type === type); }
   function workerRecords(type) { return records(type).filter(item => normalizeName(item.nickname) === normalizeName(workerName)); }
   function todayDaily() { return workerRecords('daily').find(item => item.date === todayIso()) || null; }
+  function todayCommunication() {
+    const current = workerRecords('daily_check').find(item => item.date === todayIso());
+    if (current) return current;
+    const legacy = todayDaily();
+    const messages = legacy?.messages || {};
+    if (messages.parentChecked && messages.officialLineChecked && messages.groupChecked) {
+      return {
+        id: '', date: legacy.date, status: messages.unresolved ? 'needs_supervisor' : 'clear',
+        note: messages.unresolved || '', reported: messages.reported === true, legacy: true,
+      };
+    }
+    return null;
+  }
   function currentTuesday() {
     const week = weekBounds();
     return workerRecords('tuesday').find(item => item.weekKey === week.key || (item.date >= week.start && item.date <= week.end)) || null;
@@ -294,6 +310,58 @@
     const overdue = openAssignments.filter(item => item.dueDate && item.dueDate < todayIso()).length;
     const projects = workerRecords('project').filter(item => item.status !== 'completed');
     return { week, video, photo, openAssignments, overdue, projects, tuesday: currentTuesday() };
+  }
+  function monthFacts(month) {
+    const within = item => String(item.date || item.actualDate || '').slice(0, 7) === month;
+    const daily = workerRecords('daily').filter(within);
+    const dailyChecks = workerRecords('daily_check').filter(within);
+    const workItems = daily.flatMap(record => record.items || []);
+    const completed = workItems.filter(item => item.status === 'completed');
+    const marketing = completed.filter(item => ['video', 'photo_post', 'poster', 'design', 'social_schedule'].includes(item.category));
+    const videos = marketing.filter(item => item.category === 'video' && evidenceReady(item)).length;
+    const photos = marketing.filter(item => item.category === 'photo_post' && evidenceReady(item)).length;
+    const assignments = workerRecords('assignment').filter(item => String(item.date || item.dueDate || '').slice(0, 7) === month);
+    const projects = workerRecords('project').filter(item => String(item.date || '').slice(0, 7) === month || String(item.dueDate || '').slice(0, 7) === month);
+    const trials = trialRecords().filter(item => String(item.date || '').slice(0, 7) === month || String(item.paymentDate || '').slice(0, 7) === month);
+    const overdueTrials = trials.filter(item => !['converted', 'not_enrolled'].includes(item.status) && item.nextFollowupDate && item.nextFollowupDate < todayIso()).length;
+    const overdueWork = assignments.filter(item => item.status !== 'completed' && item.dueDate && item.dueDate < todayIso()).length
+      + workItems.filter(item => item.status !== 'completed' && item.dueDate && item.dueDate < todayIso()).length;
+    const environments = workerRecords('environment').filter(within);
+    const environmentIssues = environments.filter(item => item.status === 'needs_action').length;
+    const communication = dailyChecks.concat(daily.filter(item => item.messages?.parentChecked)).length;
+    const escalations = dailyChecks.filter(item => item.status === 'needs_supervisor').length
+      + daily.filter(item => item.messages?.unresolved).length;
+    const reported = dailyChecks.filter(item => item.status === 'needs_supervisor' && item.reported).length
+      + daily.filter(item => item.messages?.unresolved && item.messages?.reported).length;
+    return {
+      dailyDays: new Set(daily.map(item => item.date)).size,
+      communicationDays: new Set(dailyChecks.map(item => item.date).concat(daily.filter(item => item.messages?.parentChecked).map(item => item.date))).size,
+      workCount: workItems.length,
+      completedCount: completed.length,
+      videos,
+      photos,
+      overdueTrials,
+      converted: trials.filter(item => item.status === 'converted').length,
+      openTrials: trials.filter(item => !['converted', 'not_enrolled'].includes(item.status)).length,
+      assignmentCount: assignments.length,
+      projectCount: projects.length,
+      overdueWork,
+      environmentDays: environments.length,
+      environmentIssues,
+      escalations,
+      reported,
+    };
+  }
+  function kpiFactText(key, facts) {
+    const map = {
+      daily: `工作紀錄 ${facts.dailyDays} 天、共 ${facts.workCount} 項；訊息確認 ${facts.communicationDays} 天`,
+      promotion: `可判讀完成證據：影片 ${facts.videos} 支、照片宣傳 ${facts.photos} 則`,
+      followup: `追蹤中 ${facts.openTrials} 人、已轉一期 ${facts.converted} 人、逾期 ${facts.overdueTrials} 人`,
+      deadline: `交辦 ${facts.assignmentCount} 項、專案 ${facts.projectCount} 項、目前逾期 ${facts.overdueWork} 項`,
+      environment: `環境檢核 ${facts.environmentDays} 天，其中 ${facts.environmentIssues} 天有改善事項`,
+      supervisor: `需主管協助 ${facts.escalations} 次，其中 ${facts.reported} 次已標記主動回報`,
+    };
+    return map[key] || '目前沒有可彙整資料';
   }
   function publishedScore(month = state.ui.month) {
     return workerRecords('score').find(item => item.month === month && item.published) || null;
@@ -395,30 +463,35 @@
   function metric(label, value, note, iconName = 'chart-no-axes-column-increasing') {
     return `<article class="metric"><div class="metric-top"><span>${esc(label)}</span><span class="metric-icon">${icon(iconName, 19)}</span></div><div class="metric-value">${value}</div><div class="metric-note">${esc(note)}</div></article>`;
   }
+  function quickAction(label, status, note, iconName, action, tone = '') {
+    return `<button type="button" class="quick-action ${tone}" data-action="${esc(action)}"><span class="quick-action-icon">${icon(iconName, 20)}</span><span><strong>${esc(label)}</strong><small>${esc(status)}${note ? ` · ${esc(note)}` : ''}</small></span>${icon('chevron-right', 18)}</button>`;
+  }
+  function renderTodayItems(daily) {
+    const items = daily?.items || [];
+    if (!items.length) return emptyState('notebook-pen', '今天還沒有工作紀錄', '完成一件或推進一件工作時再新增，不需要先寫流水帳。', '<button class="button primary" data-action="open-work-item">新增工作</button>');
+    return `<div class="record-list compact-records">${items.map(item => `<article class="record-card"><div class="record-head"><div class="record-title"><strong>${esc(item.title)}</strong><small>${esc(categoryLabel(item.category))}${item.actualDate ? ` · ${formatDate(item.actualDate)} 完成` : item.dueDate ? ` · ${formatDate(item.dueDate)} 前處理` : ''}</small></div>${statusBadge(item.status)}</div><p class="record-copy">${nl2br(item.completedToday)}</p>${item.status !== 'completed' && item.remaining ? `<div class="next-action">${icon('arrow-right', 15)}<span><strong>下一步：</strong>${esc(item.remaining)}</span></div>` : ''}<div class="record-actions"><span class="badge ${evidenceReady(item) ? 'success' : ''}">${icon('paperclip', 13)}${(item.evidence || []).length} 份附件</span><button class="button small" data-action="open-work-item" data-id="${esc(item.id)}" data-record-id="${esc(daily.id)}">編輯</button></div></article>`).join('')}</div>`;
+  }
 
   function renderWorkerDashboard() {
     const daily = todayDaily();
+    const communication = todayCommunication();
     const weekly = weeklySummary();
     const env = currentEnvironment();
     const todayTrials = trialRecords().filter(item => item.date === todayIso());
     const noTrial = todayTrialMarker();
-    const items = daily?.items || [];
-    const unfinished = items.filter(item => item.status !== 'completed').length;
-    return `<section class="page">${pageHead('今日總覽', `${formatDate(todayIso())} · 先處理期限，再留下完成證據`, `<button class="button primary" data-action="open-work-item">${icon('plus')}新增工作</button>`)}
-      <div class="grid cols-4">
-        ${metric('今日工作日誌', daily ? `${items.length} 項` : '尚未填', daily ? `${unfinished} 項尚未完成` : '工作日需留下紀錄', 'notebook-pen')}
-        ${metric('本週影片', `${weekly.video}/2`, weekly.video >= 2 ? '已達每週標準' : `還差 ${2 - weekly.video} 支完成證據`, 'video')}
-        ${metric('本週照片宣傳', `${weekly.photo}/3`, weekly.photo >= 3 ? '已達每週標準' : `還差 ${3 - weekly.photo} 則完成證據`, 'images')}
-        ${metric('主管交辦', weekly.openAssignments.length, weekly.overdue ? `${weekly.overdue} 項已逾期` : '目前無逾期', 'list-todo')}
+    const communicationStatus = communication ? (communication.status === 'needs_supervisor' ? '已回報主管' : '已確認') : '尚未確認';
+    const envStatus = env ? (env.status === 'needs_action' ? '有待改善項目' : '正常') : '尚未確認';
+    const trialStatus = todayTrials.length ? `${todayTrials.length} 位已登錄` : noTrial ? '今日無試上' : '尚未確認';
+    return `<section class="page">${pageHead('今日工作', `${formatDate(todayIso())} · 例行事項一次確認，工作只留下結果或下一步`, `<button class="button primary" data-action="open-work-item">${icon('plus')}新增工作</button>`)}
+      <div class="quick-actions">
+        ${quickAction('訊息與 LINE', communicationStatus, communication?.note || '', communication ? 'message-circle-check' : 'message-circle', 'open-daily-check', communication ? 'done' : '')}
+        ${quickAction('一樓環境', envStatus, env?.status === 'needs_action' ? `期限 ${formatDate(env.improvementDue)}` : '', env ? 'sparkles' : 'circle', 'open-environment', env?.status === 'needs_action' ? 'attention' : env ? 'done' : '')}
+        ${quickAction('今日試上', trialStatus, '', todayTrials.length || noTrial ? 'user-round-check' : 'user-round-search', 'go-trials', todayTrials.length || noTrial ? 'done' : '')}
       </div>
+      <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('notebook-pen')}今天的工作</div><div class="panel-subtitle">${daily?.items?.length || 0} 項；不使用主觀完成百分比</div></div><button class="button small" data-action="open-work-item">${icon('plus')}新增</button></div><div class="panel-body flush">${renderTodayItems(daily)}</div></section>
       <div class="grid cols-2 mt-16">
-        <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('calendar-clock')}今天先做</div><div class="panel-subtitle">依期限與尚未完成狀態排列</div></div></div><div class="panel-body flush">${renderPriorityList()}</div></section>
-        <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('circle-check-big')}今日完整度</div><div class="panel-subtitle">只顯示今天需要確認的項目</div></div></div><div class="panel-body"><div class="check-list">
-          <div class="check-row">${icon(daily ? 'circle-check' : 'circle', 19)}<span>訊息確認與工作日誌 ${daily ? '已留存' : '尚未完成'}</span></div>
-          <div class="check-row">${icon(todayTrials.length || noTrial ? 'circle-check' : 'circle', 19)}<span>今日試上 ${todayTrials.length ? `已登錄 ${todayTrials.length} 位` : noTrial ? '已確認無試上' : '尚未確認'}</span></div>
-          <div class="check-row">${icon(env ? 'circle-check' : 'circle', 19)}<span>一樓環境 ${env ? (env.status === 'needs_action' ? '已記錄待改善' : '已檢核') : '尚未檢核'}</span></div>
-          <div class="check-row">${icon(weekly.tuesday ? 'circle-check' : 'calendar-days', 19)}<span>本週繳費追蹤 ${weekly.tuesday ? '已完成' : '週二需完成'}</span></div>
-        </div></div></section>
+        <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('calendar-clock')}接下來要處理</div><div class="panel-subtitle">只列有期限且尚未完成的工作</div></div></div><div class="panel-body flush">${renderPriorityList()}</div></section>
+        <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('images')}本週美宣成果</div><div class="panel-subtitle">由完成紀錄與附件自動統計</div></div></div><div class="panel-body"><div class="result-pair"><div><span>影片</span><strong>${weekly.video}/2</strong></div><div><span>照片宣傳</span><strong>${weekly.photo}/3</strong></div></div>${weekly.video >= 2 && weekly.photo >= 3 ? '<div class="notice mt-16">本週產出已達標。</div>' : '<div class="notice warning mt-16">只計入已完成且有可判讀附件的紀錄。</div>'}</div></section>
       </div>
     </section>`;
   }
@@ -427,11 +500,20 @@
     const assignments = workerRecords('assignment').filter(item => item.status !== 'completed');
     const work = workerRecords('daily').flatMap(record => (record.items || []).filter(item => item.status !== 'completed').map(item => ({
       id: item.id, recordId: record.id, title: item.title, dueDate: item.dueDate, status: item.status,
-      source: '工作日誌', progress: item.progress, startedAt: record.date,
+      source: '工作日誌', startedAt: record.date, progressNote: item.remaining,
     })));
     const list = assignments.concat(work).sort((a, b) => String(a.dueDate || '9999').localeCompare(String(b.dueDate || '9999'))).slice(0, 6);
     if (!list.length) return emptyState('circle-check-big', '沒有待處理工作', '新增工作或主管交辦後，系統會依期限排在這裡。');
-    return `<div class="record-list" style="padding:12px">${list.map(item => `<article class="record-card"><div class="record-head"><div class="record-title"><strong>${esc(item.title)}</strong><small>${esc(item.source || '主管交辦')} · ${item.startedAt ? `建立 ${formatDate(item.startedAt)} · ` : ''}${item.dueDate ? `期限 ${formatDate(item.dueDate)}` : '尚未設定期限'}</small></div>${statusBadge(item.status)}</div><div class="progress"><span style="width:${Number(item.progress || 0)}%"></span></div><div class="progress-label"><span>目前進度</span><strong>${Number(item.progress || 0)}%</strong></div><div class="record-actions">${item.source === '工作日誌' ? `<button class="button small" data-action="open-work-item" data-id="${esc(item.id)}" data-record-id="${esc(item.recordId)}">更新進度</button>` : `<button class="button small" data-action="update-assignment" data-id="${esc(item.id)}">更新進度</button>`}</div></article>`).join('')}</div>`;
+    return `<div class="record-list" style="padding:12px">${list.map(item => `<article class="record-card"><div class="record-head"><div class="record-title"><strong>${esc(item.title)}</strong><small>${esc(item.source || '主管交辦')} · ${item.startedAt ? `建立 ${formatDate(item.startedAt)} · ` : ''}${item.dueDate ? `期限 ${formatDate(item.dueDate)}` : '尚未設定期限'}</small></div>${statusBadge(item.status)}</div>${item.progressNote ? `<p class="record-copy">${nl2br(item.progressNote)}</p>` : ''}<div class="record-actions">${item.source === '工作日誌' ? `<button class="button small" data-action="open-work-item" data-id="${esc(item.id)}" data-record-id="${esc(item.recordId)}">更新</button>` : `<button class="button small" data-action="update-assignment" data-id="${esc(item.id)}">更新</button>`}</div></article>`).join('')}</div>`;
+  }
+
+  function renderWeeklyParentCheck() {
+    const item = currentTuesday();
+    const week = weekBounds();
+    const actions = isManager ? '' : `<button class="button small" data-action="open-tuesday-check">${icon(item ? 'pencil' : 'check')}${item ? '更新確認' : '本週確認'}</button><button class="button small teal" data-action="open-followup" ${item ? '' : 'disabled'}>${icon('user-round-plus')}新增家長事項</button>`;
+    const checks = item?.checks || {};
+    const completed = ['paymentList', 'expiringStudents', 'unpaidParents', 'remindersSent'].filter(key => checks[key]).length;
+    return `<section class="panel parent-check"><div class="panel-head"><div><div class="panel-title">${icon('calendar-check-2')}本週收費與續課確認</div><div class="panel-subtitle">${formatDate(week.start)}–${formatDate(week.end)} · 名單一次核對，個別家長另外追蹤</div></div><div class="record-actions no-margin">${item ? '<span class="badge success">已確認</span>' : '<span class="badge warning">尚未確認</span>'}${actions}</div></div><div class="panel-body"><div class="summary-line"><span>固定名單</span><strong>${completed}/4</strong><span>未結案家長</span><strong>${(item?.followups || []).filter(entry => entry.status !== 'closed').length}</strong></div>${item?.note ? `<div class="notice warning mt-16">${icon('circle-alert')}<div>${nl2br(item.note)}</div></div>` : ''}<div class="mt-16">${renderFollowups(item?.followups || [])}</div></div></section>`;
   }
 
   function renderTrialsPage() {
@@ -441,8 +523,9 @@
     const filtered = summary.items.filter(item => state.ui.trialStatus === 'all' || item.status === state.ui.trialStatus);
     const controls = `<label class="field compact-control"><span class="visually-hidden">月份</span><input type="month" id="month-filter" value="${esc(state.ui.month)}"></label><label class="field compact-control"><span class="visually-hidden">追蹤狀態</span><select id="trial-status-filter"><option value="all">全部狀態</option>${TRIAL_STATUSES.map(([value,label]) => `<option value="${value}" ${state.ui.trialStatus === value ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></label>${isManager ? `<button class="button" data-action="print">${icon('printer')}列印月報</button>` : `<button class="button" data-action="mark-no-trial" ${todayItems.length || noTrial ? 'disabled' : ''}>${icon('calendar-x-2')}今日無試上</button><button class="button primary" data-action="open-trial">${icon('user-round-plus')}登錄試上</button>`}`;
     const todayState = isManager ? '' : `<div class="notice ${todayItems.length || noTrial ? '' : 'warning'}"><span>${icon(todayItems.length || noTrial ? 'circle-check' : 'circle-alert')}</span><div>${todayItems.length ? `今天已登錄 ${todayItems.length} 位試上學生。` : noTrial ? '今天已確認沒有試上學生。' : '今天尚未登錄試上學生，也尚未確認「今日無試上」。'}</div></div>`;
-    return `<section class="page trial-page">${pageHead(isManager ? '試上與首報獎金' : '試上追蹤', isManager ? '小魚與柏翰只需確認候選名單，不必重複輸入資料' : '當日登錄一次，後續聯絡、報名與獎金都更新同一筆', controls)}
+    return `<section class="page trial-page">${pageHead(isManager ? '家長追蹤與首報獎金' : '家長追蹤', isManager ? '查看到期事項與首報獎金，不重複輸入行政資料' : '試上、收費、續課與家長後續集中在這一頁', controls)}
       ${todayState}
+      <div class="mt-16">${renderWeeklyParentCheck()}</div>
       <div class="grid cols-4 mt-16">
         ${metric('本月試上', summary.trials, '依試上日期統計', 'user-round-search')}
         ${metric('轉一期', summary.converted, `轉換率 ${summary.conversionRate}%`, 'user-round-check')}
@@ -450,7 +533,7 @@
         ${metric('已核准獎金', `$${summary.bonus}`, `${summary.approved.length} 人；另 ${summary.pending.length} 人待審`, 'badge-dollar-sign')}
       </div>
       ${isManager && summary.pending.length ? `<div class="notice warning mt-16">${icon('badge-dollar-sign')}<div><strong>${summary.pending.length} 筆首報獎金待確認</strong><br>確認首次一期、繳費證明與未曾領取後再核准。</div></div>` : ''}
-      <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('users-round')}${esc(state.ui.month)} 試上名單</div><div class="panel-subtitle">報名月份跨月時仍會列入，核准獎金歸在繳費月份</div></div><span class="badge">${filtered.length} 筆</span></div><div class="panel-body flush">${filtered.length ? `<div class="trial-list">${filtered.map(renderTrialCard).join('')}</div>` : emptyState('user-round-search', '這個月份沒有符合的紀錄', isManager ? '行政登錄試上後會出現在這裡。' : '有試上時當日新增；沒有試上請按「今日無試上」。')}</div></section>
+      <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('users-round')}${esc(state.ui.month)} 試上名單</div><div class="panel-subtitle">每位學生只建立一次，後續都更新原紀錄</div></div><span class="badge">${filtered.length} 筆</span></div><div class="panel-body flush">${filtered.length ? `<div class="trial-list">${filtered.map(renderTrialCard).join('')}</div>` : emptyState('user-round-search', '這個月份沒有符合的紀錄', isManager ? '行政登錄試上後會出現在這裡。' : '有試上時當日新增；沒有試上請按「今日無試上」。')}</div></section>
       ${isManager ? renderTrialBonusTable(summary) : ''}
     </section>`;
   }
@@ -461,7 +544,7 @@
     const action = isManager
       ? `<button class="button small" data-action="view-trial" data-id="${esc(item.id)}">${icon('eye')}查看</button>${['pending_review','rejected'].includes(item.bonusStatus) ? `<button class="button small teal" data-action="review-trial-bonus" data-id="${esc(item.id)}">${icon('badge-check')}${item.bonusStatus === 'rejected' ? '重新審核' : '確認獎金'}</button>` : ''}`
       : `<button class="button small" data-action="open-trial" data-id="${esc(item.id)}">${icon('pencil')}更新</button>`;
-    return `<article class="trial-row"><div class="trial-main"><div class="record-head"><div class="record-title"><strong>${esc(item.studentName)}</strong><small>${formatDate(item.date)} 試上 · ${esc(item.course)} · ${esc(item.teacher)}</small></div>${statusBadge(item.status)}</div><div class="trial-meta"><span>${icon('phone',14)}${esc(maskContact(item.contactRef))}</span><span>${icon('sparkles',14)}${esc(trialInterestLabel(item.interest))}</span>${item.nextFollowupDate && !['converted','not_enrolled'].includes(item.status) ? `<span class="${overdue ? 'text-danger' : ''}">${icon('calendar-clock',14)}${overdue ? '已逾期 ' : '下次 '}${formatDate(item.nextFollowupDate)}</span>` : ''}</div>${lastFollowup ? `<p class="record-copy trial-last"><strong>最近追蹤：</strong>${esc(lastFollowup.note)}</p>` : ''}<div class="record-actions">${trialBonusBadge(item)}${action}</div></div></article>`;
+    return `<article class="trial-row"><div class="trial-main"><div class="record-head"><div class="record-title"><strong>${esc(item.studentName)}</strong><small>${formatDate(item.date)} 試上 · ${esc(item.course)} · ${esc(item.teacher)}</small></div>${statusBadge(item.status)}</div><div class="trial-meta"><span>${icon('phone',14)}${esc(maskContact(item.contactRef))}</span>${item.nextFollowupDate && !['converted','not_enrolled'].includes(item.status) ? `<span class="${overdue ? 'text-danger' : ''}">${icon('calendar-clock',14)}${overdue ? '已逾期 ' : '下次 '}${formatDate(item.nextFollowupDate)}</span>` : ''}</div>${lastFollowup ? `<p class="record-copy trial-last"><strong>最近追蹤：</strong>${esc(lastFollowup.note)}</p>` : ''}<div class="record-actions">${trialBonusBadge(item)}${action}</div></div></article>`;
   }
 
   function renderTrialBonusTable(summary) {
@@ -491,7 +574,7 @@
   }
   function renderFollowups(items) {
     if (!items.length) return emptyState('circle-check-big', '本週沒有待追蹤家長', '若有特殊狀況，再新增學生／家長與下次追蹤日期。');
-    return `<div class="record-list" style="padding:12px">${items.map(item => `<article class="record-card"><div class="record-head"><div class="record-title"><strong>${esc(item.person)}</strong><small>${item.status === 'closed' ? '已結案' : `下次追蹤 ${formatDate(item.nextDate)}`}</small></div>${statusBadge(item.status === 'closed' ? 'completed' : 'in_progress')}</div><p class="record-copy"><strong>目前：</strong>${esc(item.situation)}<br><strong>已處理：</strong>${esc(item.handled)}</p><div class="record-actions"><button class="button small" data-action="open-tuesday" data-followup-id="${esc(item.id)}">編輯</button></div></article>`).join('')}</div>`;
+    return `<div class="record-list" style="padding:12px">${items.map(item => `<article class="record-card"><div class="record-head"><div class="record-title"><strong>${esc(item.person)}</strong><small>${item.status === 'closed' ? '已結案' : `下次追蹤 ${formatDate(item.nextDate)}`}</small></div>${statusBadge(item.status === 'closed' ? 'completed' : 'in_progress')}</div><p class="record-copy"><strong>目前：</strong>${esc(item.situation)}<br><strong>已處理：</strong>${esc(item.handled)}</p>${isManager ? '' : `<div class="record-actions"><button class="button small" data-action="open-followup" data-followup-id="${esc(item.id)}">編輯</button></div>`}</article>`).join('')}</div>`;
   }
 
   function renderEnvironmentPage() {
@@ -505,14 +588,21 @@
 
   function renderProjectsPage() {
     const list = workerRecords('project');
-    return `<section class="page">${pageHead(isManager ? '活動與宣傳專案' : '專案進度', '企劃到發布逐階段排程，避免活動前集中趕工', isManager ? '' : `<button class="button primary" data-action="open-project">${icon('plus')}新增專案</button>`)}
-      <div class="stack">${list.length ? list.map(renderProjectCard).join('') : `<section class="panel">${emptyState('gantt-chart-square', '目前沒有進行中的專案', '招生活動、體驗週、節慶活動或新班招生，都可建立完整八階段排程。', isManager ? '' : `<button class="button primary" data-action="open-project">新增第一個專案</button>`)}</section>`}</div>
+    const assignments = workerRecords('assignment').slice().sort((a, b) => String(a.dueDate || '').localeCompare(String(b.dueDate || '')));
+    return `<section class="page">${pageHead('專案與交辦', '主管交辦與較長期工作集中在同一頁', `<button class="button primary" data-action="open-project">${icon('plus')}新增專案</button>`)}
+      <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('list-todo')}主管交辦</div><div class="panel-subtitle">依期限排列，直接更新下一步或完成狀態</div></div><span class="badge">${assignments.length} 項</span></div><div class="panel-body flush">${assignments.length ? `<div class="record-list compact-records">${assignments.map(renderAssignmentCard).join('')}</div>` : emptyState('list-todo', '目前沒有主管交辦', '小魚建立交辦後會自動出現在這裡。')}</div></section>
+      <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('gantt-chart-square')}活動與宣傳專案</div><div class="panel-subtitle">只維護目前階段、下一步與期限</div></div><span class="badge">${list.length} 個</span></div><div class="panel-body flush">${list.length ? `<div class="record-list compact-records">${list.map(renderProjectCard).join('')}</div>` : emptyState('gantt-chart-square', '目前沒有專案', '招生活動、體驗週或大型宣傳工作再建立專案，不必把一般工作放進來。', '<button class="button primary" data-action="open-project">新增第一個專案</button>')}</div></section>
     </section>`;
   }
+  function renderAssignmentCard(item) {
+    return `<article class="record-card"><div class="record-head"><div class="record-title"><strong>${esc(item.title)}</strong><small>${item.dueDate ? `期限 ${formatDate(item.dueDate)}` : '未設定期限'}${item.priority === 'urgent' ? ' · 緊急' : item.priority === 'high' ? ' · 優先' : ''}</small></div>${statusBadge(item.status)}</div><p class="record-copy">${nl2br(item.progressNote || item.detail || '尚未更新')}</p>${item.status !== 'completed' && item.progressNote ? `<div class="next-action">${icon('arrow-right', 15)}<span>${esc(item.progressNote)}</span></div>` : ''}<div class="record-actions"><button class="button small" data-action="update-assignment" data-id="${esc(item.id)}">${item.status === 'completed' ? '查看' : '更新'}</button></div></article>`;
+  }
   function renderProjectCard(item) {
-    const complete = (item.stages || []).filter(stage => stage.status === 'completed').length;
-    const next = (item.stages || []).find(stage => stage.status !== 'completed');
-    return `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('gantt-chart-square')}${esc(item.title)}</div><div class="panel-subtitle">${esc(item.projectType)}${next?.dueDate ? ` · 下一階段 ${next.name} ${formatDate(next.dueDate)}` : ''}</div></div>${item.reviewStatus ? statusBadge(item.reviewStatus) : statusBadge(item.status)}</div><div class="panel-body"><div class="progress"><span style="width:${Math.round(complete / 8 * 100)}%"></span></div><div class="progress-label"><span>${complete}/8 階段完成</span><strong>${Math.round(complete / 8 * 100)}%</strong></div><div class="stage-list mt-16">${(item.stages || []).map(stage => `<div class="check-row">${icon(stage.status === 'completed' ? 'circle-check' : stage.status === 'active' ? 'loader-circle' : 'circle', 19)}<span><strong>${esc(stage.name)}</strong>${stage.dueDate ? ` · 預計 ${formatDate(stage.dueDate)}` : ''}${stage.actualDate ? ` · 實際 ${formatDate(stage.actualDate)}` : ''}</span></div>`).join('')}</div><div class="record-actions">${isManager ? `<button class="button teal" data-action="review-record" data-id="${esc(item.id)}">${icon('scan-search')}審查專案</button>` : `<button class="button" data-action="open-project" data-id="${esc(item.id)}">${icon('pencil')}更新專案</button>`}</div>${item.reviewComment ? `<div class="notice ${item.reviewStatus === 'needs_revision' ? 'danger' : ''} mt-16">${icon('message-square-text')}<div>${nl2br(item.reviewComment)}</div></div>` : ''}</div></section>`;
+    const stages = Array.isArray(item.stages) ? item.stages : [];
+    const current = stages.find(stage => stage.status === 'active') || stages.slice().reverse().find(stage => stage.status === 'completed') || {};
+    const currentStage = item.currentStage || current.name || '尚未設定';
+    const dueDate = item.dueDate || current.dueDate || '';
+    return `<article class="record-card"><div class="record-head"><div class="record-title"><strong>${esc(item.title)}</strong><small>${esc(item.projectType)} · ${esc(currentStage)}${dueDate ? ` · 期限 ${formatDate(dueDate)}` : ''}</small></div>${statusBadge(item.status)}</div><p class="record-copy">${nl2br(item.summary || '尚未留下下一步')}</p><div class="record-actions"><span class="badge ${evidenceReady(item) ? 'success' : ''}">${icon('paperclip', 13)}${(item.evidence || []).length} 份附件</span>${isManager ? `<button class="button small" data-action="review-record" data-id="${esc(item.id)}">查看／回覆</button>` : `<button class="button small" data-action="open-project" data-id="${esc(item.id)}">編輯</button>`}</div>${item.reviewComment ? `<div class="notice mt-16">${icon('message-square-text')}<div>${nl2br(item.reviewComment)}</div></div>` : ''}</article>`;
   }
 
   function renderPerformancePage() {
@@ -538,33 +628,38 @@
   function renderManagerDashboard() {
     const weekly = weeklySummary();
     const trialSummary = trialMonthSummary();
-    const reviewable = workerRecords('daily').filter(item => !item.reviewStatus).length + workerRecords('tuesday').filter(item => !item.reviewStatus).length + workerRecords('environment').filter(item => !item.reviewStatus).length + workerRecords('project').filter(item => !item.reviewStatus).length;
+    const facts = monthFacts(currentMonth());
     const projects = workerRecords('project').filter(item => item.status !== 'completed');
-    return `<section class="page">${pageHead('行政美宣主管總覽', '小魚主管 · 只看期限、缺件與需要決策的事項', `<button class="button primary" data-action="open-assignment">${icon('plus')}新增交辦</button>`)}
-      <div class="grid cols-4">${metric('待審紀錄', reviewable, '工作日誌、週二追蹤與環境', 'scan-search')}${metric('首報獎金待審', trialSummary.pending.length, `本月已核准 $${trialSummary.bonus}`, 'badge-dollar-sign')}${metric('本週美宣', `${weekly.video + weekly.photo}/5`, `影片 ${weekly.video}/2 · 照片 ${weekly.photo}/3`, 'images')}${metric('逾期事項', weekly.overdue + trialSummary.due.length, `交辦 ${weekly.overdue} · 試上追蹤 ${trialSummary.due.length}`, 'clock-alert')}</div>
+    return `<section class="page">${pageHead('行政美宣主管總覽', '小魚主管 · 先看事實、期限與需要決策的事項', `<button class="button primary" data-action="open-assignment">${icon('plus')}新增交辦</button>`)}
+      <div class="grid cols-4">${metric('本月工作留痕', `${facts.dailyDays} 天`, `共 ${facts.workCount} 項工作`, 'notebook-tabs')}${metric('首報獎金待確認', trialSummary.pending.length, `本月已核准 $${trialSummary.bonus}`, 'badge-dollar-sign')}${metric('本週美宣', `${weekly.video + weekly.photo}/5`, `影片 ${weekly.video}/2 · 照片 ${weekly.photo}/3`, 'images')}${metric('目前逾期', facts.overdueWork + trialSummary.due.length, `工作 ${facts.overdueWork} · 家長 ${trialSummary.due.length}`, 'clock-alert')}</div>
       <div class="grid cols-2 mt-16"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('triangle-alert')}主管現在要處理</div><div class="panel-subtitle">逾期、待補充與待審優先</div></div></div><div class="panel-body flush">${renderManagerAlerts()}</div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('gantt-chart-square')}進行中專案</div><div class="panel-subtitle">目前 ${projects.length} 個</div></div></div><div class="panel-body flush">${projects.length ? `<div class="record-list" style="padding:12px">${projects.slice(0,5).map(item => `<article class="record-card"><div class="record-head"><div class="record-title"><strong>${esc(item.title)}</strong><small>${esc(item.projectType)}</small></div>${statusBadge(item.status)}</div></article>`).join('')}</div>` : emptyState('circle-check-big','沒有進行中專案','新專案建立後會顯示各階段期限。')}</div></section></div>
     </section>`;
   }
   function renderManagerAlerts() {
     const assignments = workerRecords('assignment').filter(item => item.status !== 'completed' && item.dueDate < todayIso()).map(item => ({ ...item, label: '交辦逾期' }));
-    const reviews = workerRecords('daily').filter(item => !item.reviewStatus).map(item => ({ ...item, title: `${formatDate(item.date)} 工作日誌`, label: '待審' }));
     const bonuses = trialRecords().filter(item => item.bonusStatus === 'pending_review').map(item => ({ ...item, title: `${item.studentName} 首報獎金`, label: '50 元待確認' }));
-    const list = bonuses.concat(assignments, reviews).slice(0, 8);
-    if (!list.length) return emptyState('circle-check-big', '目前沒有急件', '新的待審、逾期或需補充事項會排在這裡。');
-    return `<div class="record-list" style="padding:12px">${list.map(item => `<article class="record-card"><div class="record-head"><div class="record-title"><strong>${esc(item.title)}</strong><small>${esc(item.label)}${item.dueDate ? ` · ${formatDate(item.dueDate)}` : ''}</small></div>${statusBadge(item.bonusStatus || item.status)}</div><div class="record-actions">${item.type === 'trial' ? `<button class="button small teal" data-action="review-trial-bonus" data-id="${esc(item.id)}">確認獎金</button>` : item.type === 'daily' ? `<button class="button small" data-action="review-record" data-id="${esc(item.id)}">開啟審查</button>` : `<button class="button small" data-route="assignments">查看交辦</button>`}</div></article>`).join('')}</div>`;
+    const trials = trialRecords().filter(item => !['converted', 'not_enrolled'].includes(item.status) && item.nextFollowupDate && item.nextFollowupDate <= todayIso()).map(item => ({ ...item, title: `${item.studentName} 家長追蹤`, label: '今日到期／逾期' }));
+    const environments = workerRecords('environment').filter(item => item.status === 'needs_action' && item.improvementDue && item.improvementDue <= todayIso()).map(item => ({ ...item, title: `${formatDate(item.date)} 環境改善`, label: '改善期限到期' }));
+    const list = bonuses.concat(assignments, trials, environments).slice(0, 8);
+    if (!list.length) return emptyState('circle-check-big', '目前沒有急件', '新的獎金確認、逾期或改善事項會排在這裡。');
+    return `<div class="record-list" style="padding:12px">${list.map(item => `<article class="record-card"><div class="record-head"><div class="record-title"><strong>${esc(item.title)}</strong><small>${esc(item.label)}${item.dueDate || item.nextFollowupDate || item.improvementDue ? ` · ${formatDate(item.dueDate || item.nextFollowupDate || item.improvementDue)}` : ''}</small></div>${statusBadge(item.bonusStatus || item.status)}</div><div class="record-actions">${item.type === 'trial' && item.bonusStatus === 'pending_review' ? `<button class="button small teal" data-action="review-trial-bonus" data-id="${esc(item.id)}">確認獎金</button>` : item.type === 'trial' ? `<button class="button small" data-action="view-trial" data-id="${esc(item.id)}">查看追蹤</button>` : item.type === 'environment' ? `<button class="button small" data-action="review-record" data-id="${esc(item.id)}">查看問題</button>` : `<button class="button small" data-route="assignments">查看交辦</button>`}</div></article>`).join('')}</div>`;
   }
 
   function renderReviewsPage() {
-    const list = state.records.filter(item => ['daily', 'tuesday', 'environment', 'project'].includes(item.type));
-    return `<section class="page">${pageHead('工作審查', '查看完整內容與證據，再決定通過或退回補充')}
-      <div class="stack">${list.length ? list.map(item => `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon(item.type === 'daily' ? 'notebook-pen' : item.type === 'tuesday' ? 'calendar-check-2' : item.type === 'project' ? 'gantt-chart-square' : 'sparkles')}${esc(item.type === 'daily' ? `${formatDate(item.date)} 工作日誌` : item.type === 'tuesday' ? `${formatDate(item.date)} 週二確認` : item.type === 'project' ? item.title : `${formatDate(item.date)} 環境檢核`)}</div><div class="panel-subtitle">${esc(item.nickname || workerName)} · 更新 ${formatDateTime(item.updatedAt)}</div></div>${item.reviewStatus ? statusBadge(item.reviewStatus) : '<span class="badge warning">待審</span>'}</div><div class="panel-body"><div class="record-actions"><button class="button teal" data-action="review-record" data-id="${esc(item.id)}">${icon('scan-search')}查看完整內容</button></div></div></section>`).join('') : `<section class="panel">${emptyState('scan-search','目前沒有可審紀錄','皮皮送出工作日誌、週二追蹤、環境檢核或專案後會出現在這裡。')}</section>`}</div>
+    const list = state.records.filter(item => ['daily', 'daily_check', 'tuesday', 'environment', 'project'].includes(item.type)).sort((a, b) => String(b.updatedAt || b.date).localeCompare(String(a.updatedAt || a.date)));
+    const title = item => item.type === 'daily' ? `${formatDate(item.date)} 工作紀錄` : item.type === 'daily_check' ? `${formatDate(item.date)} 訊息確認` : item.type === 'tuesday' ? `${formatDate(item.date)} 收費與續課確認` : item.type === 'project' ? item.title : `${formatDate(item.date)} 環境確認`;
+    const summary = item => item.type === 'daily' ? `${(item.items || []).length} 項工作` : item.type === 'daily_check' ? (item.status === 'needs_supervisor' ? item.note : '訊息皆已處理') : item.type === 'tuesday' ? `${(item.followups || []).filter(entry => entry.status !== 'closed').length} 項持續追蹤` : item.type === 'project' ? (item.summary || '未留下一步') : item.status === 'needs_action' ? item.issue : '環境正常';
+    return `<section class="page">${pageHead('工作紀錄', '按日期查看行政做了什麼；只有需要時再留下主管回覆')}
+      <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('notebook-tabs')}近期紀錄</div><div class="panel-subtitle">不要求逐筆核准，月底評核時可回看事實</div></div><span class="badge">${list.length} 筆</span></div><div class="panel-body flush">${list.length ? `<div class="record-list compact-records">${list.map(item => `<article class="record-card"><div class="record-head"><div class="record-title"><strong>${esc(title(item))}</strong><small>${esc(summary(item))} · 更新 ${formatDateTime(item.updatedAt)}</small></div>${item.reviewComment ? '<span class="badge info">已回覆</span>' : ''}</div><div class="record-actions"><button class="button small" data-action="review-record" data-id="${esc(item.id)}">查看${item.reviewComment ? '／更新回覆' : ''}</button></div></article>`).join('')}</div>` : emptyState('notebook-tabs','目前沒有工作紀錄','皮皮開始使用後，紀錄會依日期出現在這裡。')}</div></section>
     </section>`;
   }
 
   function renderAssignmentsPage() {
     const list = workerRecords('assignment');
-    return `<section class="page">${pageHead('主管交辦事項', '每件工作都有交辦日、期限、進度、實際完成日與證據', `<button class="button primary" data-action="open-assignment">${icon('plus')}新增交辦</button>`)}
-      <div class="stack">${list.length ? list.map(item => `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('list-todo')}${esc(item.title)}</div><div class="panel-subtitle">交辦 ${formatDate(item.date)} · 期限 ${formatDate(item.dueDate)} · ${esc(item.nickname)}</div></div>${statusBadge(item.status)}</div><div class="panel-body"><p class="record-copy">${nl2br(item.detail)}</p><div class="progress"><span style="width:${Number(item.progress || 0)}%"></span></div><div class="progress-label"><span>${item.progressNote ? esc(item.progressNote) : '尚未更新進度'}</span><strong>${Number(item.progress || 0)}%</strong></div><div class="record-actions"><button class="button small" data-action="open-assignment" data-id="${esc(item.id)}">編輯交辦</button></div></div></section>`).join('') : `<section class="panel">${emptyState('list-todo','尚未建立交辦事項','新增後會直接出現在皮皮的今日優先工作。',`<button class="button primary" data-action="open-assignment">新增第一項交辦</button>`)}</section>`}</div>
+    const projects = workerRecords('project');
+    return `<section class="page">${pageHead('交辦與專案', '先看期限與下一步，不要求行政維護主觀百分比', `<button class="button primary" data-action="open-assignment">${icon('plus')}新增交辦</button>`)}
+      <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('list-todo')}主管交辦</div><div class="panel-subtitle">${list.filter(item => item.status !== 'completed').length} 項尚未完成</div></div></div><div class="panel-body flush">${list.length ? `<div class="record-list compact-records">${list.map(renderAssignmentCard).join('')}</div>` : emptyState('list-todo','尚未建立交辦事項','新增後會直接出現在皮皮的今日工作。','<button class="button primary" data-action="open-assignment">新增第一項交辦</button>')}</div></section>
+      <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('gantt-chart-square')}行政建立的專案</div><div class="panel-subtitle">主管查閱目前階段、下一步與期限</div></div><span class="badge">${projects.length} 個</span></div><div class="panel-body flush">${projects.length ? `<div class="record-list compact-records">${projects.map(renderProjectCard).join('')}</div>` : emptyState('gantt-chart-square','目前沒有專案','行政建立大型活動或宣傳專案後會出現在這裡。')}</div></section>
     </section>`;
   }
 
@@ -581,9 +676,10 @@
     const month = selectedEvaluationMonth();
     const existing = workerRecords('score').find(item => item.month === month) || { scores: {} };
     const messages = conversation(month).messages || [];
+    const facts = monthFacts(month);
     const selection = `<form id="evaluation-selection-form" class="month-confirm-form"><label class="field compact-control"><span>評核月份</span><input type="month" name="month" value="${esc(month)}" max="${currentMonth()}"></label><button class="button small" type="submit">確認查看</button></form><button class="button" data-action="print">${icon('printer')}列印</button>`;
-    return `<section class="page">${pageHead('月度評核', '預設開啟最近一次評核；選擇其他月份後需確認才會切換', selection)}
-      <div class="grid cols-2"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}100 分評核</div><div class="panel-subtitle">${esc(month)} · 分數輸入就在項目旁</div></div><span class="badge ${existing.published ? 'success' : 'warning'}">${existing.published ? '已公布' : '草稿'}</span></div><div class="panel-body"><form id="score-form"><input type="hidden" name="month" value="${esc(month)}"><div class="stack">${KPI.map(item => `<div class="record-card"><div class="record-head"><div class="record-title"><strong>${esc(item.label)}</strong><small>滿分 ${item.max}</small></div><div class="field" style="width:92px"><label for="score-${item.key}">分數</label><input id="score-${item.key}" name="${item.key}" type="number" min="0" max="${item.max}" value="${Number(existing.scores?.[item.key] || 0)}" required></div></div></div>`).join('')}</div><div class="field full mt-16"><label for="score-comment">主管建議</label><textarea id="score-comment" name="comment" placeholder="寫出做得好的地方、需要改善的地方與下個月重點">${esc(existing.comment || '')}</textarea></div><label class="check-row mt-16"><input type="checkbox" name="published" ${existing.published ? 'checked' : ''}><span>公布給皮皮查看</span></label><div class="record-actions"><button class="button primary" type="submit">${icon('save')}儲存評核</button></div></form></div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('messages-square')}主管與行政對話</div><div class="panel-subtitle">公布評核後仍可來回補充</div></div></div><div class="panel-body">${renderMessages(messages)}<form id="message-form" class="mt-16"><input type="hidden" name="month" value="${esc(month)}"><div class="field"><label for="message-text">給皮皮的訊息</label><textarea id="message-text" name="text" placeholder="詢問進度、說明評核或提供修正方向"></textarea></div><div class="record-actions"><button class="button teal" type="submit">${icon('send')}送出訊息</button></div></form></div></section></div>
+    return `<section class="page">${pageHead('月度評核', '先看系統事實，再依明確尺度評分；不憑印象打分', selection)}
+      <div class="evaluation-layout"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}100 分評核</div><div class="panel-subtitle">${esc(month)} · 每項分數旁皆有資料與評分尺度</div></div><span class="badge ${existing.published ? 'success' : 'warning'}">${existing.published ? '已公布' : '草稿'}</span></div><div class="panel-body"><form id="score-form"><input type="hidden" name="month" value="${esc(month)}"><div class="evaluation-list">${KPI.map(item => `<article class="evaluation-row"><div class="evaluation-copy"><div class="record-title"><strong>${esc(item.label)}</strong><small>滿分 ${item.max} 分</small></div><div class="evidence-fact">${icon('database', 15)}<span>${esc(kpiFactText(item.key, facts))}</span></div><details><summary>查看評分尺度</summary><p>${esc(item.rubric)}</p></details></div><label class="score-input" for="score-${item.key}"><span>分數</span><input id="score-${item.key}" name="${item.key}" type="number" min="0" max="${item.max}" value="${Number(existing.scores?.[item.key] || 0)}" required><small>/ ${item.max}</small></label></article>`).join('')}</div><div class="field full mt-16"><label for="score-comment">本月評語 <span class="conditional">公布時必填</span></label><textarea id="score-comment" name="comment" placeholder="分成：做得好的地方、需改善事項、下月具體重點">${esc(existing.comment || '')}</textarea></div><label class="check-row mt-16"><input type="checkbox" name="published" ${existing.published ? 'checked' : ''}><span>確認分數與評語後，公布給皮皮查看</span></label><div class="record-actions"><button class="button primary" type="submit">${icon('save')}儲存評核</button></div></form></div></section><section class="panel conversation-panel"><div class="panel-head"><div><div class="panel-title">${icon('messages-square')}主管與行政對話</div><div class="panel-subtitle">針對評核與工作進度持續回覆</div></div></div><div class="panel-body">${renderMessages(messages)}<form id="message-form" class="mt-16"><input type="hidden" name="month" value="${esc(month)}"><div class="field"><label for="message-text">給皮皮的訊息</label><textarea id="message-text" name="text" placeholder="詢問進度、說明評核或提供修正方向"></textarea></div><div class="record-actions"><button class="button teal" type="submit">${icon('send')}送出訊息</button></div></form></div></section></div>
     </section>`;
   }
 
@@ -621,20 +717,18 @@
   }
 
   function renderGuidePage() {
-    return `<section class="page">${pageHead(isManager ? '行政美宣 KPI 制度' : '行政美宣使用規則', '說明集中放在這一頁，正式填寫畫面保持乾淨')}
-      <div class="grid cols-2"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('notebook-pen')}每日怎麼填</div></div></div><div class="panel-body"><div class="check-list"><div class="check-row"><span><strong>今日完成</strong><br>只寫今天實際完成或推進的內容。</span></div><div class="check-row"><span><strong>目前進度</strong><br>用百分比表示，不用重複今日完成的句子。</span></div><div class="check-row"><span><strong>尚未完成</strong><br>寫剩餘工作並設定預計完成日。</span></div><div class="check-row"><span><strong>實際完成</strong><br>完成時補上日期及可判讀證據。</span></div></div></div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('images')}美宣完成標準</div></div></div><div class="panel-body"><div class="notice warning">${icon('circle-alert')}<div>拍到素材不等於完成。影片、照片分享、海報與排程需達到可發布狀態。</div></div><div class="check-list mt-16"><div class="check-row"><span>每週至少 2 支完成影片</span></div><div class="check-row"><span>每週至少 3 則照片宣傳</span></div><div class="check-row"><span>證據可用發布、排程、海報／圖卡或影片完成截圖</span></div></div></div></section></div>
-      <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('badge-dollar-sign')}試上轉首次一期獎金</div><div class="panel-subtitle">獎金與 KPI 分數分開計算</div></div><span class="badge success">每人 50 元</span></div><div class="panel-body"><div class="check-list"><div class="check-row"><span><strong>當日登錄</strong><br>有試上就建立學生；沒有試上按「今日無試上」，不用在工作日誌再抄一次。</span></div><div class="check-row"><span><strong>更新同一筆</strong><br>後續聯絡、家長回覆與報名結果都留在原學生紀錄。</span></div><div class="check-row"><span><strong>符合條件</strong><br>第一次正式報名一期、完成繳費、有追蹤紀錄及證明，續報不計。</span></div><div class="check-row"><span><strong>主管確認</strong><br>每位學生終身只核發一次；小魚或柏翰審核通過後才列入月獎金。</span></div></div></div></section>
-      <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('gauge')}100 分評核結構</div><div class="panel-subtitle">工作量不是唯一分數，期限、結果、回報與證據同時判讀</div></div></div><div class="panel-body">${KPI.map(item => `<div class="kpi-bar"><div class="kpi-name">${esc(item.label)}</div><div class="kpi-track"><span style="width:${item.max}%"></span></div><div class="kpi-score">${item.max} 分</div></div>`).join('')}</div></section>
-      <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('siren')}需要主動回報</div></div></div><div class="panel-body"><div class="grid cols-3">${['家長客訴','繳費異常','家長長時間未回覆','宣傳工作延遲','活動資料不足','設備異常','環境無法自行改善','工作可能逾期'].map(item => `<div class="check-row"><span>${esc(item)}</span></div>`).join('')}</div></div></section>
+    return `<section class="page">${pageHead(isManager ? '行政美宣評分標準' : '行政美宣使用說明', '規則集中在這裡，正式填寫頁只保留當下需要的欄位')}
+      <div class="grid cols-2"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('mouse-pointer-click')}最短填寫方式</div></div></div><div class="panel-body"><ol class="simple-steps"><li><strong>一天一次</strong><span>確認訊息與 LINE、環境、今日是否有試上。</span></li><li><strong>一件工作一筆</strong><span>只寫本次結果；未完成再寫下一步與期限。</span></li><li><strong>同一件持續更新</strong><span>試上、家長追蹤、交辦與專案都不重複建立。</span></li><li><strong>系統自動彙整</strong><span>每週產出、逾期、獎金與月度事實不需另做表格。</span></li></ol></div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('paperclip')}什麼時候要附件</div></div></div><div class="panel-body"><div class="check-list"><div class="check-row"><span><strong>美宣完成</strong><br>附可發布成品、發布畫面或排程截圖。</span></div><div class="check-row"><span><strong>首次一期獎金</strong><br>附報名或完成繳費證明。</span></div><div class="check-row"><span><strong>一般行政</strong><br>只有主管需要核對結果時才附，不為拍照而拍照。</span></div></div></div></section></div>
+      <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('target')}固定目標與獎金</div></div></div><div class="panel-body"><div class="rule-grid"><div><span>每週影片</span><strong>2 支</strong><small>完成至可發布狀態</small></div><div><span>照片宣傳</span><strong>3 則</strong><small>單張、多張或圖卡皆可</small></div><div><span>首報獎金</span><strong>50 元／人</strong><small>首次一期且完成繳費</small></div></div></div></section>
+      <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('gauge')}100 分評核</div><div class="panel-subtitle">主管必須依系統事實與下列尺度評分</div></div></div><div class="panel-body"><div class="rubric-list">${KPI.map(item => `<details><summary><span>${esc(item.label)}</span><strong>${item.max} 分</strong></summary><p>${esc(item.rubric)}</p></details>`).join('')}</div></div></section>
+      <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('siren')}必須主動回報</div></div></div><div class="panel-body"><div class="tag-list">${['家長客訴','繳費異常','家長長時間未回覆','宣傳延遲','活動資料不足','設備異常','環境無法改善','工作可能逾期'].map(item => `<span class="badge warning">${esc(item)}</span>`).join('')}</div></div></section>
     </section>`;
   }
 
   function renderRoute() {
     if (workspace.role === 'worker') {
       if (state.ui.route === 'trials') return renderTrialsPage();
-      if (state.ui.route === 'daily') return renderDailyPage();
-      if (state.ui.route === 'tuesday') return renderTuesdayPage();
-      if (state.ui.route === 'environment') return renderEnvironmentPage();
+      if (['daily', 'tuesday', 'environment'].includes(state.ui.route)) return renderWorkerDashboard();
       if (state.ui.route === 'projects') return renderProjectsPage();
       if (state.ui.route === 'performance') return renderPerformancePage();
       if (state.ui.route === 'guide') return renderGuidePage();
@@ -643,8 +737,8 @@
     if (state.ui.route === 'trials') return renderTrialsPage();
     if (state.ui.route === 'reviews') return renderReviewsPage();
     if (state.ui.route === 'assignments') return renderAssignmentsPage();
-    if (state.ui.route === 'weekly') return renderWeeklyPage();
-    if (state.ui.route === 'projects') return renderProjectsPage();
+    if (state.ui.route === 'weekly') return renderManagerDashboard();
+    if (state.ui.route === 'projects') return renderAssignmentsPage();
     if (state.ui.route === 'evaluation') return renderEvaluationPage();
     if (state.ui.route === 'cloud') return renderCloudPage();
     if (state.ui.route === 'guide') return renderGuidePage();
@@ -677,18 +771,56 @@
   function dialogShell(title, subtitle, body, submitLabel = '', formId = '') {
     return `<div class="dialog-head"><div><h2 id="dialog-title">${esc(title)}</h2><p>${esc(subtitle)}</p></div><button type="button" class="button icon-only" data-action="close-dialog" aria-label="關閉">${icon('x')}</button></div>${formId ? `<form id="${formId}">` : ''}<div class="dialog-body">${body}</div><div class="dialog-foot"><button type="button" class="button" data-action="close-dialog">取消</button>${submitLabel ? `<button type="submit" class="button primary">${icon('save')}${esc(submitLabel)}</button>` : ''}</div>${formId ? '</form>' : ''}`;
   }
+  function existingFileControls(files, fieldName = 'removeEvidence') {
+    if (!Array.isArray(files) || !files.length) return '';
+    return `<div class="existing-files">${files.map(file => `<label class="file-chip"><span>${icon('paperclip', 13)}${esc(file.fileName || '附件')}</span><input type="checkbox" name="${esc(fieldName)}" value="${esc(file.id || file.fileId || file.url)}"><small>移除</small></label>`).join('')}</div>`;
+  }
+  function retainedFiles(files, formData, fieldName = 'removeEvidence') {
+    const removed = new Set(formData.getAll(fieldName).map(String));
+    return (Array.isArray(files) ? files : []).filter(file => !removed.has(String(file.id || file.fileId || file.url)));
+  }
+  function renderSelectedFiles(input) {
+    if (!input?.id) return;
+    const target = $(`[data-file-preview="${input.id}"]`);
+    if (!target) return;
+    const files = Array.from(input.files || []);
+    target.innerHTML = files.map((file, index) => `<span class="selected-file"><span>${icon('paperclip', 13)}${esc(file.name)}</span><button type="button" data-action="remove-selected-file" data-input-id="${esc(input.id)}" data-index="${index}" aria-label="移除 ${esc(file.name)}">${icon('x', 14)}</button></span>`).join('');
+    hydrateIcons();
+  }
+  function removeSelectedFile(inputId, index) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    const transfer = new DataTransfer();
+    Array.from(input.files || []).forEach((file, fileIndex) => {
+      if (fileIndex !== Number(index)) transfer.items.add(file);
+    });
+    input.files = transfer.files;
+    renderSelectedFiles(input);
+  }
+
+  function openDailyCheck() {
+    const item = todayCommunication() || {};
+    const status = item.status || 'clear';
+    const body = `<div class="notice">${icon('message-circle-check')}<div>一次確認家長訊息、官方 LINE 與班級群組，不會在每一筆工作重複詢問。</div></div><div class="choice-grid mt-16"><label class="choice-card"><input type="radio" name="status" value="clear" ${status === 'clear' ? 'checked' : ''}><span>${icon('circle-check')}<strong>已處理完成</strong><small>目前沒有需要主管決定的事項</small></span></label><label class="choice-card"><input type="radio" name="status" value="needs_supervisor" ${status === 'needs_supervisor' ? 'checked' : ''}><span>${icon('circle-alert')}<strong>需要主管協助</strong><small>留下問題並確認已回報</small></span></label></div><div class="form-grid mt-16" data-daily-issue><div class="field full"><label for="daily-check-note">需要主管協助的事項 <span class="required">*</span></label><textarea id="daily-check-note" name="note" placeholder="寫清楚目前狀況與需要主管決定的內容">${esc(item.note || '')}</textarea></div><label class="check-row field full"><input type="checkbox" name="reported" ${item.reported ? 'checked' : ''}><span>我已主動回報小魚主管</span></label></div>`;
+    showDialog(dialogShell('今日訊息確認', '一天只需完成一次', body, '儲存確認', 'daily-check-form'));
+    updateDailyCheckVisibility();
+  }
+  function updateDailyCheckVisibility() {
+    const status = $('#daily-check-form input[name="status"]:checked')?.value || 'clear';
+    const block = $('[data-daily-issue]');
+    if (block) block.hidden = status !== 'needs_supervisor';
+  }
 
   function openWorkItem(itemId = '', recordId = '') {
     const daily = (recordId ? workerRecords('daily').find(record => record.id === recordId) : null) || todayDaily();
     const item = (daily?.items || []).find(entry => entry.id === itemId) || state.drafts.workItem || {};
-    const messages = daily?.messages || state.drafts.messages || {};
-    const messageFields = `<div class="grid cols-3"><label class="check-row"><input type="checkbox" name="parentChecked" ${messages.parentChecked ? 'checked' : ''}><span>家長訊息已確認</span></label><label class="check-row"><input type="checkbox" name="officialLineChecked" ${messages.officialLineChecked ? 'checked' : ''}><span>官方 LINE 已確認</span></label><label class="check-row"><input type="checkbox" name="groupChecked" ${messages.groupChecked ? 'checked' : ''}><span>班級群組已確認</span></label></div><div class="form-grid mt-16"><div class="field full"><label for="unresolved">需主管確認／無法立即處理</label><textarea id="unresolved" name="unresolved" placeholder="沒有可留白；若有，寫清楚目前狀況與需要主管決定的內容">${esc(messages.unresolved || '')}</textarea></div><label class="check-row field full"><input type="checkbox" name="reported" ${messages.reported ? 'checked' : ''}><span>有未解決事項時，我已主動回報主管</span></label></div>`;
-    const messageBlock = daily
-      ? `<details class="compact-details"><summary>${icon('message-circle-check')}當日訊息已確認，需要時可展開修改</summary><div class="compact-details-body">${messageFields}</div></details>`
-      : `<h3>今日訊息確認 <span class="required">*</span></h3>${messageFields}`;
-    const body = `${daily ? '' : `<div class="notice">${icon('info')}<div>同一天新增的工作會整合在同一份日誌。美宣標記完成時必須附可判讀的完成證據。</div></div>`}${messageBlock}
-      <h3>本項工作</h3><input type="hidden" name="itemId" value="${esc(item.id || '')}"><input type="hidden" name="recordId" value="${esc(daily?.id || '')}"><div class="form-grid"><div class="field"><label for="work-category">工作類型 <span class="required">*</span></label><select id="work-category" name="category" required><option value="">請選擇</option>${CATEGORIES.map(([key,label]) => `<option value="${key}" ${item.category === key ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></div><div class="field"><label for="work-title">工作內容 <span class="required">*</span></label><input id="work-title" name="title" value="${esc(item.title || '')}" placeholder="例：9 月體驗週海報" required></div><div class="field full"><label for="completed-today">本次完成／處理 <span class="required">*</span></label><textarea id="completed-today" name="completedToday" placeholder="寫本次實際完成或推進的內容" required>${esc(item.completedToday || '')}</textarea></div><div class="field"><label for="work-progress">目前進度：<span id="progress-value">${Number(item.progress || 0)}%</span></label><input id="work-progress" name="progress" type="range" min="0" max="100" step="5" value="${Number(item.progress || 0)}"></div><div class="field"><label for="work-status">狀態 <span class="required">*</span></label><select id="work-status" name="status"><option value="in_progress" ${item.status === 'in_progress' || !item.status ? 'selected' : ''}>進行中</option><option value="waiting" ${item.status === 'waiting' ? 'selected' : ''}>等待主管／外部資料</option><option value="completed" ${item.status === 'completed' ? 'selected' : ''}>已完成</option></select></div><div class="field full"><label for="remaining">尚未完成／剩餘工作 <span class="required">*</span> <span class="conditional">未完成時</span></label><textarea id="remaining" name="remaining" placeholder="例：剩餘課程時間與 QR Code 確認">${esc(item.remaining || '')}</textarea></div><div class="field"><label for="due-date">預計完成日期 <span class="required">*</span> <span class="conditional">未完成時</span></label><input id="due-date" name="dueDate" type="date" value="${esc(item.dueDate || '')}"></div><div class="field"><label for="actual-date">實際完成日期 <span class="required">*</span> <span class="conditional">完成時</span></label><input id="actual-date" name="actualDate" type="date" value="${esc(item.actualDate || '')}"></div><div class="field full"><label for="work-evidence">完成證據 <span class="required">*</span> <span class="conditional">美宣完成時</span></label><input id="work-evidence" name="evidence" type="file" multiple accept="image/*,video/*,.pdf,.ppt,.pptx"><div class="field-help">可一次選多個檔案；已發布、排程、海報／圖卡或影片完成截圖皆可。</div>${(item.evidence || []).length ? `<div class="file-list">${item.evidence.map(file => `<span class="badge success">${icon('paperclip',12)}${esc(file.fileName)}</span>`).join('')}</div>` : ''}</div></div>`;
-    showDialog(dialogShell(itemId ? '編輯工作紀錄' : '新增工作紀錄', '保留可供主管判讀的進度、期限與證據', body, '儲存工作', 'work-item-form'), true);
+    const body = `<div class="notice">${icon('info')}<div>只寫這次做到的結果；未完成時再補「下一步」與期限。系統不再要求主觀百分比。</div></div><input type="hidden" name="itemId" value="${esc(item.id || '')}"><input type="hidden" name="recordId" value="${esc(daily?.id || '')}"><div class="form-grid mt-16"><div class="field"><label for="work-category">工作類型 <span class="required">*</span></label><select id="work-category" name="category" required><option value="">請選擇</option>${CATEGORIES.map(([key,label]) => `<option value="${key}" ${item.category === key ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></div><div class="field"><label for="work-title">工作名稱 <span class="required">*</span></label><input id="work-title" name="title" value="${esc(item.title || '')}" placeholder="例：9 月體驗週海報" required></div><div class="field full"><label for="completed-today">本次處理結果 <span class="required">*</span></label><textarea id="completed-today" name="completedToday" placeholder="例：完成第一版海報並送主管確認" required>${esc(item.completedToday || '')}</textarea></div><div class="field full"><label for="work-status">目前狀態 <span class="required">*</span></label><select id="work-status" name="status"><option value="completed" ${item.status === 'completed' ? 'selected' : ''}>已完成</option><option value="in_progress" ${item.status === 'in_progress' || !item.status ? 'selected' : ''}>還要繼續</option><option value="waiting" ${item.status === 'waiting' ? 'selected' : ''}>等待主管／外部資料</option></select></div><div class="field full" data-work-next><label for="remaining">下一步 <span class="required">*</span></label><input id="remaining" name="remaining" value="${esc(item.remaining || '')}" placeholder="例：確認課程時間與 QR Code"></div><div class="field" data-work-next><label for="due-date">下次完成期限 <span class="required">*</span></label><input id="due-date" name="dueDate" type="date" value="${esc(item.dueDate || '')}"></div><div class="field full"><label for="work-evidence">附件 <span class="conditional">美宣標記完成時必填</span></label><input id="work-evidence" name="evidence" type="file" multiple accept="image/*,video/*,.pdf,.ppt,.pptx"><div class="field-help">可一次選多個檔案，也可在儲存前移除點錯的檔案。</div><div class="selected-files" data-file-preview="work-evidence"></div>${existingFileControls(item.evidence || [])}</div></div>`;
+    showDialog(dialogShell(itemId ? '編輯工作' : '新增工作', '留下主管能直接判讀的結果與下一步', body, '儲存', 'work-item-form'));
+    updateWorkFormVisibility();
+  }
+  function updateWorkFormVisibility() {
+    const completed = $('#work-status')?.value === 'completed';
+    $$('[data-work-next]').forEach(node => { node.hidden = completed; });
   }
 
   function openTrial(id = '') {
@@ -701,13 +833,12 @@
       <div class="field"><label for="trial-course">試上課程 <span class="required">*</span></label><input id="trial-course" name="course" value="${esc(item.course || '')}" placeholder="例：機器人入門" required></div>
       <div class="field"><label for="trial-teacher">授課老師 <span class="required">*</span></label><input id="trial-teacher" name="teacher" value="${esc(item.teacher || '')}" required></div>
       <div class="field"><label for="trial-contact">家長聯絡方式／識別資料 <span class="required">*</span></label><input id="trial-contact" name="contactRef" value="${esc(item.contactRef || '')}" placeholder="手機末碼、LINE 名稱或其他可辨識資料" ${approved ? 'readonly' : ''} required></div>
-      <div class="field"><label for="trial-interest">目前意願</label><select id="trial-interest" name="interest">${[['unknown','尚未確認'],['high','意願高'],['medium','考慮中'],['low','意願低']].map(([value,label]) => `<option value="${value}" ${item.interest === value ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
       <div class="field"><label for="trial-status">追蹤狀態 <span class="required">*</span></label><select id="trial-status" name="status" ${approved ? 'disabled' : ''}>${TRIAL_STATUSES.map(([value,label]) => `<option value="${value}" ${(item.status || 'waiting_contact') === value ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>${approved ? `<input type="hidden" name="status" value="${esc(item.status)}">` : ''}</div>
       <div class="field"><label for="trial-next">下一次追蹤日期 <span class="required">*</span> <span class="conditional">未結案時</span></label><input id="trial-next" name="nextFollowupDate" type="date" value="${esc(item.nextFollowupDate || '')}"></div>
       <div class="field full"><label for="trial-note">當日備註</label><textarea id="trial-note" name="note" placeholder="只寫需要保留的特殊狀況">${esc(item.note || '')}</textarea></div>
     </div>
     ${isNew ? '' : `<section class="subsection"><h3>新增一筆追蹤</h3><div class="form-grid"><div class="field"><label for="followup-date">聯絡日期</label><input id="followup-date" name="followupDate" type="date" max="${todayIso()}" value="${todayIso()}"></div><div class="field"><label for="followup-method">聯絡方式</label><select id="followup-method" name="followupMethod"><option value="line">LINE／訊息</option><option value="phone">電話</option><option value="in_person">現場</option><option value="other">其他</option></select></div><div class="field full"><label for="followup-note">本次家長回覆／處理結果</label><textarea id="followup-note" name="followupNote" placeholder="有聯絡才填；儲存後會加入時間軸"></textarea></div></div></section>`}
-    <section class="subsection conversion-fields" data-conversion-fields><h3>首次一期報名與繳費</h3><div class="notice">${icon('badge-dollar-sign')}<div>只有「首次正式報名並完成繳費」才會產生 50 元待審獎金；續報不計。</div></div><div class="form-grid mt-16"><div class="field"><label for="enrollment-date">一期報名日期 <span class="required">*</span></label><input id="enrollment-date" name="enrollmentDate" type="date" value="${esc(item.enrollmentDate || '')}" ${approved ? 'readonly' : ''}></div><div class="field"><label for="payment-date">繳費確認日期 <span class="required">*</span></label><input id="payment-date" name="paymentDate" type="date" value="${esc(item.paymentDate || '')}" ${approved ? 'readonly' : ''}></div><div class="field full"><label for="enrollment-course">正式報名課程 <span class="required">*</span></label><input id="enrollment-course" name="enrollmentCourse" value="${esc(item.enrollmentCourse || '')}" ${approved ? 'readonly' : ''}></div><div class="field"><label for="first-enrollment">是否為第一次正式報名 <span class="required">*</span></label><select id="first-enrollment" name="firstEnrollment" ${approved ? 'disabled' : ''}><option value="">請確認</option><option value="yes" ${item.firstEnrollment === true ? 'selected' : ''}>是，第一次報名一期</option><option value="no" ${item.firstEnrollment === false && item.status === 'converted' ? 'selected' : ''}>不是，屬續報／轉班</option></select>${approved ? '<input type="hidden" name="firstEnrollment" value="yes">' : ''}</div><div class="field"><label for="payment-evidence">報名／繳費證明 <span class="required">*</span> <span class="conditional">首次報名時</span></label><input id="payment-evidence" name="paymentEvidence" type="file" multiple accept="image/*,.pdf" ${approved ? 'disabled' : ''}><div class="field-help">可一次選多張截圖。</div>${(item.paymentEvidence || []).length ? `<div class="file-list">${item.paymentEvidence.map(file => `<span class="badge success">${icon('paperclip',12)}${esc(file.fileName)}</span>`).join('')}</div>` : ''}</div></div>${trialBonusBadge(item)}</section>`;
+    <section class="subsection conversion-fields" data-conversion-fields><h3>首次一期報名與繳費</h3><div class="notice">${icon('badge-dollar-sign')}<div>只有「首次正式報名並完成繳費」才會產生 50 元待審獎金；續報不計。</div></div><div class="form-grid mt-16"><div class="field"><label for="enrollment-date">一期報名日期 <span class="required">*</span></label><input id="enrollment-date" name="enrollmentDate" type="date" value="${esc(item.enrollmentDate || '')}" ${approved ? 'readonly' : ''}></div><div class="field"><label for="payment-date">繳費確認日期 <span class="required">*</span></label><input id="payment-date" name="paymentDate" type="date" value="${esc(item.paymentDate || '')}" ${approved ? 'readonly' : ''}></div><div class="field full"><label for="enrollment-course">正式報名課程 <span class="required">*</span></label><input id="enrollment-course" name="enrollmentCourse" value="${esc(item.enrollmentCourse || '')}" ${approved ? 'readonly' : ''}></div><div class="field"><label for="first-enrollment">是否為第一次正式報名 <span class="required">*</span></label><select id="first-enrollment" name="firstEnrollment" ${approved ? 'disabled' : ''}><option value="">請確認</option><option value="yes" ${item.firstEnrollment === true ? 'selected' : ''}>是，第一次報名一期</option><option value="no" ${item.firstEnrollment === false && item.status === 'converted' ? 'selected' : ''}>不是，屬續報／轉班</option></select>${approved ? '<input type="hidden" name="firstEnrollment" value="yes">' : ''}</div><div class="field"><label for="payment-evidence">報名／繳費證明 <span class="required">*</span> <span class="conditional">首次報名時</span></label><input id="payment-evidence" name="paymentEvidence" type="file" multiple accept="image/*,.pdf" ${approved ? 'disabled' : ''}><div class="field-help">可一次選多張截圖，儲存前可移除點錯的檔案。</div><div class="selected-files" data-file-preview="payment-evidence"></div>${approved ? '' : existingFileControls(item.paymentEvidence || [], 'removePaymentEvidence')}</div></div>${trialBonusBadge(item)}</section>`;
     showDialog(dialogShell(isNew ? '登錄今日試上' : `更新 ${item.studentName}`, isNew ? '建立一次後，所有聯絡與報名都更新同一筆' : '更新狀態或加入新的家長追蹤', body, '儲存試上追蹤', 'trial-form'), true);
     updateTrialFormVisibility();
   }
@@ -740,44 +871,74 @@
     showDialog(dialogShell('確認今日無試上', '用來區分沒有試上與忘記登錄', body, '確認無試上', 'no-trial-form'));
   }
 
-  function openTuesday(followupId = '') {
+  function openTuesday(mode = 'check', followupId = '') {
     const item = currentTuesday() || {};
     const followup = (item.followups || []).find(entry => entry.id === followupId) || {};
     const checks = item.checks || {};
-    const body = `<h3>固定行政檢核 <span class="required">*</span></h3><div class="grid cols-2"><label class="check-row"><input type="checkbox" name="paymentList" ${checks.paymentList ? 'checked' : ''}><span>確認需繳費學生名單</span></label><label class="check-row"><input type="checkbox" name="expiringStudents" ${checks.expiringStudents ? 'checked' : ''}><span>確認即將到期／需續課學生</span></label><label class="check-row"><input type="checkbox" name="unpaidParents" ${checks.unpaidParents ? 'checked' : ''}><span>確認尚未完成繳費之家長</span></label><label class="check-row"><input type="checkbox" name="remindersSent" ${checks.remindersSent ? 'checked' : ''}><span>已完成提醒與後續追蹤</span></label></div><label class="check-row mt-16"><input type="checkbox" name="exceptionsReported" ${checks.exceptionsReported ? 'checked' : ''}><span>特殊狀況已主動回報主管；若沒有特殊狀況也可勾選確認</span></label><h3>${followupId ? '編輯追蹤事項' : '新增家長事項（沒有可留白）'}</h3><input type="hidden" name="followupId" value="${esc(followup.id || '')}"><div class="form-grid"><div class="field"><label for="followup-person">學生／家長</label><input id="followup-person" name="person" value="${esc(followup.person || '')}"></div><div class="field"><label for="followup-status">狀態</label><select id="followup-status" name="followupStatus"><option value="open" ${followup.status !== 'closed' ? 'selected' : ''}>持續追蹤</option><option value="closed" ${followup.status === 'closed' ? 'selected' : ''}>已結案</option></select></div><div class="field full"><label for="followup-situation">目前狀況 <span class="required">*</span> <span class="conditional">建立追蹤時</span></label><textarea id="followup-situation" name="situation">${esc(followup.situation || '')}</textarea></div><div class="field full"><label for="followup-handled">已處理事項 <span class="required">*</span> <span class="conditional">建立追蹤時</span></label><textarea id="followup-handled" name="handled">${esc(followup.handled || '')}</textarea></div><div class="field"><label for="followup-next">下次追蹤日期 <span class="required">*</span> <span class="conditional">未結案時</span></label><input id="followup-next" name="nextDate" type="date" value="${esc(followup.nextDate || '')}"></div><div class="field"><label for="tuesday-date">完成日期 <span class="required">*</span></label><input id="tuesday-date" name="date" type="date" value="${esc(item.date || todayIso())}" required></div><div class="field full"><label for="tuesday-note">補充說明</label><textarea id="tuesday-note" name="note">${esc(item.note || '')}</textarea></div></div>`;
-    showDialog(dialogShell('每週二行政確認', '未結案事項一定要有下一次追蹤日期', body, '儲存本週確認', 'tuesday-form'), true);
+    if (mode === 'followup') {
+      if (!item.id) {
+        toast('請先完成本週行政確認，再新增個別追蹤', 'warning');
+        return;
+      }
+      const body = `<input type="hidden" name="mode" value="followup"><input type="hidden" name="followupId" value="${esc(followup.id || '')}"><div class="form-grid"><div class="field"><label for="followup-person">學生／家長 <span class="required">*</span></label><input id="followup-person" name="person" value="${esc(followup.person || '')}" required></div><div class="field"><label for="followup-status">狀態</label><select id="followup-status" name="followupStatus"><option value="open" ${followup.status !== 'closed' ? 'selected' : ''}>持續追蹤</option><option value="closed" ${followup.status === 'closed' ? 'selected' : ''}>已結案</option></select></div><div class="field full"><label for="followup-situation">目前狀況 <span class="required">*</span></label><textarea id="followup-situation" name="situation" required>${esc(followup.situation || '')}</textarea></div><div class="field full"><label for="followup-handled">這次已處理 <span class="required">*</span></label><textarea id="followup-handled" name="handled" required>${esc(followup.handled || '')}</textarea></div><div class="field"><label for="followup-next">下次追蹤日期 <span class="conditional">持續追蹤時必填</span></label><input id="followup-next" name="nextDate" type="date" value="${esc(followup.nextDate || '')}"></div></div>`;
+      showDialog(dialogShell(followupId ? '更新家長事項' : '新增家長事項', '同一筆持續更新，直到結案', body, '儲存追蹤', 'tuesday-form'));
+      return;
+    }
+    const body = `<input type="hidden" name="mode" value="check"><div class="notice">${icon('calendar-check-2')}<div>每週只確認一次；個別未結案家長請另外新增追蹤，不塞在同一張表單。</div></div><div class="grid cols-2 mt-16"><label class="check-row"><input type="checkbox" name="paymentList" ${checks.paymentList ? 'checked' : ''}><span>需繳費名單已核對</span></label><label class="check-row"><input type="checkbox" name="expiringStudents" ${checks.expiringStudents ? 'checked' : ''}><span>到期／續課名單已核對</span></label><label class="check-row"><input type="checkbox" name="unpaidParents" ${checks.unpaidParents ? 'checked' : ''}><span>未繳費家長已核對</span></label><label class="check-row"><input type="checkbox" name="remindersSent" ${checks.remindersSent ? 'checked' : ''}><span>需要提醒者已完成聯絡</span></label></div><div class="form-grid mt-16"><div class="field"><label for="tuesday-date">確認日期</label><input id="tuesday-date" name="date" type="date" value="${esc(item.date || todayIso())}" required></div><div class="field full"><label for="tuesday-note">例外或需主管協助 <span class="conditional">沒有可留白</span></label><textarea id="tuesday-note" name="note" placeholder="只寫異常、爭議或需要主管決定的事項">${esc(item.note || '')}</textarea></div></div>`;
+    showDialog(dialogShell('本週行政確認', '四項名單一次核對', body, '儲存確認', 'tuesday-form'));
   }
 
   function openEnvironment() {
     const item = currentEnvironment() || {};
-    const body = `<h3>逐項檢核 <span class="required">*</span></h3><div class="grid cols-2">${ENVIRONMENT_CHECKS.map(([key,label]) => `<label class="check-row"><input type="checkbox" name="check-${key}" ${item.checks?.[key] ? 'checked' : ''}><span>${esc(label)}</span></label>`).join('')}</div><div class="form-grid mt-16"><div class="field full"><label for="environment-issue">未通過項目與改善方式 <span class="required">*</span> <span class="conditional">有未通過時</span></label><textarea id="environment-issue" name="issue" placeholder="全部正常可留白">${esc(item.issue || '')}</textarea></div><div class="field"><label for="environment-due">改善期限 <span class="required">*</span> <span class="conditional">有未通過時</span></label><input id="environment-due" name="improvementDue" type="date" value="${esc(item.improvementDue || '')}"></div><div class="field"><label for="environment-files">環境照片（選填）</label><input id="environment-files" name="evidence" type="file" multiple accept="image/*"><div class="field-help">可一次選多張，不需要另外寫照片判讀說明。</div></div></div>`;
-    showDialog(dialogShell('今日環境檢核', '只用勾選完成日常確認，有問題才填改善內容', body, '儲存環境檢核', 'environment-form'), true);
+    const hasIssue = item.status === 'needs_action';
+    const affected = ENVIRONMENT_GROUPS.filter(([, , keys]) => keys.some(key => item.checks && item.checks[key] === false)).map(([key]) => key);
+    const body = `<div class="choice-grid"><label class="choice-card"><input type="radio" name="environmentStatus" value="clear" ${hasIssue ? '' : 'checked'}><span>${icon('circle-check')}<strong>今日正常</strong><small>各區域皆已確認</small></span></label><label class="choice-card"><input type="radio" name="environmentStatus" value="issue" ${hasIssue ? 'checked' : ''}><span>${icon('triangle-alert')}<strong>有待改善</strong><small>選擇區域並設定期限</small></span></label></div><div data-environment-issue><h3>問題區域 <span class="required">*</span></h3><div class="compact-check-grid">${ENVIRONMENT_GROUPS.map(([key,label]) => `<label class="check-row"><input type="checkbox" name="issue-${key}" ${affected.includes(key) ? 'checked' : ''}><span>${esc(label)}</span></label>`).join('')}</div><div class="form-grid mt-16"><div class="field full"><label for="environment-issue">問題與改善方式 <span class="required">*</span></label><textarea id="environment-issue" name="issue" placeholder="例：門口紙箱未清，今日閉店前移除">${esc(item.issue || '')}</textarea></div><div class="field"><label for="environment-due">改善期限 <span class="required">*</span></label><input id="environment-due" name="improvementDue" type="date" value="${esc(item.improvementDue || '')}"></div></div></div><div class="field mt-16"><label for="environment-files">環境照片 <span class="conditional">選填</span></label><input id="environment-files" name="evidence" type="file" multiple accept="image/*"><div class="field-help">可一次選多張，不需要另外寫照片判讀說明。</div><div class="selected-files" data-file-preview="environment-files"></div>${existingFileControls(item.evidence || [])}</div>`;
+    showDialog(dialogShell('今日環境確認', '正常一鍵完成，有問題才展開細節', body, '儲存', 'environment-form'));
+    updateEnvironmentVisibility();
+  }
+  function updateEnvironmentVisibility() {
+    const status = $('#environment-form input[name="environmentStatus"]:checked')?.value || 'clear';
+    const block = $('[data-environment-issue]');
+    if (block) block.hidden = status !== 'issue';
   }
 
   function openProject(id = '') {
     const item = workerRecords('project').find(entry => entry.id === id) || {};
-    const stages = PROJECT_STAGES.map(name => (item.stages || []).find(stage => stage.name === name) || { name, status: 'pending', dueDate: '', actualDate: '' });
-    const body = `<div class="form-grid"><div class="field"><label for="project-title">專案名稱 <span class="required">*</span></label><input id="project-title" name="title" value="${esc(item.title || '')}" required></div><div class="field"><label for="project-type">專案類型 <span class="required">*</span></label><select id="project-type" name="projectType" required><option value="">請選擇</option>${['招生活動','體驗週','節慶活動','特別課程','比賽活動','新班招生','其他'].map(value => `<option ${item.projectType === value ? 'selected' : ''}>${value}</option>`).join('')}</select></div><div class="field full"><label for="project-summary">專案說明</label><textarea id="project-summary" name="summary">${esc(item.summary || '')}</textarea></div><div class="field"><label for="project-status">專案狀態</label><select id="project-status" name="status"><option value="planning" ${item.status === 'planning' || !item.status ? 'selected' : ''}>規劃中</option><option value="active" ${item.status === 'active' ? 'selected' : ''}>進行中</option><option value="completed" ${item.status === 'completed' ? 'selected' : ''}>已完成</option><option value="paused" ${item.status === 'paused' ? 'selected' : ''}>暫停</option></select></div><div class="field"><label for="project-files">完成證據 <span class="required">*</span> <span class="conditional">專案完成時</span></label><input id="project-files" name="evidence" type="file" multiple accept="image/*,video/*,.pdf,.ppt,.pptx"></div></div><h3>八階段時程</h3><div class="stage-list">${stages.map((stage,index) => `<div class="stage-row"><strong>${esc(stage.name)}</strong><label class="stage-cell"><span>狀態</span><select name="stageStatus-${index}"><option value="pending" ${stage.status === 'pending' ? 'selected' : ''}>未開始</option><option value="active" ${stage.status === 'active' ? 'selected' : ''}>進行中</option><option value="completed" ${stage.status === 'completed' ? 'selected' : ''}>已完成</option></select></label><label class="stage-cell"><span>預計完成</span><input type="date" name="stageDue-${index}" value="${esc(stage.dueDate || '')}" aria-label="${esc(stage.name)}預計完成日期"></label><label class="stage-cell"><span>實際完成</span><input type="date" name="stageActual-${index}" value="${esc(stage.actualDate || '')}" aria-label="${esc(stage.name)}實際完成日期"></label></div>`).join('')}</div>`;
-    showDialog(dialogShell(id ? '更新專案' : '新增活動／宣傳專案', '每一階段設定日期，主管審核與修改也列入排程', `<input type="hidden" name="projectId" value="${esc(item.id || '')}">${body}`, '儲存專案', 'project-form'), true);
+    const stages = Array.isArray(item.stages) ? item.stages : [];
+    const current = stages.find(stage => stage.status === 'active') || stages.slice().reverse().find(stage => stage.status === 'completed') || {};
+    const currentStage = item.currentStage || current.name || PROJECT_STAGES[0];
+    const dueDate = item.dueDate || current.dueDate || '';
+    const body = `<input type="hidden" name="projectId" value="${esc(item.id || '')}"><div class="form-grid"><div class="field"><label for="project-title">專案名稱 <span class="required">*</span></label><input id="project-title" name="title" value="${esc(item.title || '')}" required></div><div class="field"><label for="project-type">專案類型 <span class="required">*</span></label><select id="project-type" name="projectType" required><option value="">請選擇</option>${['招生活動','體驗週','節慶活動','特別課程','比賽活動','新班招生','其他'].map(value => `<option ${item.projectType === value ? 'selected' : ''}>${value}</option>`).join('')}</select></div><div class="field"><label for="project-stage">目前階段 <span class="required">*</span></label><select id="project-stage" name="currentStage">${PROJECT_STAGES.map(name => `<option value="${esc(name)}" ${currentStage === name ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></div><div class="field"><label for="project-status">狀態</label><select id="project-status" name="status"><option value="planning" ${item.status === 'planning' || !item.status ? 'selected' : ''}>規劃中</option><option value="active" ${item.status === 'active' ? 'selected' : ''}>進行中</option><option value="waiting" ${item.status === 'waiting' ? 'selected' : ''}>等待主管／資料</option><option value="completed" ${item.status === 'completed' ? 'selected' : ''}>已完成</option><option value="paused" ${item.status === 'paused' ? 'selected' : ''}>暫停</option></select></div><div class="field full"><label for="project-summary">現在做到哪裡／下一步 <span class="required">*</span></label><textarea id="project-summary" name="summary" placeholder="例：海報初稿完成，下一步送主管確認文案" required>${esc(item.summary || '')}</textarea></div><div class="field"><label for="project-due">這一階段期限 <span class="required">*</span></label><input id="project-due" name="dueDate" type="date" value="${esc(dueDate)}" required></div><div class="field full"><label for="project-files">附件 <span class="conditional">完成時至少一份</span></label><input id="project-files" name="evidence" type="file" multiple accept="image/*,video/*,.pdf,.ppt,.pptx"><div class="selected-files" data-file-preview="project-files"></div>${existingFileControls(item.evidence || [])}</div></div>${stages.length ? `<details class="compact-details mt-16"><summary>${icon('history')}查看舊版階段紀錄</summary><div class="compact-details-body"><div class="check-list">${stages.map(stage => `<div class="check-row"><span><strong>${esc(stage.name)}</strong> · ${esc(stage.status === 'completed' ? '已完成' : stage.status === 'active' ? '進行中' : '未開始')}${stage.dueDate ? ` · ${formatDate(stage.dueDate)}` : ''}</span></div>`).join('')}</div></div></details>` : ''}`;
+    showDialog(dialogShell(id ? '更新專案' : '新增專案', '只維護目前階段、下一步與期限', body, '儲存', 'project-form'));
   }
 
   function openAssignment(id = '') {
     const item = workerRecords('assignment').find(entry => entry.id === id) || {};
     const managerEdit = isManager;
-    const body = managerEdit ? `<input type="hidden" name="assignmentId" value="${esc(item.id || '')}"><div class="form-grid"><div class="field full"><label for="assignment-title">工作內容 <span class="required">*</span></label><input id="assignment-title" name="title" value="${esc(item.title || '')}" required></div><div class="field full"><label for="assignment-detail">交辦說明 <span class="required">*</span></label><textarea id="assignment-detail" name="detail" required>${esc(item.detail || '')}</textarea></div><div class="field"><label for="assignment-date">交辦日期</label><input id="assignment-date" name="date" type="date" value="${esc(item.date || todayIso())}" required></div><div class="field"><label for="assignment-due">完成期限 <span class="required">*</span></label><input id="assignment-due" name="dueDate" type="date" value="${esc(item.dueDate || '')}" required></div><div class="field"><label for="assignment-priority">優先層級</label><select id="assignment-priority" name="priority"><option value="normal" ${item.priority === 'normal' || !item.priority ? 'selected' : ''}>一般</option><option value="high" ${item.priority === 'high' ? 'selected' : ''}>優先</option><option value="urgent" ${item.priority === 'urgent' ? 'selected' : ''}>緊急</option></select></div></div>` : `<input type="hidden" name="assignmentId" value="${esc(item.id || '')}"><div class="notice">${icon('clipboard-list')}<div><strong>${esc(item.title)}</strong><br>期限 ${formatDate(item.dueDate)}<br>${nl2br(item.detail)}</div></div><div class="form-grid mt-16"><div class="field"><label for="assignment-progress">目前進度：<span id="progress-value">${Number(item.progress || 0)}%</span></label><input id="assignment-progress" name="progress" type="range" min="0" max="100" step="5" value="${Number(item.progress || 0)}"></div><div class="field"><label for="assignment-status">狀態</label><select id="assignment-status" name="status"><option value="pending" ${item.status === 'pending' ? 'selected' : ''}>待處理</option><option value="in_progress" ${item.status === 'in_progress' ? 'selected' : ''}>進行中</option><option value="waiting" ${item.status === 'waiting' ? 'selected' : ''}>等待確認／資料</option><option value="completed" ${item.status === 'completed' ? 'selected' : ''}>已完成</option></select></div><div class="field full"><label for="assignment-note">進度說明</label><textarea id="assignment-note" name="progressNote">${esc(item.progressNote || '')}</textarea></div><div class="field"><label for="assignment-actual">實際完成日期</label><input id="assignment-actual" name="actualDate" type="date" value="${esc(item.actualDate || '')}"></div><div class="field"><label for="assignment-evidence">完成證據</label><input id="assignment-evidence" name="evidence" type="file" multiple accept="image/*,video/*,.pdf,.ppt,.pptx"></div></div>`;
-    showDialog(dialogShell(managerEdit ? (id ? '編輯主管交辦' : '新增主管交辦') : '更新交辦進度', managerEdit ? '期限是交辦的一部分，不建立沒有期限的待辦' : '更新進度、完成日期與證據', body, managerEdit ? '儲存交辦' : '更新進度', 'assignment-form'), true);
+    const body = managerEdit ? `<input type="hidden" name="assignmentId" value="${esc(item.id || '')}"><div class="form-grid"><div class="field full"><label for="assignment-title">工作內容 <span class="required">*</span></label><input id="assignment-title" name="title" value="${esc(item.title || '')}" required></div><div class="field full"><label for="assignment-detail">交辦說明 <span class="required">*</span></label><textarea id="assignment-detail" name="detail" required>${esc(item.detail || '')}</textarea></div><div class="field"><label for="assignment-date">交辦日期</label><input id="assignment-date" name="date" type="date" value="${esc(item.date || todayIso())}" required></div><div class="field"><label for="assignment-due">完成期限 <span class="required">*</span></label><input id="assignment-due" name="dueDate" type="date" value="${esc(item.dueDate || '')}" required></div><div class="field"><label for="assignment-priority">優先層級</label><select id="assignment-priority" name="priority"><option value="normal" ${item.priority === 'normal' || !item.priority ? 'selected' : ''}>一般</option><option value="high" ${item.priority === 'high' ? 'selected' : ''}>優先</option><option value="urgent" ${item.priority === 'urgent' ? 'selected' : ''}>緊急</option></select></div></div>` : `<input type="hidden" name="assignmentId" value="${esc(item.id || '')}"><div class="notice">${icon('clipboard-list')}<div><strong>${esc(item.title)}</strong><br>期限 ${formatDate(item.dueDate)}<br>${nl2br(item.detail)}</div></div><div class="form-grid mt-16"><div class="field"><label for="assignment-status">狀態 <span class="required">*</span></label><select id="assignment-status" name="status"><option value="pending" ${item.status === 'pending' ? 'selected' : ''}>待處理</option><option value="in_progress" ${item.status === 'in_progress' ? 'selected' : ''}>進行中</option><option value="waiting" ${item.status === 'waiting' ? 'selected' : ''}>等待確認／資料</option><option value="completed" ${item.status === 'completed' ? 'selected' : ''}>已完成</option></select></div><div class="field full"><label for="assignment-note" data-assignment-note-label>${item.status === 'completed' ? '完成結果' : '目前結果與下一步'} <span class="required">*</span></label><textarea id="assignment-note" name="progressNote" required>${esc(item.progressNote || '')}</textarea></div><div class="field full"><label for="assignment-evidence">附件 <span class="conditional">完成時至少一份</span></label><input id="assignment-evidence" name="evidence" type="file" multiple accept="image/*,video/*,.pdf,.ppt,.pptx"><div class="selected-files" data-file-preview="assignment-evidence"></div>${existingFileControls(item.evidence || [])}</div></div>`;
+    showDialog(dialogShell(managerEdit ? (id ? '編輯主管交辦' : '新增主管交辦') : '更新交辦', managerEdit ? '期限是交辦的一部分，不建立沒有期限的待辦' : '留下結果或具體下一步，不填主觀百分比', body, managerEdit ? '儲存交辦' : '儲存', 'assignment-form'), true);
+    if (!managerEdit) updateAssignmentVisibility();
+  }
+  function updateAssignmentVisibility() {
+    const completed = $('#assignment-status')?.value === 'completed';
+    const label = $('[data-assignment-note-label]');
+    if (label) label.innerHTML = `${completed ? '完成結果' : '目前結果與下一步'} <span class="required">*</span>`;
   }
 
   function openReview(id) {
     const item = state.records.find(record => record.id === id);
     if (!item) return;
     let detail = '';
-    if (item.type === 'daily') detail = (item.items || []).map(work => `<article class="record-card"><div class="record-head"><div class="record-title"><strong>${esc(work.title)}</strong><small>${esc(categoryLabel(work.category))}</small></div>${statusBadge(work.status)}</div><p class="record-copy">${nl2br(work.completedToday)}</p><div class="progress"><span style="width:${Number(work.progress || 0)}%"></span></div><div class="progress-label"><span>${work.remaining ? `剩餘：${esc(work.remaining)}` : '完成'}</span><strong>${Number(work.progress || 0)}%</strong></div><div class="file-list">${(work.evidence || []).map(file => `<a class="badge success" href="${esc(file.url)}" target="_blank" rel="noopener">${icon('paperclip',12)}${esc(file.fileName)}</a>`).join('')}</div></article>`).join('');
-    else if (item.type === 'tuesday') detail = `<div class="check-list">${Object.entries(item.checks || {}).map(([key,value]) => `<div class="check-row">${icon(value ? 'circle-check' : 'circle-x',19)}<span>${esc(key)}</span></div>`).join('')}</div>${renderFollowups(item.followups || [])}`;
+    if (item.type === 'daily') detail = (item.items || []).map(work => `<article class="record-card"><div class="record-head"><div class="record-title"><strong>${esc(work.title)}</strong><small>${esc(categoryLabel(work.category))}</small></div>${statusBadge(work.status)}</div><p class="record-copy">${nl2br(work.completedToday)}</p>${work.remaining ? `<div class="next-action">${icon('arrow-right', 15)}<span><strong>下一步：</strong>${esc(work.remaining)}${work.dueDate ? ` · ${formatDate(work.dueDate)}` : ''}</span></div>` : ''}<div class="file-list">${(work.evidence || []).map(file => `<a class="badge success" href="${esc(file.url)}" target="_blank" rel="noopener">${icon('paperclip',12)}${esc(file.fileName)}</a>`).join('')}</div></article>`).join('');
+    else if (item.type === 'daily_check') detail = `<div class="notice ${item.status === 'needs_supervisor' ? 'warning' : ''}">${icon(item.status === 'needs_supervisor' ? 'circle-alert' : 'message-circle-check')}<div>${item.status === 'needs_supervisor' ? nl2br(item.note) : '家長訊息、官方 LINE 與班級群組皆已確認。'}${item.reported ? '<br><strong>已主動回報主管</strong>' : ''}</div></div>`;
+    else if (item.type === 'tuesday') {
+      const labels = { paymentList: '需繳費名單', expiringStudents: '到期／續課名單', unpaidParents: '未繳費家長', remindersSent: '提醒與追蹤' };
+      detail = `<div class="check-list">${Object.entries(labels).map(([key,value]) => `<div class="check-row">${icon(item.checks?.[key] ? 'circle-check' : 'circle-x',19)}<span>${esc(value)}</span></div>`).join('')}</div>${item.note ? `<div class="notice warning mt-16">${nl2br(item.note)}</div>` : ''}${renderFollowups(item.followups || [])}`;
+    }
     else if (item.type === 'project') detail = `<div class="record-card"><div class="record-title"><strong>${esc(item.title)}</strong><small>${esc(item.projectType)}</small></div><p class="record-copy">${nl2br(item.summary || '未填專案說明')}</p></div><div class="stage-list mt-16">${(item.stages || []).map(stage => `<div class="check-row">${icon(stage.status === 'completed' ? 'circle-check' : stage.status === 'active' ? 'loader-circle' : 'circle',19)}<span><strong>${esc(stage.name)}</strong>${stage.dueDate ? ` · 預計 ${formatDate(stage.dueDate)}` : ''}${stage.actualDate ? ` · 實際 ${formatDate(stage.actualDate)}` : ''}</span></div>`).join('')}</div>`;
     else detail = `<div class="grid cols-2">${ENVIRONMENT_CHECKS.map(([key,label]) => `<div class="check-row">${icon(item.checks?.[key] ? 'circle-check' : 'circle-x',19)}<span>${esc(label)}</span></div>`).join('')}</div>${item.issue ? `<div class="notice danger mt-16">${icon('triangle-alert')}<div>${esc(item.issue)} · 改善期限 ${formatDate(item.improvementDue)}</div></div>` : ''}`;
-    const body = `${detail}<div class="field mt-16"><label for="review-note">主管意見</label><textarea id="review-note" name="note" placeholder="通過可寫做得好的地方；退回需說明要補什麼">${esc(item.reviewComment || '')}</textarea></div><div class="grid cols-2 mt-16"><label class="check-row"><input type="radio" name="result" value="approved" ${item.reviewStatus !== 'needs_revision' ? 'checked' : ''}><span>通過</span></label><label class="check-row"><input type="radio" name="result" value="needs_revision" ${item.reviewStatus === 'needs_revision' ? 'checked' : ''}><span>退回補充</span></label></div>`;
-    showDialog(dialogShell('審查完整紀錄', `${formatDate(item.date)} · ${item.nickname || workerName}`, `<input type="hidden" name="recordId" value="${esc(item.id)}">${body}`, '儲存審查', 'review-form'), true);
+    const body = `${detail}<div class="field mt-16"><label for="review-note">主管回覆 <span class="conditional">需要時再填</span></label><textarea id="review-note" name="note" placeholder="指出做得好的地方、需調整事項或具體下一步">${esc(item.reviewComment || '')}</textarea></div>`;
+    showDialog(dialogShell('查看工作紀錄', `${formatDate(item.date)} · ${item.nickname || workerName}`, `<input type="hidden" name="recordId" value="${esc(item.id)}">${body}`, '儲存主管回覆', 'review-form'), true);
   }
 
   function profileDialog() {
@@ -887,7 +1048,7 @@
       note: String(data.get('note') || '').trim(), status, followups,
       enrollmentDate, paymentDate, enrollmentCourse,
       firstEnrollment: status === 'converted' && firstEnrollmentChoice === 'yes',
-      paymentEvidence: status === 'converted' ? (existing.paymentEvidence || []).concat(newEvidence) : [],
+      paymentEvidence: status === 'converted' ? retainedFiles(existing.paymentEvidence, data, 'removePaymentEvidence').concat(newEvidence) : [],
     };
     if (status === 'converted') {
       if (record.firstEnrollment && !evidenceReady({ evidence: record.paymentEvidence })) throw new Error('首次報名需附報名或繳費證明');
@@ -938,6 +1099,24 @@
     closeDialog(); renderApp(); toast(resultValue === 'approved' ? '已核准首報獎金 50 元' : '已記錄不符合');
   }
 
+  async function handleDailyCheck(form) {
+    const data = new FormData(form);
+    const status = String(data.get('status') || 'clear');
+    const note = status === 'needs_supervisor' ? String(data.get('note') || '').trim() : '';
+    const reported = status === 'needs_supervisor' && data.get('reported') === 'on';
+    if (status === 'needs_supervisor' && !note) throw new Error('請寫清楚需要主管協助的事項');
+    if (status === 'needs_supervisor' && !reported) throw new Error('請確認已主動回報小魚主管');
+    const existing = workerRecords('daily_check').find(item => item.date === todayIso()) || {};
+    const record = {
+      ...existing,
+      id: existing.id || `admin-marketing-daily-check-${normalizeName(workerName)}-${todayIso()}`,
+      type: 'daily_check', nickname: workerName, date: todayIso(), status, note, reported,
+    };
+    const result = await saveRecord('daily_check', record);
+    if (!result?.ok) throw new Error(result?.error || '今日訊息確認儲存失敗');
+    closeDialog(); renderApp(); toast('今日訊息確認已儲存');
+  }
+
   async function handleWorkItem(form) {
     const data = new FormData(form);
     const recordId = String(data.get('recordId') || '');
@@ -948,26 +1127,19 @@
     const item = {
       ...existing, id,
       category: String(data.get('category') || ''), title: String(data.get('title') || '').trim(),
-      completedToday: String(data.get('completedToday') || '').trim(), progress: Number(data.get('progress') || 0), status,
-      remaining: String(data.get('remaining') || '').trim(), dueDate: String(data.get('dueDate') || ''), actualDate: String(data.get('actualDate') || ''),
+      completedToday: String(data.get('completedToday') || '').trim(), status,
+      progress: status === 'completed' ? 100 : Math.max(1, Math.min(95, Number(existing.progress || 50))),
+      remaining: status === 'completed' ? '' : String(data.get('remaining') || '').trim(),
+      dueDate: status === 'completed' ? '' : String(data.get('dueDate') || ''),
+      actualDate: status === 'completed' ? (existing.actualDate || todayIso()) : '',
     };
     if (!item.category || !item.title || !item.completedToday) throw new Error('工作類型、內容與今日完成皆為必填');
     if (status !== 'completed' && (!item.remaining || !item.dueDate)) throw new Error('未完成工作要填剩餘工作與預計完成日期');
-    if (status === 'completed') {
-      item.progress = 100;
-      if (!item.actualDate) throw new Error('已完成工作要填實際完成日期');
-    }
     const newFiles = await uploadFiles(form.elements.evidence, item.category);
-    item.evidence = (existing.evidence || []).concat(newFiles);
+    item.evidence = retainedFiles(existing.evidence, data).concat(newFiles);
     if (status === 'completed' && ['video','photo_post','poster','design','social_schedule'].includes(item.category) && !evidenceReady(item)) throw new Error('美宣工作標記完成時必須附完成證據');
-    const messages = {
-      parentChecked: data.get('parentChecked') === 'on', officialLineChecked: data.get('officialLineChecked') === 'on', groupChecked: data.get('groupChecked') === 'on',
-      unresolved: String(data.get('unresolved') || '').trim(), reported: data.get('reported') === 'on',
-    };
-    if (!messages.parentChecked || !messages.officialLineChecked || !messages.groupChecked) throw new Error('請先完成三個訊息確認');
-    if (messages.unresolved && !messages.reported) throw new Error('有待主管確認事項時必須勾選已主動回報');
     const items = (daily.items || []).filter(entry => entry.id !== id).concat(item);
-    const result = await saveRecord('daily', { ...daily, messages, items, status: 'submitted' });
+    const result = await saveRecord('daily', { ...daily, messages: daily.messages || {}, items, status: 'submitted' });
     if (!result?.ok) throw new Error(result?.error || '工作日誌儲存失敗');
     state.drafts.workItem = null;
     closeDialog(); renderApp(); toast('工作日誌已儲存');
@@ -976,16 +1148,28 @@
   async function handleTuesday(form) {
     const data = new FormData(form);
     const existing = currentTuesday() || { id: `admin-marketing-tuesday-${normalizeName(workerName)}-${weekBounds().key}`, type: 'tuesday', nickname: workerName, weekKey: weekBounds().key, followups: [] };
+    const mode = String(data.get('mode') || 'check');
     let followups = existing.followups || [];
-    const person = String(data.get('person') || '').trim();
-    if (person) {
+    if (mode === 'followup') {
+      const person = String(data.get('person') || '').trim();
+      if (!person) throw new Error('請填寫學生或家長姓名');
       const id = String(data.get('followupId') || '') || uid('followup');
       const followup = { id, person, situation: String(data.get('situation') || '').trim(), handled: String(data.get('handled') || '').trim(), nextDate: String(data.get('nextDate') || ''), status: String(data.get('followupStatus') || 'open') };
       if (!followup.situation || !followup.handled) throw new Error('家長事項要填目前狀況與已處理事項');
       if (followup.status === 'open' && !followup.nextDate) throw new Error('持續追蹤事項必須設定下次追蹤日期');
       followups = followups.filter(item => item.id !== id).concat(followup);
     }
-    const record = { ...existing, date: String(data.get('date') || todayIso()), weekKey: weekBounds().key, checks: { paymentList: data.get('paymentList') === 'on', expiringStudents: data.get('expiringStudents') === 'on', unpaidParents: data.get('unpaidParents') === 'on', remindersSent: data.get('remindersSent') === 'on', exceptionsReported: data.get('exceptionsReported') === 'on' }, followups, note: String(data.get('note') || '').trim(), status: 'submitted' };
+    const checks = mode === 'check' ? {
+      paymentList: data.get('paymentList') === 'on', expiringStudents: data.get('expiringStudents') === 'on',
+      unpaidParents: data.get('unpaidParents') === 'on', remindersSent: data.get('remindersSent') === 'on',
+      exceptionsReported: Boolean(String(data.get('note') || '').trim()),
+    } : (existing.checks || {});
+    const record = {
+      ...existing,
+      date: mode === 'check' ? String(data.get('date') || todayIso()) : (existing.date || todayIso()),
+      weekKey: weekBounds().key, checks, followups,
+      note: mode === 'check' ? String(data.get('note') || '').trim() : String(existing.note || ''), status: 'submitted',
+    };
     if (!record.checks.paymentList || !record.checks.expiringStudents || !record.checks.unpaidParents || !record.checks.remindersSent) throw new Error('四項固定行政確認都必須完成');
     const result = await saveRecord('tuesday', record);
     if (!result?.ok) throw new Error(result?.error || '週二確認儲存失敗');
@@ -995,13 +1179,20 @@
   async function handleEnvironment(form) {
     const data = new FormData(form);
     const existing = currentEnvironment() || { id: `admin-marketing-environment-${normalizeName(workerName)}-${todayIso()}`, type: 'environment', nickname: workerName, date: todayIso() };
-    const checks = {};
-    ENVIRONMENT_CHECKS.forEach(([key]) => { checks[key] = data.get(`check-${key}`) === 'on'; });
-    const issue = String(data.get('issue') || '').trim();
-    const improvementDue = String(data.get('improvementDue') || '');
-    if (Object.values(checks).some(value => !value) && (!issue || !improvementDue)) throw new Error('未通過項目必須填寫問題與改善期限');
+    const environmentStatus = String(data.get('environmentStatus') || 'clear');
+    const affectedGroups = new Set(ENVIRONMENT_GROUPS.filter(([key]) => data.get(`issue-${key}`) === 'on').map(([key]) => key));
+    const checks = Object.fromEntries(ENVIRONMENT_CHECKS.map(([key]) => [key, true]));
+    if (environmentStatus === 'issue') {
+      if (!affectedGroups.size) throw new Error('請至少選擇一個有問題的區域');
+      ENVIRONMENT_GROUPS.forEach(([groupKey, , keys]) => {
+        if (affectedGroups.has(groupKey)) keys.forEach(key => { checks[key] = false; });
+      });
+    }
+    const issue = environmentStatus === 'issue' ? String(data.get('issue') || '').trim() : '';
+    const improvementDue = environmentStatus === 'issue' ? String(data.get('improvementDue') || '') : '';
+    if (environmentStatus === 'issue' && (!issue || !improvementDue)) throw new Error('有待改善時，請填寫問題、改善方式與期限');
     const files = await uploadFiles(form.elements.evidence, 'environment');
-    const record = { ...existing, checks, issue, improvementDue, evidence: (existing.evidence || []).concat(files), status: Object.values(checks).every(Boolean) ? 'submitted' : 'needs_action' };
+    const record = { ...existing, checks, issue, improvementDue, evidence: retainedFiles(existing.evidence, data).concat(files), status: environmentStatus === 'issue' ? 'needs_action' : 'submitted' };
     const result = await saveRecord('environment', record);
     if (!result?.ok) throw new Error(result?.error || '環境檢核儲存失敗');
     closeDialog(); renderApp(); toast('今日環境檢核已儲存');
@@ -1011,14 +1202,20 @@
     const data = new FormData(form);
     const id = String(data.get('projectId') || '') || uid('project');
     const existing = workerRecords('project').find(item => item.id === id) || {};
-    const stages = PROJECT_STAGES.map((name,index) => ({ name, status: String(data.get(`stageStatus-${index}`) || 'pending'), dueDate: String(data.get(`stageDue-${index}`) || ''), actualDate: String(data.get(`stageActual-${index}`) || '') }));
-    for (const stage of stages) {
-      if (stage.status !== 'pending' && !stage.dueDate) throw new Error(`${stage.name}階段需設定預計完成日期`);
-      if (stage.status === 'completed' && !stage.actualDate) throw new Error(`${stage.name}階段完成時需填實際完成日期`);
-    }
+    const currentStage = String(data.get('currentStage') || PROJECT_STAGES[0]);
+    const currentIndex = Math.max(0, PROJECT_STAGES.indexOf(currentStage));
+    const status = String(data.get('status') || 'planning');
+    const dueDate = String(data.get('dueDate') || '');
+    const oldStages = Array.isArray(existing.stages) ? existing.stages : [];
+    const stages = PROJECT_STAGES.map((name, index) => {
+      const old = oldStages.find(stage => stage.name === name) || {};
+      if (index < currentIndex || status === 'completed') return { ...old, name, status: 'completed', actualDate: old.actualDate || todayIso(), dueDate: old.dueDate || (index === currentIndex ? dueDate : '') };
+      if (index === currentIndex) return { ...old, name, status: status === 'planning' ? 'pending' : 'active', dueDate, actualDate: '' };
+      return { ...old, name, status: 'pending', dueDate: old.status === 'completed' ? old.dueDate || '' : '', actualDate: old.status === 'completed' ? old.actualDate || '' : '' };
+    });
     const files = await uploadFiles(form.elements.evidence, 'project');
-    const record = { ...existing, id, date: existing.date || todayIso(), title: String(data.get('title') || '').trim(), projectType: String(data.get('projectType') || ''), summary: String(data.get('summary') || '').trim(), status: String(data.get('status') || 'planning'), stages, evidence: (existing.evidence || []).concat(files) };
-    if (!record.title || !record.projectType) throw new Error('專案名稱與類型為必填');
+    const record = { ...existing, id, date: existing.date || todayIso(), title: String(data.get('title') || '').trim(), projectType: String(data.get('projectType') || ''), summary: String(data.get('summary') || '').trim(), status, currentStage, dueDate, stages, evidence: retainedFiles(existing.evidence, data).concat(files) };
+    if (!record.title || !record.projectType || !record.summary || !record.dueDate) throw new Error('專案名稱、類型、目前結果與階段期限皆為必填');
     if (record.status === 'completed' && !evidenceReady(record)) throw new Error('專案完成時必須附完成證據');
     const result = await saveRecord('project', record);
     if (!result?.ok) throw new Error(result?.error || '專案儲存失敗');
@@ -1035,10 +1232,11 @@
       if (!record.title || !record.detail || !record.dueDate) throw new Error('交辦內容、說明與期限皆為必填');
     } else {
       const files = await uploadFiles(form.elements.evidence, 'assignment');
-      record = { ...existing, id, progress: Number(data.get('progress') || 0), status: String(data.get('status') || 'in_progress'), progressNote: String(data.get('progressNote') || '').trim(), actualDate: String(data.get('actualDate') || ''), evidence: (existing.evidence || []).concat(files) };
+      const status = String(data.get('status') || 'in_progress');
+      record = { ...existing, id, progress: status === 'completed' ? 100 : Math.max(1, Math.min(95, Number(existing.progress || 50))), status, progressNote: String(data.get('progressNote') || '').trim(), actualDate: status === 'completed' ? (existing.actualDate || todayIso()) : '', evidence: retainedFiles(existing.evidence, data).concat(files) };
+      if (!record.progressNote) throw new Error('請填寫目前結果與下一步');
       if (record.status === 'completed') {
-        record.progress = 100;
-        if (!record.actualDate || !evidenceReady(record)) throw new Error('交辦完成時必須填實際完成日並附證據');
+        if (!evidenceReady(record)) throw new Error('交辦完成時至少要有一份可判讀附件');
       }
     }
     const result = await saveAssignment(record);
@@ -1049,9 +1247,8 @@
   async function handleReview(form) {
     const data = new FormData(form);
     const id = String(data.get('recordId') || '');
-    const resultValue = String(data.get('result') || 'approved');
+    const resultValue = 'approved';
     const note = String(data.get('note') || '').trim();
-    if (resultValue === 'needs_revision' && !note) throw new Error('退回補充時必須寫明要補什麼');
     if (PREVIEW_MODE) {
       const item = state.records.find(record => record.id === id);
       item.reviewStatus = resultValue; item.reviewComment = note; item.reviewedBy = currentUser.nickname; item.reviewedAt = new Date().toISOString();
@@ -1061,7 +1258,7 @@
       if (!result?.ok) throw new Error(result?.error || '審查儲存失敗');
       upsertLocal(result.record);
     }
-    closeDialog(); renderApp(); toast('主管審查已儲存');
+    closeDialog(); renderApp(); toast(note ? '主管回覆已儲存' : '已清除主管回覆');
   }
 
   async function handleScore(form) {
@@ -1070,6 +1267,7 @@
     const scores = {};
     KPI.forEach(item => { scores[item.key] = Number(data.get(item.key) || 0); });
     const score = { month, scores, comment: String(data.get('comment') || '').trim(), published: data.get('published') === 'on' };
+    if (score.published && !score.comment) throw new Error('公布評核前，請填寫做得好的地方與下月具體重點');
     if (PREVIEW_MODE) {
       const total = KPI.reduce((sum,item) => sum + Math.max(0, Math.min(item.max, Number(scores[item.key] || 0))), 0);
       upsertLocal({ id: `admin-marketing-score-${normalizeName(workerName)}-${month}`, type: 'score', nickname: workerName, date: `${month}-01`, month, ...score, total, status: score.published ? 'published' : 'draft', updatedAt: new Date().toISOString() });
@@ -1128,7 +1326,10 @@
     else if (action === 'view-trial') openTrialDetail(actionNode.dataset.id || '', false);
     else if (action === 'review-trial-bonus') openTrialDetail(actionNode.dataset.id || '', true);
     else if (action === 'mark-no-trial') openNoTrialConfirm();
-    else if (action === 'open-tuesday') openTuesday(actionNode.dataset.followupId || '');
+    else if (action === 'go-trials') { state.ui.route = 'trials'; persist(); closeDialog(); renderApp(); }
+    else if (action === 'open-daily-check') openDailyCheck();
+    else if (action === 'open-tuesday' || action === 'open-tuesday-check') openTuesday('check');
+    else if (action === 'open-followup') openTuesday('followup', actionNode.dataset.followupId || '');
     else if (action === 'open-environment') openEnvironment();
     else if (action === 'open-project') openProject(actionNode.dataset.id || '');
     else if (action === 'open-assignment' || action === 'update-assignment') openAssignment(actionNode.dataset.id || '');
@@ -1146,6 +1347,7 @@
     else if (action === 'more-nav') moreNavDialog();
     else if (action === 'retry-cloud') loadCloudData(true);
     else if (action === 'refresh-drive') loadDriveFolders(true);
+    else if (action === 'remove-selected-file') removeSelectedFile(actionNode.dataset.inputId || '', actionNode.dataset.index || '0');
     else if (action === 'print') window.print();
   });
 
@@ -1167,6 +1369,11 @@
       persist('篩選已更新'); renderApp();
     }
     if (event.target.id === 'trial-status') updateTrialFormVisibility();
+    if (event.target.id === 'work-status') updateWorkFormVisibility();
+    if (event.target.id === 'assignment-status') updateAssignmentVisibility();
+    if (event.target.matches('#daily-check-form input[name="status"]')) updateDailyCheckVisibility();
+    if (event.target.matches('#environment-form input[name="environmentStatus"]')) updateEnvironmentVisibility();
+    if (event.target.matches('input[type="file"]')) renderSelectedFiles(event.target);
   });
   document.addEventListener('submit', event => {
     event.preventDefault();
@@ -1187,6 +1394,7 @@
     else if (form.id === 'trial-form') runForm(handleTrial, form);
     else if (form.id === 'no-trial-form') runForm(() => handleNoTrial(), form);
     else if (form.id === 'trial-bonus-form') runForm(handleTrialBonus, form);
+    else if (form.id === 'daily-check-form') runForm(handleDailyCheck, form);
     else if (form.id === 'work-item-form') runForm(handleWorkItem, form);
     else if (form.id === 'tuesday-form') runForm(handleTuesday, form);
     else if (form.id === 'environment-form') runForm(handleEnvironment, form);

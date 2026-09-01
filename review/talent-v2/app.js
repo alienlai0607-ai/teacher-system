@@ -540,7 +540,7 @@
 
   function renderPrep() {
     const preps = ownPreps();
-    return `${pageHead('備課檔案', '記錄課程名稱，需要時再補充附件；儲存後可直接用於本堂紀錄。', `<button type="button" class="btn btn-primary" data-action="new-prep">${icon('plus', 17)}新增備課檔案</button>`)}
+    return `${pageHead('備課檔案', '記錄課程名稱，並至少上傳一份教案或教材；儲存後可直接用於本堂紀錄。', `<button type="button" class="btn btn-primary" data-action="new-prep">${icon('plus', 17)}新增備課檔案</button>`)}
       <div class="filter-bar"><span>${icon('folder-open', 17)}${preps.length} 門課程</span><span class="filter-note">不需主管審核</span></div>
       <section class="card-list">${preps.length ? preps.map(renderPrepCard).join('') : renderEmpty('尚無備課檔案', '先建立課程類型與課程名稱，上課當天即可選用。', 'notebook-tabs', '<button type="button" class="btn btn-primary" data-action="new-prep">新增備課檔案</button>')}</section>`;
   }
@@ -551,7 +551,7 @@
     return `<article class="prep-card">
       <div class="prep-card-head"><span class="course-icon">${icon('notebook-tabs', 21)}</span><div><div class="record-title">${esc(prep.courseName || prep.title || '未命名課程')}</div><div class="record-meta">${esc(prep.courseType || '未分類')}${updated ? ` · ${formatDate(updated)} 更新` : ''}</div></div></div>
       ${note ? `<p>${esc(note)}</p>` : ''}
-      <div class="tag-row"><span>${icon('paperclip', 14)}${Array.isArray(prep.materials) ? prep.materials.length : 0} 份附件</span><span>${icon('circle-check', 14)}可直接選用</span></div>
+      <div class="tag-row"><span>${icon('paperclip', 14)}${Array.isArray(prep.materials) ? prep.materials.length : 0} 份附件</span><span>${icon(prepHasMaterial(prep) ? 'circle-check' : 'circle-alert', 14)}${prepHasMaterial(prep) ? '可直接選用' : '請補教案或教材'}</span></div>
       <div class="card-actions"><button type="button" class="btn" data-action="view-prep" data-id="${prep.id}">${icon('eye', 16)}查看檔案</button>${isTeacher() ? `<button type="button" class="btn btn-primary" data-action="edit-prep" data-id="${prep.id}">${icon('pencil', 16)}編輯</button>` : ''}</div>
     </article>`;
   }
@@ -1019,7 +1019,13 @@
   }
 
   function usablePreps() {
-    return state.preps.filter(prep => prep.id && (normalizeName(prep.teacher) === normalizeName(currentUser.nickname) || prep.teacher === '共用'));
+    return state.preps.filter(prep => prep.id && prepHasMaterial(prep) && (normalizeName(prep.teacher) === normalizeName(currentUser.nickname) || prep.teacher === '共用'));
+  }
+
+  function prepHasMaterial(prep) {
+    const materials = Array.isArray(prep?.materials) ? prep.materials : [];
+    if (PREVIEW_MODE) return materials.some(item => Boolean(attachmentName(item)));
+    return materials.some(item => typeof item === 'object' && /^https:\/\/drive\.google\.com\//i.test(String(item.url || item.cloudUrl || '')));
   }
 
   function openLogEditor(existing = null) {
@@ -1059,7 +1065,7 @@
           ${numberField('應到正式', 'expected', formValue('expected', 0), true)}${numberField('正式實到', 'present', formValue('present', 0), true)}${numberField('請假', 'leave', formValue('leave', 0), true)}${numberField('未請假缺席', 'absent', formValue('absent', 0), true)}${numberField('補課實到', 'makeup', formValue('makeup', 0), true)}${numberField('體驗人數', 'trial', formValue('trial', 0), true)}
         </div>${uploadField('點名簿照片', 'attendance', '要看得出日期、課程與圈記；可一次多選。', 'image/*', true)}</section>
         <section class="form-section"><div class="section-title"><span class="section-number">${isPt() ? '3' : '2'}</span><div><h3>備課檔案與教學日誌</h3><p>選擇這堂課使用的課程檔案，不需要主管審核。</p></div></div>
-          <label class="form-field span-all"><span>本堂使用的備課檔案 <b>*</b></span><select name="prepId" required><option value="">請選擇課程</option>${prepOptions.map(prep => `<option value="${prep.id}" ${formValue('prepId') === prep.id ? 'selected' : ''}>${esc(prep.courseName || prep.title || '未命名課程')} · ${esc(prep.courseType || '未分類')}</option>`).join('')}</select>${prepOptions.length ? '' : '<small class="field-error">目前沒有備課檔案，請先到「備課檔案」新增課程名稱。</small>'}</label>
+          <label class="form-field span-all"><span>本堂使用的備課檔案 <b>*</b></span><select name="prepId" required><option value="">請選擇課程</option>${prepOptions.map(prep => `<option value="${prep.id}" ${formValue('prepId') === prep.id ? 'selected' : ''}>${esc(prep.courseName || prep.title || '未命名課程')} · ${esc(prep.courseType || '未分類')}</option>`).join('')}</select>${prepOptions.length ? '' : '<small class="field-error">目前沒有可使用的備課檔案，請先建立課程並上傳至少一份教案或教材。</small>'}</label>
           <div class="form-grid">${textareaField('本堂實際完成內容', 'completed', formValue('completed'), true, '寫完成的任務、作品或理解結果。')}${textareaField('孩子反應／學習證據', 'response', formValue('response'), true, '寫可觀察的行為、作品差異或學生原句。')}${textareaField('課程問題與下次優化', 'issue', formValue('issue'), true, '寫本堂遇到的問題，以及下次要改的講法、活動或材料。')}</div>
           ${uploadField('學習過程與成果', 'learning', '照片、影片可一次多選；須能對應本堂目標。', 'image/*,video/*', true)}
         </section>
@@ -1544,8 +1550,8 @@
     pendingFiles.prep = prep.materials || [];
     openDrawer({
       title: existing ? '編輯備課檔案' : '新增備課檔案',
-      subtitle: '只需記錄這是什麼課；教材、照片或備課影片有需要再附加。',
-      body: `<form id="prep-form" novalidate><input type="hidden" name="id" value="${esc(prep.id || '')}"><section class="form-section"><div class="section-title"><span class="section-number">1</span><div><h3>課程資料</h3><p>儲存後即可在本堂紀錄直接選用。</p></div></div><div class="form-grid">${selectField('課程類型', 'courseType', COURSE_TYPES, prep.courseType || COURSE_TYPES[1], true)}${field('課程名稱', 'courseName', 'text', prep.courseName || prep.title || '', true, '例：齒輪轉速實驗')}${textareaField('上課內容／備課提醒（選填）', 'notes', prep.notes || prep.summary || '', false, '有需要再記錄本課重點、器材或上課提醒。')}</div>${uploadField('備課附件（選填）', 'prep', '可一次多選教案、教材、照片或 MP4／MOV 備課影片；影片單檔上限 15 MB。', 'image/*,video/mp4,video/quicktime,video/x-m4v,video/webm,.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.zip,.sb3', false)}</section></form>`,
+      subtitle: '填寫課程名稱，並至少上傳一份教案或教材，不需主管審核。',
+      body: `<form id="prep-form" novalidate><input type="hidden" name="id" value="${esc(prep.id || '')}"><section class="form-section"><div class="section-title"><span class="section-number">1</span><div><h3>課程資料</h3><p>儲存後即可在本堂紀錄直接選用。</p></div></div><div class="form-grid">${selectField('課程類型', 'courseType', COURSE_TYPES, prep.courseType || COURSE_TYPES[1], true)}${field('課程名稱', 'courseName', 'text', prep.courseName || prep.title || '', true, '例：齒輪轉速實驗')}${textareaField('上課內容／備課提醒（選填）', 'notes', prep.notes || prep.summary || '', false, '有需要再記錄本課重點、器材或上課提醒。')}</div>${uploadField('教案或教材附件', 'prep', '至少一份；可一次多選教案、簡報、學習單、照片或 MP4／MOV 備課影片，影片單檔上限 15 MB。', 'image/*,video/mp4,video/quicktime,video/x-m4v,video/webm,.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.zip,.sb3', true)}</section></form>`,
       footer: `<button type="button" class="btn" data-action="close-drawer">取消</button><button type="button" data-action="save-prep" class="btn btn-primary">${icon('save', 16)}儲存備課檔案</button>`,
     });
   }
@@ -1573,6 +1579,7 @@
 
   async function savePrep(form) {
     if (!form.checkValidity()) { form.reportValidity(); toast('請選擇課程類型並填寫課程名稱', 'danger'); return; }
+    if (!(pendingFiles.prep || []).length) { toast('請至少上傳一份教案或教材資料', 'danger'); return; }
     const item = capturePrep(form);
     const result = PREVIEW_MODE ? { ok: true, prep: item } : await API.saveTalentPrep(currentUser.nickname, item);
     if (!result?.ok) {

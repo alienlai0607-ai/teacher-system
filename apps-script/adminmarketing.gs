@@ -3,15 +3,15 @@
  * 以 record_type 分流每日工作、週二追蹤、環境、專案、主管交辦、評分與對話。
  */
 
-const ADMIN_MARKETING_RECORD_TYPES_ = ['daily', 'tuesday', 'environment', 'project', 'trial', 'trial_day', 'assignment', 'score', 'message'];
+const ADMIN_MARKETING_RECORD_TYPES_ = ['daily', 'daily_check', 'tuesday', 'environment', 'project', 'trial', 'trial_day', 'assignment', 'score', 'message'];
 const ADMIN_MARKETING_TRIAL_BONUS_ = 50;
 const ADMIN_MARKETING_KPI_ = [
-  { key: 'daily', label: '每日行政與訊息處理', max: 20 },
-  { key: 'promotion', label: '每週美宣產出與完成證據', max: 25 },
-  { key: 'followup', label: '繳費與家長事項追蹤', max: 15 },
-  { key: 'deadline', label: '期限與活動專案管理', max: 20 },
-  { key: 'environment', label: '環境、公告與素材管理', max: 10 },
-  { key: 'supervisor', label: '正確性、主動回報與溝通', max: 10 },
+  { key: 'daily', label: '行政處理與工作留痕', max: 20 },
+  { key: 'promotion', label: '美宣產出與發布品質', max: 25 },
+  { key: 'followup', label: '試上、繳費與家長追蹤', max: 15 },
+  { key: 'deadline', label: '期限與專案推進', max: 20 },
+  { key: 'environment', label: '環境與資料維護', max: 10 },
+  { key: 'supervisor', label: '正確性與主動回報', max: 10 },
 ];
 
 function ensureAdminMarketingRecordsSheet_() {
@@ -159,10 +159,6 @@ function validateAdminMarketingDaily_(data) {
     unresolved: adminMarketingText_(messages.unresolved, 1500),
     reported: messages.reported === true,
   };
-  if (!data.messages.parentChecked || !data.messages.officialLineChecked || !data.messages.groupChecked) {
-    throw new Error('請完成家長訊息、官方 LINE 與班級群組確認');
-  }
-  if (data.messages.unresolved && !data.messages.reported) throw new Error('有待主管確認事項時，必須勾選已主動回報');
   if (!Array.isArray(data.items) || !data.items.length) throw new Error('每日工作日誌至少要有一項工作');
   data.items = data.items.slice(0, 30).map(function (raw) {
     const item = raw || {};
@@ -195,6 +191,17 @@ function validateAdminMarketingDaily_(data) {
   });
   data.note = adminMarketingText_(data.note, 2000);
   data.status = 'submitted';
+  return data;
+}
+
+function validateAdminMarketingDailyCheck_(data) {
+  data.date = adminMarketingDate_(data.date, true);
+  if (data.date > todayStr()) throw new Error('不可預先建立未來日期的訊息確認');
+  data.status = data.status === 'needs_supervisor' ? 'needs_supervisor' : 'clear';
+  data.note = data.status === 'needs_supervisor' ? adminMarketingText_(data.note, 1800) : '';
+  data.reported = data.status === 'needs_supervisor' && data.reported === true;
+  if (data.status === 'needs_supervisor' && !data.note) throw new Error('請寫明需要主管協助的事項');
+  if (data.status === 'needs_supervisor' && !data.reported) throw new Error('請確認已主動回報主管');
   return data;
 }
 
@@ -257,17 +264,18 @@ function validateAdminMarketingProject_(data) {
   data.title = adminMarketingText_(data.title, 220);
   data.projectType = adminMarketingText_(data.projectType, 100);
   data.summary = adminMarketingText_(data.summary, 2200);
-  data.status = ['planning', 'active', 'completed', 'paused'].indexOf(data.status) >= 0 ? data.status : 'planning';
-  if (!data.title || !data.projectType) throw new Error('專案名稱與活動類型為必填');
+  data.status = ['planning', 'active', 'waiting', 'completed', 'paused'].indexOf(data.status) >= 0 ? data.status : 'planning';
   const stageNames = ['企劃', '素材準備', '文案', '美宣', '主管審核', '修改', '排程', '發布'];
+  data.currentStage = adminMarketingText_(data.currentStage, 80);
+  if (stageNames.indexOf(data.currentStage) < 0) data.currentStage = stageNames[0];
+  data.dueDate = adminMarketingDate_(data.dueDate, true);
+  if (!data.title || !data.projectType || !data.summary) throw new Error('專案名稱、類型與目前結果為必填');
   const source = Array.isArray(data.stages) ? data.stages : [];
   data.stages = stageNames.map(function (name, index) {
     const raw = source[index] || source.filter(function (item) { return item.name === name; })[0] || {};
     const status = ['pending', 'active', 'completed'].indexOf(raw.status) >= 0 ? raw.status : 'pending';
     const dueDate = adminMarketingDate_(raw.dueDate, false);
     const actualDate = adminMarketingDate_(raw.actualDate, false);
-    if ((status === 'active' || status === 'completed') && !dueDate) throw new Error(name + '階段必須設定完成日期');
-    if (status === 'completed' && !actualDate) throw new Error(name + '階段完成時必須填寫實際完成日期');
     return { name: name, status: status, dueDate: dueDate, actualDate: actualDate, note: adminMarketingText_(raw.note, 800) };
   });
   data.evidence = adminMarketingAttachments_(data.evidence, data.status === 'completed');
@@ -344,6 +352,7 @@ function validateAdminMarketingRecord_(type, value) {
   data.type = type;
   if (!data.id) throw new Error('紀錄編號遺失');
   if (type === 'daily') return validateAdminMarketingDaily_(data);
+  if (type === 'daily_check') return validateAdminMarketingDailyCheck_(data);
   if (type === 'tuesday') return validateAdminMarketingTuesday_(data);
   if (type === 'environment') return validateAdminMarketingEnvironment_(data);
   if (type === 'project') return validateAdminMarketingProject_(data);
@@ -487,7 +496,7 @@ function saveAdminMarketingRecord(params) {
       (actor.role !== 'admin' && actor.nickname !== target.nickname && !managerTrialEntry)) {
     return { ok: false, error: '只能儲存自己的行政美宣紀錄' };
   }
-  if (['daily', 'tuesday', 'environment', 'project', 'trial', 'trial_day'].indexOf(type) < 0) {
+  if (['daily', 'daily_check', 'tuesday', 'environment', 'project', 'trial', 'trial_day'].indexOf(type) < 0) {
     return { ok: false, error: '此紀錄類型不可由行政端儲存' };
   }
   let data = validateAdminMarketingRecord_(type, params.record);
@@ -590,6 +599,7 @@ function saveAdminMarketingAssignment(params) {
       actualDate: adminMarketingDate_(data.actualDate, false),
       evidence: adminMarketingAttachments_(data.evidence, data.status === 'completed'),
     });
+    if (!data.progressNote) return { ok: false, error: '請填寫目前結果與下一步' };
   } else {
     if (!adminMarketingManagerCanReview_(actor)) return { ok: false, error: '只有行政美宣主管可建立交辦事項' };
     data.title = adminMarketingText_(data.title, 220);
@@ -654,6 +664,7 @@ function saveAdminMarketingScore(params) {
     status: raw.published === true ? 'published' : 'draft',
     published: raw.published === true,
   };
+  if (data.published && !data.comment) return { ok: false, error: '公布評核前必須填寫具體評語' };
   const saved = upsertAdminMarketingRecord_('score', nickname, data, actor.nickname);
   return { ok: true, score: saved };
 }

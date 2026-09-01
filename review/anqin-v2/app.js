@@ -1796,6 +1796,7 @@
     if (!source) return ['尚未選擇備課檔案'];
     const issues = [];
     if (!prepSourceMatchesType(source, executionType)) issues.push('課程類型不相符');
+    if (!(source.prepEvidence || []).some(item => materialCloudUrl(item))) issues.push('缺少教案或教材附件');
     return issues;
   }
 
@@ -1855,7 +1856,7 @@
 
   function activityPreparationReady(activity) {
     if (activity.type === 'lessonprep') {
-      return Boolean(activity.title && activity.details?.targetCourse);
+      return Boolean(activity.title && activity.details?.targetCourse && (activity.prepEvidence || []).some(item => materialCloudUrl(item)));
     }
     if (activityNeedsPrepSource(activity.type)) {
       const source = prepSourceById(activity.prepSourceId);
@@ -1903,6 +1904,7 @@
     if (activity.type === 'lessonprep') {
       return [
         { key: 'record', label: '課程名稱與類型', ready: Boolean(activity.title && activity.details?.targetCourse) },
+        { key: 'material', label: '至少一份教案或教材附件', ready: (activity.prepEvidence || []).some(item => materialCloudUrl(item)) },
       ];
     }
     const feedbackOnly = activityNeedsPrepSource(activity.type);
@@ -2337,11 +2339,11 @@
       </section>
 
       <div class="guide-split">
-        <section class="panel guide-section"><div class="panel-head"><div><div class="panel-title">${icon('package-check')}備課檔案怎麼用</div><div class="panel-subtitle">先記錄課程，授課當天直接選用</div></div></div><div class="panel-body"><div class="guide-source-flow"><div><span>1</span><strong>新增備課檔案</strong><small>選擇課程類型並填寫課程名稱。</small></div><div><span>2</span><strong>需要時加入附件</strong><small>教案、教材或參考資料皆為選填。</small></div><div><span>3</span><strong>授課當天選用</strong><small>儲存後即可使用，不需主管審核。</small></div><div><span>4</span><strong>留下課後回饋</strong><small>記錄有效處、孩子反應與下次調整。</small></div></div><div class="guide-rule">${icon('info', 17)}<span>只有班級經營需要選擇特殊狀況學生；課業指導與學科外課程不顯示關聯學生。</span></div></div></section>
+        <section class="panel guide-section"><div class="panel-head"><div><div class="panel-title">${icon('package-check')}備課檔案怎麼用</div><div class="panel-subtitle">先記錄課程，授課當天直接選用</div></div></div><div class="panel-body"><div class="guide-source-flow"><div><span>1</span><strong>新增備課檔案</strong><small>選擇課程類型並填寫課程名稱。</small></div><div><span>2</span><strong>上傳教案或教材</strong><small>至少一份，可上傳文件、簡報、照片或備課影片。</small></div><div><span>3</span><strong>授課當天選用</strong><small>儲存後即可使用，不需主管審核。</small></div><div><span>4</span><strong>留下課後回饋</strong><small>記錄有效處、孩子反應與下次調整。</small></div></div><div class="guide-rule">${icon('info', 17)}<span>只有班級經營需要選擇特殊狀況學生；課業指導與學科外課程不顯示關聯學生。</span></div></div></section>
         <section class="panel guide-section"><div class="panel-head"><div><div class="panel-title">${icon('scan-search')}什麼才算可判讀證據</div><div class="panel-subtitle">主管要能直接看懂資料證明了什麼</div></div></div><div class="panel-body"><div class="guide-evidence-compare"><div><span class="badge yellow">授課前</span><strong>備課檔案</strong><p>記錄課程名稱；教案、任務單或簡報有需要再附加。</p></div><div><span class="badge blue">授課後</span><strong>成果證據</strong><p>學生作品、訂正前後、測試數據或行為變化；不能只放一張看不出重點的廣角照。</p></div></div><div class="guide-rule">${icon('scan-line', 17)}<span>工作結果由系統帶入，不用重寫；老師只需標示主管要看檔案的哪個位置，照片可加編號。</span></div><div class="guide-rule">${icon('images', 17)}<span>可從相簿一次選多張；選錯照片可按右上角叉號移除，照片上的重點標記也可個別刪除。</span></div><div class="guide-rule">${icon('eye', 17)}<span>工作頁的「課程與工作證據標準」第一次完整顯示；完成第一份成果證據後預設收合，可隨時按「查看證據標準」再次開啟。</span></div></div></section>
       </div>
 
-      <div class="notice-band info">${icon('split', 19)}<div><div class="notice-title">備課與授課紀錄分工</div><div class="notice-copy">備課檔案只記錄課程與選填附件；授課當天留下課後回饋與成果證據。</div></div></div>
+      <div class="notice-band info">${icon('split', 19)}<div><div class="notice-title">備課與授課紀錄分工</div><div class="notice-copy">備課檔案記錄課程並保留至少一份教案或教材；授課當天只需留下課後回饋與成果證據。</div></div></div>
     </div>`;
   }
 
@@ -2820,7 +2822,7 @@
     return isCrossDay ? {
       classLabel: '', classPlaceholder: '', hideClass: true,
       titleLabel: '課程名稱', titlePlaceholder: '例：餐車計畫｜菜單成本教學', hideStudents: true,
-      prepTitle: '備課附件', prepSubtitle: '需要時再加入教案或教材', prepBadge: '選填',
+      prepTitle: '備課附件', prepSubtitle: '至少加入一份教案或教材', prepBadge: '必填',
       prepSummaryLabel: '備課補充', prepSummaryPlaceholder: '例：第一次接觸成本概念的班級，需先完成共同範例。',
       adjustmentLabel: '使用提醒', adjustmentPlaceholder: '例：混齡班可分為基礎版與進階版學習單。',
       fileTitle: '加入參考資料', fileCopy: '正式授課教材請在上方「教案內容與教材」管理',
@@ -2839,7 +2841,7 @@
   }
 
   function renderSimplePrepFiles(items = []) {
-    if (!items.length) return '<div class="prep-file-empty">尚無附件；附件為選填，不影響這份課程被選用。</div>';
+    if (!items.length) return '<div class="prep-file-empty">尚無附件；請至少上傳一份可直接使用的教案或教材。</div>';
     return `<div class="prep-file-list">${items.map(item => { const cloudUrl = materialCloudUrl(item); return `<div class="prep-file-row editable" data-prep-id="${esc(item.id)}">${icon('paperclip', 18)}<div class="prep-file-main">${cloudUrl ? `<a class="file-name-link" href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer"><strong>${esc(item.fileName)}</strong>${icon('external-link', 13)}</a>` : `<strong>${esc(item.fileName)}</strong>`}<small>${esc(item.size || '')} · ${formatDate(String(item.addedAt || '').slice(0, 10))}</small></div><span class="badge ${cloudUrl ? 'green' : 'red'}">${cloudUrl ? '已歸檔' : '未上傳'}</span><button type="button" class="icon-button" data-action="remove-prep-file" data-id="${esc(item.id)}" aria-label="移除 ${esc(item.fileName)}" title="移除">${icon('x', 15)}</button></div>`; }).join('')}</div>`;
   }
 
@@ -2859,7 +2861,7 @@
           <div class="form-field"><div class="form-label">建立日期</div><div class="course-prep-date">${icon('calendar-days', 16)}${formatDate(value.date || state.daily.date)}</div></div>
           <div class="form-field span-2"><label class="form-label" for="course-prep-title">課程名稱 <span class="required">*</span></label><input id="course-prep-title" name="title" value="${esc(value.title || '')}" placeholder="例：9/1 數學小挑戰" required></div>
           <div class="form-field span-2"><label class="form-label" for="course-prep-note">上課內容或使用提醒（選填）</label><textarea id="course-prep-note" name="prepSummary" placeholder="需要補充時再填寫；沒有可留白。">${esc(value.prep?.summary || '')}</textarea></div>
-          <div class="form-field span-2"><div class="form-label">教案或教材附件（選填）</div><label class="file-drop" for="activity-prep-files">${icon('upload-cloud', 21)}<span><strong>加入附件</strong><small>可一次選多份；沒有附件可直接儲存</small></span></label><input class="sr-only" id="activity-prep-files" type="file" multiple data-change="prep-files" accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.key,image/*,video/*"><div id="prep-file-list">${renderSimplePrepFiles(value.prepEvidence || [])}</div></div>
+          <div class="form-field span-2"><div class="form-label">教案或教材附件 <span class="required">*</span></div><label class="file-drop" for="activity-prep-files">${icon('upload-cloud', 21)}<span><strong>加入附件</strong><small>至少一份，可一次選多份教案、教材、照片或備課影片</small></span></label><input class="sr-only" id="activity-prep-files" type="file" multiple data-change="prep-files" accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.key,image/*,video/*"><div id="prep-file-list">${renderSimplePrepFiles(value.prepEvidence || [])}</div></div>
         </div>
       </section>
     </form>`;
@@ -3199,7 +3201,7 @@
       .filter(activity => activity.teacher === state.context.teacher && activity.type === 'lessonprep')
       .sort((a, b) => String(b.updatedAt || b.date).localeCompare(String(a.updatedAt || a.date)));
     return `<div class="page">
-      ${pageHead('備課檔案', '記錄課程名稱；附件可視需要補充', `<button type="button" class="btn btn-primary" data-action="open-activity" data-type="lessonprep">${icon('folder-plus', 17)}<span>新增備課檔案</span></button>`)}
+      ${pageHead('備課檔案', '記錄課程名稱，並至少上傳一份教案或教材', `<button type="button" class="btn btn-primary" data-action="open-activity" data-type="lessonprep">${icon('folder-plus', 17)}<span>新增備課檔案</span></button>`)}
       <section class="panel">
         <div class="panel-head"><div><div class="panel-title">${icon('notebook-tabs')}我的備課檔案</div><div class="panel-subtitle">${allPreps.length} 門課程</div></div></div>
         <div class="panel-body flush"><div class="table-wrap"><table class="data-table plan-table"><thead><tr><th>課程名稱</th><th>課程類型</th><th>建立／更新</th><th>附件</th><th>使用次數</th><th></th></tr></thead><tbody>${allPreps.length ? allPreps.map(renderPrepRecordRow).join('') : '<tr><td colspan="6" class="muted">尚未建立備課檔案</td></tr>'}</tbody></table></div></div>
@@ -4045,7 +4047,7 @@
       return teacherMatch && queryMatch;
     }).sort((a, b) => String(b.updatedAt || b.date).localeCompare(String(a.updatedAt || a.date)));
     return `<div class="page">
-      ${pageHead('備課檔案', '查看各老師建立的課程與選填附件', '')}
+      ${pageHead('備課檔案', '依老師查看已建立的課程與教案教材', '')}
       <div class="notice-band info">${icon('eye', 19)}<div><div class="notice-title">此頁只做客觀查閱</div><div class="notice-copy">備課檔案不需主管核准；填寫與附件品質於月度 KPI 評核時綜合判斷。</div></div></div>
       <div class="filter-bar"><div class="filter-field"><label for="plan-review-teacher">老師</label><select id="plan-review-teacher" aria-label="備課檔案老師" data-change="view-filter" data-filter-group="planReview" data-filter-key="teacher"><option value="all">全部老師</option>${teachingStaff().map(item => `<option value="${esc(item.nickname)}" ${filters.teacher === item.nickname ? 'selected' : ''}>${esc(item.nickname)}</option>`).join('')}</select></div><div class="filter-field grow"><label for="plan-review-query">搜尋</label><input id="plan-review-query" value="${esc(filters.query)}" data-input="view-filter" data-filter-group="planReview" data-filter-key="query" placeholder="搜尋課程名稱或類型"></div></div>
       <section class="panel mt-16"><div class="panel-body flush"><div class="table-wrap"><table class="data-table"><thead><tr><th>課程名稱</th><th>老師</th><th>課程類型</th><th>建立／更新</th><th>附件</th><th>使用次數</th><th></th></tr></thead><tbody>${preps.map(activity => {
@@ -4385,7 +4387,7 @@
     const isCoursePrep = activityDraft.type === 'lessonprep';
     openDrawer({
       title: isCoursePrep ? `${isExisting ? '編輯' : '新增'}備課檔案` : isExisting ? '編輯工作紀錄' : '新增工作紀錄',
-      subtitle: isCoursePrep ? '填寫課程類型與名稱即可儲存' : activityNeedsPrepSource(activityDraft.type) ? '選擇備課檔案，再記錄實際教學與課後回饋' : '記錄實際做法、結果、問題與後續行動',
+      subtitle: isCoursePrep ? '填寫課程類型與名稱，並至少上傳一份教案或教材' : activityNeedsPrepSource(activityDraft.type) ? '選擇備課檔案，再記錄實際教學與課後回饋' : '記錄實際做法、結果、問題與後續行動',
       body: `${draftRecoveryNotice(draftContext.saved?.savedAt, draftContext.saved?.mediaOmitted)}${isCoursePrep ? renderCoursePrepForm(activityDraft) : renderActivityForm(activityDraft)}`,
       footer: `${isExisting ? `<button type="button" class="btn btn-danger" style="margin-right:auto" data-action="delete-activity" data-activity-id="${activityDraft.id}">${icon('trash-2', 15)}刪除</button>` : ''}<button type="button" class="btn" data-action="close-drawer">稍後繼續</button><button type="submit" form="${isCoursePrep ? 'course-prep-form' : 'activity-form'}" class="btn btn-primary">${icon('save', 16)}${isCoursePrep ? '儲存備課檔案' : '儲存紀錄'}</button>`,
     });
@@ -4445,7 +4447,7 @@
     const updatedDate = String(activity.updatedAt || '').slice(0, 10) || activity.date;
     const referenceList = referenceCount
       ? `<div class="prep-file-list">${references.map(item => { const cloudUrl = materialCloudUrl(item); return `<div class="prep-file-row read-only">${icon('file-check-2', 18)}<div class="prep-file-main">${cloudUrl ? `<a class="file-name-link" href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer"><strong>${esc(item.fileName)}</strong>${icon('external-link', 13)}</a>` : `<strong>${esc(item.fileName)}</strong>`}<small>${esc(item.size || '')}${item.addedAt ? ` · ${formatDate(String(item.addedAt).slice(0, 10))}` : ''}</small>${item.note ? `<p>${esc(item.note)}</p>` : ''}</div>${statusBadge(cloudUrl ? '已歸檔' : '未上傳', cloudUrl ? 'green' : 'red')}</div>`; }).join('')}${legacyOutputs.map(item => `<div class="prep-file-row read-only">${icon('archive', 18)}<div class="prep-file-main"><strong>${esc(item.title || item.fileName || '舊版備課附件')}</strong><small>舊版資料保留</small>${item.claim ? `<p>${esc(item.claim)}</p>` : ''}</div></div>`).join('')}</div>`
-      : '<div class="prep-file-empty">沒有附件；附件為選填。</div>';
+      : '<div class="prep-file-empty">尚未上傳教案或教材；補上一份後即可供授課紀錄選用。</div>';
     const usageList = usageRecords.length
       ? `<div class="prep-version-uses">${usageRecords.map(item => { const feedback = item.prepFeedback || {}; return `<article><div class="prep-use-head"><div><strong>${esc(item.title)}</strong><small>${formatDate(item.date)} · ${esc(item.className || '未指定班級')}</small></div>${statusBadge(prepFeedbackComplete(item) ? '回饋完整' : '待補', prepFeedbackComplete(item) ? 'green' : 'red')}</div><div class="prep-feedback-review"><div><strong>有效處</strong><p>${esc(feedback.strengths || '尚未填寫')}</p></div><div><strong>孩子共鳴</strong><p>${esc(feedback.resonance || '尚未填寫')}</p></div><div><strong>下次調整</strong><p>${esc(feedback.changes || '尚未填寫')}</p></div></div></article>`; }).join('')}</div>`
       : '<div class="prep-file-empty">這份備課檔案尚未被授課紀錄選用。</div>';
@@ -4697,7 +4699,7 @@
       { label: '最近一次儲存', tone: runtimeHealth.lastPersistOk ? 'good' : 'bad', value: runtimeHealth.lastPersistOk ? (formatTime(runtimeHealth.lastPersistAt) || '尚未寫入') : '失敗', copy: runtimeHealth.persistError || '沒有未處理的儲存錯誤。' },
       { label: '本機使用量', tone: usageTone, value: formatStorageUsage(usage), copy: usageTone === 'good' ? '容量仍在建議範圍內。' : usageTone === 'warn' ? '接近瀏覽器常見上限，建議減少不必要照片。' : '已接近容量上限，請先移除部分照片再繼續。' },
       { label: '成果附件', tone: attachmentCount > 0 ? 'good' : 'warn', value: `${attachmentCount} 份`, copy: '成果照片會先縮圖壓縮，正式送出時上傳至雲端。' },
-      { label: '備課附件', tone: !materials.length || archivedMaterials === materials.length ? 'good' : 'bad', value: materials.length ? `${archivedMaterials}/${materials.length} 已歸檔` : '無附件', copy: !materials.length ? '附件為選填，目前沒有附件。' : archivedMaterials === materials.length ? '所有附件都可由主管開啟原始檔。' : '有附件只剩檔名，請回到備課檔案重新上傳。' },
+      { label: '備課附件', tone: materials.length && archivedMaterials === materials.length ? 'good' : 'bad', value: materials.length ? `${archivedMaterials}/${materials.length} 已歸檔` : '缺少附件', copy: !materials.length ? '每份備課檔案至少要有一份教案或教材。' : archivedMaterials === materials.length ? '所有附件都可由主管開啟原始檔。' : '有附件只剩檔名，請回到備課檔案重新上傳。' },
       { label: '備課檔案雲端', tone: !state.integration.cloudSyncEnabled || !coursePreps.length || syncedCoursePreps === coursePreps.length ? 'good' : 'bad', value: state.integration.cloudSyncEnabled ? `${syncedCoursePreps}/${coursePreps.length} 已同步` : '審查模式', copy: !coursePreps.length ? '目前尚未建立備課檔案。' : syncedCoursePreps === coursePreps.length ? '備課內容可在其他裝置還原。' : '有備課檔案只留在目前裝置，請重新儲存完成同步。' },
       { label: '追蹤事項雲端', tone: !state.integration.cloudSyncEnabled || !ownTasks.length || syncedTasks === ownTasks.length ? 'good' : 'warn', value: state.integration.cloudSyncEnabled ? `${syncedTasks}/${ownTasks.length} 已同步` : '審查模式', copy: !ownTasks.length ? '目前沒有追蹤事項。' : syncedTasks === ownTasks.length ? '事項已納入跨裝置與排程提醒。' : '尚有事項等待同步，送出日報時會再次補送。' },
       { label: '未送出暫存', tone: 'good', value: `${openDraftCount} 份`, copy: openDraftCount ? '重新打開對應表單即可繼續填寫。' : '目前沒有待恢復的表單內容。' },
@@ -4864,6 +4866,10 @@
   async function saveCoursePrepForm(form) {
     if (!form.reportValidity()) return;
     const draft = captureCoursePrepFormDraft();
+    if (!(draft?.prepEvidence || []).some(item => materialCloudUrl(item))) {
+      toast('請至少上傳一份教案或教材，並等待顯示「已歸檔」後再儲存', 'danger');
+      return;
+    }
     const data = new FormData(form);
     const id = String(data.get('id') || uid('prep'));
     const existing = state.activities.find(item => item.id === id && item.type === 'lessonprep');

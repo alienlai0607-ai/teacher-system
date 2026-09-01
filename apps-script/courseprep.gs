@@ -42,6 +42,12 @@ function saveCoursePrep(params) {
   if (!prep.id || prep.type !== 'lessonprep' || !String(prep.title || '').trim()) {
     return { ok: false, error: '備課檔案資料不完整' };
   }
+  const prepFiles = Array.isArray(prep.prepEvidence) ? prep.prepEvidence : [];
+  const planFiles = plan && Array.isArray(plan.materials) ? plan.materials : [];
+  const hasArchivedMaterial = prepFiles.concat(planFiles).some(function (item) {
+    return /^https:\/\/drive\.google\.com\//i.test(String(item && (item.cloudUrl || item.url) || ''));
+  });
+  if (!hasArchivedMaterial) return { ok: false, error: '請至少上傳一份教案或教材資料' };
   const now = nowIso();
   const existing = (() => {
     ensureCoursePrepSheet_();

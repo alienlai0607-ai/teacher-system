@@ -392,6 +392,8 @@ function saveTalentLesson(params) {
     if (!prepRow || prepRow.record_type !== 'prep' || prepRow.nickname !== nickname) {
       throw new Error('請選擇本人的備課檔案');
     }
+    const selectedPrep = talentRecordObject_(prepRow);
+    talentAttachments_(selectedPrep.materials, true);
     lesson.attendanceFiles = talentAttachments_(lesson.attendanceFiles, true);
     lesson.learningFiles = talentAttachments_(lesson.learningFiles, true);
     lesson.roomFiles = talentAttachments_(lesson.roomFiles, true);
@@ -505,7 +507,7 @@ function saveTalentPrep(params) {
   prep.title = String(prep.title || prep.courseName).trim();
   prep.status = 'ready';
   prep.date = String(prep.date || todayStr()).slice(0, 10);
-  prep.materials = talentAttachments_(prep.materials, false);
+  prep.materials = talentAttachments_(prep.materials, true);
   const saved = upsertTalentRecord_('prep', nickname, prep, actor.nickname);
   logSystem(nickname, 'save_talent_prep', prep.id, { status: prep.status });
   return { ok: true, prep: saved };

@@ -35,9 +35,13 @@ const unfinished = validDaily();
 unfinished.items[0] = { ...unfinished.items[0], category: 'admin', status: 'in_progress', progress: 60, remaining: '', dueDate: '', actualDate: '', evidence: [] };
 assert.throws(() => context.validateAdminMarketingRecord_('daily', unfinished), /剩餘工作與預計完成日期/);
 
-const unresolved = validDaily();
-unresolved.messages.unresolved = '等待主管確認發布時間';
-assert.throws(() => context.validateAdminMarketingRecord_('daily', unresolved), /主動回報/);
+const dailyCheck = context.validateAdminMarketingRecord_('daily_check', {
+  id: 'daily-check-1', date: '2026-08-26', status: 'clear', note: '', reported: false,
+});
+assert.equal(dailyCheck.status, 'clear');
+assert.throws(() => context.validateAdminMarketingRecord_('daily_check', {
+  id: 'daily-check-2', date: '2026-08-26', status: 'needs_supervisor', note: '等待主管確認發布時間', reported: false,
+}), /主動回報/);
 
 assert.throws(() => context.validateAdminMarketingRecord_('tuesday', {
   id: 'tuesday-1', date: '2026-08-26',
@@ -50,9 +54,9 @@ assert.throws(() => context.validateAdminMarketingRecord_('environment', {
 }), /問題與改善期限/);
 
 assert.throws(() => context.validateAdminMarketingRecord_('project', {
-  id: 'project-1', date: '2026-08-26', title: '體驗週', projectType: '招生活動',
-  stages: [{ name: '企劃', status: 'active', dueDate: '', actualDate: '' }],
-}), /企劃階段必須設定完成日期/);
+  id: 'project-1', date: '2026-08-26', title: '體驗週', projectType: '招生活動', summary: '海報初稿完成',
+  currentStage: '美宣', dueDate: '', stages: [],
+}), /日期格式/);
 
 const trial = context.validateAdminMarketingRecord_('trial', {
   id: 'trial-1', date: '2026-08-26', studentName: '小布', course: '機器人試上', teacher: '皮皮老師',
@@ -121,8 +125,8 @@ assert.match(apiSource, /reviewAdminMarketingTrialBonus/);
 assert.match(uiSource, /type="file" multiple/, '證據需可一次選多個檔案');
 assert.match(uiSource, /API\.uploadPhoto/, '圖片證據需進入 KPI 證據資料夾');
 assert.match(uiSource, /API\.uploadFile/, '影片、PDF 與簡報需保留在檔案與素材資料夾');
-assert.match(uiSource, /每週至少 2 支完成影片/);
-assert.match(uiSource, /每週至少 3 則照片宣傳/);
+assert.match(uiSource, /影片每週至少 2 支/);
+assert.match(uiSource, /照片宣傳每週至少 3 則/);
 assert.match(uiSource, /週二完成繳費、到期、續課與未繳費追蹤/);
 assert.match(uiSource, /與主管對話/);
 assert.match(uiSource, /route: 'cloud', label: '雲端資料'/);
@@ -138,10 +142,13 @@ assert.doesNotMatch(adminDashboardSource, /test-view-grid/, '測試入口不得�
 assert.match(sharedUiSource, /admin\/dashboard\.html\?v=20260827-test-view-fast-1#test-view/, '離開測試視角需直接回快速切換頁');
 assert.match(uiSource, /data-action="open-test-view"/, '行政美宣主管視角需能進入快速測試');
 assert.match(uiSource, /data-action="exit-impersonation"/, '行政美宣測試視角需能一鍵換老師');
-assert.match(uiSource, /route: 'trials', label: '試上追蹤'/, '行政需有獨立試上追蹤頁');
-assert.match(uiSource, /route: 'trials', label: '試上與獎金'/, '主管需有首報獎金審核頁');
+assert.match(uiSource, /route: 'trials', label: '家長追蹤'/, '行政需有集中的家長追蹤頁');
+assert.match(uiSource, /route: 'trials', label: '家長與獎金'/, '主管需有首報獎金審核頁');
 assert.match(uiSource, /今日無試上/, '需區分無試上與忘記填寫');
-assert.match(uiSource, /每位學生終身只核發一次/, '使用規則需寫明防重複原則');
+assert.match(uiSource, /首次一期且完成繳費/, '使用規則需寫明首報獎金原則');
+assert.match(uiSource, /function handleDailyCheck/, '每日訊息確認需與工作項目分開儲存');
+assert.match(uiSource, /function retainedFiles/, '已上傳附件需能個別移除');
+assert.match(uiSource, /remove-selected-file/, '新選附件在儲存前需能移除');
 assert.match(uiSource, /此學生已有試上追蹤紀錄，請更新原紀錄/, '前端需在重複新增時立即阻擋');
 assert.match(uiSource, /列印月報/, '主管需能列印每月獎金明細');
 assert.match(uiSource, /actionNode\.classList\.contains\('dialog-backdrop'\) && event\.target !== actionNode/, '點擊表單內按鈕不得被背景誤判為關閉對話框');

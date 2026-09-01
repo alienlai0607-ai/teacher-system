@@ -162,7 +162,8 @@ assert.match(talentUiSource, /data-action="view-prep-review"/, '選老師後需�
 assert.match(talentUiSource, /此頁不需要核准或退回/, '主管備課頁必須明確採唯讀查閱流程');
 assert.doesNotMatch(talentUiSource, /data-action="review-prep"|data-action="finish-prep-review"/, '才藝主管不可再核准或退回備課檔案');
 assert.match(backendSource, /prep\.status = 'ready'/, '備課檔案儲存後應立即成為可用資料');
-assert.match(backendSource, /talentAttachments_\(prep\.materials, false\)/, '備課附件必須為選填');
+assert.match(backendSource, /talentAttachments_\(prep\.materials, true\)/, '備課檔案必須至少有一份已上傳的教案或教材');
+assert.match(backendSource, /talentAttachments_\(selectedPrep\.materials, true\)/, '送出本堂紀錄時必須再驗證備課附件');
 assert.doesNotMatch(backendSource, /prepRow\.status !== 'approved'/, '本堂紀錄不可再受備課核准狀態阻擋');
 assert.match(backendSource, /備課檔案儲存後即可使用，不需要主管審核/, '舊審查 API 必須明確停用');
 assert.match(talentUiSource, /pending_users/, '主管人員頁需顯示待開通的黑豹');
@@ -175,7 +176,9 @@ assert.match(backendSource, /talentCanAccessHistoricalUser_\(actor, user\)/, '�
 assert.match(talentUiSource, /離職保留/);
 assert.match(anqinUiSource, /route: 'cloud-reports', label: '雲端日報'/);
 assert.match(talentUiSource, /type="file"[^>]*multiple/);
-assert.match(talentUiSource, /備課附件（選填）/, '才藝備課附件需保留，但不得列為必填');
+assert.match(talentUiSource, /教案或教材附件/, '才藝備課頁需清楚命名必填資料');
+assert.match(talentUiSource, /if \(!\(pendingFiles\.prep \|\| \[\]\)\.length\)/, '前端儲存前需擋下沒有附件的備課檔案');
+assert.match(talentUiSource, /prep\.id && prepHasMaterial\(prep\)/, '本堂紀錄不得選取缺附件的備課檔案');
 assert.match(talentUiSource, /video\/mp4,video\/quicktime/, '才藝備課選檔需直接接受常用影片格式');
 assert.match(talentUiSource, /影片單檔上限 15 MB/, '影片上傳限制需在選檔前說清楚');
 assert.match(talentUiSource, /function attachmentIcon\([\s\S]*startsWith\('video\/'\)/, '老師與主管需能辨識影片附件');
