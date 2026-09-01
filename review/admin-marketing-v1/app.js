@@ -22,6 +22,59 @@
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
   };
+  function dateOffset(days, base = todayIso()) {
+    const date = new Date(`${base}T12:00:00+08:00`);
+    date.setDate(date.getDate() + Number(days || 0));
+    return date.toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
+  }
+  function trialLabeledValue(text, labels) {
+    const pattern = new RegExp(`(?:^|\\n)\\s*(?:${labels.join('|')})\\s*[：:]\\s*([^\\n]+)`, 'im');
+    const match = String(text || '').match(pattern);
+    if (!match) return '';
+    return match[1].split(/[｜|；;]/)[0].replace(/\s+(?=(?:日期|時間|時段|課程|老師|電話|手機|LINE|家長)\s*[：:])/i, '').trim();
+  }
+  function trialDateFromMessage(text) {
+    const source = String(text || '');
+    const today = todayIso();
+    if (/(?:今天|今日)/.test(source)) return today;
+    let year;
+    let month;
+    let day;
+    const full = source.match(/(20\d{2})\s*[年\/.\-]\s*(\d{1,2})\s*[月\/.\-]\s*(\d{1,2})\s*日?/);
+    if (full) {
+      year = Number(full[1]); month = Number(full[2]); day = Number(full[3]);
+    } else {
+      const short = source.match(/(?:^|[^\d:])(\d{1,2})\s*[月\/.\-]\s*(\d{1,2})\s*日?/);
+      if (!short) return '';
+      year = Number(today.slice(0, 4)); month = Number(short[1]); day = Number(short[2]);
+    }
+    const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const parsed = new Date(`${iso}T12:00:00+08:00`);
+    if (Number.isNaN(parsed.getTime()) || parsed.getFullYear() !== year || parsed.getMonth() + 1 !== month || parsed.getDate() !== day) return '';
+    return iso <= today ? iso : '';
+  }
+  function parseTrialMessage(raw) {
+    const text = String(raw || '').replace(/\r\n?/g, '\n').trim();
+    if (!text) return {};
+    const phone = text.match(/09\d{2}[\s\-]?\d{3}[\s\-]?\d{3}/)?.[0]?.replace(/[\s\-]/g, '') || '';
+    const timeRange = text.match(/(\d{1,2})[：:](\d{2})\s*(?:[-~～—–至到])\s*(\d{1,2})[：:](\d{2})/);
+    const labeledStudent = trialLabeledValue(text, ['學生姓名', '學生', '孩子姓名', '孩子', '學員姓名', '學員']);
+    const leadingStudent = text.match(/(?:^|\n)\s*([\p{Script=Han}]{2,4})(?:同學|小朋友)?\s+(?=(?:20\d{2}[\/.\-])?\d{1,2}[月\/.\-]\d{1,2})/u)?.[1] || '';
+    const labeledTeacher = trialLabeledValue(text, ['授課老師', '試上老師', '老師']);
+    const knownTeacher = text.match(/(?:浩浩老師|RITA老師|皮皮老師|紅豆老師|小明老師|黑豹老師|柳丁(?:老師|主管)?)/i)?.[0] || '';
+    const labeledCourse = trialLabeledValue(text, ['試上課程', '體驗課程', '課程名稱', '課程', '班別']);
+    const courseLine = text.split('\n').map(line => line.trim()).find(line => /(?:機器人|STEAM|程式|樂高|科學|美術|繪畫|黏土|桌遊|作文|英文|數學|才藝).*(?:課|班|體驗)/i.test(line)) || '';
+    const labeledContact = trialLabeledValue(text, ['家長聯絡方式', '聯絡方式', '家長電話', '聯絡電話', '手機', '電話', '家長LINE', 'LINE', '家長', '聯絡人']);
+    const result = {
+      date: trialDateFromMessage(text),
+      studentName: (labeledStudent || leadingStudent).replace(/(?:同學|小朋友)$/u, '').trim(),
+      course: labeledCourse || courseLine.replace(/^(?:試上|體驗)?課程\s*[：:]?\s*/i, ''),
+      teacher: labeledTeacher || knownTeacher,
+      contactRef: phone || labeledContact,
+      trialTime: timeRange ? `${String(Number(timeRange[1])).padStart(2, '0')}:${timeRange[2]}–${String(Number(timeRange[3])).padStart(2, '0')}:${timeRange[4]}` : trialLabeledValue(text, ['試上時間', '上課時間', '時間', '時段']),
+    };
+    return Object.fromEntries(Object.entries(result).filter(([, value]) => String(value || '').trim()));
+  }
   const reviewRibbon = $('#review-ribbon');
   if (reviewRibbon) reviewRibbon.hidden = !PREVIEW_MODE;
 
@@ -763,11 +816,12 @@
   }
 
   function showDialog(content, wide = false) {
+    document.body.classList.add('dialog-open');
     $('#dialog-root').innerHTML = `<div class="dialog-backdrop" data-action="close-dialog"><section class="dialog ${wide ? 'wide' : ''}" role="dialog" aria-modal="true" aria-labelledby="dialog-title" data-dialog>${content}</section></div>`;
     hydrateIcons();
-    window.setTimeout(() => $('#dialog-root input, #dialog-root textarea, #dialog-root button')?.focus(), 20);
+    window.setTimeout(() => $('#dialog-root input:not([type="hidden"]), #dialog-root textarea, #dialog-root select, #dialog-root button')?.focus(), 20);
   }
-  function closeDialog() { $('#dialog-root').innerHTML = ''; }
+  function closeDialog() { $('#dialog-root').innerHTML = ''; document.body.classList.remove('dialog-open'); }
   function dialogShell(title, subtitle, body, submitLabel = '', formId = '') {
     return `<div class="dialog-head"><div><h2 id="dialog-title">${esc(title)}</h2><p>${esc(subtitle)}</p></div><button type="button" class="button icon-only" data-action="close-dialog" aria-label="關閉">${icon('x')}</button></div>${formId ? `<form id="${formId}">` : ''}<div class="dialog-body">${body}</div><div class="dialog-foot"><button type="button" class="button" data-action="close-dialog">取消</button>${submitLabel ? `<button type="submit" class="button primary">${icon('save')}${esc(submitLabel)}</button>` : ''}</div>${formId ? '</form>' : ''}`;
   }
@@ -814,8 +868,8 @@
   function openWorkItem(itemId = '', recordId = '') {
     const daily = (recordId ? workerRecords('daily').find(record => record.id === recordId) : null) || todayDaily();
     const item = (daily?.items || []).find(entry => entry.id === itemId) || state.drafts.workItem || {};
-    const body = `<div class="notice">${icon('info')}<div>只寫這次做到的結果；未完成時再補「下一步」與期限。系統不再要求主觀百分比。</div></div><input type="hidden" name="itemId" value="${esc(item.id || '')}"><input type="hidden" name="recordId" value="${esc(daily?.id || '')}"><div class="form-grid mt-16"><div class="field"><label for="work-category">工作類型 <span class="required">*</span></label><select id="work-category" name="category" required><option value="">請選擇</option>${CATEGORIES.map(([key,label]) => `<option value="${key}" ${item.category === key ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></div><div class="field"><label for="work-title">工作名稱 <span class="required">*</span></label><input id="work-title" name="title" value="${esc(item.title || '')}" placeholder="例：9 月體驗週海報" required></div><div class="field full"><label for="completed-today">本次處理結果 <span class="required">*</span></label><textarea id="completed-today" name="completedToday" placeholder="例：完成第一版海報並送主管確認" required>${esc(item.completedToday || '')}</textarea></div><div class="field full"><label for="work-status">目前狀態 <span class="required">*</span></label><select id="work-status" name="status"><option value="completed" ${item.status === 'completed' ? 'selected' : ''}>已完成</option><option value="in_progress" ${item.status === 'in_progress' || !item.status ? 'selected' : ''}>還要繼續</option><option value="waiting" ${item.status === 'waiting' ? 'selected' : ''}>等待主管／外部資料</option></select></div><div class="field full" data-work-next><label for="remaining">下一步 <span class="required">*</span></label><input id="remaining" name="remaining" value="${esc(item.remaining || '')}" placeholder="例：確認課程時間與 QR Code"></div><div class="field" data-work-next><label for="due-date">下次完成期限 <span class="required">*</span></label><input id="due-date" name="dueDate" type="date" value="${esc(item.dueDate || '')}"></div><div class="field full"><label for="work-evidence">附件 <span class="conditional">美宣標記完成時必填</span></label><input id="work-evidence" name="evidence" type="file" multiple accept="image/*,video/*,.pdf,.ppt,.pptx"><div class="field-help">可一次選多個檔案，也可在儲存前移除點錯的檔案。</div><div class="selected-files" data-file-preview="work-evidence"></div>${existingFileControls(item.evidence || [])}</div></div>`;
-    showDialog(dialogShell(itemId ? '編輯工作' : '新增工作', '留下主管能直接判讀的結果與下一步', body, '儲存', 'work-item-form'));
+    const body = `<input type="hidden" name="itemId" value="${esc(item.id || '')}"><input type="hidden" name="recordId" value="${esc(daily?.id || '')}"><div class="form-grid"><div class="field"><label for="work-category">工作類型 <span class="required">*</span></label><select id="work-category" name="category" required><option value="">請選擇</option>${CATEGORIES.map(([key,label]) => `<option value="${key}" ${item.category === key ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></div><div class="field"><label for="work-title">工作名稱 <span class="required">*</span></label><input id="work-title" name="title" value="${esc(item.title || '')}" placeholder="例：9 月體驗週海報" required></div><div class="field full"><label for="completed-today">本次處理結果 <span class="required">*</span></label><textarea id="completed-today" name="completedToday" placeholder="例：完成第一版海報並送主管確認" required>${esc(item.completedToday || '')}</textarea></div><div class="field full"><label for="work-status">目前狀態 <span class="required">*</span></label><select id="work-status" name="status"><option value="completed" ${item.status === 'completed' ? 'selected' : ''}>已完成</option><option value="in_progress" ${item.status === 'in_progress' || !item.status ? 'selected' : ''}>還要繼續</option><option value="waiting" ${item.status === 'waiting' ? 'selected' : ''}>等待主管／外部資料</option></select></div><div class="field full" data-work-next><label for="remaining">下一步 <span class="required">*</span></label><input id="remaining" name="remaining" value="${esc(item.remaining || '')}" placeholder="例：確認課程時間與 QR Code"></div><div class="field" data-work-next><label for="due-date">下次完成期限 <span class="required">*</span></label><input id="due-date" name="dueDate" type="date" value="${esc(item.dueDate || '')}"></div><div class="field full"><label for="work-evidence">附件 <span class="conditional">美宣標記完成時必填</span></label><input id="work-evidence" name="evidence" type="file" multiple accept="image/*,video/*,.pdf,.ppt,.pptx"><div class="field-help">可一次選多個檔案，也可在儲存前移除點錯的檔案。</div><div class="selected-files" data-file-preview="work-evidence"></div>${existingFileControls(item.evidence || [])}</div></div>`;
+    showDialog(dialogShell(itemId ? '編輯工作' : '新增工作', '完成填結果；未完成再填下一步與期限', body, '儲存', 'work-item-form'));
     updateWorkFormVisibility();
   }
   function updateWorkFormVisibility() {
@@ -827,16 +881,17 @@
     const item = trialRecords().find(entry => entry.id === id) || {};
     const isNew = !item.id;
     const approved = item.bonusStatus === 'approved';
-    const body = `<input type="hidden" name="trialId" value="${esc(item.id || '')}"><div class="form-grid">
+    const importPanel = isNew ? `<section class="trial-import"><label for="trial-message-import">貼上家長的試上訊息</label><textarea id="trial-message-import" placeholder="可直接貼上 LINE 訊息，例如：\n學生：王小明\n日期：9/1\n時間：19:00-20:30\n課程：機器人入門\n老師：皮皮老師\n電話：0912-345-678"></textarea><div class="trial-import-actions"><small id="trial-parse-status" class="trial-parse-status">系統只在目前頁面辨識，不會保存整段對話。</small><button type="button" class="button small teal" data-action="parse-trial-message">${icon('scan-text')}辨識並帶入</button></div></section>` : '';
+    const body = `${importPanel}<input type="hidden" name="trialId" value="${esc(item.id || '')}"><div class="form-grid">
       <div class="field"><label for="trial-date">試上日期 <span class="required">*</span></label><input id="trial-date" name="date" type="date" max="${todayIso()}" value="${esc(item.date || todayIso())}" ${isNew ? '' : 'readonly'} required><div class="field-help">新紀錄需於試上當日建立。</div></div>
       <div class="field"><label for="trial-student">學生姓名 <span class="required">*</span></label><input id="trial-student" name="studentName" value="${esc(item.studentName || '')}" ${approved ? 'readonly' : ''} required></div>
       <div class="field"><label for="trial-course">試上課程 <span class="required">*</span></label><input id="trial-course" name="course" value="${esc(item.course || '')}" placeholder="例：機器人入門" required></div>
+      <div class="field"><label for="trial-time">試上時段</label><input id="trial-time" name="trialTime" value="${esc(item.trialTime || '')}" placeholder="例：19:00–20:30"></div>
       <div class="field"><label for="trial-teacher">授課老師 <span class="required">*</span></label><input id="trial-teacher" name="teacher" value="${esc(item.teacher || '')}" required></div>
       <div class="field"><label for="trial-contact">家長聯絡方式／識別資料 <span class="required">*</span></label><input id="trial-contact" name="contactRef" value="${esc(item.contactRef || '')}" placeholder="手機末碼、LINE 名稱或其他可辨識資料" ${approved ? 'readonly' : ''} required></div>
       <div class="field"><label for="trial-status">追蹤狀態 <span class="required">*</span></label><select id="trial-status" name="status" ${approved ? 'disabled' : ''}>${TRIAL_STATUSES.map(([value,label]) => `<option value="${value}" ${(item.status || 'waiting_contact') === value ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>${approved ? `<input type="hidden" name="status" value="${esc(item.status)}">` : ''}</div>
-      <div class="field"><label for="trial-next">下一次追蹤日期 <span class="required">*</span> <span class="conditional">未結案時</span></label><input id="trial-next" name="nextFollowupDate" type="date" value="${esc(item.nextFollowupDate || '')}"></div>
-      <div class="field full"><label for="trial-note">當日備註</label><textarea id="trial-note" name="note" placeholder="只寫需要保留的特殊狀況">${esc(item.note || '')}</textarea></div>
-    </div>
+      <div class="field" data-trial-next><label for="trial-next">下一次追蹤日期 <span class="required">*</span></label><input id="trial-next" name="nextFollowupDate" type="date" value="${esc(item.nextFollowupDate || dateOffset(1))}"></div>
+    </div><details class="compact-details mt-16" ${item.note ? 'open' : ''}><summary>${icon('message-square-more')}補充資料（選填）</summary><div class="compact-details-body"><div class="field full"><label for="trial-note">特殊狀況</label><textarea id="trial-note" name="note" placeholder="只有需要保留的特殊狀況才填">${esc(item.note || '')}</textarea></div></div></details>
     ${isNew ? '' : `<section class="subsection"><h3>新增一筆追蹤</h3><div class="form-grid"><div class="field"><label for="followup-date">聯絡日期</label><input id="followup-date" name="followupDate" type="date" max="${todayIso()}" value="${todayIso()}"></div><div class="field"><label for="followup-method">聯絡方式</label><select id="followup-method" name="followupMethod"><option value="line">LINE／訊息</option><option value="phone">電話</option><option value="in_person">現場</option><option value="other">其他</option></select></div><div class="field full"><label for="followup-note">本次家長回覆／處理結果</label><textarea id="followup-note" name="followupNote" placeholder="有聯絡才填；儲存後會加入時間軸"></textarea></div></div></section>`}
     <section class="subsection conversion-fields" data-conversion-fields><h3>首次一期報名與繳費</h3><div class="notice">${icon('badge-dollar-sign')}<div>只有「首次正式報名並完成繳費」才會產生 50 元待審獎金；續報不計。</div></div><div class="form-grid mt-16"><div class="field"><label for="enrollment-date">一期報名日期 <span class="required">*</span></label><input id="enrollment-date" name="enrollmentDate" type="date" value="${esc(item.enrollmentDate || '')}" ${approved ? 'readonly' : ''}></div><div class="field"><label for="payment-date">繳費確認日期 <span class="required">*</span></label><input id="payment-date" name="paymentDate" type="date" value="${esc(item.paymentDate || '')}" ${approved ? 'readonly' : ''}></div><div class="field full"><label for="enrollment-course">正式報名課程 <span class="required">*</span></label><input id="enrollment-course" name="enrollmentCourse" value="${esc(item.enrollmentCourse || '')}" ${approved ? 'readonly' : ''}></div><div class="field"><label for="first-enrollment">是否為第一次正式報名 <span class="required">*</span></label><select id="first-enrollment" name="firstEnrollment" ${approved ? 'disabled' : ''}><option value="">請確認</option><option value="yes" ${item.firstEnrollment === true ? 'selected' : ''}>是，第一次報名一期</option><option value="no" ${item.firstEnrollment === false && item.status === 'converted' ? 'selected' : ''}>不是，屬續報／轉班</option></select>${approved ? '<input type="hidden" name="firstEnrollment" value="yes">' : ''}</div><div class="field"><label for="payment-evidence">報名／繳費證明 <span class="required">*</span> <span class="conditional">首次報名時</span></label><input id="payment-evidence" name="paymentEvidence" type="file" multiple accept="image/*,.pdf" ${approved ? 'disabled' : ''}><div class="field-help">可一次選多張截圖，儲存前可移除點錯的檔案。</div><div class="selected-files" data-file-preview="payment-evidence"></div>${approved ? '' : existingFileControls(item.paymentEvidence || [], 'removePaymentEvidence')}</div></div>${trialBonusBadge(item)}</section>`;
     showDialog(dialogShell(isNew ? '登錄今日試上' : `更新 ${item.studentName}`, isNew ? '建立一次後，所有聯絡與報名都更新同一筆' : '更新狀態或加入新的家長追蹤', body, '儲存試上追蹤', 'trial-form'), true);
@@ -846,7 +901,35 @@
   function updateTrialFormVisibility() {
     const select = $('#trial-status');
     const section = $('[data-conversion-fields]');
+    const concluded = ['converted', 'not_enrolled'].includes(select?.value || '');
     if (section) section.hidden = select?.value !== 'converted';
+    const next = $('[data-trial-next]');
+    if (next) next.hidden = concluded;
+  }
+
+  function applyTrialMessageParsing(overwrite = false) {
+    const input = $('#trial-message-import');
+    const status = $('#trial-parse-status');
+    if (!input || !status) return;
+    const parsed = parseTrialMessage(input.value);
+    const fields = [
+      ['date', '#trial-date', '日期'], ['studentName', '#trial-student', '學生'], ['course', '#trial-course', '課程'],
+      ['trialTime', '#trial-time', '時段'], ['teacher', '#trial-teacher', '老師'], ['contactRef', '#trial-contact', '聯絡資料'],
+    ];
+    const filled = [];
+    fields.forEach(([key, selector, label]) => {
+      const control = $(selector);
+      if (!control || !parsed[key] || (!overwrite && String(control.value || '').trim())) return;
+      control.value = parsed[key];
+      filled.push(label);
+    });
+    const requiredMissing = [
+      ['#trial-student', '學生'], ['#trial-course', '課程'], ['#trial-teacher', '老師'], ['#trial-contact', '聯絡資料'],
+    ].filter(([selector]) => !String($(selector)?.value || '').trim()).map(([, label]) => label);
+    status.className = `trial-parse-status ${requiredMissing.length ? 'is-partial' : 'is-ready'}`;
+    status.textContent = filled.length
+      ? `已帶入：${filled.join('、')}。${requiredMissing.length ? `請再確認：${requiredMissing.join('、')}。` : '必填資料已齊，請確認內容後儲存。'}`
+      : '尚未辨識到可帶入的資料，請確認訊息中有姓名、課程、老師或電話等資訊。';
   }
 
   function renderTrialTimeline(item) {
@@ -862,7 +945,8 @@
     if (!item) return;
     const evidence = (item.paymentEvidence || []).map(file => `<a class="badge success" href="${esc(file.url)}" target="_blank" rel="noopener">${icon('paperclip',12)}${esc(file.fileName)}</a>`).join('');
     const review = withReview ? `<div class="field mt-16"><label for="trial-review-note">主管審核說明</label><textarea id="trial-review-note" name="note" placeholder="不符合時必須寫明原因">${esc(item.bonusReviewNote || '')}</textarea></div><div class="grid cols-2 mt-16"><label class="check-row"><input type="radio" name="result" value="approved" ${item.bonusStatus !== 'rejected' ? 'checked' : ''}><span>確認符合，核發 50 元</span></label><label class="check-row"><input type="radio" name="result" value="rejected" ${item.bonusStatus === 'rejected' ? 'checked' : ''}><span>不符合</span></label></div>` : '';
-    const body = `<input type="hidden" name="recordId" value="${esc(item.id)}"><div class="detail-grid"><div><span>學生</span><strong>${esc(item.studentName)}</strong></div><div><span>家長識別</span><strong>${esc(item.contactRef)}</strong></div><div><span>試上</span><strong>${formatDate(item.date)} · ${esc(item.course)}</strong></div><div><span>授課老師</span><strong>${esc(item.teacher)}</strong></div><div><span>目前狀態</span><strong>${esc(trialStatusLabel(item.status))}</strong></div><div><span>負責人</span><strong>${esc(item.owner || workerName)}</strong></div>${item.status === 'converted' ? `<div><span>正式報名</span><strong>${formatDate(item.enrollmentDate)} · ${esc(item.enrollmentCourse)}</strong></div><div><span>繳費確認</span><strong>${formatDate(item.paymentDate)}</strong></div><div><span>首次報名</span><strong>${item.firstEnrollment ? '是' : '否，不計獎金'}</strong></div><div><span>獎金狀態</span><strong>${item.bonusStatus === 'approved' ? '已核准 50 元' : item.bonusStatus === 'rejected' ? '不符合' : '待主管確認'}</strong></div>` : ''}</div>${evidence ? `<div class="file-list mt-16">${evidence}</div>` : ''}<h3>處理時間軸</h3>${renderTrialTimeline(item)}${review}`;
+    const trialLabel = [formatDate(item.date), item.trialTime, item.course].filter(Boolean).join(' · ');
+    const body = `<input type="hidden" name="recordId" value="${esc(item.id)}"><div class="detail-grid"><div><span>學生</span><strong>${esc(item.studentName)}</strong></div><div><span>家長識別</span><strong>${esc(item.contactRef)}</strong></div><div><span>試上</span><strong>${esc(trialLabel)}</strong></div><div><span>授課老師</span><strong>${esc(item.teacher)}</strong></div><div><span>目前狀態</span><strong>${esc(trialStatusLabel(item.status))}</strong></div><div><span>負責人</span><strong>${esc(item.owner || workerName)}</strong></div>${item.status === 'converted' ? `<div><span>正式報名</span><strong>${formatDate(item.enrollmentDate)} · ${esc(item.enrollmentCourse)}</strong></div><div><span>繳費確認</span><strong>${formatDate(item.paymentDate)}</strong></div><div><span>首次報名</span><strong>${item.firstEnrollment ? '是' : '否，不計獎金'}</strong></div><div><span>獎金狀態</span><strong>${item.bonusStatus === 'approved' ? '已核准 50 元' : item.bonusStatus === 'rejected' ? '不符合' : '待主管確認'}</strong></div>` : ''}</div>${evidence ? `<div class="file-list mt-16">${evidence}</div>` : ''}<h3>處理時間軸</h3>${renderTrialTimeline(item)}${review}`;
     showDialog(dialogShell(withReview ? '確認首報獎金' : '試上追蹤明細', `${item.studentName} · ${formatDate(item.date)} 試上`, body, withReview ? '儲存審核' : '', withReview ? 'trial-bonus-form' : ''), true);
   }
 
@@ -1024,8 +1108,9 @@
     const contactRef = String(data.get('contactRef') || '').trim();
     const date = String(data.get('date') || todayIso());
     const course = String(data.get('course') || '').trim();
+    const trialTime = String(data.get('trialTime') || '').trim();
     const teacher = String(data.get('teacher') || '').trim();
-    const nextFollowupDate = String(data.get('nextFollowupDate') || '');
+    const nextFollowupDate = ['converted', 'not_enrolled'].includes(status) ? '' : String(data.get('nextFollowupDate') || '');
     const enrollmentDate = status === 'converted' ? String(data.get('enrollmentDate') || '') : '';
     const paymentDate = status === 'converted' ? String(data.get('paymentDate') || '') : '';
     const enrollmentCourse = status === 'converted' ? String(data.get('enrollmentCourse') || '').trim() : '';
@@ -1043,7 +1128,7 @@
     if (duplicate) throw new Error('此學生已有試上追蹤紀錄，請更新原紀錄，不要重複新增');
     const newEvidence = await uploadFiles(form.elements.paymentEvidence, 'trial-payment');
     const record = {
-      ...existing, id, date, studentName, course, teacher, contactRef,
+      ...existing, id, date, studentName, course, trialTime, teacher, contactRef,
       interest: String(data.get('interest') || 'unknown'), owner: workerName, nextFollowupDate,
       note: String(data.get('note') || '').trim(), status, followups,
       enrollmentDate, paymentDate, enrollmentCourse,
@@ -1305,6 +1390,7 @@
     catch (error) { toast(error.message || '操作失敗', 'danger'); if (button) button.disabled = false; }
   }
 
+  let trialParseTimer = 0;
   document.addEventListener('click', event => {
     const route = event.target.closest('[data-route]');
     if (route) {
@@ -1323,6 +1409,7 @@
       closeDialog();
     } else if (action === 'open-work-item') openWorkItem(actionNode.dataset.id || '', actionNode.dataset.recordId || '');
     else if (action === 'open-trial') openTrial(actionNode.dataset.id || '');
+    else if (action === 'parse-trial-message') applyTrialMessageParsing(true);
     else if (action === 'view-trial') openTrialDetail(actionNode.dataset.id || '', false);
     else if (action === 'review-trial-bonus') openTrialDetail(actionNode.dataset.id || '', true);
     else if (action === 'mark-no-trial') openNoTrialConfirm();
@@ -1354,6 +1441,10 @@
   document.addEventListener('input', event => {
     const scoreForm = event.target.closest('#score-form');
     if (scoreForm) scoreForm.dataset.dirty = 'true';
+    if (event.target.id === 'trial-message-import') {
+      window.clearTimeout(trialParseTimer);
+      trialParseTimer = window.setTimeout(() => applyTrialMessageParsing(false), 250);
+    }
     if (event.target.matches('input[type="range"]')) {
       const label = $('#progress-value');
       if (label) label.textContent = `${event.target.value}%`;

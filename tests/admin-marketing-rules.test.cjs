@@ -107,6 +107,8 @@ const codeSource = fs.readFileSync(path.join(root, 'apps-script/Code.gs'), 'utf8
 const setupSource = fs.readFileSync(path.join(root, 'apps-script/setup.gs'), 'utf8');
 const apiSource = fs.readFileSync(path.join(root, 'shared/api.js'), 'utf8');
 const uiSource = fs.readFileSync(path.join(root, 'review/admin-marketing-v1/app.js'), 'utf8');
+const uiCssSource = fs.readFileSync(path.join(root, 'review/admin-marketing-v1/styles.css'), 'utf8');
+const uiHtmlSource = fs.readFileSync(path.join(root, 'review/admin-marketing-v1/index.html'), 'utf8');
 const adminDashboardSource = fs.readFileSync(path.join(root, 'admin/dashboard.html'), 'utf8');
 const sharedUiSource = fs.readFileSync(path.join(root, 'shared/ui.js'), 'utf8');
 
@@ -149,6 +151,17 @@ assert.match(uiSource, /首次一期且完成繳費/, '使用規則需寫明首�
 assert.match(uiSource, /function handleDailyCheck/, '每日訊息確認需與工作項目分開儲存');
 assert.match(uiSource, /function retainedFiles/, '已上傳附件需能個別移除');
 assert.match(uiSource, /remove-selected-file/, '新選附件在儲存前需能移除');
+assert.match(uiSource, /function parseTrialMessage/, '登錄試上需支援貼上訊息自動辨識');
+assert.match(uiSource, /data-action="parse-trial-message"/, '登錄試上需提供手動重新辨識按鈕');
+assert.match(uiSource, /trialTime/, '試上時段需能帶入、儲存並重新顯示');
+assert.match(uiSource, /data-trial-next/, '下一次追蹤日期需能依結案狀態動態隱藏');
+assert.match(uiSource, /\['converted', 'not_enrolled'\]\.includes\(status\) \? ''/, '結案後不得殘留無效的下次追蹤日期');
+assert.match(uiCssSource, /\.dialog > form \{[^}]*min-height: 0;[^}]*display: flex;[^}]*overflow: hidden;/, '彈窗表單需形成可捲動的 flex 容器');
+assert.match(uiCssSource, /\.dialog-body \{[^}]*min-height: 0;[^}]*overflow-y: auto;/, '所有行政彈窗內容需可獨立向下捲動');
+assert.match(uiCssSource, /\.dialog-foot \{[^}]*flex: 0 0 auto;/, '行政彈窗底部操作需固定留在畫面內');
+assert.match(uiCssSource, /\.file-chip, \.selected-file \{[^}]*max-width: 100%;/, '長檔名不得撐破手機版面');
+assert.match(uiHtmlSource, /app\.js\?v=20260901-admin-dialog-trial-import-1/, '行政新表單需使用獨立快取版本');
+assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=admin-marketing(?:-manager)?&v=20260901-admin-dialog-trial-import-1/g) || []).length, 2, '行政與主管入口都需避開舊版快取');
 assert.match(uiSource, /此學生已有試上追蹤紀錄，請更新原紀錄/, '前端需在重複新增時立即阻擋');
 assert.match(uiSource, /列印月報/, '主管需能列印每月獎金明細');
 assert.match(uiSource, /actionNode\.classList\.contains\('dialog-backdrop'\) && event\.target !== actionNode/, '點擊表單內按鈕不得被背景誤判為關閉對話框');
