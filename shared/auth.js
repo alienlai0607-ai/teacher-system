@@ -24,7 +24,7 @@ window.AUTH = (function () {
           return null;
         }
         const real = JSON.parse(realRaw);
-        if (Date.now() - Number(real.t || 0) > 12 * 3600 * 1000) {
+        if (Date.now() - Number(real.t || 0) > 24 * 3600 * 1000) {
           localStorage.removeItem(SESSION_KEY);
           return null;
         }
@@ -32,7 +32,7 @@ window.AUTH = (function () {
         return real;
       }
       // 覆蓋完整工作日，避免老師上午登入、晚間送出前被迫重新登入。
-      if (!s.impersonate && Date.now() - s.t > 12 * 3600 * 1000) {
+      if (!s.impersonate && Date.now() - s.t > 24 * 3600 * 1000) {
         localStorage.removeItem(SESSION_KEY);
         return null;
       }
@@ -169,7 +169,7 @@ window.AUTH = (function () {
     const anqinDepartments = ['東橋教室', '永康教室', '北區教室'];
     const usesAnqinWorkspace = role === 'admin'
       || (['manager', 'teacher'].includes(role) && anqinDepartments.includes(session.department));
-    if (usesAnqinWorkspace) window.location.href = root + 'review/anqin-v2/index.html?v=20260901-prep-delete-confirm-1';
+    if (usesAnqinWorkspace) window.location.href = root + 'review/anqin-v2/index.html?v=20260901-upload-pipeline-1';
     else if (role === 'manager') window.location.href = root + 'manager/dashboard.html';
     else window.location.href = root + 'teacher/today.html';
   }

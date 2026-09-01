@@ -9,7 +9,7 @@
  */
 
 const GOOGLE_OAUTH_CLIENT_ID_ = '110974418283-75a7ifti599cauhptkcd0jsqshfrupbf.apps.googleusercontent.com';
-const API_SESSION_TTL_MS_ = 12 * 60 * 60 * 1000;
+const API_SESSION_TTL_MS_ = 24 * 60 * 60 * 1000;
 
 function whoami(params) {
   const identity = verifyLoginIdentity_(params || {});

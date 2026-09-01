@@ -64,25 +64,29 @@ const managerLatest = evalContext.getEval({ nickname: '紅豆', viewer: '小魚'
 assert.equal(managerLatest.eval.year_month, '2026-07', '主管可直接回到最近處理的評核草稿');
 
 const dailyTrackRules = source.slice(source.indexOf('function activityTrackMeta('), source.indexOf('function activityDetailSchema('));
-assert.match(dailyTrackRules, /學科外｜特色課程（如有則填）/, '特色課程入口必須明確標示當日選填');
-assert.match(dailyTrackRules, /return tracks\.academic\.covered;/, '日結只要求每日課業輔導存在');
-assert.doesNotMatch(source, /blockers\.push\('新增特色課程紀錄'\)/, '沒有特色課程不得阻擋日結');
+assert.match(dailyTrackRules, /學科外｜特色課程/, '特色課程入口需清楚標示');
+assert.match(dailyTrackRules, /return tracks\.academic\.covered \|\| tracks\.enrichment\.covered;/, '日結需接受學科內或學科外至少一筆');
+assert.match(source, /blockers\.push\('新增一筆學科內或學科外紀錄'\)/, '兩類皆未填時才可阻擋日結');
 assert.match(source, /!tracks\.enrichment\.covered \|\| tracks\.enrichment\.items\.every\(weeklyActivityCoreReady\)/, '週整理須將沒有特色課程視為正常');
 assert.match(source, /tracks\.enrichment\.covered && !enrichmentReady/, '若已新增特色課程但內容不完整仍須列為缺件');
-assert.match(source, /學科內必填；學科外有課才填/, '主管審查頁必須使用相同規則說明');
-assert.match(source, /id="activity-track-indicator">\$\{renderActivityTrackIndicator\(value\.type\)\}/, '特色課程表單內要再次顯示有課才填、填了要完整的規則');
+assert.match(source, /每日兩類至少擇一/, '主管審查頁必須使用相同規則說明');
+assert.match(source, /id="activity-track-indicator">\$\{renderActivityTrackIndicator\(value\.type\)\}/, '課程表單內要顯示目前選定的紀錄類型');
 assert.match(styles, /\.daily-track-row\.is-optional:not\(\.is-covered\)/, '選填的特色課程不得以紅色缺件樣式呈現');
 assert.match(source, /const TEST_VIEW_MODE = INITIAL_AUTH_SESSION\?\.impersonate === true/, '安親需以登入代看狀態啟用互動測試');
 assert.match(source, /const TEST_VIEW_WRITE_ACTIONS = new Set\([\s\S]*'send-feedback-message'[\s\S]*'confirm-delete'[\s\S]*'export-monthly-archive'/, '安親測試視角必須攔截對話、刪除與正式歸檔');
 assert.match(source, /if \(TEST_VIEW_MODE\)[\s\S]{0,220}表單流程正常，最後寫入已攔截/, '安親表單需在正式寫入前由測試模式攔截');
 assert.match(source, /TEST_VIEW_MODE && fileInput[\s\S]{0,220}不會上傳正式檔案/, '安親測試視角選擇附件後不得上傳正式檔案');
 assert.match(source, /可以開啟、輸入與切換完整流程/, '安親測試狀態需明確說明可互動範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260901-prep-delete-confirm-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260901-prep-delete-confirm-1/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260901-upload-pipeline-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260901-upload-pipeline-1/, '登入備援路徑也必須避開舊版快取');
 
 const activityFormSource = source.slice(source.indexOf('function renderActivitySpecificFields('), source.indexOf('function renderEvidenceAttachmentList('));
 assert.match(activityFormSource, /if \(activityNeedsPrepSource\(type\)\) return '';/, '課業指導與學科外不得重複顯示舊課程內容欄位');
 assert.match(activityFormSource, /hideStudents: type !== 'classroom'/, '只有班級經營可顯示關聯學生');
+assert.match(activityFormSource, /singleCourseName \? classFieldCopy\.label : '紀錄標題'/, '學科外只保留一個類型專屬課程名稱');
+assert.match(activityFormSource, /<input type="hidden" name="type"/, '進入表單後課程類型必須固定，不得再次顯示重複下拉選單');
+assert.doesNotMatch(activityFormSource, /id="activity-type"/, '正式填寫表單不得再出現課程類型下拉選單');
+assert.match(source, /function openActivityTypePicker\(/, '學科內外入口需先用簡單選單選定紀錄類型');
 assert.match(activityFormSource, /function renderActivityResultSection\([\s\S]*activityNeedsPrepSource\(value\.type\)[\s\S]*renderActivityPrepFeedbackFields/, '課程紀錄只保留課後備課回饋');
 assert.doesNotMatch(source, /<option value="attendance">出席<\/option>/, '學生追蹤不得再提供出席類型');
 
@@ -146,6 +150,12 @@ assert.match(activitySaveSource, /markDailyNeedsResubmit\(activity\.date, activi
 assert.match(activitySaveSource, /markDailyNeedsResubmit\(item\.date, item\.teacher\)/, '修改學生或親師紀錄後需退回待重新送出');
 const evidenceSaveSource = source.slice(source.indexOf('function saveEvidenceForm('), source.indexOf('function capturePlanForm('));
 assert.match(evidenceSaveSource, /markDailyNeedsResubmit\(linkedDailyDate, linkedDailyTeacher\)/, '修改成果照片後需退回待重新送出');
+assert.doesNotMatch(evidenceSaveSource, /attachmentsMissingNotes|主管判讀重點/, '多張成果不得要求老師逐張填寫主管判讀說明');
+assert.match(evidenceSaveSource, /status: evidenceReady\(draft\) \? 'pending' : 'draft'/, '成果是否可送審只檢查附件，不得使用文字分數判定');
+const evidenceFormSource = source.slice(source.indexOf('function renderEvidenceAttachmentList('), source.indexOf('function weeklySourceData('));
+assert.doesNotMatch(evidenceFormSource, /這張要主管看什麼|主管請看哪裡|name="observation"[^>]*required|evidence-quality">/, '成果表單不得重複要求老師說明主管觀看位置或顯示自動品質分數');
+assert.match(evidenceFormSource, /主管將依內容的完整性、清楚度與可判讀性進行判斷與評分/, '成果表單需清楚說明內容品質由主管判斷');
+assert.match(source, /function evidenceReady\(data\)[\s\S]{0,120}evidenceAttachments\(data\)\.some\(attachmentAvailable\)/, '成果送出門檻只能確認至少有一份實際可讀附件');
 assert.match(source, /submittedAt, status: 'pending'/, '重新送出後必須回到主管待審，不得停留在草稿或舊狀態');
 const resubmitSource = source.slice(source.indexOf('function markDailyNeedsResubmit('), source.indexOf('function todaySectionStatus('));
 const resubmitContext = vm.createContext({
@@ -183,12 +193,24 @@ assert.match(operationPhotoSource, /file\.arrayBuffer\(\)/, '班務照片需以�
 assert.doesNotMatch(operationPhotoSource, /file\.name\.toLowerCase|lastModified/, '照片檔名或拍攝時間不得被當成影像內容指紋');
 const operationPhotoHandlerSource = source.slice(source.indexOf('async function handleOperationPhoto('), source.indexOf('async function handleReviewDecision('));
 assert.match(operationPhotoHandlerSource, /status: currentStatus/, '選圖時必須同步保留畫面上的正常或異常狀態，避免已附照片仍顯示 0\/4');
+assert.match(operationPhotoHandlerSource, /uploadCompressedPhoto\(dataUrl/, '班務照片需在選取時壓縮並立即上傳');
+assert.doesNotMatch(operationPhotoHandlerSource, /這張照片已用於/, '班務照片不得因系統誤判重複而阻擋老師');
 const operationSaveSource = source.slice(source.indexOf('function saveOperationsForm('), source.indexOf('function saveDailySummaryForm('));
 assert.doesNotMatch(operationSaveSource, /fileNames|相同檔名/, '相同檔名但內容不同的手機照片不得被拒絕');
-assert.match(operationSaveSource, /fingerprints/, '真正相同的影像內容仍需阻擋跨面向重複使用');
+assert.doesNotMatch(operationSaveSource, /重複影像|fingerprints/, '照片內容品質改由主管判讀，不應由前端重複判定阻擋');
 const prepUploadSource = source.slice(source.indexOf('async function handlePrepFiles('), source.indexOf('async function hashFile('));
 assert.match(prepUploadSource, /fileFingerprint = await hashFile\(file\)/, '安親備課附件需以內容指紋辨識重複選檔');
 assert.match(prepUploadSource, /相同檔案已略過/, '重複附件需略過並清楚告知老師');
+assert.match(prepUploadSource, /duplicateIndex >= 0/, '先前未完成的同一附件必須允許重新選擇並修復');
+const evidenceUploadSource = source.slice(source.indexOf('async function handleEvidenceFile('), source.indexOf('function placeEvidencePin('));
+assert.match(evidenceUploadSource, /uploadCompressedPhoto\(dataUrl/, '成果照片需在選取時壓縮並立即上傳');
+assert.match(evidenceUploadSource, /if \(cloudFile\) dataUrl = ''/, '照片成功上傳後不得再將大型內容塞進本機草稿');
+assert.match(evidenceUploadSource, /duplicateIndex >= 0/, '未完成的成果附件必須能由同一原檔重新上傳修復');
+assert.match(source, /const MAX_DOCUMENT_FILE_BYTES = 25 \* 1024 \* 1024/, '文件上限需提高至 25 MB');
+assert.match(source, /function sameReviewIdentity\(/, '登入暱稱需忽略老師或主管尾綴後再核對');
+assert.match(source, /sameReviewIdentity\(session\.nickname, state\.context\.teacher\)/, '正式送出權限不得因顯示名稱尾綴誤判未登入');
+assert.match(source, /function preserveActivityMedia\(/, '雲端草稿不得用只有檔名的附件覆蓋本機可用媒體');
+assert.match(sharedAuth, /24 \* 3600 \* 1000/, '正式登入應維持完整工作日並降低填寫途中過期風險');
 assert.match(pdfReport, /教案／教材有效處/, '正式 PDF 需使用新的課後備課回饋欄位');
 assert.match(pdfReport, /parent_handoff_confirmed/, '正式 PDF 需保留無重要事項時的門口交接證據');
 

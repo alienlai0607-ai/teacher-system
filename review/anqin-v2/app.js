@@ -26,8 +26,10 @@
     && (['127.0.0.1', 'localhost'].includes(window.location.hostname)
       || window.location.hostname.endsWith('.trycloudflare.com'))
     && Boolean(LOCAL_REVIEW_NICKNAME);
-  const APP_VERSION = 19;
+  const APP_VERSION = 20;
   const MAX_EVIDENCE_FILES = 8;
+  const MAX_DOCUMENT_FILE_BYTES = 25 * 1024 * 1024;
+  const MAX_IMAGE_SOURCE_BYTES = 25 * 1024 * 1024;
   const GLOBAL_MANAGER_NICKNAMES = ['小魚'];
   let loadStateIssue = '';
 
@@ -37,6 +39,12 @@
       .replace(/\s+/g, '')
       .replace(/(?:老師|主管)$/u, '')
       .toLowerCase();
+  }
+
+  function sameReviewIdentity(left, right) {
+    const normalizedLeft = normalizeReviewNickname(left);
+    const normalizedRight = normalizeReviewNickname(right);
+    return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
   }
 
   const ACTIVITY_TYPES = {
@@ -372,7 +380,7 @@
       const department = normalizeDepartmentScope(user.department || '');
       if (!['東橋教室', '北區教室'].includes(department)) return;
       const displayName = displayNameForBackend(user.nickname);
-      const existing = state.people.find(person => backendNickname(person.nickname) === user.nickname);
+      const existing = state.people.find(person => sameReviewIdentity(person.nickname, user.nickname));
       const person = {
         nickname: displayName,
         department,
@@ -398,7 +406,7 @@
       grouped.set(teacher, list);
     });
     grouped.forEach((studentsForPerson, nickname) => {
-      const person = state.people.find(item => backendNickname(item.nickname) === nickname);
+      const person = state.people.find(item => sameReviewIdentity(item.nickname, nickname));
       if (person) person.students = studentsForPerson;
     });
   }
@@ -463,36 +471,50 @@
         placeholder: Boolean(record.placeholder && !record.dataUrl),
       }];
     }
-    record.attachments = attachments.map((attachment, index) => ({
-      id: attachment.id || `attachment_${record.id || 'item'}_${index + 1}`,
-      fileName: attachment.fileName || `成果檔案 ${index + 1}`,
-      mimeType: attachment.mimeType || 'application/octet-stream',
-      dataUrl: attachment.dataUrl || '',
-      size: attachment.size || '',
-      note: attachment.note || '',
-      cloudUrl: attachment.cloudUrl || attachment.url || '',
-      cloudFileId: attachment.cloudFileId || attachment.fileId || '',
-      placeholder: Boolean(attachment.placeholder && !attachment.dataUrl),
-    }));
+    record.attachments = attachments.map((attachment, index) => {
+      const cloudUrl = attachment.cloudUrl || attachment.url || '';
+      const cloudFileId = attachment.cloudFileId || attachment.fileId || '';
+      const hasCloudCopy = Boolean(cloudUrl || cloudFileId);
+      const dataUrl = hasCloudCopy ? '' : (attachment.dataUrl || '');
+      return {
+        id: attachment.id || `attachment_${record.id || 'item'}_${index + 1}`,
+        fileName: attachment.fileName || `成果檔案 ${index + 1}`,
+        mimeType: attachment.mimeType || 'application/octet-stream',
+        dataUrl,
+        size: attachment.size || '',
+        note: attachment.note || '',
+        fingerprint: attachment.fingerprint || attachment.fileFingerprint || '',
+        cloudUrl,
+        cloudFileId,
+        uploadStatus: attachment.uploadStatus || (hasCloudCopy ? 'uploaded' : dataUrl ? 'local' : 'incomplete'),
+        uploadError: attachment.uploadError || '',
+        placeholder: Boolean(!hasCloudCopy && !dataUrl),
+      };
+    });
     const primary = record.attachments.find(item => item.id === record.primaryAttachmentId) || record.attachments[0];
     record.primaryAttachmentId = primary?.id || '';
     if (primary) {
       record.fileName = primary.fileName;
       record.mimeType = primary.mimeType;
       record.dataUrl = primary.dataUrl || '';
-      record.placeholder = Boolean(primary.placeholder && !primary.dataUrl);
+      record.cloudUrl = primary.cloudUrl || '';
+      record.cloudFileId = primary.cloudFileId || '';
+      record.placeholder = Boolean(!primary.dataUrl && !primary.cloudUrl && !primary.cloudFileId);
     }
     if (record.quality === undefined || record.quality === null || record.quality === '') {
-      let score = 0;
-      if (record.attachments.length) score += 20;
-      if (record.type) score += 15;
-      if (String(record.claim || '').trim().length >= 8) score += 20;
-      if (String(record.observation || '').trim().length >= 12) score += 20;
-      if (record.privacy) score += 15;
-      if ((record.pins || []).length || record.attachments.every(item => String(item.note || '').trim().length >= 4) || String(record.observation || '').trim().length >= 32) score += 10;
-      record.quality = score;
+      record.quality = record.attachments.length ? 100 : 0;
       record.qualityInferred = true;
     }
+    return record;
+  }
+
+  function normalizeOperationPhotoRecord(record) {
+    if (!record || typeof record !== 'object') return record;
+    record.cloudUrl = record.cloudUrl || record.url || '';
+    record.cloudFileId = record.cloudFileId || record.fileId || '';
+    if (record.cloudUrl || record.cloudFileId) record.dataUrl = '';
+    record.uploadStatus = record.uploadStatus || (record.cloudUrl || record.cloudFileId ? 'uploaded' : record.dataUrl ? 'local' : 'incomplete');
+    record.placeholder = Boolean(record.fileName && !record.dataUrl && !record.cloudUrl && !record.cloudFileId);
     return record;
   }
 
@@ -593,8 +615,10 @@
     if (parsed.daily.parentStatus === 'none') parsed.daily.parentStatus = 'handoff';
     parsed.weekly = { ...seed.weekly, ...(parsed.weekly || {}) };
     parsed.operations = { ...seed.operations, ...(parsed.operations || {}), evidenceByCheck: { ...seed.operations.evidenceByCheck, ...(parsed.operations?.evidenceByCheck || {}) } };
+    Object.values(parsed.operations.evidenceByCheck || {}).forEach(normalizeOperationPhotoRecord);
     if (!parsed.operations.id || parsed.operations.id === 'op_today') parsed.operations.id = `op_${parsed.operations.date}_${parsed.operations.dutyOwner || parsed.context.teacher}`;
     parsed.operationHistory = Array.isArray(parsed.operationHistory) ? parsed.operationHistory : clone(seed.operationHistory);
+    parsed.operationHistory.forEach(operation => Object.values(operation?.evidenceByCheck || {}).forEach(normalizeOperationPhotoRecord));
     ['people', 'activities', 'studentCases', 'contacts', 'lessonPlans', 'tasks', 'submissions', 'managerNotes'].forEach(key => {
       if (!Array.isArray(parsed[key])) parsed[key] = clone(seed[key] || []);
     });
@@ -675,17 +699,20 @@
     const stripEvidence = evidence => {
       if (!evidence) return;
       evidence.dataUrl = '';
-      evidence.placeholder = Boolean(evidence.fileName);
+      evidence.placeholder = Boolean(evidence.fileName && !materialCloudUrl(evidence) && !evidence.cloudFileId);
       (evidence.attachments || []).forEach(attachment => {
         attachment.dataUrl = '';
-        attachment.placeholder = true;
+        attachment.placeholder = Boolean(!materialCloudUrl(attachment) && !attachment.cloudFileId);
       });
     };
     snapshot.activities.forEach(activity => (activity.evidence || []).forEach(stripEvidence));
     (snapshot.submissions || []).forEach(submission => (submission.activitySnapshots || []).forEach(activity => (activity.evidence || []).forEach(stripEvidence)));
     if (snapshot.operations?.evidence) stripEvidence(snapshot.operations.evidence);
     Object.values(snapshot.operations?.evidenceByCheck || {}).forEach(item => {
-      if (item) item.dataUrl = '';
+      if (item) {
+        item.dataUrl = '';
+        item.placeholder = Boolean(item.fileName && !materialCloudUrl(item) && !item.cloudFileId);
+      }
     });
     snapshot.ui = snapshot.ui || {};
     snapshot.ui.mediaRecovery = true;
@@ -772,6 +799,7 @@
     readinessMessage: '',
     cloudStatus: 'idle',
     cloudMessage: '',
+    cloudErrorContext: '',
     draftSyncStatus: 'idle',
     draftSyncAt: '',
     prepSyncStatus: 'idle',
@@ -810,7 +838,7 @@
   }
 
   function displayNameForBackend(nickname = '') {
-    return STAFF_ROSTER.find(person => backendNickname(person.nickname) === nickname)?.nickname || nickname;
+    return STAFF_ROSTER.find(person => sameReviewIdentity(person.nickname, nickname))?.nickname || nickname;
   }
 
   function cloudLogId(teacher, date) {
@@ -825,10 +853,16 @@
     }
   }
 
+  function cloudTeacherNickname(displayName = state.context.teacher) {
+    const session = legacySession();
+    if (session?.role === 'teacher' && sameReviewIdentity(session.nickname, displayName)) return session.nickname;
+    return backendNickname(displayName);
+  }
+
   function personForSession(session = legacySession()) {
     if (!session?.nickname) return null;
-    const known = state.people.find(person => backendNickname(person.nickname) === session.nickname)
-      || STAFF_ROSTER.find(person => backendNickname(person.nickname) === session.nickname);
+    const known = state.people.find(person => sameReviewIdentity(person.nickname, session.nickname))
+      || STAFF_ROSTER.find(person => sameReviewIdentity(person.nickname, session.nickname));
     if (known) return known;
     const department = normalizeDepartmentScope(session.department || '');
     if (!department || !['teacher', 'manager'].includes(session.role)) return null;
@@ -846,7 +880,7 @@
   function cloudIdentityReady() {
     const session = legacySession();
     if (!session || session.status === 'suspended' || session.impersonate === true) return false;
-    return session.role === 'teacher' && session.nickname === backendNickname(state.context.teacher);
+    return session.role === 'teacher' && sameReviewIdentity(session.nickname, state.context.teacher);
   }
 
   function applyLegacySessionContext() {
@@ -866,7 +900,7 @@
       runtimeHealth.loadIssue = '登入帳號尚未完成安親角色或教室設定，已停止沿用先前使用者畫面。';
       return;
     }
-    const existingPerson = state.people.find(item => backendNickname(item.nickname) === session.nickname);
+    const existingPerson = state.people.find(item => sameReviewIdentity(item.nickname, session.nickname));
     if (existingPerson) Object.assign(existingPerson, person);
     else state.people.push(person);
     state.context.department = normalizeDepartmentScope(person.department);
@@ -1007,7 +1041,7 @@
     if (session.status === 'suspended') return '帳號已停用';
     if (session.impersonate === true) return `${session.impersonated_by || '主管'}正在互動測試 ${session.nickname}，正式送出會被攔截`;
     if (session.role !== 'teacher') return `目前登入為${sessionRoleLabel(session.role)}`;
-    if (session.nickname !== backendNickname(state.context.teacher)) return `目前登入為 ${session.nickname}`;
+    if (!sameReviewIdentity(session.nickname, state.context.teacher)) return `目前登入為 ${session.nickname}`;
     return `${session.nickname} 已登入`;
   }
 
@@ -1084,7 +1118,7 @@
     const context = cloudFeedbackContext(threadKey);
     if (!session || !context) return { ok: false, error: '找不到正式登入身分或對話資料' };
     const teacherNickname = backendNickname(context.teacher);
-    if (session.role === 'teacher' && session.nickname !== teacherNickname) return { ok: false, error: '只能回覆自己的資料' };
+    if (session.role === 'teacher' && !sameReviewIdentity(session.nickname, teacherNickname)) return { ok: false, error: '只能回覆自己的資料' };
     if (session.role === 'manager' && !managerScopeMatches(context.teacher, context.department)) return { ok: false, error: '沒有回覆其他教室資料的權限' };
     if (!['teacher', 'manager', 'admin'].includes(session.role)) return { ok: false, error: '目前身分無法送出回覆' };
     const toNickname = session.role === 'teacher' ? backendNickname(MANAGER_BY_DEPARTMENT[context.department] || state.context.manager) : teacherNickname;
@@ -1148,7 +1182,7 @@
 
   function storageFailureMessage(error) {
     return error?.name === 'QuotaExceededError'
-      ? '儲存空間不足：文字已嘗試安全備份，請移除部分照片後再儲存'
+      ? '本機暫存空間不足：文字已安全備份；照片改由雲端保存，請重新整理後重試未完成的上傳'
       : '資料儲存失敗：請先不要關閉頁面，並執行系統健康檢查';
   }
 
@@ -1421,13 +1455,13 @@
     });
     rows.push([]);
 
-    rows.push(['【成果證據索引】'], ['日期', '工作標題', '證據標題', '附件檔名', '附件連結', '證明內容', '主管查看重點', '品質', '狀態', '主管與老師對話']);
+    rows.push(['【成果證據索引】'], ['日期', '工作標題', '證據標題', '附件檔名', '附件連結', '對應工作結果', '舊版補充說明', '附件狀態', '主管狀態', '主管與老師對話']);
     activities.forEach(activity => (activity.evidence || []).forEach(evidence => {
       const attachments = evidenceAttachments(evidence);
       rows.push([
         activity.date, activity.title, evidence.title || '', attachments.map(item => item.fileName).join('、'),
         attachments.map(item => materialCloudUrl(item)).filter(Boolean).join('\n'), evidence.claim || '', evidence.observation || '',
-        evidence.quality || '', evidence.status || '', feedbackThreadExport(feedbackThreadKey('evidence', activity.id, evidence.id)),
+        evidenceReady(evidence) ? '已上傳' : '未上傳', evidence.status || '', feedbackThreadExport(feedbackThreadKey('evidence', activity.id, evidence.id)),
       ]);
     }));
     rows.push([]);
@@ -1488,7 +1522,7 @@
     const session = legacySession();
     if (state.integration.cloudSyncEnabled && session && cloudIdentityReady() && window.API?.archiveMonthlyCsv) {
       cloudResult = await API.archiveMonthlyCsv({
-        nickname: backendNickname(state.context.teacher),
+        nickname: cloudTeacherNickname(),
         month,
         csv: csvText(rows),
       });
@@ -1536,8 +1570,17 @@
     }
     const message = runtimeHealth.persistError || runtimeHealth.loadIssue;
     if (message) return `<div class="system-status-notice"><div class="notice-band danger">${icon('database-zap', 19)}<div><div class="notice-title">資料安全提醒</div><div class="notice-copy">${esc(message)}</div></div><button type="button" class="btn btn-small" data-action="open-health">健康檢查</button></div></div>`;
+    if (state.ui.role === 'teacher' && state.integration.cloudSyncEnabled && !cloudIdentityReady()) {
+      return `<div class="system-status-notice"><div class="notice-band warning">${icon('log-in', 19)}<div><div class="notice-title">請重新確認老師帳號</div><div class="notice-copy">畫面草稿仍保留；重新登入後即可繼續上傳與正式送出。</div></div><button type="button" class="btn btn-small" data-action="open-formal-login">重新登入</button></div></div>`;
+    }
     if (session?.role === 'teacher' && integrationRuntime.cloudStatus === 'error') {
-      return `<div class="system-status-notice"><div class="notice-band danger">${icon('cloud-alert', 19)}<div><div class="notice-title">雲端資料讀取失敗</div><div class="notice-copy">${esc(integrationRuntime.cloudMessage || '目前只顯示本機保留內容，請勿把空白誤認為沒有舊紀錄。')}</div></div><button type="button" class="btn btn-small" data-action="sync-teacher-records">重新讀取</button></div></div>`;
+      const readFailure = integrationRuntime.cloudErrorContext === 'read';
+      const title = readFailure ? '雲端資料讀取失敗' : '雲端處理未完成';
+      const fallback = readFailure ? '目前只顯示本機保留內容，請重新讀取。' : '本機草稿仍保留，請依訊息修正後重新送出。';
+      const action = readFailure
+        ? '<button type="button" class="btn btn-small" data-action="sync-teacher-records">重新讀取</button>'
+        : '<button type="button" class="btn btn-small" data-action="today-tab" data-tab="submit">回到送出</button>';
+      return `<div class="system-status-notice"><div class="notice-band danger">${icon('cloud-alert', 19)}<div><div class="notice-title">${title}</div><div class="notice-copy">${esc(integrationRuntime.cloudMessage || fallback)}</div></div>${action}</div></div>`;
     }
     if (['manager', 'admin'].includes(session?.role) && integrationRuntime.managerSyncStatus === 'error') {
       return `<div class="system-status-notice"><div class="notice-band danger">${icon('cloud-alert', 19)}<div><div class="notice-title">主管資料讀取失敗</div><div class="notice-copy">${esc(integrationRuntime.managerSyncMessage || '目前資料可能不完整，請重新讀取後再審查。')}</div></div><button type="button" class="btn btn-small" data-action="manager-refresh">重新讀取</button></div></div>`;
@@ -1740,8 +1783,8 @@
 
   function activityTrackMeta(track) {
     return {
-      academic: { label: '學科內｜課業輔導／班級經營', shortLabel: '學科內', icon: 'book-open-check', tone: 'blue', description: '安親課業指導每天必填；班級經營有實際事件時再記。' },
-      enrichment: { label: '學科外｜特色課程（如有則填）', shortLabel: '學科外選填', icon: 'sparkles', tone: 'purple', description: '當天有專案、機器人／STEAM、學習歷程或 SEL 才新增；有上課就要完整填寫。' },
+      academic: { label: '學科內｜課業輔導／班級經營', shortLabel: '學科內', icon: 'book-open-check', tone: 'blue', description: '今天有學科內工作就填寫；班級經營有實際事件時再記。' },
+      enrichment: { label: '學科外｜特色課程', shortLabel: '學科外', icon: 'sparkles', tone: 'purple', description: '今天有專案、機器人／STEAM、學習歷程或 SEL 就填寫。' },
       legacy: { label: '歷史紀錄', shortLabel: '歷史資料', icon: 'archive', tone: 'outline', description: '只保留舊資料，不提供新增。' },
     }[track] || { label: '學科內', shortLabel: '學科內', icon: 'book-open-check', tone: 'blue', description: '' };
   }
@@ -1751,17 +1794,12 @@
       const items = activities.filter(activity => activityTrack(activity.type) === track);
       return { items, count: items.length, complete: items.filter(activityComplete).length, covered: items.length > 0 };
     };
-    const academic = build('academic');
-    const requiredAcademic = academic.items.filter(activity => activity.type === 'tutoring');
-    academic.requiredCount = requiredAcademic.length;
-    academic.requiredComplete = requiredAcademic.filter(activityComplete).length;
-    academic.covered = requiredAcademic.length > 0;
-    return { academic, enrichment: build('enrichment') };
+    return { academic: build('academic'), enrichment: build('enrichment') };
   }
 
   function dailyRequiredTracksReady(activities = todayActivities()) {
     const tracks = dailyTrackStatus(activities);
-    return tracks.academic.covered;
+    return tracks.academic.covered || tracks.enrichment.covered;
   }
 
   function activityDetailSchema(type) {
@@ -1877,7 +1915,7 @@
 
   function operationProofCount(operation) {
     const proof = operation.evidenceByCheck || {};
-    return Object.keys(OPERATION_CHECKS).filter(key => proof[key]?.fileName && ['normal', 'exception'].includes(proof[key]?.status)).length;
+    return Object.keys(OPERATION_CHECKS).filter(key => proof[key]?.fileName && attachmentAvailable(proof[key]) && ['normal', 'exception'].includes(proof[key]?.status)).length;
   }
 
   function operationExceptionCount(operation) {
@@ -1897,7 +1935,7 @@
     if (!activityPlanReady(activity)) return false;
     const config = ACTIVITY_TYPES[activity.type] || ACTIVITY_TYPES.tutoring;
     if (!config.evidence) return true;
-    return (activity.evidence || []).some(evidence => evidence.quality >= 80);
+    return (activity.evidence || []).some(evidenceReady);
   }
 
   function activityReadinessChecks(activity) {
@@ -1912,7 +1950,7 @@
     const basic = feedbackOnly
       ? identityReady
       : Boolean(identityReady && String(activity.objective || '').length >= 8 && String(activity.action || '').length >= 8 && String(activity.result || '').length >= 8 && String(activity.nextAction || '').length >= 6 && String(activity.owner || '').trim() && String(activity.dueDate || '').trim() && activityDetailsComplete(activity));
-    const evidenceReady = (activity.evidence || []).some(item => item.quality >= 80);
+    const hasEvidence = (activity.evidence || []).some(evidenceReady);
     const checks = [{ key: 'record', label: feedbackOnly ? '課程資料' : '工作內容', ready: basic }];
     if (activityNeedsPrepSource(activity.type)) {
       checks.push(
@@ -1921,7 +1959,7 @@
       );
     }
     const config = ACTIVITY_TYPES[activity.type] || ACTIVITY_TYPES.tutoring;
-    if (config.evidence) checks.push({ key: 'evidence', label: '成果證據', ready: evidenceReady });
+    if (config.evidence) checks.push({ key: 'evidence', label: '成果證據', ready: hasEvidence });
     return checks;
   }
 
@@ -1929,7 +1967,7 @@
     if (respectDutyOwner && operation.dutyOwner !== state.context.teacher) return true;
     const proof = operation.evidenceByCheck || {};
     const items = Object.keys(OPERATION_CHECKS).map(key => proof[key]);
-    return Boolean(operation.confirmedAt) && items.every(item => item && item.fileName && ['normal', 'exception'].includes(item.status) && (item.status !== 'exception' || String(item.action || '').trim().length >= 8));
+    return Boolean(operation.confirmedAt) && items.every(item => item && item.fileName && attachmentAvailable(item) && ['normal', 'exception'].includes(item.status) && (item.status !== 'exception' || String(item.action || '').trim().length >= 8));
   }
 
   function markDailyNeedsResubmit(date = state.daily.date, teacher = state.context.teacher) {
@@ -1972,7 +2010,7 @@
     const activities = todayActivities();
     const tracks = dailyTrackStatus(activities);
     const evidenceRequired = activities.filter(activity => (ACTIVITY_TYPES[activity.type] || ACTIVITY_TYPES.tutoring).evidence);
-    const evidenceReady = evidenceRequired.filter(activity => (activity.evidence || []).some(item => item.quality >= 80)).length;
+    const evidenceReadyCount = evidenceRequired.filter(activity => (activity.evidence || []).some(evidenceReady)).length;
     const prepRequired = activities.filter(activity => activityNeedsPrepSource(activity.type));
     const prepReady = prepRequired.filter(activityPreparationReady).length;
     const completion = dailyCompletion();
@@ -1983,8 +2021,8 @@
       ${renderGuideInvite()}
       <div class="status-strip">
         <div class="status-cell"><div class="status-label">今日完成度</div><div class="status-value">${completion}%</div><div class="status-note">${state.daily.status === 'submitted' ? '已送出' : '草稿'}</div></div>
-        <div class="status-cell"><div class="status-label">今日必填</div><div class="status-value">${Number(tracks.academic.covered)}/1</div><div class="status-note">課業輔導 · 特色課程選填</div></div>
-        <div class="status-cell"><div class="status-label">備課／成果</div><div class="status-value">${prepReady}/${prepRequired.length}</div><div class="status-note">成果 ${evidenceReady}/${evidenceRequired.length} 筆</div></div>
+        <div class="status-cell"><div class="status-label">今日課程</div><div class="status-value">${Number(tracks.academic.covered || tracks.enrichment.covered)}/1</div><div class="status-note">學科內／學科外擇一</div></div>
+        <div class="status-cell"><div class="status-label">備課／成果</div><div class="status-value">${prepReady}/${prepRequired.length}</div><div class="status-note">成果 ${evidenceReadyCount}/${evidenceRequired.length} 筆</div></div>
         <div class="status-cell"><div class="status-label">待追蹤</div><div class="status-value">${openTasks().length}</div><div class="status-note">${openTasks().filter(item => item.priority === 'high').length} 項優先</div></div>
       </div>
       <div class="workflow-tabs" role="tablist" aria-label="今日紀錄步驟">
@@ -2010,25 +2048,23 @@
     const ready = activities.filter(activityComplete).length;
     return `<div class="content-grid">
       <section class="panel">
-        <div class="panel-head"><div><div class="panel-title">${icon('clipboard-list')}工作紀錄</div><div class="panel-subtitle">課業輔導每日 1 筆；特色課程有上課才記 · 完整 ${ready}/${activities.length || 0}</div></div></div>
+        <div class="panel-head"><div><div class="panel-title">${icon('clipboard-list')}工作紀錄</div><div class="panel-subtitle">學科內或學科外每天至少記錄一筆 · 完整 ${ready}/${activities.length || 0}</div></div></div>
         <div class="panel-body">
           <div class="daily-track-requirements">${['academic', 'enrichment'].map(track => {
             const meta = activityTrackMeta(track);
             const status = tracks[track];
             const fullyComplete = status.covered && status.complete === status.count;
-            const progress = track === 'academic'
-              ? status.covered
-                ? `${status.requiredComplete}/${status.requiredCount} 筆課業輔導完整${status.count > status.requiredCount ? ` · 班級經營 ${status.count - status.requiredCount} 筆` : ''}`
-                : status.count
-                  ? '已有班級經營，仍需新增安親課業指導'
-                  : '尚未新增安親課業指導，今日紀錄無法送出'
-              : status.count ? `${status.complete}/${status.count} 筆完整` : '今日沒有特色課程可不填；若有上課請新增';
-            const buttonLabel = status.covered ? '再記一筆' : track === 'academic' ? '新增必填' : '有課程就新增';
-            const buttonClass = !status.covered && track === 'academic' ? 'btn-primary' : '';
-            return `<article class="daily-track-row ${track === 'enrichment' ? 'is-optional' : ''} ${status.covered ? 'is-covered' : ''} ${fullyComplete ? 'is-complete' : ''}"><span class="daily-track-icon">${icon(meta.icon, 20)}</span><div><strong>${esc(meta.label)}</strong><div class="daily-track-progress">${esc(progress)}</div></div><button type="button" class="btn btn-small ${buttonClass}" data-action="open-activity" data-track="${track}">${icon(status.covered ? 'plus' : 'plus-circle', 14)}${buttonLabel}</button></article>`;
+            const progress = status.count
+              ? `${status.complete}/${status.count} 筆完整`
+              : tracks.academic.covered || tracks.enrichment.covered
+                ? '今天沒有這類課程可留白'
+                : '尚未記錄；兩類至少選一類填寫';
+            const buttonLabel = status.covered ? '再記一筆' : track === 'academic' ? '新增學科內' : '新增學科外';
+            const buttonClass = !tracks.academic.covered && !tracks.enrichment.covered && track === 'academic' ? 'btn-primary' : '';
+            return `<article class="daily-track-row ${status.covered ? 'is-covered' : ''} ${fullyComplete ? 'is-complete' : ''}"><span class="daily-track-icon">${icon(meta.icon, 20)}</span><div><strong>${esc(meta.label)}</strong><div class="daily-track-progress">${esc(progress)}</div></div><button type="button" class="btn btn-small ${buttonClass}" data-action="open-activity" data-track="${track}">${icon(status.covered ? 'plus' : 'plus-circle', 14)}${buttonLabel}</button></article>`;
           }).join('')}</div>
           <div class="section-divider"></div>
-          ${activities.length ? `<div class="activity-list">${activities.map(renderActivityRow).join('')}</div>` : renderEmpty('clipboard-plus', '尚無工作紀錄', '請先新增今天的課業輔導；有特色課程再另外新增。', '', '')}
+          ${activities.length ? `<div class="activity-list">${activities.map(renderActivityRow).join('')}</div>` : renderEmpty('clipboard-plus', '尚無工作紀錄', '請依今天實際內容，新增一筆學科內或學科外紀錄。', '', '')}
         </div>
       </section>
       <aside class="stack">
@@ -2067,7 +2103,7 @@
         <div class="activity-meta">${esc(config.label)} · ${isCrossDay ? `${formatDate(activity.date)} 建立` : contextMeta}</div>
         <div class="activity-glance"><strong>${isCrossDay ? '本日進度' : feedbackOnly ? '課後備課回饋' : '今日成果'}</strong><span>${esc(truncate(resultPreview || '尚未填寫', 100))}</span></div>
         ${missing.length ? `<div class="activity-missing activity-missing-compact">${icon('triangle-alert', 14)}<strong>待補：</strong>${esc(missing.map(item => item.label).join('、'))}</div>` : ''}
-        <div class="activity-quick-meta"><span class="badge ${evidence.some(item => item.quality >= 80) ? 'blue' : 'red'}">${icon('scan-line', 12)}${isCrossDay ? '本日產出' : '成果'} ${evidence.length} 份</span>${activity.nextAction ? `<span class="badge outline">${icon('calendar-clock', 12)}${formatShortDate(activity.dueDate)} ${isCrossDay ? '下一步' : '追蹤'}</span>` : ''}</div>
+        <div class="activity-quick-meta"><span class="badge ${evidence.some(evidenceReady) ? 'blue' : 'red'}">${icon('scan-line', 12)}${isCrossDay ? '本日產出' : '成果'} ${evidence.length} 份</span>${activity.nextAction ? `<span class="badge outline">${icon('calendar-clock', 12)}${formatShortDate(activity.dueDate)} ${isCrossDay ? '下一步' : '追蹤'}</span>` : ''}</div>
         <details class="activity-record-details"><summary>${icon('list-tree', 14)}<span>完整紀錄</span>${icon('chevron-down', 14)}</summary><div class="activity-record-details-body">${detailSummary ? `<div class="activity-detail-summary">${detailSummary}</div>` : ''}${feedbackOnly ? `<div class="activity-prep-line"><strong>備課檔案：</strong>${esc(prepSource ? `${prepSource.title} · ${formatDate(prepSource.date)} 建立` : '尚未連結')}</div>` : ''}${feedbackDetails}</div></details>
       </div>
       <div class="activity-actions">
@@ -2127,7 +2163,7 @@
           <div class="check-item done"><span class="check-icon">${icon('check', 12)}</span><span>授課前：選擇本堂課實際使用的備課檔案</span></div>
           <div class="check-item done"><span class="check-icon">${icon('check', 12)}</span><span>班級經營：歸在學科內，不要求教案或備課附件</span></div>
           <div class="check-item done"><span class="check-icon">${icon('check', 12)}</span><span>課程成果證據對應課後備課回饋；班級經營證據對應實際結果</span></div>
-          <div class="check-item done"><span class="check-icon">${icon('check', 12)}</span><span>指出主管應查看的具體位置或差異</span></div>
+          <div class="check-item done"><span class="check-icon">${icon('check', 12)}</span><span>成果內容需清楚可辨識；主管會依完整性、清楚度與可判讀性評分</span></div>
           <div class="check-item done"><span class="check-icon">${icon('check', 12)}</span><span>完成隱私確認，避免無關個資</span></div>
         </div>
       </div>
@@ -2238,7 +2274,7 @@
         </div>
       </section>
       <aside class="stack">
-        <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}目前狀態</div></div></div><div class="panel-body"><div class="metric-row"><span class="metric-value" id="operation-proof-count">${proofCount}/4 ${operation.confirmedAt ? '已上傳' : '已選取'}</span><div class="progress-track"><div id="operation-proof-progress" class="progress-fill ${proofCount < 4 ? 'warn' : ''}" style="width:${proofCount / 4 * 100}%"></div></div></div><div class="operation-metrics mt-12"><div><strong>${4 - exceptionCount}</strong><small>正常</small></div><div class="${exceptionCount ? 'danger' : ''}"><strong>${exceptionCount}</strong><small>異常</small></div><div><strong>${operation.confirmedAt ? review[0] : '未送出'}</strong><small>主管狀態</small></div></div><div class="text-small muted mt-8" id="operation-proof-help">${operation.confirmedAt && operationsComplete() ? `已於 ${formatTime(operation.confirmedAt)} 完成檢核` : proofCount === 4 ? '照片已選取，送出時會上傳並交主管稽核' : '補齊照片與異常處理後即可送出'}</div></div></section>
+        <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}目前狀態</div></div></div><div class="panel-body"><div class="metric-row"><span class="metric-value" id="operation-proof-count">${proofCount}/4 ${proofCount ? '已上傳' : '待上傳'}</span><div class="progress-track"><div id="operation-proof-progress" class="progress-fill ${proofCount < 4 ? 'warn' : ''}" style="width:${proofCount / 4 * 100}%"></div></div></div><div class="operation-metrics mt-12"><div><strong>${4 - exceptionCount}</strong><small>正常</small></div><div class="${exceptionCount ? 'danger' : ''}"><strong>${exceptionCount}</strong><small>異常</small></div><div><strong>${operation.confirmedAt ? review[0] : '未送出'}</strong><small>主管狀態</small></div></div><div class="text-small muted mt-8" id="operation-proof-help">${operation.confirmedAt && operationsComplete() ? `已於 ${formatTime(operation.confirmedAt)} 完成檢核` : proofCount === 4 ? '照片已上傳，可送出班務檢核' : '補齊照片與異常處理後即可送出'}</div></div></section>
       </aside>
     </div>`;
   }
@@ -2250,7 +2286,7 @@
     const tracks = dailyTrackStatus();
     const summary = buildDailySummary();
     const blockers = [];
-    if (!tracks.academic.covered) blockers.push('新增課業輔導紀錄');
+    if (!dailyRequiredTracksReady()) blockers.push('新增一筆學科內或學科外紀錄');
     if (dailyRequiredTracksReady() && !status.activities) blockers.push('已新增的課程需選擇備課檔案並完成課後回饋；班級經營只需工作欄位及可判讀成果證據');
     if (!status.students) blockers.push('新增學生追蹤，或確認今日無需個別追蹤');
     if (!status.parents) blockers.push('新增重要親師溝通，或完成門口交接確認與備註');
@@ -2340,7 +2376,7 @@
 
       <div class="guide-split">
         <section class="panel guide-section"><div class="panel-head"><div><div class="panel-title">${icon('package-check')}備課檔案怎麼用</div><div class="panel-subtitle">先記錄課程，授課當天直接選用</div></div></div><div class="panel-body"><div class="guide-source-flow"><div><span>1</span><strong>新增備課檔案</strong><small>選擇課程類型並填寫課程名稱。</small></div><div><span>2</span><strong>上傳教案或教材</strong><small>至少一份，可上傳文件、簡報、照片或備課影片。</small></div><div><span>3</span><strong>授課當天選用</strong><small>儲存後即可使用，不需主管審核。</small></div><div><span>4</span><strong>留下課後回饋</strong><small>記錄有效處、孩子反應與下次調整。</small></div></div><div class="guide-rule">${icon('info', 17)}<span>只有班級經營需要選擇特殊狀況學生；課業指導與學科外課程不顯示關聯學生。</span></div></div></section>
-        <section class="panel guide-section"><div class="panel-head"><div><div class="panel-title">${icon('scan-search')}什麼才算可判讀證據</div><div class="panel-subtitle">主管要能直接看懂資料證明了什麼</div></div></div><div class="panel-body"><div class="guide-evidence-compare"><div><span class="badge yellow">授課前</span><strong>備課檔案</strong><p>記錄課程名稱；教案、任務單或簡報有需要再附加。</p></div><div><span class="badge blue">授課後</span><strong>成果證據</strong><p>學生作品、訂正前後、測試數據或行為變化；不能只放一張看不出重點的廣角照。</p></div></div><div class="guide-rule">${icon('scan-line', 17)}<span>工作結果由系統帶入，不用重寫；老師只需標示主管要看檔案的哪個位置，照片可加編號。</span></div><div class="guide-rule">${icon('images', 17)}<span>可從相簿一次選多張；選錯照片可按右上角叉號移除，照片上的重點標記也可個別刪除。</span></div><div class="guide-rule">${icon('eye', 17)}<span>工作頁的「課程與工作證據標準」第一次完整顯示；完成第一份成果證據後預設收合，可隨時按「查看證據標準」再次開啟。</span></div></div></section>
+        <section class="panel guide-section"><div class="panel-head"><div><div class="panel-title">${icon('scan-search')}什麼才算可判讀證據</div><div class="panel-subtitle">主管要能直接看懂資料呈現的成果</div></div></div><div class="panel-body"><div class="guide-evidence-compare"><div><span class="badge yellow">授課前</span><strong>備課檔案</strong><p>記錄課程名稱，並保留至少一份教案、任務單、簡報或教材。</p></div><div><span class="badge blue">授課後</span><strong>成果證據</strong><p>學生作品、訂正前後、測試數據或行為變化；避免只有看不出成果的廣角照。</p></div></div><div class="guide-rule">${icon('scan-line', 17)}<span>工作結果由系統帶入，老師不需重寫，也不必另外說明主管要看哪裡。</span></div><div class="guide-rule">${icon('images', 17)}<span>可從相簿一次選多張；選錯照片可按右上角叉號移除，照片重點標記為選用功能。</span></div><div class="guide-rule">${icon('badge-check', 17)}<span>主管會依成果內容的完整性、清楚度與可判讀性進行判斷與評分。</span></div><div class="guide-rule">${icon('eye', 17)}<span>工作頁的「課程與工作證據標準」第一次完整顯示；完成第一份成果證據後預設收合，可隨時按「查看證據標準」再次開啟。</span></div></div></section>
       </div>
 
       <div class="notice-band info">${icon('split', 19)}<div><div class="notice-title">備課與授課紀錄分工</div><div class="notice-copy">備課檔案記錄課程並保留至少一份教案或教材；授課當天只需留下課後回饋與成果證據。</div></div></div>
@@ -2349,7 +2385,7 @@
 
   async function loadTeacherEvaluation(month = 'latest') {
     const session = legacySession();
-    if (!session || session.role !== 'teacher' || session.nickname !== backendNickname(state.context.teacher)) {
+    if (!session || session.role !== 'teacher' || !sameReviewIdentity(session.nickname, state.context.teacher)) {
       integrationRuntime.evaluationStatus = 'restricted';
       integrationRuntime.evaluationMessage = '請先登入目前老師的正式帳號';
       renderApp();
@@ -2664,17 +2700,17 @@
   function renderActivityTrackIndicator(type) {
     const meta = activityTrackMeta(activityTrack(type));
     const requirementCopy = type === 'tutoring'
-      ? '每日學科內必填'
+      ? '學科內紀錄'
       : type === 'classroom'
-        ? '歸在學科內，但不取代每日課業輔導'
+        ? '有特殊班級事件時記錄'
         : activityTrack(type) === 'enrichment'
-          ? '當天有課才填；新增後須完整填寫'
+          ? '學科外紀錄'
           : '只保留歷史資料，不提供新增';
     return `<div class="activity-track-indicator ${activityTrack(type)}">${icon(meta.icon, 17)}<div><strong>${esc(meta.label)}</strong><small>${esc(requirementCopy)}</small></div></div>`;
   }
 
   function activityTypeOptionLabel(type, config) {
-    if (type === 'tutoring') return `${config.label}（每日必填）`;
+    if (type === 'tutoring') return config.label;
     if (type === 'classroom') return `${config.label}（有事件再記）`;
     return config.label;
   }
@@ -2806,6 +2842,7 @@
 
   function activityFormCopy(type) {
     const isCrossDay = type === 'lessonprep';
+    const singleCourseName = activityTrack(type) === 'enrichment';
     const classFieldCopy = {
       project: { label: '專案選修課程名稱', placeholder: '例：布拉克餐車計畫' },
       robotics: { label: '機器人／STEAM 課程名稱', placeholder: '例：循線機器人挑戰' },
@@ -2829,8 +2866,8 @@
       resultTitle: '備課內容', resultSubtitle: '集中整理教案與教材', resultBadge: '備課檔案',
       ownerLabel: '備課老師', dueLabel: '更新日期',
     } : {
-      classLabel: classFieldCopy.label, classPlaceholder: classFieldCopy.placeholder, hideClass: false,
-      titleLabel: '紀錄標題', titlePlaceholder, hideStudents: type !== 'classroom',
+      classLabel: classFieldCopy.label, classPlaceholder: classFieldCopy.placeholder, hideClass: singleCourseName,
+      titleLabel: singleCourseName ? classFieldCopy.label : '紀錄標題', titlePlaceholder: singleCourseName ? classFieldCopy.placeholder : titlePlaceholder, hideStudents: type !== 'classroom',
       prepTitle: '本堂使用的備課檔案', prepSubtitle: '選擇這堂課使用的課程名稱', prepBadge: '授課前選取',
       prepSummaryLabel: '', prepSummaryPlaceholder: '',
       adjustmentLabel: '', adjustmentPlaceholder: '',
@@ -2861,7 +2898,7 @@
           <div class="form-field"><div class="form-label">建立日期</div><div class="course-prep-date">${icon('calendar-days', 16)}${formatDate(value.date || state.daily.date)}</div></div>
           <div class="form-field span-2"><label class="form-label" for="course-prep-title">課程名稱 <span class="required">*</span></label><input id="course-prep-title" name="title" value="${esc(value.title || '')}" placeholder="例：9/1 數學小挑戰" required></div>
           <div class="form-field span-2"><label class="form-label" for="course-prep-note">上課內容或使用提醒（選填）</label><textarea id="course-prep-note" name="prepSummary" placeholder="需要補充時再填寫；沒有可留白。">${esc(value.prep?.summary || '')}</textarea></div>
-          <div class="form-field span-2"><div class="form-label">教案或教材附件 <span class="required">*</span></div><label class="file-drop" for="activity-prep-files">${icon('upload-cloud', 21)}<span><strong>加入附件</strong><small>至少一份，可一次選多份教案、教材、照片或備課影片</small></span></label><input class="sr-only" id="activity-prep-files" type="file" multiple data-change="prep-files" accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.key,image/*,video/*"><div id="prep-file-list">${renderSimplePrepFiles(value.prepEvidence || [])}</div></div>
+          <div class="form-field span-2"><div class="form-label">教案或教材附件 <span class="required">*</span></div><label class="file-drop" for="activity-prep-files">${icon('upload-cloud', 21)}<span><strong>加入附件</strong><small>至少一份，可一次選多份；文件保留原檔，單檔上限 25 MB</small></span></label><input class="sr-only" id="activity-prep-files" type="file" multiple data-change="prep-files" accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.key,image/*,video/*"><div id="prep-file-list">${renderSimplePrepFiles(value.prepEvidence || [])}</div></div>
         </div>
       </section>
     </form>`;
@@ -2873,14 +2910,14 @@
     };
     const copy = activityFormCopy(value.type);
     const formTrack = value.formTrack || activityTrack(value.type);
-    const typeLabel = formTrack === 'enrichment' ? '課程類型' : '工作類型';
+    const canonicalTitle = copy.hideClass ? (value.className || value.title || '') : (value.title || '');
     return `<form id="activity-form" data-form="activity" data-activity-track="${esc(formTrack)}">
       <input type="hidden" name="id" value="${esc(value.id)}">
+      <input type="hidden" name="type" value="${esc(value.type)}">
       <div id="activity-track-indicator">${renderActivityTrackIndicator(value.type)}</div>
       <div class="form-grid">
-        <div class="form-field"><label class="form-label" for="activity-type">${esc(typeLabel)} <span class="required">*</span></label><select id="activity-type" name="type" data-change="activity-type" required>${renderActivityTypeOptions(value.type, formTrack)}</select></div>
         ${copy.hideClass ? '<input type="hidden" name="className" value="">' : `<div class="form-field"><label class="form-label" id="activity-class-label" for="activity-class">${esc(copy.classLabel)} <span class="required">*</span></label><input id="activity-class" name="className" value="${esc(value.className)}" placeholder="${esc(copy.classPlaceholder)}" required></div>`}
-        <div class="form-field span-2"><label class="form-label" id="activity-title-label" for="activity-title">${esc(copy.titleLabel)} <span class="required">*</span></label><input id="activity-title" name="title" value="${esc(value.title)}" placeholder="${esc(copy.titlePlaceholder)}" required></div>
+        <div class="form-field span-2"><label class="form-label" id="activity-title-label" for="activity-title">${esc(copy.titleLabel)} <span class="required">*</span></label><input id="activity-title" name="title" value="${esc(canonicalTitle)}" placeholder="${esc(copy.titlePlaceholder)}" required></div>
         <div id="activity-students-field" class="form-field span-2" ${copy.hideStudents ? 'hidden' : ''}><div class="form-label">關聯學生（本班 ${assignedStudents(value.teacher || state.context.teacher).length} 人）</div><div class="chip-list">${renderStudentChoices(value.teacher || state.context.teacher, value.students || [])}</div></div>
       </div>
       ${renderActivityPreparationSection(value)}
@@ -2927,21 +2964,21 @@
   }
 
   function evidenceQuality(data) {
-    let score = 0;
-    const attachments = evidenceAttachments(data);
-    if (attachments.length) score += 20;
-    if (data.type) score += 15;
-    if (String(data.claim || '').trim().length >= 8) score += 20;
-    if (String(data.observation || '').trim().length >= 12) score += 20;
-    if (data.privacy) score += 15;
-    if ((data.pins || []).length > 0 || attachments.every(item => String(item.note || '').trim().length >= 4) || String(data.observation || '').trim().length >= 32) score += 10;
-    return score;
+    return evidenceReady(data) ? 100 : 0;
   }
 
   function evidenceAttachments(data) {
     if (!data) return [];
     normalizeEvidenceRecord(data);
     return data.attachments || [];
+  }
+
+  function attachmentAvailable(item) {
+    return Boolean(item && (item.dataUrl || materialCloudUrl(item) || item.cloudFileId));
+  }
+
+  function evidenceReady(data) {
+    return evidenceAttachments(data).some(attachmentAvailable);
   }
 
   function evidencePrimaryAttachment(data) {
@@ -2962,14 +2999,15 @@
     data.fileName = primary?.fileName || '';
     data.mimeType = primary?.mimeType || '';
     data.dataUrl = primary?.dataUrl || '';
-    data.placeholder = Boolean(primary?.placeholder && !primary?.dataUrl);
+    data.cloudUrl = primary?.cloudUrl || '';
+    data.cloudFileId = primary?.cloudFileId || '';
+    data.placeholder = Boolean(primary && !attachmentAvailable(primary));
     return data;
   }
 
   function renderEvidenceAttachmentList(data, editable = true) {
     const attachments = evidenceAttachments(data);
     if (!attachments.length) return '<div class="evidence-attachment-empty">尚未加入成果照片或檔案。</div>';
-    const requireNotes = attachments.length > 1;
     return `<div class="evidence-attachment-grid">${attachments.map((attachment, index) => {
       const primary = attachment.id === data.primaryAttachmentId;
       const previewUrl = attachmentPreviewUrl(attachment, 240);
@@ -2983,8 +3021,7 @@
       return `<article class="evidence-attachment-item ${primary ? 'is-primary' : ''}" data-attachment-id="${esc(attachment.id)}">
         <button type="button" class="evidence-attachment-preview" data-action="set-evidence-primary" data-attachment-id="${esc(attachment.id)}" ${editable ? '' : 'disabled'} aria-label="${primary ? '目前標註主圖' : `設為標註主圖：${esc(attachment.fileName)}`}">${preview}<span class="evidence-attachment-index">${index + 1}</span></button>
         <div class="evidence-attachment-main"><div class="evidence-attachment-head">${fileName}<span class="badge ${primary ? 'blue' : 'outline'}">${primary ? '標註主圖' : esc(attachment.size || '已加入')}</span></div>
-        <label class="form-label" for="evidence-attachment-note-${esc(attachment.id)}">這張要主管看什麼？${requireNotes ? ' <span class="required">*</span>' : ''}</label>
-        <input id="evidence-attachment-note-${esc(attachment.id)}" data-evidence-attachment-note data-attachment-id="${esc(attachment.id)}" value="${esc(attachment.note || '')}" minlength="4" placeholder="例：請看右下角學生訂正後的第二次答案" ${requireNotes ? 'required' : ''} ${editable ? '' : 'disabled'}></div>
+        ${attachment.note ? `<small>舊版補充說明：${esc(attachment.note)}</small>` : ''}</div>
         ${editable ? `<button type="button" class="icon-button evidence-attachment-remove" data-action="remove-evidence-attachment" data-attachment-id="${esc(attachment.id)}" aria-label="移除 ${esc(attachment.fileName)}" title="移除">${icon('x', 15)}</button>` : ''}
       </article>`;
     }).join('')}</div>`;
@@ -2992,10 +3029,10 @@
 
   function renderEvidenceCanvas(data) {
     const primary = evidencePrimaryAttachment(data);
-    if (!primary) return '<div><div class="empty-icon">' + icon('image-plus', 24) + '</div><div class="empty-title">尚未選擇檔案</div><div class="empty-copy">加入照片後，可點選關鍵位置加上編號標記。</div></div>';
+    if (!primary) return '<div><div class="empty-icon">' + icon('image-plus', 24) + '</div><div class="empty-title">尚未選擇檔案</div><div class="empty-copy">加入照片後即可預覽；重點位置標記為選用功能。</div></div>';
     const previewUrl = attachmentPreviewUrl(primary);
     if (previewUrl) return `<img src="${esc(previewUrl)}" alt="證據預覽">${renderPins(data.pins)}`;
-    return `<div><div class="empty-icon">${icon(primary.mimeType === 'application/pdf' ? 'file-text' : 'file-check-2', 24)}</div><div class="empty-title">${esc(primary.fileName)}</div><div class="empty-copy">檔案已加入；非照片檔請用文字說明主管應查看的頁面或位置。</div></div>`;
+    return `<div><div class="empty-icon">${icon(primary.mimeType === 'application/pdf' ? 'file-text' : 'file-check-2', 24)}</div><div class="empty-title">${esc(primary.fileName)}</div><div class="empty-copy">檔案已加入；主管可直接開啟原檔查看內容。</div></div>`;
   }
 
   function renderEvidenceForm(activity, evidence) {
@@ -3013,16 +3050,17 @@
     evidenceDraft.pins = clone(value.pins || []);
     syncEvidencePrimaryFields(evidenceDraft);
     const attachmentCount = evidenceDraft.attachments.length;
-    const score = evidenceQuality(evidenceDraft);
     return `<form id="evidence-form" data-form="evidence">
       <input type="hidden" name="id" value="${esc(value.id)}">
       <input type="hidden" name="activityId" value="${esc(activity.id)}">
+      <input type="hidden" name="observation" value="${esc(value.observation || '')}">
       <div class="notice-band info">${icon('link', 19)}<div><div class="notice-title">${isCrossDay ? '關聯備課檔案' : '關聯工作'}：${esc(activity.title)}</div><div class="notice-copy">${activityNeedsPrepSource(activity.type) ? '課後備課回饋' : isCrossDay ? '本次備課目標' : '目標'}：${esc(linkedResult || activity.objective || '尚未填寫')}</div></div></div>
+      <div class="notice-band info mt-12">${icon('eye', 19)}<div><div class="notice-title">上傳清楚、可辨識的成果即可</div><div class="notice-copy">不需另外描述主管要看哪裡；主管將依內容的完整性、清楚度與可判讀性進行判斷與評分。</div></div></div>
       <div class="detail-split">
         <div>
           <div class="evidence-upload-zone ${attachmentCount ? 'has-file' : ''}" id="evidence-upload-zone">
             <span class="evidence-upload-icon">${icon(attachmentCount ? 'images' : 'camera', 24)}</span>
-            <div class="evidence-upload-copy"><strong id="evidence-upload-title">${attachmentCount ? `已加入 ${attachmentCount} 份成果` : (isCrossDay ? '上傳今天完成的版本' : '成果照片／檔案')} <span class="required">*</span></strong><small>${isCrossDay ? `可一次選擇多份今日實際完成的教案、教材或版本檔案，最多 ${MAX_EVIDENCE_FILES} 份。` : `可一次選取多張照片，最多 ${MAX_EVIDENCE_FILES} 張；請拍作品、學習單或測試結果本身。`}</small><span id="evidence-file-name">${attachmentCount ? esc(evidenceDraft.attachments.map(item => item.fileName).join('、')) : '尚未選擇檔案 · 單檔上限 15 MB'}</span></div>
+            <div class="evidence-upload-copy"><strong id="evidence-upload-title">${attachmentCount ? `已加入 ${attachmentCount} 份成果` : (isCrossDay ? '上傳今天完成的版本' : '成果照片／檔案')} <span class="required">*</span></strong><small>${isCrossDay ? `可一次選擇多份今日實際完成的教案、教材或版本檔案，最多 ${MAX_EVIDENCE_FILES} 份。` : `可一次選取多張照片，系統會自動壓縮並上傳；最多 ${MAX_EVIDENCE_FILES} 張。`}</small><span id="evidence-file-name">${attachmentCount ? esc(evidenceDraft.attachments.map(item => item.fileName).join('、')) : '尚未選擇檔案 · 單檔上限 25 MB'}</span></div>
             <div class="evidence-upload-actions">
               ${isCrossDay ? '' : `<label class="btn btn-primary evidence-file-button">${icon('camera', 16)}直接拍照<input id="evidence-camera" type="file" data-change="evidence-file" accept="image/*" capture="environment" aria-label="直接拍照"></label>`}
               <label class="btn ${isCrossDay ? 'btn-primary' : ''} evidence-file-button">${icon('folder-up', 16)}${isCrossDay ? '選擇版本檔案' : '從相簿／檔案多選'}<input id="evidence-file" type="file" multiple data-change="evidence-file" accept="image/*,.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx" aria-label="${isCrossDay ? '選擇一份或多份版本檔案' : '從相簿或檔案選擇一張或多張'}"></label>
@@ -3035,7 +3073,6 @@
           <div id="pin-list" class="pin-list">${renderPinList(value.pins)}</div>
         </div>
         <div class="stack">
-          <div class="quality-box" id="evidence-quality">${renderEvidenceQuality(score)}</div>
           <div class="form-field"><label class="form-label" for="evidence-type">證據類型 <span class="required">*</span></label><select id="evidence-type" name="type" data-input="evidence-quality" required><option value="">請選擇</option>${Object.entries(EVIDENCE_TYPES).map(([key, label]) => `<option value="${key}" ${value.type === key ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></div>
           <div class="form-field"><div class="form-label">紀錄階段 <span class="required">*</span></div><div class="segmented"><label><input type="radio" name="stage" value="before" ${value.stage === 'before' ? 'checked' : ''} required>${isCrossDay ? '接續依據' : '課前'}</label><label><input type="radio" name="stage" value="during" ${value.stage === 'during' ? 'checked' : ''} required>${isCrossDay ? '本日製作' : '進行中'}</label><label><input type="radio" name="stage" value="after" ${value.stage === 'after' ? 'checked' : ''} required>${isCrossDay ? '本日完成' : '成果'}</label></div></div>
         </div>
@@ -3044,7 +3081,6 @@
       <div class="form-grid">
         <div class="form-field span-2"><label class="form-label" for="evidence-title">${isCrossDay ? '本日產出標題' : '證據標題'} <span class="required">*</span></label><input id="evidence-title" name="title" value="${esc(value.title)}" placeholder="${isCrossDay ? '例：餐車課程教案與學習單 v1.2' : '例：三組菜單成本表與定價初稿'}" minlength="4" data-input="evidence-quality" required></div>
         <div class="form-field span-2"><div class="form-label">${activityNeedsPrepSource(activity.type) ? '對應的課後備課回饋' : '對應的工作結果'}</div><div class="evidence-linked-result">${esc(value.claim || linkedResult)}</div><input id="evidence-claim" type="hidden" name="claim" value="${esc(value.claim || linkedResult)}"></div>
-        <div class="form-field span-2"><label class="form-label" for="evidence-observation">主管請看哪裡？ <span class="required">*</span></label><textarea id="evidence-observation" name="observation" placeholder="${isCrossDay ? '例：請核對教案第 2、3 段與簡報第 8–15 頁，以及檔名 v1.2。' : '例：請看左側兩組的完整三類成本，以及右側紅筆補上的耗材。'}" minlength="12" data-input="evidence-quality" required>${esc(value.observation)}</textarea><div class="field-hint">可在照片上加編號標記；未標記時請具體說明位置。</div></div>
         ${tracksStudents ? `<div class="form-field span-2"><div class="form-label">關聯學生（本班 ${assignedStudents(activity.teacher || state.context.teacher).length} 人）</div><div class="chip-list">${renderStudentChoices(activity.teacher || state.context.teacher, value.students || [])}</div></div>` : ''}
         <div class="form-field span-2"><label class="choice-chip" for="evidence-privacy"><input id="evidence-privacy" type="checkbox" name="privacy" data-change="evidence-privacy" ${value.privacy ? 'checked' : ''} required>${icon('shield-check', 15)}已確認檔案不含無關姓名、聯絡資訊或不必要的正面影像 <span class="required">*</span></label></div>
       </div>
@@ -3056,14 +3092,8 @@
   }
 
   function renderPinList(pins) {
-    if (!pins || !pins.length) return '<div class="text-tiny muted">點照片的關鍵位置可新增標記。</div>';
+    if (!pins || !pins.length) return '<div class="text-tiny muted">選用：需要時可點照片的關鍵位置新增標記。</div>';
     return pins.map((pin, index) => `<div class="pin-row"><span class="pin-number">${index + 1}</span><span>${esc(pin.note)}</span><button type="button" class="icon-button" data-action="remove-evidence-pin" data-pin-index="${index}" aria-label="刪除標記" title="刪除標記">${icon('x', 14)}</button></div>`).join('');
-  }
-
-  function renderEvidenceQuality(score) {
-    const tone = score >= 80 ? 'good' : score >= 60 ? 'warn' : 'bad';
-    const label = score >= 80 ? '可送主管判讀' : score >= 60 ? '建議再補一項' : '資料不足';
-    return `<div class="quality-head"><div><div class="text-small text-strong">送出完整度</div></div><div class="quality-score ${tone}">${score}</div></div><div class="progress-track"><div class="progress-fill ${score < 60 ? 'danger' : score < 80 ? 'warn' : ''}" style="width:${score}%"></div></div><div class="text-tiny muted mt-8">${label}</div>`;
   }
 
   function weeklySourceData() {
@@ -3095,21 +3125,22 @@
     return dates.map(date => {
       const activities = source.activities.filter(activity => activity.date === date);
       const tracks = dailyTrackStatus(activities);
-      const academicReady = tracks.academic.covered && tracks.academic.items.every(weeklyActivityCoreReady);
+      const trackCovered = tracks.academic.covered || tracks.enrichment.covered;
+      const academicReady = !tracks.academic.covered || tracks.academic.items.every(weeklyActivityCoreReady);
       const enrichmentReady = !tracks.enrichment.covered || tracks.enrichment.items.every(weeklyActivityCoreReady);
       const evidenceRequired = activities.filter(activity => (ACTIVITY_TYPES[activity.type] || ACTIVITY_TYPES.tutoring).evidence);
-      const evidenceReady = evidenceRequired.filter(activity => (activity.evidence || []).some(evidence => evidence.quality >= 80)).length;
+      const evidenceReadyCount = evidenceRequired.filter(activity => (activity.evidence || []).some(evidenceReady)).length;
       const operation = operationRecords().find(item => item.date === date);
       const ownDuty = operation?.dutyOwner === state.context.teacher;
       const operationReady = ownDuty ? operationsComplete(operation, false) : null;
       const missing = [];
-      if (!tracks.academic.covered) missing.push('學科內');
-      else if (!academicReady) missing.push('學科內內容');
+      if (!trackCovered) missing.push('學科內或學科外');
+      if (tracks.academic.covered && !academicReady) missing.push('學科內內容');
       if (tracks.enrichment.covered && !enrichmentReady) missing.push('學科外內容');
-      if (evidenceReady < evidenceRequired.length) missing.push('成果證據');
+      if (evidenceReadyCount < evidenceRequired.length) missing.push('成果證據');
       if (ownDuty && !operationReady) missing.push('班務');
       return {
-        date, academicReady, enrichmentReady, enrichmentCovered: tracks.enrichment.covered, evidenceReady, evidenceRequired: evidenceRequired.length,
+        date, academicReady, academicCovered: tracks.academic.covered, enrichmentReady, enrichmentCovered: tracks.enrichment.covered, evidenceReady: evidenceReadyCount, evidenceRequired: evidenceRequired.length,
         operationLabel: !operation ? '—' : ownDuty ? operationReady ? '完整' : '待補' : '非值日',
         operationTone: !operation || !ownDuty ? 'neutral' : operationReady ? 'done' : 'pending',
         missing, complete: missing.length === 0,
@@ -3130,7 +3161,7 @@
     const evidenceTone = !row.evidenceRequired ? 'neutral' : row.evidenceReady >= row.evidenceRequired ? 'done' : 'pending';
     return `<${tag} class="weekly-coverage-row ${row.complete ? 'is-complete' : 'is-pending'}"${action}>
       <span class="weekly-coverage-date"><strong>${formatShortDate(row.date)}</strong><small>${row.complete ? '資料完整' : '仍有待補'}</small></span>
-      ${renderWeeklyCoverageCell('學科內', row.academicReady ? '完整' : '待補', row.academicReady ? 'done' : 'pending')}
+      ${renderWeeklyCoverageCell('學科內', row.academicCovered ? (row.academicReady ? '完整' : '待補') : '未填', row.academicCovered ? (row.academicReady ? 'done' : 'pending') : 'neutral')}
       ${renderWeeklyCoverageCell('特色課程', row.enrichmentReady ? (row.enrichmentCovered ? '完整' : '無課程') : '待補', row.enrichmentReady ? (row.enrichmentCovered ? 'done' : 'neutral') : 'pending')}
       ${renderWeeklyCoverageCell('成果證據', evidenceLabel, evidenceTone)}
       ${renderWeeklyCoverageCell('班務', row.operationLabel, row.operationTone)}
@@ -3142,7 +3173,7 @@
   function renderWeekly() {
     const source = weeklySourceData();
     const summary = buildWeeklySummary(source);
-    const acceptedOrReady = source.evidence.filter(item => item.evidence.status === 'accepted' || item.evidence.quality >= 80).length;
+    const acceptedOrReady = source.evidence.filter(item => item.evidence.status === 'accepted' || evidenceReady(item.evidence)).length;
     const coverageRows = weeklyCoverageRows(source);
     const completeCoverageDays = coverageRows.filter(row => row.complete).length;
     return `<div class="page">
@@ -3551,6 +3582,35 @@
     renderApp();
   }
 
+  function preserveAttachmentMedia(localAttachment, remoteAttachment) {
+    if (!localAttachment || !remoteAttachment || attachmentAvailable(remoteAttachment) || !attachmentAvailable(localAttachment)) return remoteAttachment;
+    remoteAttachment.dataUrl = localAttachment.dataUrl || '';
+    remoteAttachment.cloudUrl = localAttachment.cloudUrl || localAttachment.url || '';
+    remoteAttachment.cloudFileId = localAttachment.cloudFileId || localAttachment.fileId || '';
+    remoteAttachment.fingerprint = remoteAttachment.fingerprint || localAttachment.fingerprint || localAttachment.fileFingerprint || '';
+    remoteAttachment.uploadStatus = localAttachment.uploadStatus || (remoteAttachment.cloudUrl || remoteAttachment.cloudFileId ? 'uploaded' : 'local');
+    remoteAttachment.placeholder = false;
+    return remoteAttachment;
+  }
+
+  function preserveActivityMedia(localActivity, remoteActivity) {
+    if (!localActivity || !remoteActivity) return remoteActivity;
+    (remoteActivity.evidence || []).forEach(remoteEvidence => {
+      const localEvidence = (localActivity.evidence || []).find(item => item.id === remoteEvidence.id);
+      if (!localEvidence) return;
+      normalizeEvidenceRecord(localEvidence);
+      normalizeEvidenceRecord(remoteEvidence);
+      remoteEvidence.attachments.forEach(remoteAttachment => {
+        const localAttachment = localEvidence.attachments.find(item => item.id === remoteAttachment.id)
+          || localEvidence.attachments.find(item => item.fingerprint && item.fingerprint === remoteAttachment.fingerprint)
+          || localEvidence.attachments.find(item => item.fileName === remoteAttachment.fileName && item.size === remoteAttachment.size);
+        preserveAttachmentMedia(localAttachment, remoteAttachment);
+      });
+      normalizeEvidenceRecord(remoteEvidence);
+    });
+    return remoteActivity;
+  }
+
   function importCloudSnapshot(snapshot) {
     if (!snapshot || snapshot.schema !== 'anqin-v2' || !snapshot.submission) return false;
     const remoteSubmission = clone(snapshot.submission);
@@ -3570,7 +3630,9 @@
     const mergeCollection = (key, items) => {
       (items || []).forEach(item => {
         const existing = state[key].find(current => current.id === item.id);
-        if (existing) Object.assign(existing, clone(item));
+        const incoming = clone(item);
+        if (key === 'activities' && existing) preserveActivityMedia(existing, incoming);
+        if (existing) Object.assign(existing, incoming);
         else state[key].push(clone(item));
       });
     };
@@ -3580,9 +3642,16 @@
     mergeCollection('lessonPlans', snapshot.lessonPlans || []);
     reconcileLegacyPlans(state);
     if (snapshot.operation?.id) {
+      const incomingOperation = clone(snapshot.operation);
       const current = operationRecordById(snapshot.operation.id);
-      if (current) Object.assign(current, clone(snapshot.operation));
-      else state.operationHistory.push(clone(snapshot.operation));
+      if (current) {
+        Object.entries(incomingOperation.evidenceByCheck || {}).forEach(([key, remotePhoto]) => {
+          preserveAttachmentMedia(current.evidenceByCheck?.[key], remotePhoto);
+          normalizeOperationPhotoRecord(remotePhoto);
+        });
+        Object.assign(current, incomingOperation);
+      }
+      else state.operationHistory.push(incomingOperation);
     }
     if (snapshot.daily && state.ui.role === 'teacher' && remoteSubmission.teacher === state.context.teacher && remoteSubmission.date === state.daily.date) {
       state.daily.parentStatus = snapshot.daily.parentStatus || '';
@@ -3657,7 +3726,7 @@
     persist();
     const plan = activity.planId ? planById(activity.planId) : null;
     const result = await API.saveCoursePrep({
-      nickname: backendNickname(activity.teacher || state.context.teacher),
+      nickname: cloudTeacherNickname(activity.teacher || state.context.teacher),
       prep: removeInlineMedia(activity),
       plan: plan ? removeInlineMedia(plan) : null,
     });
@@ -3722,7 +3791,7 @@
       if (latestDecision) {
         const [kind, id, secondaryId] = key.split(':');
         const needsChanges = latestDecision.tag === '需改進';
-        const teacherOwnsThread = legacySession()?.role === 'teacher' && legacySession()?.nickname === backendNickname(context.teacher);
+        const teacherOwnsThread = legacySession()?.role === 'teacher' && sameReviewIdentity(legacySession()?.nickname, context.teacher);
         if (kind === 'plan') {
           const plan = state.lessonPlans.find(item => item.id === id);
           if (plan) {
@@ -3756,16 +3825,18 @@
 
   async function syncTeacherCloudData(notify = true) {
     const session = legacySession();
-    if (!session || session.role !== 'teacher' || session.nickname !== backendNickname(state.context.teacher)) {
+    if (!session || session.role !== 'teacher' || !sameReviewIdentity(session.nickname, state.context.teacher)) {
       if (notify) toast('請先登入目前老師的正式帳號', 'danger');
       return;
     }
     integrationRuntime.cloudStatus = 'loading';
+    integrationRuntime.cloudErrorContext = '';
     integrationRuntime.cloudMessage = '正在讀取過去紀錄';
     renderApp();
     const result = await API.listLogs({ viewer: session.nickname, nickname: session.nickname, from: addDays(state.daily.date, -366), to: state.daily.date, limit: 500 });
     if (!result?.ok) {
       integrationRuntime.cloudStatus = 'error';
+      integrationRuntime.cloudErrorContext = 'read';
       integrationRuntime.cloudMessage = result?.error || '紀錄讀取失敗';
       renderApp();
       if (notify) toast(`讀取失敗：${integrationRuntime.cloudMessage}`, 'danger');
@@ -3783,6 +3854,7 @@
     const taskSync = await syncTasksFromCloud(session);
     const threads = await syncCloudFeedback(session);
     integrationRuntime.cloudStatus = 'saved';
+    integrationRuntime.cloudErrorContext = '';
     integrationRuntime.prepSyncStatus = prepSync.ok ? 'saved' : 'error';
     integrationRuntime.prepSyncMessage = prepSync.ok ? `已更新 ${prepSync.imported || 0} 份備課檔案` : (prepSync.error || '備課檔案讀取失敗');
     integrationRuntime.taskSyncStatus = taskSync.ok ? 'saved' : 'error';
@@ -3949,7 +4021,7 @@
     const previewUrl = attachmentPreviewUrl(primary);
     const status = evidence.status === 'accepted' ? ['已採認', 'green'] : evidence.status === 'clarify' ? ['待補充', 'red'] : ['待審查', 'yellow'];
     return `<article class="evidence-card">
-      <div class="evidence-thumb">${previewUrl ? `<img src="${esc(previewUrl)}" alt="${esc(evidence.title)}">${renderPins(evidence.pins)}` : icon(primary?.mimeType === 'application/pdf' ? 'file-text' : evidence.type === 'plan_asset' ? 'archive' : 'image', 44)}<span class="badge ${evidence.quality >= 80 ? 'green' : 'red'} quality-pill">完整度 ${evidence.quality}</span>${attachments.length > 1 ? `<span class="badge blue evidence-count-pill">${icon('images', 12)}${attachments.length} 份</span>` : ''}</div>
+      <div class="evidence-thumb">${previewUrl ? `<img src="${esc(previewUrl)}" alt="${esc(evidence.title)}">${renderPins(evidence.pins)}` : icon(primary?.mimeType === 'application/pdf' ? 'file-text' : evidence.type === 'plan_asset' ? 'archive' : 'image', 44)}<span class="badge blue quality-pill">${icon('images', 12)}${attachments.length} 份</span></div>
       <div class="evidence-card-body"><div class="evidence-title">${esc(evidence.title)}</div><div class="evidence-caption">${esc(truncate(evidence.claim, 82))}</div><div class="evidence-meta"><span class="badge ${status[1]}">${status[0]}</span><button type="button" class="btn btn-small" data-action="inspect-evidence" data-activity-id="${activity.id}" data-evidence-id="${evidence.id}">判讀</button></div></div>
     </article>`;
   }
@@ -3967,12 +4039,12 @@
       const queryMatch = !query || `${item.activity.teacher} ${item.activity.title} ${item.evidence.title} ${item.evidence.claim} ${(item.evidence.students || []).join(' ')}`.toLowerCase().includes(query);
       return typeMatch && statusMatch && kpiMatch && queryMatch;
     });
-    const ready = allItems.filter(item => item.evidence.quality >= 80).length;
+    const ready = allItems.filter(item => evidenceReady(item.evidence)).length;
     const accepted = allItems.filter(item => item.evidence.status === 'accepted').length;
     return `<div class="page">
-      ${pageHead('證據中心', '從「這份資料證明什麼」進入，不用逐張猜測照片內容', '')}
-      <div class="status-strip"><div class="status-cell"><div class="status-label">備課參考資料</div><div class="status-value">${prepItems.length}</div><div class="status-note">集中保留在備課檔案</div></div><div class="status-cell"><div class="status-label">成果證據完整</div><div class="status-value">${ready}/${allItems.length}</div><div class="status-note">欄位完整度達 80</div></div><div class="status-cell"><div class="status-label">主管已採認</div><div class="status-value">${accepted}</div><div class="status-note">採認與自動完整度分開</div></div><div class="status-cell"><div class="status-label">待補充</div><div class="status-value">${allItems.filter(item => item.evidence.status === 'clarify').length}</div><div class="status-note">已回到老師待辦</div></div></div>
-      <div class="filter-bar"><div class="filter-field"><label for="evidence-type-filter">證據類型</label><select id="evidence-type-filter" aria-label="證據類型篩選" data-change="view-filter" data-filter-group="evidence" data-filter-key="type"><option value="all">全部</option>${Object.entries(EVIDENCE_TYPES).map(([key, label]) => `<option value="${key}" ${filters.type === key ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></div><div class="filter-field"><label for="evidence-status-filter">主管狀態</label><select id="evidence-status-filter" aria-label="證據主管狀態" data-change="view-filter" data-filter-group="evidence" data-filter-key="status"><option value="open" ${filters.status === 'open' ? 'selected' : ''}>待處理</option><option value="all" ${filters.status === 'all' ? 'selected' : ''}>全部</option><option value="pending" ${filters.status === 'pending' ? 'selected' : ''}>待審查</option><option value="clarify" ${filters.status === 'clarify' ? 'selected' : ''}>待補充</option><option value="accepted" ${filters.status === 'accepted' ? 'selected' : ''}>已採認</option></select></div><div class="filter-field"><label for="evidence-kpi-filter">KPI 支持項目</label><select id="evidence-kpi-filter" aria-label="證據 KPI 支持項目" data-change="view-filter" data-filter-group="evidence" data-filter-key="kpi"><option value="all">全部</option>${['課業指導', '專案課程', '班級經營', '親師溝通', '個人態度與表現', '班級環境整潔'].map(label => `<option value="${label}" ${filters.kpi === label ? 'selected' : ''}>${label}</option>`).join('')}</select></div><div class="filter-field grow"><label for="evidence-query">搜尋</label><input id="evidence-query" value="${esc(filters.query)}" data-input="view-filter" data-filter-group="evidence" data-filter-key="query" placeholder="搜尋老師、課程、學生或證明主張"></div></div>
+      ${pageHead('證據中心', '依老師、課程與工作紀錄集中查看成果內容', '')}
+      <div class="status-strip"><div class="status-cell"><div class="status-label">備課參考資料</div><div class="status-value">${prepItems.length}</div><div class="status-note">集中保留在備課檔案</div></div><div class="status-cell"><div class="status-label">已上傳成果</div><div class="status-value">${ready}/${allItems.length}</div><div class="status-note">內容品質由主管判斷</div></div><div class="status-cell"><div class="status-label">主管已採認</div><div class="status-value">${accepted}</div><div class="status-note">依內容完成評分</div></div><div class="status-cell"><div class="status-label">待補充</div><div class="status-value">${allItems.filter(item => item.evidence.status === 'clarify').length}</div><div class="status-note">已回到老師待辦</div></div></div>
+      <div class="filter-bar"><div class="filter-field"><label for="evidence-type-filter">證據類型</label><select id="evidence-type-filter" aria-label="證據類型篩選" data-change="view-filter" data-filter-group="evidence" data-filter-key="type"><option value="all">全部</option>${Object.entries(EVIDENCE_TYPES).map(([key, label]) => `<option value="${key}" ${filters.type === key ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></div><div class="filter-field"><label for="evidence-status-filter">主管狀態</label><select id="evidence-status-filter" aria-label="證據主管狀態" data-change="view-filter" data-filter-group="evidence" data-filter-key="status"><option value="open" ${filters.status === 'open' ? 'selected' : ''}>待處理</option><option value="all" ${filters.status === 'all' ? 'selected' : ''}>全部</option><option value="pending" ${filters.status === 'pending' ? 'selected' : ''}>待審查</option><option value="clarify" ${filters.status === 'clarify' ? 'selected' : ''}>待補充</option><option value="accepted" ${filters.status === 'accepted' ? 'selected' : ''}>已採認</option></select></div><div class="filter-field"><label for="evidence-kpi-filter">KPI 支持項目</label><select id="evidence-kpi-filter" aria-label="證據 KPI 支持項目" data-change="view-filter" data-filter-group="evidence" data-filter-key="kpi"><option value="all">全部</option>${['課業指導', '專案課程', '班級經營', '親師溝通', '個人態度與表現', '班級環境整潔'].map(label => `<option value="${label}" ${filters.kpi === label ? 'selected' : ''}>${label}</option>`).join('')}</select></div><div class="filter-field grow"><label for="evidence-query">搜尋</label><input id="evidence-query" value="${esc(filters.query)}" data-input="view-filter" data-filter-group="evidence" data-filter-key="query" placeholder="搜尋老師、課程、學生或工作結果"></div></div>
       <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('scan-search')}${filters.status === 'open' ? '待判讀證據' : '證據清單'}</div><div class="panel-subtitle">${evidenceItems.length} 份</div></div></div><div class="panel-body">${evidenceItems.length ? `<div class="evidence-grid">${evidenceItems.map(renderEvidenceCard).join('')}</div>` : renderEmpty(allItems.length ? 'search-x' : 'folder-search-2', allItems.length ? '沒有符合篩選的證據' : '目前沒有證據', allItems.length ? '調整主管狀態、證據類型、KPI 或搜尋條件後再試一次。' : '老師送出關聯證據後會顯示在這裡。')}</div></section>
     </div>`;
   }
@@ -4116,7 +4188,7 @@
     ].sort((a, b) => String(a.dueDate || '').localeCompare(String(b.dueDate || ''))).slice(0, 5);
     return `<div class="page">
       ${pageHead('團隊狀態', '完成率、資料品質與績效判斷分開呈現', `<span class="badge outline">${icon('calendar-range', 15)}<span>${state.daily.date.slice(0, 4)} 年 ${Number(state.daily.date.slice(5, 7))} 月</span></span>`)}
-      <div class="notice-band info">${icon('scale', 19)}<div><div class="notice-title">資料完整度不是績效分數</div><div class="notice-copy">系統只提示證據是否足以判讀；最終 KPI 由主管依成果、影響與持續性做專業評核。</div></div></div>
+      <div class="notice-band info">${icon('scale', 19)}<div><div class="notice-title">資料完整度不是績效分數</div><div class="notice-copy">系統只整理是否已有工作紀錄與成果附件；最終 KPI 由主管依內容品質、成果、影響與持續性做專業評核。</div></div></div>
       ${renderTeamRosterTable(teachers)}
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('chart-no-axes-combined')}部門評核準備度</div><div class="panel-subtitle">來源筆數可追溯至原始事件與主管觀察</div></div></div><div class="panel-body"><div class="score-matrix">${scoreRows.map(item => `<div class="score-cell"><div class="score-label">${esc(item.label)}</div><div class="score-main">${item.value === null ? '—' : item.value}</div><div class="score-source">${esc(item.source)}</div></div>`).join('')}</div></div></section>
       <div class="content-grid mt-16"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('gauge')}團隊工作量</div></div></div><div class="panel-body flush"><div class="table-wrap"><table class="data-table"><thead><tr><th>老師</th><th>工作事件</th><th>學生案件</th><th>待辦</th><th>備課檔案</th><th>資料品質</th></tr></thead><tbody>${teamRows.map(row => `<tr><td><div class="table-primary">${esc(row.name)}</div></td><td>${row.activities}</td><td>${row.cases}</td><td>${row.tasks}</td><td>${row.plans}</td><td>${row.quality === null ? '—' : `<div class="metric-row"><span class="metric-value">${row.quality}</span><div class="progress-track"><div class="progress-fill ${row.quality < 70 ? 'danger' : row.quality < 85 ? 'warn' : ''}" style="width:${row.quality}%"></div></div></div>`}</td></tr>`).join('')}</tbody></table></div></div></section><aside class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}待完成事項</div></div></div><div class="panel-body">${pendingItems.length ? `<div class="check-list">${pendingItems.map((item, index) => `<div class="check-item pending"><span class="check-icon">${index + 1}</span><span>${esc(item.title)}${item.dueDate ? ` · ${formatShortDate(item.dueDate)}` : ''}</span></div>`).join('')}</div>` : '<div class="text-small muted">目前沒有待完成事項。</div>'}</div></aside></div>
@@ -4282,7 +4354,7 @@
     ];
     const contextCopy = feedbackOnly ? '課後備課回饋' : (activity.students || []).length ? `${activity.students.length} 位關聯學生` : '全班紀錄';
     const detailSection = details ? `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('list-tree')}依工作類型填寫</div></div></div><div class="panel-body"><div class="metadata-list">${details}</div></div></section>` : '';
-    return `<div class="stack"><div class="notice-band info">${icon(config.icon, 19)}<div><div class="notice-title">${esc(config.label)} · ${esc(activity.className || '未指定班級')}</div><div class="notice-copy">${formatDate(activity.date)} · ${esc(activity.teacher || state.context.teacher)} · ${esc(contextCopy)}</div></div></div><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}${feedbackOnly ? '課後備課回饋' : '完整填寫內容'}</div></div></div><div class="panel-body"><div class="metadata-list">${outcomeRows.map(([label, value]) => `<div class="metadata-row"><div class="metadata-label">${label}</div><div class="metadata-value">${nl2br(value || '未填寫')}</div></div>`).join('')}</div></div></section>${detailSection}<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('images')}成果證據</div><div class="panel-subtitle">${evidence.length} 筆證據</div></div></div><div class="panel-body">${evidence.length ? evidence.map(item => { const attachments = evidenceAttachments(item); return `<article class="archived-evidence-block"><div><strong>${esc(item.title)}</strong><p>${esc(item.claim)}</p><small>主管請看：${esc(item.observation)}</small></div><div class="archived-evidence-thumbs">${attachments.map(attachment => { const previewUrl = attachmentPreviewUrl(attachment, 180); const cloudUrl = materialCloudUrl(attachment); const media = previewUrl ? `<img src="${esc(previewUrl)}" alt="${esc(attachment.fileName)}">` : `<span>${icon('file-check-2', 18)}</span>`; return cloudUrl ? `<a href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer" aria-label="開啟 ${esc(attachment.fileName)}">${media}</a>` : media; }).join('')}</div></article>`; }).join('') : '<div class="text-small muted">此筆送出紀錄沒有成果證據。</div>'}</div></section></div>`;
+    return `<div class="stack"><div class="notice-band info">${icon(config.icon, 19)}<div><div class="notice-title">${esc(config.label)} · ${esc(activity.className || '未指定班級')}</div><div class="notice-copy">${formatDate(activity.date)} · ${esc(activity.teacher || state.context.teacher)} · ${esc(contextCopy)}</div></div></div><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}${feedbackOnly ? '課後備課回饋' : '完整填寫內容'}</div></div></div><div class="panel-body"><div class="metadata-list">${outcomeRows.map(([label, value]) => `<div class="metadata-row"><div class="metadata-label">${label}</div><div class="metadata-value">${nl2br(value || '未填寫')}</div></div>`).join('')}</div></div></section>${detailSection}<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('images')}成果證據</div><div class="panel-subtitle">${evidence.length} 筆證據</div></div></div><div class="panel-body">${evidence.length ? evidence.map(item => { const attachments = evidenceAttachments(item); return `<article class="archived-evidence-block"><div><strong>${esc(item.title)}</strong><p>${esc(item.claim)}</p>${item.observation ? `<small>舊版補充說明：${esc(item.observation)}</small>` : ''}</div><div class="archived-evidence-thumbs">${attachments.map(attachment => { const previewUrl = attachmentPreviewUrl(attachment, 180); const cloudUrl = materialCloudUrl(attachment); const media = previewUrl ? `<img src="${esc(previewUrl)}" alt="${esc(attachment.fileName)}">` : `<span>${icon('file-check-2', 18)}</span>`; return cloudUrl ? `<a href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer" aria-label="開啟 ${esc(attachment.fileName)}">${media}</a>` : media; }).join('')}</div></article>`; }).join('') : '<div class="text-small muted">此筆送出紀錄沒有成果證據。</div>'}</div></section></div>`;
   }
 
   function renderSubmissionReview(submission, readOnly = false) {
@@ -4297,7 +4369,7 @@
     const showThread = !readOnly || feedbackThreadMessages(threadKey).length > 0;
     return `<div class="stack">
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('sparkles')}主管摘要</div><div class="panel-subtitle">${esc(submission.teacher)} · ${formatDate(submission.date)} · ${formatTime(submission.submittedAt)} · 系統依原始紀錄彙整</div></div>${reviewStatusBadge(submission.status)}</div><div class="panel-body"><div class="summary-list"><div class="summary-line"><span class="summary-index">1</span><div><div class="summary-title">今日成果</div><div class="summary-copy">${esc(submission.keyResult)}</div></div></div><div class="summary-line"><span class="summary-index">2</span><div><div class="summary-title">需追蹤</div><div class="summary-copy">${esc(submission.followup)}</div></div></div><div class="summary-line"><span class="summary-index">3</span><div><div class="summary-title">最近待辦</div><div class="summary-copy">${esc(submission.tomorrowPriority)}</div></div></div>${submission.teacherNote ? `<div class="summary-line"><span class="summary-index">4</span><div><div class="summary-title">老師補充</div><div class="summary-copy">${esc(submission.teacherNote)}</div></div></div>` : ''}</div></div></section>
-      <div class="status-strip"><div class="status-cell"><div class="status-label">學科內／學科外</div><div class="status-value">${tracks.academic.count}/${tracks.enrichment.count}</div><div class="status-note">學科內必填；學科外有課才填</div></div><div class="status-cell"><div class="status-label">備課檔案／成果</div><div class="status-value">${prepReady}/${prepRequired.length} · ${evidence}</div></div><div class="status-cell"><div class="status-label">學生追蹤</div><div class="status-value">${cases.length}</div></div><div class="status-cell"><div class="status-label">親師溝通</div><div class="status-value">${contacts.length}</div></div></div>
+      <div class="status-strip"><div class="status-cell"><div class="status-label">學科內／學科外</div><div class="status-value">${tracks.academic.count}/${tracks.enrichment.count}</div><div class="status-note">每日兩類至少擇一</div></div><div class="status-cell"><div class="status-label">備課檔案／成果</div><div class="status-value">${prepReady}/${prepRequired.length} · ${evidence}</div></div><div class="status-cell"><div class="status-label">學生追蹤</div><div class="status-value">${cases.length}</div></div><div class="status-cell"><div class="status-label">親師溝通</div><div class="status-value">${contacts.length}</div></div></div>
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-list')}工作與證據</div><div class="panel-subtitle">點選任一筆查看送出當下的完整內容</div></div></div><div class="panel-body">${activities.length ? `<div class="archived-activity-list">${activities.map(item => renderArchivedActivityRow(item, submission.id)).join('')}</div>` : `<div class="notice-band danger">${icon('file-question', 19)}<div><div class="notice-title">沒有可追溯的工作事件</div><div class="notice-copy">摘要無法連回班級、教學方法、學生結果與原始證據。</div></div></div>`}</div></section>
       <div class="detail-split"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('user-round-search')}學生追蹤</div></div></div><div class="panel-body">${cases.length ? `<div class="metadata-list">${cases.map(item => `<div class="metadata-row"><div class="metadata-label">${esc(item.student)}</div><div class="metadata-value">${esc(item.observation)}<br><span class="muted">下一步：${esc(item.nextAction)}</span></div></div>`).join('')}</div>` : '<div class="text-small muted">當日無學生追蹤紀錄。</div>'}</div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('messages-square')}親師溝通</div></div></div><div class="panel-body">${contacts.length ? `<div class="metadata-list">${contacts.map(item => `<div class="metadata-row"><div class="metadata-label">${esc(item.student)}</div><div class="metadata-value">${esc(item.summary)}<br><span class="muted">共識與後續：${esc([item.decision, item.nextAction].filter(Boolean).join('；'))}</span></div></div>`).join('')}</div>` : submission.parentHandoffConfirmed ? `<div class="notice-band success">${icon('hand-heart', 18)}<div><div class="notice-title">無重要事項，已親自完成門口交接</div><div class="notice-copy">${esc(submission.parentHandoffNote || '老師已確認完成交接')}</div></div></div>` : '<div class="text-small muted">當日沒有親師溝通或門口交接確認。</div>'}</div></section></div>
       ${showThread ? renderFeedbackThread(threadKey) : ''}
@@ -4315,17 +4387,16 @@
     const showThread = managerMode || feedbackThreadMessages(threadKey).length > 0;
     const linkedResult = activityFeedbackSummary(activity);
     const checks = [
-      [activityNeedsPrepSource(activity.type) ? '與課後備課回饋直接相關' : '與工作目標直接相關', Boolean(linkedResult && evidence.claim)],
-      ['工作結果可追溯', String(evidence.claim || '').length >= 8],
-      ['主管看點明確', String(evidence.observation || '').length >= 12],
-      ['關聯學生／班級可追溯', Boolean(activity.className)],
+      ['已上傳成果檔案', evidenceReady(evidence)],
+      ['對應工作紀錄可追溯', Boolean(linkedResult || evidence.claim)],
+      ['課程／班級可追溯', Boolean(activity.className)],
       ['隱私確認完成', Boolean(evidence.privacy)],
     ];
     return `<div class="stack"><div class="detail-split">
-      <div><div class="annotation-canvas ${primaryPreviewUrl ? 'has-image' : ''}">${primaryPreviewUrl ? `<img src="${esc(primaryPreviewUrl)}" alt="${esc(evidence.title)}">${renderPins(evidence.pins)}` : `<div><div class="empty-icon">${icon(primary?.mimeType === 'application/pdf' ? 'file-text' : evidence.type === 'plan_asset' ? 'archive' : 'image', 28)}</div><div class="empty-title">${esc(primary?.fileName || evidence.fileName)}</div><div class="empty-copy">檔案名稱與判讀欄位已保留；此裝置沒有可顯示的原始預覽。</div></div>`}</div><div class="pin-list">${(evidence.pins || []).length ? renderPinList(evidence.pins).replaceAll('data-action="remove-evidence-pin"', 'disabled') : ''}</div>${attachments.length ? `<div class="evidence-detail-files"><div class="text-small text-strong">全部成果（${attachments.length} 份）</div>${attachments.map((attachment, index) => { const previewUrl = attachmentPreviewUrl(attachment, 180); const cloudUrl = materialCloudUrl(attachment); const thumb = previewUrl ? `<img src="${esc(previewUrl)}" alt="${esc(attachment.fileName)}">` : icon(attachment.mimeType === 'application/pdf' ? 'file-text' : 'file-check-2', 20); return `<article class="evidence-detail-file"><span class="evidence-detail-thumb">${cloudUrl ? `<a href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer" aria-label="開啟 ${esc(attachment.fileName)}">${thumb}</a>` : thumb}</span><div><strong>${index + 1}. ${esc(attachment.fileName)}</strong><small>${esc(attachment.note || (index === 0 ? evidence.observation : '未另外標註'))}</small></div>${cloudUrl ? `<a class="btn btn-small" href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer">${icon('external-link', 14)}開啟原檔</a>` : attachment.id === evidence.primaryAttachmentId ? '<span class="badge blue">標註主圖</span>' : ''}</article>`; }).join('')}</div>` : ''}</div>
+      <div><div class="annotation-canvas ${primaryPreviewUrl ? 'has-image' : ''}">${primaryPreviewUrl ? `<img src="${esc(primaryPreviewUrl)}" alt="${esc(evidence.title)}">${renderPins(evidence.pins)}` : `<div><div class="empty-icon">${icon(primary?.mimeType === 'application/pdf' ? 'file-text' : evidence.type === 'plan_asset' ? 'archive' : 'image', 28)}</div><div class="empty-title">${esc(primary?.fileName || evidence.fileName)}</div><div class="empty-copy">此裝置沒有可顯示的預覽，請開啟原檔查看內容。</div></div>`}</div><div class="pin-list">${(evidence.pins || []).length ? renderPinList(evidence.pins).replaceAll('data-action="remove-evidence-pin"', 'disabled') : ''}</div>${attachments.length ? `<div class="evidence-detail-files"><div class="text-small text-strong">全部成果（${attachments.length} 份）</div>${attachments.map((attachment, index) => { const previewUrl = attachmentPreviewUrl(attachment, 180); const cloudUrl = materialCloudUrl(attachment); const thumb = previewUrl ? `<img src="${esc(previewUrl)}" alt="${esc(attachment.fileName)}">` : icon(attachment.mimeType === 'application/pdf' ? 'file-text' : 'file-check-2', 20); const legacyNote = attachment.note || (index === 0 ? evidence.observation : ''); return `<article class="evidence-detail-file"><span class="evidence-detail-thumb">${cloudUrl ? `<a href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer" aria-label="開啟 ${esc(attachment.fileName)}">${thumb}</a>` : thumb}</span><div><strong>${index + 1}. ${esc(attachment.fileName)}</strong>${legacyNote ? `<small>舊版補充說明：${esc(legacyNote)}</small>` : ''}</div>${cloudUrl ? `<a class="btn btn-small" href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer">${icon('external-link', 14)}開啟原檔</a>` : attachment.id === evidence.primaryAttachmentId ? '<span class="badge blue">標註主圖</span>' : ''}</article>`; }).join('')}</div>` : ''}</div>
       <div class="stack">
-        <div class="quality-box">${renderEvidenceQuality(evidence.quality)}</div>
-        <div class="metadata-list"><div class="metadata-row"><div class="metadata-label">工作</div><div class="metadata-value">${esc(activity.title)}</div></div><div class="metadata-row"><div class="metadata-label">支持 KPI</div><div class="metadata-value">${esc(config.kpi)}</div></div><div class="metadata-row"><div class="metadata-label">類型</div><div class="metadata-value">${esc(EVIDENCE_TYPES[evidence.type] || evidence.type)}</div></div><div class="metadata-row"><div class="metadata-label">證明主張</div><div class="metadata-value">${esc(evidence.claim)}</div></div><div class="metadata-row"><div class="metadata-label">主管看點</div><div class="metadata-value">${esc(evidence.observation)}</div></div><div class="metadata-row"><div class="metadata-label">關聯學生</div><div class="metadata-value">${esc((evidence.students || []).join('、') || '全班／未指定')}</div></div></div>
+        <div class="notice-band info">${icon('badge-check', 18)}<div><div class="notice-title">由主管直接判讀內容品質</div><div class="notice-copy">請依完整性、清楚度與可判讀性進行判斷與評分；系統不以老師撰寫的說明代替審查。</div></div></div>
+        <div class="metadata-list"><div class="metadata-row"><div class="metadata-label">工作</div><div class="metadata-value">${esc(activity.title)}</div></div><div class="metadata-row"><div class="metadata-label">支持 KPI</div><div class="metadata-value">${esc(config.kpi)}</div></div><div class="metadata-row"><div class="metadata-label">類型</div><div class="metadata-value">${esc(EVIDENCE_TYPES[evidence.type] || evidence.type)}</div></div><div class="metadata-row"><div class="metadata-label">對應工作結果</div><div class="metadata-value">${esc(evidence.claim)}</div></div>${evidence.observation ? `<div class="metadata-row"><div class="metadata-label">舊版補充說明</div><div class="metadata-value">${esc(evidence.observation)}</div></div>` : ''}<div class="metadata-row"><div class="metadata-label">關聯學生</div><div class="metadata-value">${esc((evidence.students || []).join('、') || '全班／未指定')}</div></div></div>
         <div class="check-list">${checks.map(([label, done]) => `<div class="check-item ${done ? 'done' : 'pending'}"><span class="check-icon">${icon(done ? 'check' : 'minus', 12)}</span><span>${label}</span></div>`).join('')}</div>
         ${managerMode ? `<div class="form-field"><label class="form-label" for="evidence-feedback">本次判讀結論</label><textarea id="evidence-feedback" placeholder="需補充時，指出缺少的判讀資訊。"></textarea></div>` : ''}
       </div>
@@ -4373,6 +4444,16 @@
     $('#dialog-root').innerHTML = '';
   }
 
+  function openActivityTypePicker(track) {
+    const options = selectableActivityTypes(track);
+    const meta = activityTrackMeta(track);
+    openDialog({
+      title: `新增${meta.shortLabel}紀錄`,
+      body: `<div class="activity-type-picker">${options.map(([type, config]) => `<button type="button" class="activity-type-choice" data-action="open-activity" data-track="${esc(track)}" data-type="${esc(type)}"><span class="activity-icon ${config.tone}">${icon(config.icon, 19)}</span><span><strong>${esc(config.label)}</strong><small>${type === 'classroom' ? '有特殊班級事件時使用' : '記錄本次課程與課後回饋'}</small></span>${icon('chevron-right', 17)}</button>`).join('')}</div>`,
+      footer: '<button type="button" class="btn" data-action="close-dialog">取消</button>',
+    });
+  }
+
   function showActivityEditor(draft, draftContext = {}) {
     setDrawerDraftContext('activity', draftContext.key || drawerDraftKey('activity', draft.id, draft.type), draftContext.saved || null);
     activityDraft = clone(draft);
@@ -4395,6 +4476,7 @@
   }
 
   function openActivityEditor(activityId, requestedTrack = '', requestedType = '') {
+    closeDialog();
     const activity = activityId ? state.activities.find(item => item.id === activityId) : null;
     const defaultType = requestedType && ACTIVITY_TYPES[requestedType] ? requestedType : requestedTrack === 'enrichment' ? 'project' : 'tutoring';
     const formTrack = activity ? activityTrack(activity.type) : requestedTrack || activityTrack(defaultType);
@@ -4453,28 +4535,28 @@
       : '<div class="prep-file-empty">這份備課檔案尚未被授課紀錄選用。</div>';
     return `<div class="notice-band info">${icon('folder-open', 19)}<div><div class="notice-title">${esc(activity.title)}</div><div class="notice-copy">${esc(activity.details?.targetCourse || '尚未分類')} · ${formatDate(activity.date)} 建立 · ${formatDate(updatedDate)} 更新</div></div></div>
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('book-open')}課程資料</div></div></div><div class="panel-body"><div class="metadata-list"><div class="metadata-row"><div class="metadata-label">課程名稱</div><div class="metadata-value">${esc(activity.title)}</div></div><div class="metadata-row"><div class="metadata-label">課程類型</div><div class="metadata-value">${esc(activity.details?.targetCourse || '尚未分類')}</div></div><div class="metadata-row"><div class="metadata-label">上課內容／提醒</div><div class="metadata-value">${nl2br(activity.prep?.summary || '未填寫')}</div></div></div></div></section>
-      <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('paperclip')}附件</div><div class="panel-subtitle">選填 · ${referenceCount} 份</div></div></div><div class="panel-body">${referenceList}</div></section>
+      <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('paperclip')}附件</div><div class="panel-subtitle">必填 · ${referenceCount} 份</div></div></div><div class="panel-body">${referenceList}</div></section>
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('history')}使用紀錄</div><div class="panel-subtitle">${usageRecords.length} 次</div></div></div><div class="panel-body">${usageList}</div></section>`;
   }
 
   function renderDailyCourseEvidenceOverview(activity, plan, planLink) {
     const evidence = activity.evidence || [];
-    const evidenceReady = evidence.some(item => item.quality >= 80);
+    const hasEvidence = evidence.some(evidenceReady);
     const source = prepSourceById(activity.prepSourceId);
     const sourceReady = prepSourceUsable(source, activity.type, activity.date);
     const feedback = activity.prepFeedback || {};
     const updatedDate = source ? String(source.updatedAt || '').slice(0, 10) || source.date : '';
     return `<section class="evidence-stage"><div class="evidence-stage-head"><span class="evidence-stage-number">1</span><div><strong>使用的備課檔案</strong><small>${source ? `${esc(source.title)} · ${formatDate(source.date)} 建立 · ${formatDate(updatedDate)} 更新` : '尚未選擇備課檔案'}</small></div>${statusBadge(sourceReady ? '可追溯' : '待補連結', sourceReady ? 'green' : 'red')}</div>${source ? `<div class="plan-evidence-link"><div><strong>${esc(source.title)}</strong><small>${esc(source.details?.targetCourse || '尚未分類')} · ${(source.prepEvidence || []).length} 份附件</small></div><button type="button" class="btn btn-small" data-action="open-evidence" data-activity-id="${source.id}">${icon('arrow-right', 14)}查看備課檔案</button></div>${source.prep?.summary ? `<div class="prep-source-summary"><strong>上課內容／提醒</strong><p>${esc(source.prep.summary)}</p></div>` : ''}` : ''}</section>
       <section class="evidence-stage"><div class="evidence-stage-head"><span class="evidence-stage-number">2</span><div><strong>課後回饋</strong><small>主管可直接看到教案成效、孩子反應與更新方向</small></div>${statusBadge(prepFeedbackComplete(activity) ? '回饋完整' : '待補回饋', prepFeedbackComplete(activity) ? 'blue' : 'red')}</div><div class="prep-feedback-review"><div><strong>這份教案／教材哪裡有效</strong><p>${esc(feedback.strengths || '尚未填寫')}</p></div><div><strong>孩子對哪個教案環節最有反應</strong><p>${esc(feedback.resonance || '尚未填寫')}</p></div><div><strong>這份教案／教材要更新什麼</strong><p>${esc(feedback.changes || '尚未填寫')}</p></div></div></section>
-      <section class="evidence-stage"><div class="evidence-stage-head"><span class="evidence-stage-number">3</span><div><strong>學生實際成果與變化證據</strong><small>用作品、訂正、測試數據或可觀察行為證明本堂結果</small></div>${statusBadge(evidenceReady ? '可判讀' : '待補', evidenceReady ? 'blue' : 'red')}</div>${evidence.length ? `<div class="evidence-grid">${evidence.map(item => renderEvidenceCard({ activity, evidence: item })).join('')}</div>` : '<div class="prep-file-empty">尚未加入成果證據。</div>'}</section>`;
+      <section class="evidence-stage"><div class="evidence-stage-head"><span class="evidence-stage-number">3</span><div><strong>學生實際成果與變化證據</strong><small>用作品、訂正、測試數據或可觀察行為呈現本堂結果</small></div>${statusBadge(hasEvidence ? '已上傳' : '待補', hasEvidence ? 'blue' : 'red')}</div>${evidence.length ? `<div class="evidence-grid">${evidence.map(item => renderEvidenceCard({ activity, evidence: item })).join('')}</div>` : '<div class="prep-file-empty">尚未加入成果證據。</div>'}</section>`;
   }
 
   function renderActivityEvidenceOverview(activity) {
     const evidence = activity.evidence || [];
-    const evidenceReady = evidence.some(item => item.quality >= 80);
+    const hasEvidence = evidence.some(evidenceReady);
     if (activity.type === 'lessonprep') return renderCoursePrepEvidenceOverview(activity, null, '');
     if (activityNeedsPrepSource(activity.type)) return renderDailyCourseEvidenceOverview(activity, null, '');
-    return `<div class="notice-band info">${icon('target', 19)}<div><div class="notice-title">本次工作目的</div><div class="notice-copy">${esc(activity.objective)}</div></div></div><section class="evidence-stage"><div class="evidence-stage-head"><span class="evidence-stage-number">1</span><div><strong>實際執行與後續</strong><small>此類工作不需要備課檔案或教案附件</small></div>${statusBadge('直接記錄', 'green')}</div><div class="prep-feedback-review"><div><strong>實際做法</strong><p>${esc(activity.action || '尚未填寫')}</p></div><div><strong>完成情況</strong><p>${esc(activity.result || '尚未填寫')}</p></div><div><strong>下次行動</strong><p>${esc(activity.nextAction || '尚未填寫')}</p></div></div></section><section class="evidence-stage"><div class="evidence-stage-head"><span class="evidence-stage-number">2</span><div><strong>成果與變化證據</strong><small>主管需能直接判讀工作是否完成</small></div>${statusBadge(evidenceReady ? '可判讀' : '待補', evidenceReady ? 'blue' : 'red')}</div>${evidence.length ? `<div class="evidence-grid">${evidence.map(item => renderEvidenceCard({ activity, evidence: item })).join('')}</div>` : `<div class="prep-file-empty">尚未加入成果證據。</div>`}</section>`;
+    return `<div class="notice-band info">${icon('target', 19)}<div><div class="notice-title">本次工作目的</div><div class="notice-copy">${esc(activity.objective)}</div></div></div><section class="evidence-stage"><div class="evidence-stage-head"><span class="evidence-stage-number">1</span><div><strong>實際執行與後續</strong><small>此類工作不需要備課檔案或教案附件</small></div>${statusBadge('直接記錄', 'green')}</div><div class="prep-feedback-review"><div><strong>實際做法</strong><p>${esc(activity.action || '尚未填寫')}</p></div><div><strong>完成情況</strong><p>${esc(activity.result || '尚未填寫')}</p></div><div><strong>下次行動</strong><p>${esc(activity.nextAction || '尚未填寫')}</p></div></div></section><section class="evidence-stage"><div class="evidence-stage-head"><span class="evidence-stage-number">2</span><div><strong>成果與變化證據</strong><small>主管將直接判讀內容並評分</small></div>${statusBadge(hasEvidence ? '已上傳' : '待補', hasEvidence ? 'blue' : 'red')}</div>${evidence.length ? `<div class="evidence-grid">${evidence.map(item => renderEvidenceCard({ activity, evidence: item })).join('')}</div>` : `<div class="prep-file-empty">尚未加入成果證據。</div>`}</section>`;
   }
 
   function openEvidenceList(activityId) {
@@ -4507,7 +4589,7 @@
     setDrawerDraftContext('evidence', key, saved);
     const formValue = saved?.kind === 'evidence' && saved.payload ? saved.payload : evidence;
     openDrawer({
-      title: evidence ? '編輯證據' : '新增可判讀證據', subtitle: activity.title, body: `${draftRecoveryNotice(saved?.savedAt, saved?.mediaOmitted)}${renderEvidenceForm(activity, formValue)}`, wide: true,
+      title: evidence ? '編輯成果證據' : '新增成果證據', subtitle: activity.title, body: `${draftRecoveryNotice(saved?.savedAt, saved?.mediaOmitted)}${renderEvidenceForm(activity, formValue)}`, wide: true,
       footer: `${evidence ? `<button type="button" class="btn btn-danger" style="margin-right:auto" data-action="delete-evidence" data-activity-id="${activityId}" data-evidence-id="${evidence.id}">${icon('trash-2', 15)}刪除</button>` : ''}<button type="button" class="btn" data-action="close-drawer">稍後繼續</button><button type="submit" form="evidence-form" class="btn btn-primary">${icon('save', 16)}儲存證據</button>`,
     });
   }
@@ -4831,12 +4913,14 @@
     const data = new FormData(form);
     const type = String(data.get('type') || activityDraft.type || 'tutoring');
     const feedbackOnly = activityNeedsPrepSource(type);
+    const title = String(data.get('title') || '').trim();
+    const className = activityTrack(type) === 'enrichment' ? title : String(data.get('className') || '').trim();
     const details = feedbackOnly ? {} : clone(activityDraft.detailCache?.[type] || activityDraft.details || {});
     Object.assign(activityDraft, {
       id: String(data.get('id') || activityDraft.id || ''),
       type,
-      title: String(data.get('title') || '').trim(),
-      className: String(data.get('className') || '').trim(),
+      title,
+      className,
       students: type === 'classroom' ? data.getAll('students') : [],
       details,
       prepSourceId: String(data.get('prepSourceId') || activityDraft.prepSourceId || ''),
@@ -4960,14 +5044,16 @@
     const prepSource = prepSourceById(prepSourceId);
     const prepEvidence = [];
     const feedbackOnly = activityNeedsPrepSource(type);
+    const title = String(data.get('title') || '').trim();
+    const className = activityTrack(type) === 'enrichment' ? title : String(data.get('className') || '').trim();
     const details = feedbackOnly ? {} : clone(activityDraft?.detailCache?.[type] || activityDraft?.details || {});
     const activity = {
       id,
       date: existing ? existing.date : state.daily.date,
       teacher: existing ? existing.teacher : state.context.teacher,
       type,
-      title: String(data.get('title') || '').trim(),
-      className: String(data.get('className') || '').trim(),
+      title,
+      className,
       students: type === 'classroom' ? data.getAll('students') : [],
       details,
       prepSourceId,
@@ -5076,7 +5162,7 @@
     });
     const missingProof = Object.entries(OPERATION_CHECKS).filter(([key]) => {
       const item = evidenceByCheck[key] || {};
-      return !item.fileName || !['normal', 'exception'].includes(item.status);
+      return !item.fileName || !attachmentAvailable(item) || !['normal', 'exception'].includes(item.status);
     });
     if (missingProof.length) {
       toast(`尚缺 ${missingProof.map(([, config]) => config.label).join('、')} 的照片或判定`, 'danger');
@@ -5085,11 +5171,6 @@
     const incompleteExceptions = Object.entries(OPERATION_CHECKS).filter(([key]) => evidenceByCheck[key]?.status === 'exception' && String(evidenceByCheck[key]?.action || '').length < 8);
     if (incompleteExceptions.length) {
       toast(`請補齊 ${incompleteExceptions.map(([, config]) => config.label).join('、')} 的異常處理、接手人或期限`, 'danger');
-      return;
-    }
-    const fingerprints = Object.values(evidenceByCheck).map(item => String(item?.fingerprint || '')).filter(Boolean);
-    if (new Set(fingerprints).size !== fingerprints.length) {
-      toast('系統偵測到重複影像；同一張照片不能跨面向共用', 'danger');
       return;
     }
     const exceptionEntries = Object.entries(OPERATION_CHECKS).filter(([key]) => evidenceByCheck[key]?.status === 'exception');
@@ -5166,7 +5247,7 @@
     if (!window.API?.saveSelfTask) return { ok: false, error: '事項雲端服務尚未載入' };
     task.cloudSyncStatus = 'saving';
     const cloudTask = { ...task, source: taskDetailText(task) || task.source };
-    const result = await API.saveSelfTask({ nickname: backendNickname(state.context.teacher), task: removeInlineMedia(cloudTask) });
+    const result = await API.saveSelfTask({ nickname: cloudTeacherNickname(), task: removeInlineMedia(cloudTask) });
     task.cloudSyncStatus = result?.ok ? 'saved' : 'error';
     if (result?.ok) task.cloudUpdatedAt = result.updated_at || new Date().toISOString();
     return result;
@@ -5269,9 +5350,7 @@
   }
 
   function updateEvidenceQualityFromForm() {
-    const draft = syncEvidenceDraftFromForm();
-    const box = $('#evidence-quality');
-    if (draft && box) box.innerHTML = renderEvidenceQuality(evidenceQuality(draft));
+    syncEvidenceDraftFromForm();
   }
 
   function saveEvidenceForm(form) {
@@ -5282,22 +5361,17 @@
       toast('請先選擇照片或檔案', 'danger');
       return;
     }
-    const unavailableFiles = attachments.filter(item => !item.dataUrl && !materialCloudUrl(item));
+    const unavailableFiles = attachments.filter(item => !attachmentAvailable(item));
     if (state.integration.cloudSyncEnabled && unavailableFiles.length) {
       toast(`${unavailableFiles.length} 份檔案尚未完成上傳，請重新選擇後再儲存`, 'danger');
-      return;
-    }
-    const attachmentsMissingNotes = attachments.length > 1 ? attachments.filter(item => String(item.note || '').trim().length < 4) : [];
-    if (attachmentsMissingNotes.length) {
-      toast(`請補上 ${attachmentsMissingNotes.length} 張照片的主管判讀重點`, 'danger');
       return;
     }
     const score = evidenceQuality(draft);
     const item = {
       id: draft.id || uid('ev'), fileName: draft.fileName, mimeType: draft.mimeType, dataUrl: draft.dataUrl || '', type: draft.type,
       stage: draft.stage, title: draft.title, claim: draft.claim, observation: draft.observation, students: draft.students,
-      privacy: draft.privacy, pins: clone(draft.pins || []), quality: score, status: score >= 80 ? 'pending' : 'draft',
-      createdAt: draft.createdAt || new Date().toISOString(), placeholder: Boolean(draft.placeholder && !draft.dataUrl),
+      privacy: draft.privacy, pins: clone(draft.pins || []), quality: score, status: evidenceReady(draft) ? 'pending' : 'draft',
+      createdAt: draft.createdAt || new Date().toISOString(), placeholder: !attachments.some(attachmentAvailable),
       attachments: clone(attachments), primaryAttachmentId: draft.primaryAttachmentId || attachments[0].id,
     };
     const activityId = form.elements.activityId.value;
@@ -5323,7 +5397,7 @@
     clearCurrentDrawerDraft();
     evidenceDraft = null;
     closeDrawer(); persist(); scheduleDailyCloudDraftSync(); renderApp();
-    toast(score >= 80 ? '證據已達可判讀標準' : '證據已儲存，送出前仍需補充', score >= 80 ? 'success' : '');
+    toast('成果證據已儲存，內容將由主管判讀與評分', 'success');
   }
 
   function capturePlanForm() {
@@ -5420,7 +5494,7 @@
   }
 
   async function uploadPlanMaterial(file) {
-    if (file.size > 15 * 1024 * 1024) throw new Error(`${file.name} 超過 15 MB 上限`);
+    if (file.size > MAX_DOCUMENT_FILE_BYTES) throw new Error(`${file.name} 超過 25 MB 上限`);
     if (!state.integration.cloudSyncEnabled) throw new Error('請先到「帳號與通知」啟用雲端送出');
     if (!cloudIdentityReady()) throw new Error('請先登入目前老師的正式帳號');
     if (!window.API?.uploadFile) throw new Error('教材雲端服務尚未載入');
@@ -5430,7 +5504,7 @@
     if (!payload) throw new Error(`${file.name} 無法讀取`);
     const category = planMaterialCategory(file.name);
     let result = await API.uploadFile({
-      nickname: backendNickname(state.context.teacher),
+      nickname: cloudTeacherNickname(),
       date: state.daily.date,
       fileName: file.name,
       mimeType: file.type || payload.mimeType || 'application/octet-stream',
@@ -5439,7 +5513,7 @@
     });
     if (!result?.ok && String(result?.error || '').includes('Unknown action') && (file.type || payload.mimeType).startsWith('image/')) {
       result = await API.uploadPhoto({
-        nickname: backendNickname(state.context.teacher), date: state.daily.date, kpi: 3,
+        nickname: cloudTeacherNickname(), date: state.daily.date, kpi: 3,
         mimeType: file.type || payload.mimeType, base64: payload.base64, description: `正式教材：${file.name}`,
       });
     }
@@ -5526,7 +5600,7 @@
   }
 
   async function uploadFormalEvidence() {
-    const nickname = backendNickname(state.context.teacher);
+    const nickname = cloudTeacherNickname();
     const attachments = [];
     const upload = async ({ item, kpi, description, forType }) => {
       const existingCloudUrl = materialCloudUrl(item);
@@ -5536,7 +5610,7 @@
         return;
       }
       const payload = dataUrlPayload(item.dataUrl);
-      if (!payload) throw new Error(`${item.fileName || '成果檔案'}尚未完成上傳`);
+      if (!payload) return;
       integrationRuntime.cloudMessage = `正在上傳 ${item.fileName || '照片'}`;
       updateSaveIndicator('saving', integrationRuntime.cloudMessage);
       const result = isImage
@@ -5545,6 +5619,9 @@
       if (!result?.ok) throw new Error(result?.error || `${item.fileName || '照片'}上傳失敗`);
       item.cloudUrl = result.url;
       item.cloudFileId = result.fileId;
+      item.dataUrl = '';
+      item.placeholder = false;
+      item.uploadStatus = 'uploaded';
       attachments.push({ type: isImage ? 'photo' : 'file', url: result.url, fileId: result.fileId, fileName: item.fileName || '成果附件', kpi, description, forType });
     };
     for (const activity of todayActivities()) {
@@ -5587,7 +5664,7 @@
     const contactSummary = contacts.map(item => `${item.student}（${item.channel}）：${[item.decision, item.nextAction].filter(Boolean).join('；') || item.summary}`).join('；');
     const caseSummary = cases.map(item => `${item.student}：${item.observation}；已處理 ${item.intervention}；目前 ${item.outcome}；下一步 ${item.nextAction}`).join('；');
     return {
-      nickname: backendNickname(submission.teacher),
+      nickname: cloudTeacherNickname(submission.teacher),
       date: submission.date,
       submitted: true,
       kpi1_data: {
@@ -5712,6 +5789,7 @@
         return;
       }
       integrationRuntime.cloudStatus = 'submitting';
+      integrationRuntime.cloudErrorContext = '';
       integrationRuntime.cloudMessage = '正在準備雲端資料';
       renderApp();
       try {
@@ -5727,6 +5805,7 @@
         const notificationComplete = !pdfResult?.notification || pdfResult.notification.allReached;
         const pendingNotifications = pdfResult?.notification?.pending || [];
         integrationRuntime.cloudStatus = 'saved';
+        integrationRuntime.cloudErrorContext = '';
         integrationRuntime.cloudMessage = pdfResult?.ok
           ? (notificationComplete ? '雲端、主管通知與 PDF 已完成' : `雲端與 PDF 已完成；${pendingNotifications.join('、') || '主管'}通知待補`)
           : '雲端已完成；PDF 尚未完成';
@@ -5747,6 +5826,7 @@
         else toast(`已正式送出；PDF 未完成：${pdfResult?.error || '請稍後重試'}`, 'danger');
       } catch (error) {
         integrationRuntime.cloudStatus = 'error';
+        integrationRuntime.cloudErrorContext = 'submit';
         integrationRuntime.cloudMessage = error.message || '雲端送出失敗';
         state.integration.dailyDraftSyncPending = true;
         persist('本機草稿已保留');
@@ -5771,7 +5851,7 @@
         return;
       }
       const result = await API.saveWeekly({
-        nickname: backendNickname(state.context.teacher),
+        nickname: cloudTeacherNickname(),
         week_of: isoWeekString(state.daily.date),
         teaching_reflection: state.weekly.keyChange,
         student_observation: state.weekly.priorityRisks,
@@ -5859,7 +5939,7 @@
     const tasks = state.tasks.filter(task => task.ref === ref);
     if (state.integration.cloudSyncEnabled && cloudIdentityReady() && window.API?.deleteSelfTask) {
       for (const task of tasks) {
-        const result = await API.deleteSelfTask(task.id, backendNickname(state.context.teacher));
+        const result = await API.deleteSelfTask(task.id, cloudTeacherNickname());
         if (!result?.ok) return { ok: false, error: result?.error || '追蹤事項刪除失敗' };
       }
     }
@@ -5878,7 +5958,7 @@
         return;
       }
       if (activity?.type === 'lessonprep' && state.integration.cloudSyncEnabled && cloudIdentityReady()) {
-        const result = await API.deleteCoursePrep(id, backendNickname(state.context.teacher), confirmationName);
+        const result = await API.deleteCoursePrep(id, cloudTeacherNickname(), confirmationName);
         if (!result?.ok) {
           toast(`備課檔案刪除失敗：${result?.error || '請稍後重試'}`, 'danger');
           return;
@@ -6003,6 +6083,34 @@
     });
   }
 
+  function dataUrlByteLength(dataUrl) {
+    const payload = dataUrlPayload(dataUrl);
+    return payload ? Math.ceil(payload.base64.length * 0.75) : 0;
+  }
+
+  async function uploadCompressedPhoto(dataUrl, { kpi, description = '' } = {}) {
+    if (!state.integration.cloudSyncEnabled) return null;
+    if (!cloudIdentityReady()) throw new Error('登入狀態已失效，請重新登入後再選擇照片');
+    if (!window.API?.uploadPhoto) throw new Error('照片雲端服務尚未載入，請重新整理後再試');
+    const payload = dataUrlPayload(dataUrl);
+    if (!payload) throw new Error('照片無法讀取，請改選原始照片');
+    const result = await API.uploadPhoto({
+      nickname: cloudTeacherNickname(),
+      date: state.daily.date,
+      kpi,
+      mimeType: payload.mimeType || 'image/jpeg',
+      base64: payload.base64,
+      description,
+    });
+    if (!result?.ok) throw new Error(result?.error || '照片上傳失敗');
+    return {
+      cloudUrl: result.url || '',
+      cloudFileId: result.fileId || '',
+      mimeType: payload.mimeType || 'image/jpeg',
+      size: formatFileSize(dataUrlByteLength(dataUrl)),
+    };
+  }
+
   function refreshEvidenceAttachmentUI() {
     if (!evidenceDraft) return;
     syncEvidencePrimaryFields(evidenceDraft);
@@ -6012,7 +6120,7 @@
     const uploadTitle = $('#evidence-upload-title');
     if (uploadTitle) uploadTitle.innerHTML = `${attachments.length ? `已加入 ${attachments.length} 份成果` : '成果照片／檔案'} <span class="required">*</span>`;
     const fileName = $('#evidence-file-name');
-    if (fileName) fileName.textContent = attachments.length ? attachments.map(item => item.fileName).join('、') : '尚未選擇檔案 · 單檔上限 15 MB';
+    if (fileName) fileName.textContent = attachments.length ? attachments.map(item => item.fileName).join('、') : '尚未選擇檔案 · 單檔上限 25 MB';
     const list = $('#evidence-attachment-list');
     if (list) list.innerHTML = renderEvidenceAttachmentList(evidenceDraft);
     const canvas = $('#evidence-canvas');
@@ -6040,20 +6148,32 @@
       return;
     }
     const selected = files.slice(0, availableSlots);
-    const oversized = selected.filter(file => file.size > 15 * 1024 * 1024);
-    const accepted = selected.filter(file => file.size <= 15 * 1024 * 1024);
+    const oversized = selected.filter(file => file.size > MAX_DOCUMENT_FILE_BYTES);
+    const accepted = selected.filter(file => file.size <= MAX_DOCUMENT_FILE_BYTES);
     const fileName = $('#evidence-file-name');
-    if (fileName) fileName.textContent = `正在處理 ${accepted.length} 份檔案…`;
+    if (fileName) fileName.textContent = `正在壓縮並上傳 ${accepted.length} 份檔案…`;
     try {
       let added = 0;
+      let replaced = 0;
       for (const file of accepted) {
         const fingerprint = await hashFile(file);
-        const duplicate = evidenceDraft.attachments.some(item => item.fingerprint === fingerprint);
-        if (duplicate) continue;
+        const duplicateIndex = evidenceDraft.attachments.findIndex(item => item.fingerprint === fingerprint);
+        const duplicate = duplicateIndex >= 0 ? evidenceDraft.attachments[duplicateIndex] : null;
+        const duplicateComplete = duplicate && Boolean(materialCloudUrl(duplicate) || duplicate.cloudFileId || duplicate.dataUrl);
+        if (duplicateComplete) continue;
         const isImage = String(file.type || '').startsWith('image/');
-        let dataUrl = await fileToPreview(file);
+        let dataUrl = isImage ? await fileToPreview(file) : '';
         let cloudFile = null;
-        if (!isImage && state.integration.cloudSyncEnabled) {
+        if (isImage && !dataUrl) throw new Error(`${file.name} 無法轉成可上傳照片`);
+        if (isImage && state.integration.cloudSyncEnabled) {
+          const activity = state.activities.find(item => item.id === evidenceDraft.activityId);
+          updateSaveIndicator('saving', `正在上傳 ${file.name}`);
+          cloudFile = await uploadCompressedPhoto(dataUrl, {
+            kpi: activity ? activityKpiNumber(activity) : 5,
+            description: evidenceDraft.title || activity?.title || file.name,
+          });
+          if (cloudFile) dataUrl = '';
+        } else if (!isImage && state.integration.cloudSyncEnabled) {
           updateSaveIndicator('saving', `正在上傳 ${file.name}`);
           cloudFile = await uploadPlanMaterial(file);
         } else if (!isImage && file.size <= 1024 * 1024) {
@@ -6069,19 +6189,29 @@
           fingerprint,
           cloudUrl: cloudFile?.cloudUrl || '',
           cloudFileId: cloudFile?.cloudFileId || '',
+          uploadStatus: cloudFile ? 'uploaded' : dataUrl ? 'local' : 'incomplete',
+          uploadError: '',
           placeholder: !dataUrl && !cloudFile?.cloudUrl,
         };
-        evidenceDraft.attachments.push(attachment);
+        if (duplicateIndex >= 0) {
+          const previousId = evidenceDraft.attachments[duplicateIndex].id;
+          attachment.id = previousId;
+          evidenceDraft.attachments.splice(duplicateIndex, 1, attachment);
+          replaced += 1;
+        } else {
+          evidenceDraft.attachments.push(attachment);
+        }
         if (!evidenceDraft.primaryAttachmentId) evidenceDraft.primaryAttachmentId = attachment.id;
         added += 1;
+        refreshEvidenceAttachmentUI();
       }
       syncEvidencePrimaryFields(evidenceDraft);
       refreshEvidenceAttachmentUI();
       input.value = '';
       if (files.length > availableSlots) toast(`已加入前 ${availableSlots} 份；每筆上限 ${MAX_EVIDENCE_FILES} 份`, 'danger');
-      else if (oversized.length) toast(`${oversized.length} 份超過 15 MB，其他 ${added} 份已加入`, 'danger');
+      else if (oversized.length) toast(`${oversized.length} 份超過 25 MB，其他 ${added} 份已上傳`, 'danger');
       else if (added < accepted.length) toast(`已加入 ${added} 份；重複檔案已略過`, 'success');
-      else toast(`已一次加入 ${added} 份成果`, 'success');
+      else toast(`${added} 份成果已上傳${replaced ? `，其中 ${replaced} 份已修復` : ''}`, 'success');
     } catch (error) {
       input.value = '';
       refreshEvidenceAttachmentUI();
@@ -6257,18 +6387,23 @@
     try {
       for (const file of files) {
         const fileFingerprint = await hashFile(file);
-        const duplicate = (activityDraft.prepEvidence || []).some(item => item.fileFingerprint === fileFingerprint);
-        if (duplicate) {
+        const duplicateIndex = (activityDraft.prepEvidence || []).findIndex(item => item.fileFingerprint === fileFingerprint);
+        const duplicate = duplicateIndex >= 0 ? activityDraft.prepEvidence[duplicateIndex] : null;
+        if (duplicate && (materialCloudUrl(duplicate) || duplicate.cloudFileId)) {
           skipped += 1;
           continue;
         }
         const cloudFile = await uploadPlanMaterial(file);
         activityDraft.prepEvidence = activityDraft.prepEvidence || [];
-        activityDraft.prepEvidence.push({
+        const uploadedFile = {
           id: uid('prep'), fileName: cloudFile.name || file.name, size: cloudFile.size || formatFileSize(file.size),
           category: inferPrepCategory(file.name), note: '', addedAt: new Date().toISOString(),
           mimeType: cloudFile.mimeType || file.type || '', cloudUrl: cloudFile.cloudUrl || '', cloudFileId: cloudFile.cloudFileId || '', fileFingerprint,
-        });
+        };
+        if (duplicateIndex >= 0) {
+          uploadedFile.id = activityDraft.prepEvidence[duplicateIndex].id;
+          activityDraft.prepEvidence.splice(duplicateIndex, 1, uploadedFile);
+        } else activityDraft.prepEvidence.push(uploadedFile);
         uploaded += 1;
         updateSaveIndicator('saving', `附件已上傳 ${uploaded}/${files.length}`);
       }
@@ -6332,14 +6467,14 @@
     const value = $('#operation-proof-count');
     const progress = $('#operation-proof-progress');
     const help = $('#operation-proof-help');
-    if (value) value.textContent = `${count}/4 ${state.operations.confirmedAt ? '已上傳' : '已選取'}`;
+    if (value) value.textContent = `${count}/4 ${count ? '已上傳' : '待上傳'}`;
     if (progress) {
       progress.style.width = `${count / 4 * 100}%`;
       progress.classList.toggle('warn', count < 4);
     }
     if (help) help.textContent = state.operations.confirmedAt && operationsComplete()
       ? `已於 ${formatTime(state.operations.confirmedAt)} 完成檢核`
-      : count === 4 ? '照片已選取，送出時會上傳並交主管稽核' : '補齊照片與異常處理後即可送出';
+      : count === 4 ? '照片已上傳，可送出班務檢核' : '補齊照片與異常處理後即可送出';
   }
 
   async function handleOperationPhoto(input) {
@@ -6351,25 +6486,35 @@
       toast('班務證據需使用照片格式', 'danger');
       return;
     }
-    if (file.size > 12 * 1024 * 1024) {
+    if (file.size > MAX_IMAGE_SOURCE_BYTES) {
       input.value = '';
-      toast('單張照片上限為 12 MB', 'danger');
+      toast('單張原始照片上限為 25 MB', 'danger');
       return;
     }
     const preview = $(`#operation-preview-${key}`);
     if (preview) preview.classList.add('is-loading');
     try {
       const fingerprint = await hashFile(file);
-      const duplicate = Object.entries(state.operations.evidenceByCheck || {}).find(([otherKey, item]) => otherKey !== key && item?.fingerprint && item.fingerprint === fingerprint);
-      if (duplicate) {
-        input.value = '';
-        toast(`這張照片已用於「${OPERATION_CHECKS[duplicate[0]].label}」，請重新拍攝`, 'danger');
-        return;
-      }
       const dataUrl = await fileToPreview(file);
+      if (!dataUrl) throw new Error('照片無法壓縮');
+      updateSaveIndicator('saving', `正在上傳${OPERATION_CHECKS[key].label}照片`);
+      const cloudFile = await uploadCompressedPhoto(dataUrl, { kpi: 6, description: OPERATION_CHECKS[key].label });
       state.operations.evidenceByCheck = state.operations.evidenceByCheck || {};
       const currentStatus = input.closest('.operation-proof-item')?.querySelector(`[name="status_${key}"]:checked`)?.value || 'normal';
-      state.operations.evidenceByCheck[key] = { ...(state.operations.evidenceByCheck[key] || {}), status: currentStatus, fileName: file.name, size: formatFileSize(file.size), dataUrl, fingerprint, addedAt: new Date().toISOString() };
+      state.operations.evidenceByCheck[key] = {
+        ...(state.operations.evidenceByCheck[key] || {}),
+        status: currentStatus,
+        fileName: file.name,
+        mimeType: cloudFile?.mimeType || 'image/jpeg',
+        size: cloudFile?.size || formatFileSize(file.size),
+        dataUrl: cloudFile ? '' : dataUrl,
+        cloudUrl: cloudFile?.cloudUrl || '',
+        cloudFileId: cloudFile?.cloudFileId || '',
+        uploadStatus: cloudFile ? 'uploaded' : 'local',
+        placeholder: false,
+        fingerprint,
+        addedAt: new Date().toISOString(),
+      };
       state.operations.confirmedAt = '';
       markDailyNeedsResubmit(state.operations.date, state.operations.dutyOwner);
       const current = state.operations.evidenceByCheck[key];
@@ -6387,10 +6532,11 @@
       schedulePersist();
       scheduleDailyCloudDraftSync();
       hydrateIcons();
-      toast(`${OPERATION_CHECKS[key].label}照片已加入`, 'success');
+      toast(`${OPERATION_CHECKS[key].label}照片已上傳`, 'success');
     } catch (error) {
       input.value = '';
-      toast('照片處理失敗，請重新選擇', 'danger');
+      updateSaveIndicator('error', '照片上傳未完成');
+      toast(`照片上傳未完成：${error.message || '請重新選擇'}`, 'danger');
     } finally {
       if (preview) preview.classList.remove('is-loading');
     }
@@ -6630,7 +6776,12 @@
         toast('回覆已送出', 'success');
       }
     }
-    else if (action === 'open-activity') openActivityEditor(undefined, control.dataset.track || '', control.dataset.type || '');
+    else if (action === 'open-activity') {
+      const requestedTrack = control.dataset.track || '';
+      const requestedType = control.dataset.type || '';
+      if (requestedTrack && !requestedType) openActivityTypePicker(requestedTrack);
+      else openActivityEditor(undefined, requestedTrack, requestedType);
+    }
     else if (action === 'view-activity') openActivityDetail(control.dataset.activityId);
     else if (action === 'edit-activity') openActivityEditor(control.dataset.activityId);
     else if (action === 'delete-activity') openDeleteDialog('activity', control.dataset.activityId);

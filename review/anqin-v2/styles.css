@@ -1897,6 +1897,16 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--brand); }
 .guide-day-step small { color: var(--muted); font-size: 10px; }
 .guide-section { margin-top: 16px; }
 .guide-type-picker { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 10px; }
+
+.activity-type-picker { display: grid; gap: 8px; }
+.activity-type-choice {
+  width: 100%; min-height: 64px; display: grid; grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--surface); color: var(--text); text-align: left; cursor: pointer;
+}
+.activity-type-choice:hover { border-color: var(--brand); background: var(--surface-soft); }
+.activity-type-choice strong, .activity-type-choice small { display: block; }
+.activity-type-choice small { margin-top: 3px; color: var(--muted); }
 .guide-type-button { min-width: max-content; display: inline-flex; align-items: center; gap: 6px; padding: 7px 9px; color: var(--ink-soft); background: #fff; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; font-size: 11px; font-weight: 800; }
 .guide-type-button.active { color: #fff; background: var(--ink-soft); border-color: var(--ink-soft); }
 .guide-selected-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 11px; margin-top: 4px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }

@@ -1109,7 +1109,7 @@ function logSystem(nickname, action, target, detail) {
  */
 
 const GOOGLE_OAUTH_CLIENT_ID_ = '110974418283-75a7ifti599cauhptkcd0jsqshfrupbf.apps.googleusercontent.com';
-const API_SESSION_TTL_MS_ = 12 * 60 * 60 * 1000;
+const API_SESSION_TTL_MS_ = 24 * 60 * 60 * 1000;
 
 function whoami(params) {
   const identity = verifyLoginIdentity_(params || {});
@@ -2417,7 +2417,7 @@ function uploadFile(params) {
 
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
-  if (String(base64).length > 22 * 1024 * 1024) return { ok: false, error: '檔案超過 15 MB 上限' };
+  if (String(base64).length > 36 * 1024 * 1024) return { ok: false, error: '檔案超過 25 MB 上限' };
 
   const dateStr = String(date || todayStr());
   const ym = dateStr.slice(0, 7);
