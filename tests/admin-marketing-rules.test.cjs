@@ -5,6 +5,7 @@ const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
 const backendSource = fs.readFileSync(path.join(root, 'apps-script/adminmarketing.gs'), 'utf8');
+const deployedBackendSource = fs.readFileSync(path.join(root, 'apps-script/_all_in_one.gs'), 'utf8');
 const context = vm.createContext({
   Array, Date, Error, JSON, Math, Number, Object, RegExp, String,
   Utilities: {
@@ -66,12 +67,20 @@ const trial = context.validateAdminMarketingRecord_('trial', {
 assert.equal(trial.status, 'waiting_contact');
 assert.equal(context.adminMarketingTrialIdentity_(trial), '小布|0912345678');
 
+const futureTrial = context.validateAdminMarketingRecord_('trial', {
+  ...trial, id: 'trial-future', date: '2026-09-10', nextFollowupDate: '2026-08-27',
+});
+assert.equal(futureTrial.date, '2026-09-10');
+assert.equal(futureTrial.nextFollowupDate, '2026-08-27');
+assert.match(deployedBackendSource, /下一次追蹤日期不可早於今天/, '部署用合併檔需包含未來試上規則');
+assert.doesNotMatch(deployedBackendSource, /試上日期不可晚於今天/, '部署用合併檔不得保留未來試上限制');
+
 assert.throws(() => context.validateAdminMarketingRecord_('trial', {
   ...trial, id: 'trial-missing-next', nextFollowupDate: '', status: 'considering',
 }), /下一次追蹤日期/);
 assert.throws(() => context.validateAdminMarketingRecord_('trial', {
   ...trial, id: 'trial-bad-next', nextFollowupDate: '2026-08-25', status: 'considering',
-}), /不可早於試上日期/);
+}), /不可早於今天/);
 
 const convertedTrial = context.validateAdminMarketingRecord_('trial', {
   ...trial, id: 'trial-converted', status: 'converted', nextFollowupDate: '', firstEnrollment: true,
@@ -153,6 +162,10 @@ assert.match(uiSource, /function retainedFiles/, '已上傳附件需能個別移
 assert.match(uiSource, /remove-selected-file/, '新選附件在儲存前需能移除');
 assert.match(uiSource, /function parseTrialMessage/, '登錄試上需支援貼上訊息自動辨識');
 assert.match(uiSource, /data-action="parse-trial-message"/, '登錄試上需提供手動重新辨識按鈕');
+assert.match(uiSource, /return iso;/, '貼上訊息時需能辨識未來試上日期');
+assert.doesNotMatch(uiSource, /id="trial-date"[^>]*max=/, '預約試上日期不得限制為今天以前');
+assert.match(uiSource, /mayReplaceDefaultDate/, '貼上未來日期時需取代新表單預設的今天');
+assert.match(uiSource, /state\.ui\.month = date\.slice\(0, 7\)/, '跨月試上儲存後需切到預約月份');
 assert.match(uiSource, /trialTime/, '試上時段需能帶入、儲存並重新顯示');
 assert.match(uiSource, /data-trial-next/, '下一次追蹤日期需能依結案狀態動態隱藏');
 assert.match(uiSource, /\['converted', 'not_enrolled'\]\.includes\(status\) \? ''/, '結案後不得殘留無效的下次追蹤日期');
@@ -160,8 +173,8 @@ assert.match(uiCssSource, /\.dialog > form \{[^}]*min-height: 0;[^}]*display: fl
 assert.match(uiCssSource, /\.dialog-body \{[^}]*min-height: 0;[^}]*overflow-y: auto;/, '所有行政彈窗內容需可獨立向下捲動');
 assert.match(uiCssSource, /\.dialog-foot \{[^}]*flex: 0 0 auto;/, '行政彈窗底部操作需固定留在畫面內');
 assert.match(uiCssSource, /\.file-chip, \.selected-file \{[^}]*max-width: 100%;/, '長檔名不得撐破手機版面');
-assert.match(uiHtmlSource, /app\.js\?v=20260901-admin-dialog-trial-import-1/, '行政新表單需使用獨立快取版本');
-assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=admin-marketing(?:-manager)?&v=20260901-admin-dialog-trial-import-1/g) || []).length, 2, '行政與主管入口都需避開舊版快取');
+assert.match(uiHtmlSource, /app\.js\?v=20260901-admin-future-trial-1/, '行政新表單需使用獨立快取版本');
+assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=admin-marketing(?:-manager)?&v=20260901-admin-future-trial-1/g) || []).length, 2, '行政與主管入口都需避開舊版快取');
 assert.match(uiSource, /此學生已有試上追蹤紀錄，請更新原紀錄/, '前端需在重複新增時立即阻擋');
 assert.match(uiSource, /列印月報/, '主管需能列印每月獎金明細');
 assert.match(uiSource, /actionNode\.classList\.contains\('dialog-backdrop'\) && event\.target !== actionNode/, '點擊表單內按鈕不得被背景誤判為關閉對話框');

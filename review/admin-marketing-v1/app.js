@@ -51,7 +51,7 @@
     const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const parsed = new Date(`${iso}T12:00:00+08:00`);
     if (Number.isNaN(parsed.getTime()) || parsed.getFullYear() !== year || parsed.getMonth() + 1 !== month || parsed.getDate() !== day) return '';
-    return iso <= today ? iso : '';
+    return iso;
   }
   function parseTrialMessage(raw) {
     const text = String(raw || '').replace(/\r\n?/g, '\n').trim();
@@ -586,7 +586,7 @@
         ${metric('已核准獎金', `$${summary.bonus}`, `${summary.approved.length} 人；另 ${summary.pending.length} 人待審`, 'badge-dollar-sign')}
       </div>
       ${isManager && summary.pending.length ? `<div class="notice warning mt-16">${icon('badge-dollar-sign')}<div><strong>${summary.pending.length} 筆首報獎金待確認</strong><br>確認首次一期、繳費證明與未曾領取後再核准。</div></div>` : ''}
-      <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('users-round')}${esc(state.ui.month)} 試上名單</div><div class="panel-subtitle">每位學生只建立一次，後續都更新原紀錄</div></div><span class="badge">${filtered.length} 筆</span></div><div class="panel-body flush">${filtered.length ? `<div class="trial-list">${filtered.map(renderTrialCard).join('')}</div>` : emptyState('user-round-search', '這個月份沒有符合的紀錄', isManager ? '行政登錄試上後會出現在這裡。' : '有試上時當日新增；沒有試上請按「今日無試上」。')}</div></section>
+      <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('users-round')}${esc(state.ui.month)} 試上名單</div><div class="panel-subtitle">每位學生只建立一次，後續都更新原紀錄</div></div><span class="badge">${filtered.length} 筆</span></div><div class="panel-body flush">${filtered.length ? `<div class="trial-list">${filtered.map(renderTrialCard).join('')}</div>` : emptyState('user-round-search', '這個月份沒有符合的紀錄', isManager ? '行政登錄試上後會出現在這裡。' : '可提前登記未來試上；沒有試上仍需於當日確認。')}</div></section>
       ${isManager ? renderTrialBonusTable(summary) : ''}
     </section>`;
   }
@@ -883,7 +883,7 @@
     const approved = item.bonusStatus === 'approved';
     const importPanel = isNew ? `<section class="trial-import"><label for="trial-message-import">貼上家長的試上訊息</label><textarea id="trial-message-import" placeholder="可直接貼上 LINE 訊息，例如：\n學生：王小明\n日期：9/1\n時間：19:00-20:30\n課程：機器人入門\n老師：皮皮老師\n電話：0912-345-678"></textarea><div class="trial-import-actions"><small id="trial-parse-status" class="trial-parse-status">系統只在目前頁面辨識，不會保存整段對話。</small><button type="button" class="button small teal" data-action="parse-trial-message">${icon('scan-text')}辨識並帶入</button></div></section>` : '';
     const body = `${importPanel}<input type="hidden" name="trialId" value="${esc(item.id || '')}"><div class="form-grid">
-      <div class="field"><label for="trial-date">試上日期 <span class="required">*</span></label><input id="trial-date" name="date" type="date" max="${todayIso()}" value="${esc(item.date || todayIso())}" ${isNew ? '' : 'readonly'} required><div class="field-help">新紀錄需於試上當日建立。</div></div>
+      <div class="field"><label for="trial-date">預約試上日期 <span class="required">*</span></label><input id="trial-date" name="date" type="date" value="${esc(item.date || todayIso())}" ${isNew ? '' : 'readonly'} required><div class="field-help">家長預約後即可提前登記，不必等到試上當天。</div></div>
       <div class="field"><label for="trial-student">學生姓名 <span class="required">*</span></label><input id="trial-student" name="studentName" value="${esc(item.studentName || '')}" ${approved ? 'readonly' : ''} required></div>
       <div class="field"><label for="trial-course">試上課程 <span class="required">*</span></label><input id="trial-course" name="course" value="${esc(item.course || '')}" placeholder="例：機器人入門" required></div>
       <div class="field"><label for="trial-time">試上時段</label><input id="trial-time" name="trialTime" value="${esc(item.trialTime || '')}" placeholder="例：19:00–20:30"></div>
@@ -894,7 +894,7 @@
     </div><details class="compact-details mt-16" ${item.note ? 'open' : ''}><summary>${icon('message-square-more')}補充資料（選填）</summary><div class="compact-details-body"><div class="field full"><label for="trial-note">特殊狀況</label><textarea id="trial-note" name="note" placeholder="只有需要保留的特殊狀況才填">${esc(item.note || '')}</textarea></div></div></details>
     ${isNew ? '' : `<section class="subsection"><h3>新增一筆追蹤</h3><div class="form-grid"><div class="field"><label for="followup-date">聯絡日期</label><input id="followup-date" name="followupDate" type="date" max="${todayIso()}" value="${todayIso()}"></div><div class="field"><label for="followup-method">聯絡方式</label><select id="followup-method" name="followupMethod"><option value="line">LINE／訊息</option><option value="phone">電話</option><option value="in_person">現場</option><option value="other">其他</option></select></div><div class="field full"><label for="followup-note">本次家長回覆／處理結果</label><textarea id="followup-note" name="followupNote" placeholder="有聯絡才填；儲存後會加入時間軸"></textarea></div></div></section>`}
     <section class="subsection conversion-fields" data-conversion-fields><h3>首次一期報名與繳費</h3><div class="notice">${icon('badge-dollar-sign')}<div>只有「首次正式報名並完成繳費」才會產生 50 元待審獎金；續報不計。</div></div><div class="form-grid mt-16"><div class="field"><label for="enrollment-date">一期報名日期 <span class="required">*</span></label><input id="enrollment-date" name="enrollmentDate" type="date" value="${esc(item.enrollmentDate || '')}" ${approved ? 'readonly' : ''}></div><div class="field"><label for="payment-date">繳費確認日期 <span class="required">*</span></label><input id="payment-date" name="paymentDate" type="date" value="${esc(item.paymentDate || '')}" ${approved ? 'readonly' : ''}></div><div class="field full"><label for="enrollment-course">正式報名課程 <span class="required">*</span></label><input id="enrollment-course" name="enrollmentCourse" value="${esc(item.enrollmentCourse || '')}" ${approved ? 'readonly' : ''}></div><div class="field"><label for="first-enrollment">是否為第一次正式報名 <span class="required">*</span></label><select id="first-enrollment" name="firstEnrollment" ${approved ? 'disabled' : ''}><option value="">請確認</option><option value="yes" ${item.firstEnrollment === true ? 'selected' : ''}>是，第一次報名一期</option><option value="no" ${item.firstEnrollment === false && item.status === 'converted' ? 'selected' : ''}>不是，屬續報／轉班</option></select>${approved ? '<input type="hidden" name="firstEnrollment" value="yes">' : ''}</div><div class="field"><label for="payment-evidence">報名／繳費證明 <span class="required">*</span> <span class="conditional">首次報名時</span></label><input id="payment-evidence" name="paymentEvidence" type="file" multiple accept="image/*,.pdf" ${approved ? 'disabled' : ''}><div class="field-help">可一次選多張截圖，儲存前可移除點錯的檔案。</div><div class="selected-files" data-file-preview="payment-evidence"></div>${approved ? '' : existingFileControls(item.paymentEvidence || [], 'removePaymentEvidence')}</div></div>${trialBonusBadge(item)}</section>`;
-    showDialog(dialogShell(isNew ? '登錄今日試上' : `更新 ${item.studentName}`, isNew ? '建立一次後，所有聯絡與報名都更新同一筆' : '更新狀態或加入新的家長追蹤', body, '儲存試上追蹤', 'trial-form'), true);
+    showDialog(dialogShell(isNew ? '登錄試上預約' : `更新 ${item.studentName}`, isNew ? '可登記未來日期；建立後，所有聯絡與報名都更新同一筆' : '更新狀態或加入新的家長追蹤', body, '儲存試上追蹤', 'trial-form'), true);
     updateTrialFormVisibility();
   }
 
@@ -919,7 +919,9 @@
     const filled = [];
     fields.forEach(([key, selector, label]) => {
       const control = $(selector);
-      if (!control || !parsed[key] || (!overwrite && String(control.value || '').trim())) return;
+      const hasValue = String(control?.value || '').trim();
+      const mayReplaceDefaultDate = key === 'date' && hasValue === todayIso();
+      if (!control || !parsed[key] || (!overwrite && hasValue && !mayReplaceDefaultDate)) return;
       control.value = parsed[key];
       filled.push(label);
     });
@@ -1117,7 +1119,7 @@
     const firstEnrollmentChoice = String(data.get('firstEnrollment') || '');
     if (!studentName || !course || !teacher || !contactRef) throw new Error('學生、課程、授課老師與家長識別資料皆為必填');
     if (!['converted', 'not_enrolled'].includes(status) && !nextFollowupDate) throw new Error('尚未結案的學生必須設定下一次追蹤日期');
-    if (nextFollowupDate && nextFollowupDate < date) throw new Error('下一次追蹤日期不可早於試上日期');
+    if (nextFollowupDate && nextFollowupDate < todayIso()) throw new Error('下一次追蹤日期不可早於今天');
     if (status === 'converted') {
       if (!enrollmentDate || !paymentDate || !enrollmentCourse || !firstEnrollmentChoice) throw new Error('請完整填寫報名、繳費、正式課程與是否首次報名');
       if (enrollmentDate > todayIso() || paymentDate > todayIso()) throw new Error('報名與繳費日期不可晚於今天');
@@ -1149,7 +1151,8 @@
       const marker = todayTrialMarker();
       if (marker && marker.date === record.date) { marker.noTrial = false; marker.status = 'superseded'; upsertLocal(marker); persist(); }
     }
-    closeDialog(); renderApp(); toast(existing.id ? '試上追蹤已更新' : '今日試上已登錄');
+    state.ui.month = date.slice(0, 7);
+    closeDialog(); renderApp(); toast(existing.id ? '試上追蹤已更新' : date > todayIso() ? '未來試上已登錄' : '今日試上已登錄');
   }
 
   async function handleNoTrial() {

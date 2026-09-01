@@ -284,7 +284,6 @@ function validateAdminMarketingProject_(data) {
 
 function validateAdminMarketingTrial_(data) {
   data.date = adminMarketingDate_(data.date, true);
-  if (data.date > todayStr()) throw new Error('試上日期不可晚於今天');
   data.studentName = adminMarketingText_(data.studentName, 160);
   data.course = adminMarketingText_(data.course, 220);
   data.teacher = adminMarketingText_(data.teacher, 160);
@@ -301,7 +300,7 @@ function validateAdminMarketingTrial_(data) {
   if (['waiting_contact', 'contacted', 'considering', 'followup_scheduled'].indexOf(data.status) >= 0 && !data.nextFollowupDate) {
     throw new Error('尚未結案的試上學生必須設定下一次追蹤日期');
   }
-  if (data.nextFollowupDate && data.nextFollowupDate < data.date) throw new Error('下一次追蹤日期不可早於試上日期');
+  if (data.nextFollowupDate && data.nextFollowupDate < todayStr()) throw new Error('下一次追蹤日期不可早於今天');
   data.followups = (Array.isArray(data.followups) ? data.followups : []).slice(0, 100).map(function (raw) {
     const item = raw || {};
     const cleaned = {
