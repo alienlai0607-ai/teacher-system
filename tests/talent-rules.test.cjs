@@ -182,6 +182,9 @@ assert.match(backendSource, /talentCanAccessHistoricalUser_\(actor, user\)/, '�
 assert.match(talentUiSource, /離職保留/);
 assert.match(anqinUiSource, /route: 'cloud-reports', label: '雲端日報'/);
 assert.match(talentUiSource, /type="file"[^>]*multiple/);
+assert.match(talentUiSource, /const COURSE_TYPES = \['幼兒積木', '樂高簡易積木', '樂高小創客', 'WeDo 機器人', 'SPIKE 機器人', '科學實驗', 'FLL challenge戰隊培訓班', '其他才藝課程'\]/, '才藝課程類型需使用目前正式分類');
+assert.doesNotMatch(talentUiSource.match(/const COURSE_TYPES = \[[^;]+;/)?.[0] || '', /程式設計|競賽培訓/, '新建檔選單不可再提供已刪除的舊分類');
+assert.match(talentUiSource, /function courseTypeOptions\(currentValue = ''\)/, '舊備課與工作紀錄仍需保留原分類，避免編輯時被靜默改值');
 assert.match(talentUiSource, /教案或教材附件/, '才藝備課頁需清楚命名必填資料');
 assert.match(talentUiSource, /if \(!\(pendingFiles\.prep \|\| \[\]\)\.length\)/, '前端儲存前需擋下沒有附件的備課檔案');
 assert.match(talentUiSource, /prep\.id && prepHasMaterial\(prep\)/, '本堂紀錄不得選取缺附件的備課檔案');
