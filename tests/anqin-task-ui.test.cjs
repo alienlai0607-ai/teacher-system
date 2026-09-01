@@ -6,6 +6,8 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'review/anqin-v2/app.js'), 'utf8');
 const styles = fs.readFileSync(path.join(root, 'review/anqin-v2/styles.css'), 'utf8');
+const workspaces = fs.readFileSync(path.join(root, 'shared/workspaces.js'), 'utf8');
+const sharedAuth = fs.readFileSync(path.join(root, 'shared/auth.js'), 'utf8');
 const evaluationBackend = fs.readFileSync(path.join(root, 'apps-script/evaluation.gs'), 'utf8');
 const pdfReport = fs.readFileSync(path.join(root, 'apps-script/pdfreport.gs'), 'utf8');
 
@@ -74,12 +76,54 @@ assert.match(source, /const TEST_VIEW_WRITE_ACTIONS = new Set\([\s\S]*'send-feed
 assert.match(source, /if \(TEST_VIEW_MODE\)[\s\S]{0,220}表單流程正常，最後寫入已攔截/, '安親表單需在正式寫入前由測試模式攔截');
 assert.match(source, /TEST_VIEW_MODE && fileInput[\s\S]{0,220}不會上傳正式檔案/, '安親測試視角選擇附件後不得上傳正式檔案');
 assert.match(source, /可以開啟、輸入與切換完整流程/, '安親測試狀態需明確說明可互動範圍');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260901-simple-prep-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260901-simple-prep-1/, '登入備援路徑也必須避開舊版快取');
 
 const activityFormSource = source.slice(source.indexOf('function renderActivitySpecificFields('), source.indexOf('function renderEvidenceAttachmentList('));
 assert.match(activityFormSource, /if \(activityNeedsPrepSource\(type\)\) return '';/, '課業指導與學科外不得重複顯示舊課程內容欄位');
 assert.match(activityFormSource, /hideStudents: type !== 'classroom'/, '只有班級經營可顯示關聯學生');
 assert.match(activityFormSource, /function renderActivityResultSection\([\s\S]*activityNeedsPrepSource\(value\.type\)[\s\S]*renderActivityPrepFeedbackFields/, '課程紀錄只保留課後備課回饋');
 assert.doesNotMatch(source, /<option value="attendance">出席<\/option>/, '學生追蹤不得再提供出席類型');
+
+const prepFormSource = source.slice(source.indexOf('function renderCoursePrepForm('), source.indexOf('function renderActivityForm('));
+assert.match(prepFormSource, /課程類型 <span class="required">\*<\/span>/, '備課檔案只需先辨識課程類型');
+assert.match(prepFormSource, /課程名稱 <span class="required">\*<\/span>/, '備課檔案只需先辨識課程名稱');
+assert.match(prepFormSource, /教案或教材附件（選填）/, '備課附件必須明確標示為選填');
+assert.doesNotMatch(prepFormSource, /學習者背景與先備能力|可觀察學習目標|課程流程|學習檢核與達成標準/, '輕量備課不得再要求舊版教案段落');
+assert.doesNotMatch(prepFormSource, /renderActivityPlanField/, '備課表單不得再開啟第二層教案表單');
+const prepReadinessSource = source.slice(source.indexOf('function prepSourceReadinessIssues('), source.indexOf('function prepSourceUsable('));
+assert.doesNotMatch(prepReadinessSource, /directPlanReady|planReadiness|建立日不可晚於授課日/, '備課檔案不得因完成百分比、主管審核或日期被阻擋');
+const prepSaveSource = source.slice(source.indexOf('async function saveCoursePrepForm('), source.indexOf('function saveActivityForm('));
+assert.match(prepSaveSource, /status: 'complete'/, '完成基本建檔後應直接可供工作紀錄選用');
+assert.doesNotMatch(prepSaveSource, /directPlanReady\(planId\)/, '儲存備課不得依賴舊版教案完成度');
+const prepManagerSource = source.slice(source.indexOf('function renderPlanReviews('), source.indexOf('function renderTeamRosterTable('));
+assert.match(prepManagerSource, /此頁只做客觀查閱/, '主管備課頁必須明確定位為只讀查閱');
+assert.doesNotMatch(prepManagerSource, /data-action="(?:approve-plan|request-plan-changes|review-plan)"|完整度 \$\{|待審查/, '主管備課頁不得再出現審核與完成度判定');
+assert.match(source, /function reconcileLegacyPlans\(/, '舊版教案必須自動整併為可選取的備課檔案');
+assert.match(source, /mergePlanMaterialsIntoPrep\(linkedPrep, plan\)/, '舊版正式教材必須保留在簡化後的備課附件中');
+assert.match(source, /linkedPrep\.details\.targetCourse = targetCourseForPlan\(plan\)/, '舊備課缺少課程類型時必須由既有教案自動補齊');
+assert.match(source, /storedVersion < 8 \|\| storedVersion > APP_VERSION/, '所有既有正式版本都必須進入安全遷移，不得因版本號更新而清空畫面');
+
+const legacyPrepMigrationSource = source.slice(source.indexOf('function normalizePrepTitle('), source.indexOf('function normalizeLoadedState('));
+const legacyPrepMigrationContext = vm.createContext({
+  normalizeReviewNickname: value => String(value || '').replace(/老師$/u, ''),
+  materialCloudUrl: item => String(item?.cloudUrl || item?.url || ''),
+  inferPrepCategory: () => 'other',
+  uid: prefix => `${prefix}_generated`,
+  syncPlanIdentityFromPrep: () => {},
+});
+vm.runInContext(legacyPrepMigrationSource, legacyPrepMigrationContext);
+const legacyPrepState = {
+  daily: { date: '2026-09-01' },
+  context: { teacher: '紅豆老師' },
+  activities: [{ id: 'prep_old', type: 'lessonprep', teacher: '紅豆老師', title: '', details: {}, planId: 'plan_old', prepEvidence: [] }],
+  lessonPlans: [{ id: 'plan_old', teacher: '紅豆老師', title: '9/1 數學小挑戰', courseType: '安親輔導', materials: [{ id: 'material_old', name: '數學學習單.pdf', size: '1 MB', cloudUrl: 'https://example.com/material.pdf' }] }],
+};
+legacyPrepMigrationContext.reconcileLegacyPlans(legacyPrepState);
+assert.equal(legacyPrepState.activities[0].title, '9/1 數學小挑戰', '舊資料需自動帶回課程名稱');
+assert.equal(legacyPrepState.activities[0].details.targetCourse, '安親課業指導', '舊資料需自動轉成可選取的課程類型');
+assert.equal(legacyPrepState.activities[0].status, 'complete', '舊備課完成遷移後必須直接可選取');
+assert.equal(legacyPrepState.activities[0].prepEvidence[0].fileName, '數學學習單.pdf', '舊教材附件不得在簡化時遺失');
 
 const activitySaveSource = source.slice(source.indexOf('function saveActivityForm('), source.indexOf('function saveWeeklyForm('));
 assert.match(activitySaveSource, /students: type === 'classroom' \? data\.getAll\('students'\) : \[\]/, '儲存時也只能讓班級經營保留學生');
@@ -119,6 +163,14 @@ assert.match(source, /data-action="remove-evidence-attachment"/, '每張成果�
 assert.match(source, /data-action="remove-evidence-pin"/, '每個照片重點標記都需可個別移除');
 assert.match(source, /data-action="remove-operation-photo"/, '班務照片選錯時也需可移除');
 assert.match(styles, /\.operation-photo-remove/, '班務照片移除按鈕需有清楚可點擊樣式');
+const operationPhotoSource = source.slice(source.indexOf('async function hashFile('), source.indexOf('function toggleOperationStatus('));
+assert.match(operationPhotoSource, /file\.arrayBuffer\(\)/, '班務照片需以實際檔案內容建立指紋');
+assert.doesNotMatch(operationPhotoSource, /file\.name\.toLowerCase|lastModified/, '照片檔名或拍攝時間不得被當成影像內容指紋');
+const operationPhotoHandlerSource = source.slice(source.indexOf('async function handleOperationPhoto('), source.indexOf('async function handleReviewDecision('));
+assert.match(operationPhotoHandlerSource, /status: currentStatus/, '選圖時必須同步保留畫面上的正常或異常狀態，避免已附照片仍顯示 0\/4');
+const operationSaveSource = source.slice(source.indexOf('function saveOperationsForm('), source.indexOf('function saveDailySummaryForm('));
+assert.doesNotMatch(operationSaveSource, /fileNames|相同檔名/, '相同檔名但內容不同的手機照片不得被拒絕');
+assert.match(operationSaveSource, /fingerprints/, '真正相同的影像內容仍需阻擋跨面向重複使用');
 assert.match(pdfReport, /教案／教材有效處/, '正式 PDF 需使用新的課後備課回饋欄位');
 assert.match(pdfReport, /parent_handoff_confirmed/, '正式 PDF 需保留無重要事項時的門口交接證據');
 
