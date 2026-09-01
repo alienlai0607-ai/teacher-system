@@ -389,8 +389,8 @@ function saveTalentLesson(params) {
     if (lesson.siteType === 'partner') lesson.duration = 1.5;
     if ([1, 1.5].indexOf(lesson.duration) < 0) throw new Error('授課時數只可選 1 或 1.5 小時');
     const prepRow = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', String(lesson.prepId || ''));
-    if (!prepRow || prepRow.record_type !== 'prep' || prepRow.nickname !== nickname || prepRow.status !== 'approved') {
-      throw new Error('請選擇本人已核准的備課教案');
+    if (!prepRow || prepRow.record_type !== 'prep' || prepRow.nickname !== nickname) {
+      throw new Error('請選擇本人的備課檔案');
     }
     lesson.attendanceFiles = talentAttachments_(lesson.attendanceFiles, true);
     lesson.learningFiles = talentAttachments_(lesson.learningFiles, true);
@@ -498,46 +498,21 @@ function saveTalentPrep(params) {
     return { ok: false, error: '無備課建檔權限' };
   }
   const prep = talentPayload_(params.prep);
-  if (!prep.id || !String(prep.title || '').trim() || !String(prep.courseType || '').trim() || !String(prep.courseName || '').trim()) {
-    return { ok: false, error: '請完成課程類型、名稱與教案標題' };
+  if (!prep.id || !String(prep.courseType || '').trim() || !String(prep.courseName || '').trim()) {
+    return { ok: false, error: '請完成課程類型與課程名稱' };
   }
-  const existing = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', prep.id);
-  if (existing && existing.status === 'approved') return { ok: false, error: '已核准版本不可直接覆蓋，請建立新版本' };
   prep.teacher = nickname;
-  prep.status = prep.status === 'pending' ? 'pending' : 'draft';
+  prep.title = String(prep.title || prep.courseName).trim();
+  prep.status = 'ready';
   prep.date = String(prep.date || todayStr()).slice(0, 10);
-  prep.materials = talentAttachments_(prep.materials, prep.status === 'pending');
-  if (prep.status === 'pending') {
-    ['objective', 'principle', 'guidance', 'game', 'flow', 'version'].forEach(function (key) {
-      if (!String(prep[key] || '').trim()) throw new Error('送審前請完成：' + key);
-    });
-    prep.reviewedBy = '';
-    prep.reviewedAt = '';
-    prep.reviewNote = '';
-  }
+  prep.materials = talentAttachments_(prep.materials, false);
   const saved = upsertTalentRecord_('prep', nickname, prep, actor.nickname);
   logSystem(nickname, 'save_talent_prep', prep.id, { status: prep.status });
   return { ok: true, prep: saved };
 }
 
 function reviewTalentPrep(params) {
-  const actor = params.__actor;
-  if (!talentManagerCanReview_(actor)) return { ok: false, error: '只有才藝主管可審查教案' };
-  const row = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', String(params.prep_id || ''));
-  if (!row || row.record_type !== 'prep') return { ok: false, error: '找不到備課教案' };
-  const owner = findUserByNickname(row.nickname);
-  if (!owner || !talentCanAccessUser_(actor, owner)) return { ok: false, error: '無權審查此教案' };
-  const result = String(params.result || '') === 'approved' ? 'approved' : 'returned';
-  const note = String(params.note || '').trim();
-  if (!note) return { ok: false, error: '請填寫具體審查意見' };
-  const prep = talentRecordObject_(row);
-  prep.status = result;
-  prep.reviewNote = note;
-  prep.reviewedBy = actor.nickname;
-  prep.reviewedAt = nowIso();
-  const saved = upsertTalentRecord_('prep', row.nickname, prep, actor.nickname);
-  logSystem(actor.nickname, 'review_talent_prep', prep.id, { result: result, teacher: row.nickname });
-  return { ok: true, prep: saved };
+  return { ok: false, error: '備課檔案儲存後即可使用，不需要主管審核' };
 }
 
 function updateTalentAppStatus(params) {
@@ -742,10 +717,10 @@ function generateTalentLessonPdf_(lesson, user) {
   } else {
     html += '<h2>' + talentHtmlEsc_(lesson.courseName || lesson.courseType) + '</h2><div class="muted">' + talentHtmlEsc_(lesson.courseType || '') + '　' + talentHtmlEsc_(lesson.duration || '') + ' 小時</div>';
     html += '<div class="grid six"><div class="box">應到<br><strong>' + Number(lesson.expected || 0) + '</strong></div><div class="box">正式實到<br><strong>' + Number(lesson.present || 0) + '</strong></div><div class="box">請假<br><strong>' + Number(lesson.leave || 0) + '</strong></div><div class="box">未請假缺席<br><strong>' + Number(lesson.absent || 0) + '</strong></div><div class="box">補課<br><strong>' + Number(lesson.makeup || 0) + '</strong></div><div class="box">體驗<br><strong>' + Number(lesson.trial || 0) + '</strong></div></div>';
-    html += '<h3>本堂採用的備課教案</h3><div class="box' + (prep ? '' : ' warning') + '">' + (prep
-      ? '<strong>' + talentHtmlEsc_(prep.title || prep.courseName || '備課教案') + '</strong>　' + talentHtmlEsc_(prep.version || '') + '<div class="muted">' + talentHtmlEsc_(prep.courseType || '') + ' · ' + talentHtmlEsc_(prep.status === 'approved' ? '已核准' : prep.status || '') + '</div>'
-      : '原備課教案已不存在，請由主管確認') + '</div>';
-    if (prep) html += talentAttachmentLinks_('教案與教材', prep.materials);
+    html += '<h3>本堂使用的備課檔案</h3><div class="box' + (prep ? '' : ' warning') + '">' + (prep
+      ? '<strong>' + talentHtmlEsc_(prep.courseName || prep.title || '備課檔案') + '</strong><div class="muted">' + talentHtmlEsc_(prep.courseType || '') + '</div>' + (prep.notes ? '<p>' + talentHtmlEsc_(prep.notes) + '</p>' : '')
+      : '原備課檔案已不存在') + '</div>';
+    if (prep) html += talentAttachmentLinks_('備課附件', prep.materials);
     html += '<h3>本堂實際完成內容</h3><div class="box">' + talentHtmlEsc_(lesson.completed) + '</div>';
     html += '<h3>孩子反應／學習證據</h3><div class="box">' + talentHtmlEsc_(lesson.response) + '</div>';
     html += '<h3>課程問題與下次優化</h3><div class="box">' + talentHtmlEsc_(lesson.issue) + '</div>';

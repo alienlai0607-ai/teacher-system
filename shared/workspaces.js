@@ -29,7 +29,7 @@
       shortLabel: '才藝正職',
       description: '工作日誌、KPI 與獎金',
       icon: 'sparkles',
-      path: 'review/talent-v2/index.html?workspace=talent-fulltime',
+      path: 'review/talent-v2/index.html?workspace=talent-fulltime&v=20260901-simple-talent-prep-1',
     },
     'talent-pt': {
       id: 'talent-pt',
@@ -38,16 +38,16 @@
       shortLabel: '才藝 PT',
       description: '上課紀錄、鐘點與續報',
       icon: 'clock-3',
-      path: 'review/talent-v2/index.html?workspace=talent-pt',
+      path: 'review/talent-v2/index.html?workspace=talent-pt&v=20260901-simple-talent-prep-1',
     },
     'talent-manager': {
       id: 'talent-manager',
       group: 'talent',
       label: '才藝主管',
       shortLabel: '才藝主管',
-      description: '備課審查、評分與結算',
+      description: '備課查閱、評分與結算',
       icon: 'chart-no-axes-combined',
-      path: 'review/talent-v2/index.html?workspace=talent-manager',
+      path: 'review/talent-v2/index.html?workspace=talent-manager&v=20260901-simple-talent-prep-1',
     },
     'talent-payroll': {
       id: 'talent-payroll',
@@ -56,7 +56,7 @@
       shortLabel: '才藝薪資',
       description: 'PT 月度鐘點與續報資格',
       icon: 'calculator',
-      path: 'review/talent-v2/index.html?workspace=talent-payroll',
+      path: 'review/talent-v2/index.html?workspace=talent-payroll&v=20260901-simple-talent-prep-1',
     },
     'admin-marketing': {
       id: 'admin-marketing',

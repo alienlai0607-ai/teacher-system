@@ -49,7 +49,7 @@
 
   const COURSE_TYPES = ['幼兒積木', 'WeDo 機器人', 'SPIKE 機器人', '程式設計', '科學實驗', '競賽培訓', '其他才藝課程'];
   const KPI_DIMENSIONS = [
-    { key: 'prep', label: '備課教案建檔與審查', max: 25, description: '教案完整、課前核准、版本修正可追溯' },
+    { key: 'prep', label: '備課檔案與課程準備', max: 25, description: '課程名稱清楚、實際備課資料可查閱' },
     { key: 'evidence', label: '本堂紀錄與學習證據', max: 25, description: '記錄完整、證據對應課程、下次調整具體' },
     { key: 'communication', label: 'APP 與親師溝通', max: 20, description: '週六前完成 APP、溝通與個案追蹤完整' },
     { key: 'attendance', label: '出席與班級穩定追蹤', max: 15, description: '點名一致、缺席追蹤、續報追蹤' },
@@ -60,7 +60,7 @@
   const NAV = {
     fulltime: [
       { route: 'today', label: '今日上課', icon: 'clipboard-pen-line' },
-      { route: 'prep', label: '備課教案', icon: 'notebook-tabs' },
+      { route: 'prep', label: '備課檔案', icon: 'notebook-tabs' },
       { route: 'weekly', label: '家長 APP', icon: 'images' },
       { route: 'performance', label: 'KPI 與獎金', icon: 'gauge' },
       { route: 'records', label: '我的紀錄', icon: 'history' },
@@ -68,7 +68,7 @@
     ],
     pt: [
       { route: 'today', label: '今日上課', icon: 'clipboard-pen-line' },
-      { route: 'prep', label: '備課教案', icon: 'notebook-tabs' },
+      { route: 'prep', label: '備課檔案', icon: 'notebook-tabs' },
       { route: 'weekly', label: '家長 APP', icon: 'images' },
       { route: 'pay', label: '鐘點與續報', icon: 'badge-dollar-sign' },
       { route: 'records', label: '我的紀錄', icon: 'history' },
@@ -76,7 +76,7 @@
     ],
     manager: [
       { route: 'dashboard', label: '主管總覽', icon: 'layout-dashboard' },
-      { route: 'prep-review', label: '備課審查', icon: 'file-check-2' },
+      { route: 'prep-review', label: '備課檔案', icon: 'folder-search-2' },
       { route: 'log-review', label: '工作紀錄', icon: 'scan-search' },
       { route: 'scoring', label: 'KPI 評分', icon: 'gauge' },
       { route: 'settlement', label: '薪資獎金', icon: 'calculator' },
@@ -220,6 +220,7 @@
   }
   let pendingFiles = { attendance: [], learning: [], room: [], app: [], prep: [] };
   let activeLogSource = null;
+  let activePrepSource = null;
   const cloudRuntime = {
     status: PREVIEW_MODE ? 'preview' : 'loading',
     message: PREVIEW_MODE ? '內部審查資料只保存在這台裝置' : '正在讀取正式資料',
@@ -279,7 +280,7 @@
       currentUser.restDays = Array.isArray(profile.rest_days) ? profile.rest_days : (currentUser.restDays || []);
     }
     cloudRuntime.status = 'ready';
-    cloudRuntime.message = `已同步 ${state.logs.length} 筆課堂、${state.preps.length} 份教案`;
+    cloudRuntime.message = `已同步 ${state.logs.length} 筆課堂、${state.preps.length} 份備課檔案`;
     persist('雲端已同步');
     renderApp();
     if (state.ui.route === 'cloud-reports' && cloudRuntime.foldersStatus === 'idle') window.setTimeout(loadCloudFolders, 0);
@@ -354,7 +355,7 @@
     } catch (error) {}
     openDialog({
       title: '開啟 APP 通知',
-      body: `<div class="notice info">${icon('bell-ring', 19)}<div><strong>即時收到教案審查與主管回覆</strong><span>只有按下「開啟通知」後，瀏覽器才會詢問系統授權。</span></div></div>`,
+      body: `<div class="notice info">${icon('bell-ring', 19)}<div><strong>即時收到主管評核與回覆</strong><span>只有按下「開啟通知」後，瀏覽器才會詢問系統授權。</span></div></div>`,
       footer: `<button type="button" class="btn" data-action="close-dialog">稍後</button><button type="button" class="btn btn-primary" data-action="enable-push">${icon('bell-plus', 16)}開啟通知</button>`,
     });
   }
@@ -362,7 +363,7 @@
   function cloudGate() {
     if (PREVIEW_MODE || cloudRuntime.status === 'ready') return '';
     if (cloudRuntime.status === 'loading') {
-      return `${pageHead('正在讀取正式資料', '請稍候，完成前不開放填寫。')}<section class="panel"><div class="empty-state"><span>${icon('loader-circle', 28)}</span><h3>正在同步</h3><p>系統正在核對帳號、課堂、教案與月結資料。</p></div></section>`;
+      return `${pageHead('正在讀取正式資料', '請稍候，完成前不開放填寫。')}<section class="panel"><div class="empty-state"><span>${icon('loader-circle', 28)}</span><h3>正在同步</h3><p>系統正在核對帳號、課堂、備課檔案與月結資料。</p></div></section>`;
     }
     return `${pageHead('正式資料暫時無法讀取', '為避免覆蓋既有內容，目前已停止新增與修改。')}<div class="notice strict">${icon('cloud-alert', 19)}<div><strong>資料尚未載入</strong><span>${esc(cloudRuntime.message)}</span></div><button type="button" class="btn btn-small" data-action="retry-cloud">重新讀取</button></div>`;
   }
@@ -427,7 +428,7 @@
   }
 
   function renderNavButton(item) {
-    const count = item.route === 'prep-review' ? state.preps.filter(prep => prep.status === 'pending' && isActiveTalentTeacher(prep.teacher)).length : 0;
+    const count = 0;
     return `<button type="button" class="nav-button ${state.ui.route === item.route ? 'active' : ''}" data-action="navigate" data-route="${item.route}">
       ${icon(item.icon, 18)}<span>${esc(item.label)}</span>${count ? `<span class="nav-count">${count}</span>` : ''}
     </button>`;
@@ -539,18 +540,19 @@
 
   function renderPrep() {
     const preps = ownPreps();
-    return `${pageHead('備課教案', '教案只在這裡建檔一次；授課當天只選用已核准版本。', `<button type="button" class="btn btn-primary" data-action="new-prep">${icon('plus', 17)}新增備課教案</button>`)}
-      <div class="filter-bar"><span>${icon('folder-open', 17)}${preps.length} 份備課檔案</span><span class="filter-note">核准後才能於本堂紀錄選用</span></div>
-      <section class="card-list">${preps.length ? preps.map(renderPrepCard).join('') : renderEmpty('尚無備課教案', '先建立核心原理、引導方法、遊戲挑戰與教材。', 'notebook-tabs', '<button type="button" class="btn btn-primary" data-action="new-prep">開始建檔</button>')}</section>`;
+    return `${pageHead('備課檔案', '記錄課程名稱，需要時再補充附件；儲存後可直接用於本堂紀錄。', `<button type="button" class="btn btn-primary" data-action="new-prep">${icon('plus', 17)}新增備課檔案</button>`)}
+      <div class="filter-bar"><span>${icon('folder-open', 17)}${preps.length} 門課程</span><span class="filter-note">不需主管審核</span></div>
+      <section class="card-list">${preps.length ? preps.map(renderPrepCard).join('') : renderEmpty('尚無備課檔案', '先建立課程類型與課程名稱，上課當天即可選用。', 'notebook-tabs', '<button type="button" class="btn btn-primary" data-action="new-prep">新增備課檔案</button>')}</section>`;
   }
 
   function renderPrepCard(prep) {
+    const updated = prep.updatedAt || prep.createdAt || prep.date;
+    const note = prep.notes || prep.summary || '';
     return `<article class="prep-card">
-      <div class="prep-card-head"><span class="course-icon">${icon('notebook-tabs', 21)}</span><div><div class="record-title">${esc(prep.title)} ${statusBadge(prep.status)}</div><div class="record-meta">${esc(prep.courseType)} · ${esc(prep.courseName)} · ${esc(prep.version)}</div></div></div>
-      <p>${esc(prep.objective)}</p>
-      <div class="tag-row"><span>${icon('lightbulb', 14)}核心原理</span><span>${icon('route', 14)}引導流程</span><span>${icon('gamepad-2', 14)}遊戲／改造</span><span>${icon('paperclip', 14)}${prep.materials.length} 份教材</span></div>
-      ${prep.reviewNote ? `<div class="review-note"><strong>${esc(prep.reviewedBy || '主管回覆')}</strong><span>${esc(prep.reviewNote)}</span></div>` : ''}
-      <div class="card-actions"><button type="button" class="btn" data-action="view-prep" data-id="${prep.id}">${icon('eye', 16)}查看完整教案</button>${isTeacher() && prep.status !== 'approved' ? `<button type="button" class="btn btn-primary" data-action="edit-prep" data-id="${prep.id}">${icon('pencil', 16)}繼續編輯</button>` : ''}</div>
+      <div class="prep-card-head"><span class="course-icon">${icon('notebook-tabs', 21)}</span><div><div class="record-title">${esc(prep.courseName || prep.title || '未命名課程')}</div><div class="record-meta">${esc(prep.courseType || '未分類')}${updated ? ` · ${formatDate(updated)} 更新` : ''}</div></div></div>
+      ${note ? `<p>${esc(note)}</p>` : ''}
+      <div class="tag-row"><span>${icon('paperclip', 14)}${Array.isArray(prep.materials) ? prep.materials.length : 0} 份附件</span><span>${icon('circle-check', 14)}可直接選用</span></div>
+      <div class="card-actions"><button type="button" class="btn" data-action="view-prep" data-id="${prep.id}">${icon('eye', 16)}查看檔案</button>${isTeacher() ? `<button type="button" class="btn btn-primary" data-action="edit-prep" data-id="${prep.id}">${icon('pencil', 16)}編輯</button>` : ''}</div>
     </article>`;
   }
 
@@ -771,12 +773,12 @@
 
   function renderRecords() {
     const logs = ownLogs().sort((a, b) => String(b.date).localeCompare(String(a.date)));
-    return `${pageHead('我的紀錄', '可重新點入每一筆，查看當時教案版本、證據與結算結果。', `<button type="button" class="btn" data-action="export-own">${icon('download', 16)}匯出本月</button>`)}
+    return `${pageHead('我的紀錄', '可重新點入每一筆，查看當時備課檔案、證據與結算結果。', `<button type="button" class="btn" data-action="export-own">${icon('download', 16)}匯出本月</button>`)}
       <section class="panel"><div class="panel-head"><div><h2>課堂紀錄</h2><p>${logs.length} 筆可查看</p></div></div><div class="panel-body">${logs.length ? logs.map(renderLogRow).join('') : renderEmpty('尚無記錄', '本堂紀錄送出後會保留在這裡。', 'history')}</div></section>`;
   }
 
   function renderManagerDashboard() {
-    const pendingPreps = state.preps.filter(item => item.status === 'pending' && isActiveTalentTeacher(item.teacher)).length;
+    const prepCount = state.preps.filter(item => isActiveTalentTeacher(item.teacher)).length;
     const logs = state.logs.filter(item => item.date.slice(0, 7) === state.ui.month);
     const incomplete = logs.filter(item => !logComplete(item)).length;
     const missedPt = talentStaff().filter(person => person.employment === 'pt').reduce((sum, person) => {
@@ -786,50 +788,44 @@
     const appMissing = logs.filter(item => logComplete(item) && appEvidenceRequired(item) && !appEvidenceComplete(item)).length;
     const missing = incomplete + missedPt + appMissing;
     return `${pageHead('主管總覽', '先看缺件與待決策，再進入單筆證據。')}
-      <section class="status-grid manager"><article class="status-card"><span class="status-icon yellow">${icon('file-clock', 20)}</span><div><small>待審備課</small><strong>${pendingPreps} 份</strong><span>授課前需完成</span></div></article><article class="status-card"><span class="status-icon blue">${icon('notebook-pen', 20)}</span><div><small>本月課堂</small><strong>${logs.length} 堂</strong><span>正職與 PT 分開結算</span></div></article><article class="status-card"><span class="status-icon red">${icon('triangle-alert', 20)}</span><div><small>缺件／資格失效</small><strong>${missing} 堂</strong><span>${missing ? `日誌漏填 ${missedPt}／APP 缺件 ${appMissing}` : todayIso() < TALENT_EFFECTIVE_DATE ? '9/1 起開始判定' : '目前沒有缺件'}</span></div></article></section>
-      <section class="two-column manager-grid"><article class="panel"><div class="panel-head"><div><h2>待處理</h2><p>依時效排序</p></div></div><div class="panel-body action-list">${pendingPreps ? `<button type="button" data-action="navigate" data-route="prep-review"><span class="action-icon yellow">${icon('file-check-2', 19)}</span><span><strong>${pendingPreps} 份備課等待審查</strong><small>檢查原理、引導、遊戲與教材</small></span>${icon('chevron-right', 18)}</button>` : ''}<button type="button" data-action="navigate" data-route="scoring"><span class="action-icon blue">${icon('gauge', 19)}</span><span><strong>本月 KPI 尚未公布</strong><small>核對系統證據後再確定分數</small></span>${icon('chevron-right', 18)}</button><button type="button" data-action="navigate" data-route="settlement"><span class="action-icon green">${icon('calculator', 19)}</span><span><strong>鐘點與獎金待行政核准</strong><small>老師申報僅為預估，正式金額需核准</small></span>${icon('chevron-right', 18)}</button></div></article><article class="panel"><div class="panel-head"><div><h2>人員概況</h2><p>含待開通人員；未啟用前不列入計薪與漏填</p></div></div><div class="panel-body people-mini">${visibleTalentStaff().filter(person => ['fulltime', 'pt'].includes(person.employment)).map(person => `<div><span class="mini-avatar">${esc(person.nickname.replace('老師', '').slice(0, 2))}</span><span><strong>${esc(person.nickname)}</strong><small>${person.employment === 'pt' ? 'PT' : '正職'} · ${person.schedule?.[0]?.site || person.campus}</small></span>${statusBadge(person.status === 'pending' ? '待開通' : '正常')}</div>`).join('')}</div></article></section>`;
+      <section class="status-grid manager"><article class="status-card"><span class="status-icon yellow">${icon('folder-open', 20)}</span><div><small>備課檔案</small><strong>${prepCount} 份</strong><span>僅供查閱，不需核准</span></div></article><article class="status-card"><span class="status-icon blue">${icon('notebook-pen', 20)}</span><div><small>本月課堂</small><strong>${logs.length} 堂</strong><span>正職與 PT 分開結算</span></div></article><article class="status-card"><span class="status-icon red">${icon('triangle-alert', 20)}</span><div><small>缺件／資格失效</small><strong>${missing} 堂</strong><span>${missing ? `日誌漏填 ${missedPt}／APP 缺件 ${appMissing}` : todayIso() < TALENT_EFFECTIVE_DATE ? '9/1 起開始判定' : '目前沒有缺件'}</span></div></article></section>
+      <section class="two-column manager-grid"><article class="panel"><div class="panel-head"><div><h2>待處理</h2><p>依時效排序</p></div></div><div class="panel-body action-list"><button type="button" data-action="navigate" data-route="scoring"><span class="action-icon blue">${icon('gauge', 19)}</span><span><strong>本月 KPI 尚未公布</strong><small>核對系統證據後再確定分數</small></span>${icon('chevron-right', 18)}</button><button type="button" data-action="navigate" data-route="settlement"><span class="action-icon green">${icon('calculator', 19)}</span><span><strong>鐘點與獎金待行政核准</strong><small>老師申報僅為預估，正式金額需核准</small></span>${icon('chevron-right', 18)}</button></div></article><article class="panel"><div class="panel-head"><div><h2>人員概況</h2><p>含待開通人員；未啟用前不列入計薪與漏填</p></div></div><div class="panel-body people-mini">${visibleTalentStaff().filter(person => ['fulltime', 'pt'].includes(person.employment)).map(person => `<div><span class="mini-avatar">${esc(person.nickname.replace('老師', '').slice(0, 2))}</span><span><strong>${esc(person.nickname)}</strong><small>${person.employment === 'pt' ? 'PT' : '正職'} · ${person.schedule?.[0]?.site || person.campus}</small></span>${statusBadge(person.status === 'pending' ? '待開通' : '正常')}</div>`).join('')}</div></article></section>`;
   }
 
   function renderPrepReview() {
-    const reviewable = state.preps
-      .filter(item => item.status !== 'draft' && (item.status !== 'pending' || isActiveTalentTeacher(item.teacher)));
-    const teachers = Array.from(new Set(reviewable.map(item => item.teacher).filter(Boolean))).map(teacher => {
-      const preps = reviewable.filter(item => normalizeName(item.teacher) === normalizeName(teacher));
+    const viewable = state.preps.slice();
+    const teachers = Array.from(new Set(viewable.map(item => item.teacher).filter(Boolean))).map(teacher => {
+      const preps = viewable.filter(item => normalizeName(item.teacher) === normalizeName(teacher));
       return {
         teacher,
         total: preps.length,
-        pending: preps.filter(item => item.status === 'pending').length,
         latest: preps.map(item => String(item.updatedAt || item.reviewedAt || item.createdAt || '')).sort().reverse()[0] || '',
       };
-    }).sort((left, right) => right.pending - left.pending || String(right.latest).localeCompare(String(left.latest)) || left.teacher.localeCompare(right.teacher, 'zh-TW'));
+    }).sort((left, right) => String(right.latest).localeCompare(String(left.latest)) || left.teacher.localeCompare(right.teacher, 'zh-TW'));
     const selectedTeacher = teachers.some(item => normalizeName(item.teacher) === normalizeName(state.ui.prepReviewTeacher))
       ? state.ui.prepReviewTeacher
       : '';
     const selectedPreps = selectedTeacher
-      ? reviewable.filter(item => normalizeName(item.teacher) === normalizeName(selectedTeacher)).sort((left, right) => {
-        const priority = { pending: 0, returned: 1, approved: 2 };
-        return (priority[left.status] ?? 9) - (priority[right.status] ?? 9)
-          || String(right.updatedAt || right.reviewedAt || right.createdAt || '').localeCompare(String(left.updatedAt || left.reviewedAt || left.createdAt || ''));
-      })
+      ? viewable.filter(item => normalizeName(item.teacher) === normalizeName(selectedTeacher)).sort((left, right) => String(right.updatedAt || right.reviewedAt || right.createdAt || '').localeCompare(String(left.updatedAt || left.reviewedAt || left.createdAt || '')))
       : [];
     const teacherList = teachers.length
-      ? teachers.map(item => `<button type="button" class="prep-teacher-button ${normalizeName(item.teacher) === normalizeName(selectedTeacher) ? 'is-selected' : ''}" data-action="select-prep-review-teacher" data-teacher="${esc(item.teacher)}"><span class="mini-avatar">${esc(item.teacher.replace(/(?:老師|主管)$/, '').slice(0, 2))}</span><span><strong>${esc(item.teacher)}</strong><small>${item.pending ? `${item.pending} 份待審` : '目前無待審'} · 共 ${item.total} 份</small></span>${item.pending ? `<b>${item.pending}</b>` : icon('chevron-right', 16)}</button>`).join('')
-      : renderEmpty('目前沒有教案', '老師送出備課教案後會依姓名出現在這裡。', 'notebook-tabs');
+      ? teachers.map(item => `<button type="button" class="prep-teacher-button ${normalizeName(item.teacher) === normalizeName(selectedTeacher) ? 'is-selected' : ''}" data-action="select-prep-review-teacher" data-teacher="${esc(item.teacher)}"><span class="mini-avatar">${esc(item.teacher.replace(/(?:老師|主管)$/, '').slice(0, 2))}</span><span><strong>${esc(item.teacher)}</strong><small>${item.total} 份備課檔案</small></span>${icon('chevron-right', 16)}</button>`).join('')
+      : renderEmpty('目前沒有備課檔案', '老師建立課程後會依姓名出現在這裡。', 'notebook-tabs');
     const prepList = !selectedTeacher
-      ? renderEmpty('先選擇老師', '選擇左側老師後，再從該老師的教案清單開啟審查。', 'user-round-search')
+      ? renderEmpty('先選擇老師', '選擇左側老師後，再查看該老師的課程檔案。', 'user-round-search')
       : selectedPreps.length
         ? `<div class="prep-review-list">${selectedPreps.map(prep => {
           const updated = prep.updatedAt || prep.reviewedAt || prep.createdAt;
-          return `<button type="button" class="prep-review-row" data-action="view-prep-review" data-id="${esc(prep.id)}"><span class="course-icon">${icon('notebook-tabs', 19)}</span><span><strong>${esc(prep.title)}</strong><small>${esc(prep.courseType)} · ${esc(prep.version)}${updated ? ` · ${formatDate(updated)}` : ''}</small></span>${statusBadge(prep.status)}${icon('chevron-right', 17)}</button>`;
+          return `<button type="button" class="prep-review-row" data-action="view-prep-review" data-id="${esc(prep.id)}"><span class="course-icon">${icon('notebook-tabs', 19)}</span><span><strong>${esc(prep.courseName || prep.title || '未命名課程')}</strong><small>${esc(prep.courseType || '未分類')}${updated ? ` · ${formatDate(updated)} 更新` : ''} · ${Array.isArray(prep.materials) ? prep.materials.length : 0} 份附件</small></span>${icon('chevron-right', 17)}</button>`;
         }).join('')}</div>`
-        : renderEmpty('這位老師尚無教案', '教案送出後會出現在這裡。', 'file-search');
-    return `${pageHead('備課審查', '先選老師，再開啟單一教案進行審查。')}
-      <section class="prep-review-layout"><article class="panel prep-teacher-panel"><div class="panel-head"><div><h2>1. 選擇老師</h2><p>${teachers.reduce((sum, item) => sum + item.pending, 0)} 份待審</p></div></div><div class="panel-body prep-teacher-list">${teacherList}</div></article><article class="panel prep-document-panel"><div class="panel-head"><div><h2>${selectedTeacher ? `2. ${esc(selectedTeacher)}的教案` : '2. 選擇教案'}</h2><p>${selectedTeacher ? `${selectedPreps.length} 份教案，待審優先排列` : '不會一次展開所有教案內容'}</p></div></div><div class="panel-body">${prepList}</div></article></section>`;
+        : renderEmpty('這位老師尚無備課檔案', '建立課程後會出現在這裡。', 'file-search');
+    return `${pageHead('備課檔案', '依老師查閱上課課程與附件；此頁不需要核准或退回。')}
+      <section class="prep-review-layout"><article class="panel prep-teacher-panel"><div class="panel-head"><div><h2>1. 選擇老師</h2><p>${teachers.length} 位老師</p></div></div><div class="panel-body prep-teacher-list">${teacherList}</div></article><article class="panel prep-document-panel"><div class="panel-head"><div><h2>${selectedTeacher ? `2. ${esc(selectedTeacher)}的備課檔案` : '2. 選擇課程'}</h2><p>${selectedTeacher ? `${selectedPreps.length} 門課程` : '一次只查看一位老師，畫面保持乾淨'}</p></div></div><div class="panel-body">${prepList}</div></article></section>`;
   }
 
   function renderLogReview() {
     const logs = state.logs.slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
-    return `${pageHead('工作紀錄', '先看資料完整度，再查看教案、學習證據與課後調整是否相互對應。')}
+    return `${pageHead('工作紀錄', '查看備課檔案、學習證據與課後調整是否相互對應。')}
       <section class="panel"><div class="panel-head"><div><h2>所有課堂</h2><p>${logs.length} 筆紀錄</p></div></div><div class="panel-body">${logs.length ? logs.map(renderLogRow).join('') : renderEmpty('尚無紀錄', '老師送出後會出現在這裡。', 'scan-search')}</div></section>`;
   }
 
@@ -984,7 +980,7 @@
     }
     return `${pageHead(isPt() ? 'PT 使用與規則' : modeRole() === 'fulltime' ? '正職使用與規則' : '才藝部制度規則', '將說明集中在這裡，正式填寫頁面只保留當下需要的提示。')}
       <section class="guide-grid">
-        <article class="guide-card"><span>${icon('route', 22)}</span><div><h2>一次填寫流程</h2><ol><li>課前建立備課教案，可一次多選文件、照片或 15 MB 內的 MP4／MOV 備課影片，再送主管審查。</li><li>上課當天選擇固定班次與已核准版本。</li><li>上傳點名、學習證據與教室復原照片。</li><li>發布家長 APP 後，到「家長 APP」上傳完成截圖；合作校免上傳。</li><li>當日需要補充時，從「我的紀錄」開啟並按「更新紀錄」；PT 一般課堂跨日後不開放修改。</li></ol></div></article>
+        <article class="guide-card"><span>${icon('route', 22)}</span><div><h2>一次填寫流程</h2><ol><li>課前在「備課檔案」建立課程類型與課程名稱；教材、照片或備課影片有需要再附加，不需主管審核。</li><li>上課當天選擇固定班次與本堂使用的備課檔案。</li><li>上傳點名、學習證據與教室復原照片。</li><li>發布家長 APP 後，到「家長 APP」上傳完成截圖；合作校免上傳。</li><li>當日需要補充時，從「我的紀錄」開啟並按「更新紀錄」；PT 一般課堂跨日後不開放修改。</li></ol></div></article>
         <article class="guide-card"><span>${icon('images', 22)}</span><div><h2>證據怎麼拍</h2><ul><li>點名簿要看得出日期、課程與圈記。</li><li>過程證據要看得出操作、討論或引導。</li><li>成果證據要能對應本堂目標，不以張數加分。</li><li>可一次多選照片與影片；選錯可先按叉號移除再送出。</li></ul></div></article>
         ${isPt() || ['manager', 'payroll'].includes(modeRole()) ? `<article class="guide-card"><span>${icon('badge-dollar-sign', 22)}</span><div><h2>PT 鐘點規則</h2><ul><li>制度自 2026/09/01 起正式判定。</li><li>2–4 人 500／小時；5–7 人 600／小時；8–10 人 800／小時。</li><li>體驗不計級距，補課計入。</li><li>正常上課若任一堂未於當日送出，當月續報獎金資格取消且不能補寫。</li><li>自營教室每堂需上傳家長 APP 發布截圖；合作校免上傳。</li><li>停課可補選過去排課日；需填原因，不計鐘點，也不算漏填。</li><li>黑豹善化合作校每堂固定 900，無續報獎金。</li><li>PT 沒有新生獎金；自營教室續報獎金須通過當月履約。</li></ul></div></article>` : ''}
         ${['fulltime', 'manager'].includes(modeRole()) ? `<article class="guide-card"><span>${icon('gauge', 22)}</span><div><h2>正職 KPI 獎金</h2><ul><li>80–84 分：符合職務標準，不另發。</li><li>85–89 分：1,000 元。</li><li>90–94 分：1,500 元。</li><li>95–100 分：2,500 元。</li></ul></div></article>` : ''}
@@ -998,7 +994,7 @@
 
   function statusBadge(status) {
     const map = {
-      approved: ['已核准', 'green'], pending: ['待審', 'yellow'], returned: ['退回修改', 'red'], draft: ['草稿', 'gray'], submitted: ['已送出', 'green'], cancelled: ['已停課', 'gray'], published: ['已發布', 'green'], '正常': ['正常', 'green'], '待開通': ['待開通', 'yellow'], complete: ['完整', 'green'], '資格取消': ['資格取消', 'red'], '待完成': ['待完成', 'yellow']
+      ready: ['可使用', 'green'], approved: ['舊版已核准', 'green'], pending: ['舊版待審', 'gray'], returned: ['舊版退回', 'gray'], draft: ['舊版草稿', 'gray'], submitted: ['已送出', 'green'], cancelled: ['已停課', 'gray'], published: ['已發布', 'green'], '正常': ['正常', 'green'], '待開通': ['待開通', 'yellow'], complete: ['完整', 'green'], '資格取消': ['資格取消', 'red'], '待完成': ['待完成', 'yellow']
     };
     const item = map[status] || [status, 'gray'];
     return `<span class="badge ${item[1]}">${esc(item[0])}</span>`;
@@ -1022,8 +1018,8 @@
     return activeLogSource?.[name] ?? fallback;
   }
 
-  function approvedPreps() {
-    return state.preps.filter(prep => prep.status === 'approved' && (normalizeName(prep.teacher) === normalizeName(currentUser.nickname) || prep.teacher === '共用'));
+  function usablePreps() {
+    return state.preps.filter(prep => prep.id && (normalizeName(prep.teacher) === normalizeName(currentUser.nickname) || prep.teacher === '共用'));
   }
 
   function openLogEditor(existing = null) {
@@ -1038,7 +1034,7 @@
     pendingFiles = {
       attendance: draft.attendanceFiles || [], learning: draft.learningFiles || [], room: draft.roomFiles || [], app: draft.appFiles || [], prep: []
     };
-    const prepOptions = approvedPreps();
+    const prepOptions = usablePreps();
     openDrawer({
       title: editing ? '編輯本堂紀錄' : state.draftLog ? '繼續本堂紀錄' : '新增本堂紀錄',
       subtitle: editing ? '今日內更新同一筆，不會重複計薪。' : '同一頁完成一堂課，系統會自動草稿保留。',
@@ -1062,8 +1058,8 @@
         </div><div class="count-grid">
           ${numberField('應到正式', 'expected', formValue('expected', 0), true)}${numberField('正式實到', 'present', formValue('present', 0), true)}${numberField('請假', 'leave', formValue('leave', 0), true)}${numberField('未請假缺席', 'absent', formValue('absent', 0), true)}${numberField('補課實到', 'makeup', formValue('makeup', 0), true)}${numberField('體驗人數', 'trial', formValue('trial', 0), true)}
         </div>${uploadField('點名簿照片', 'attendance', '要看得出日期、課程與圈記；可一次多選。', 'image/*', true)}</section>
-        <section class="form-section"><div class="section-title"><span class="section-number">${isPt() ? '3' : '2'}</span><div><h3>本堂教案與教學日誌</h3><p>只選用已核准的備課版本，不再重填完整教案。</p></div></div>
-          <label class="form-field span-all"><span>本堂採用的備課教案 <b>*</b></span><select name="prepId" required><option value="">請選擇已核准版本</option>${prepOptions.map(prep => `<option value="${prep.id}" ${formValue('prepId') === prep.id ? 'selected' : ''}>${esc(prep.courseName)} · ${esc(prep.title)} · ${esc(prep.version)}</option>`).join('')}</select>${prepOptions.length ? '' : '<small class="field-error">目前沒有可用的已核准教案，請先到「備課教案」建檔送審。</small>'}</label>
+        <section class="form-section"><div class="section-title"><span class="section-number">${isPt() ? '3' : '2'}</span><div><h3>備課檔案與教學日誌</h3><p>選擇這堂課使用的課程檔案，不需要主管審核。</p></div></div>
+          <label class="form-field span-all"><span>本堂使用的備課檔案 <b>*</b></span><select name="prepId" required><option value="">請選擇課程</option>${prepOptions.map(prep => `<option value="${prep.id}" ${formValue('prepId') === prep.id ? 'selected' : ''}>${esc(prep.courseName || prep.title || '未命名課程')} · ${esc(prep.courseType || '未分類')}</option>`).join('')}</select>${prepOptions.length ? '' : '<small class="field-error">目前沒有備課檔案，請先到「備課檔案」新增課程名稱。</small>'}</label>
           <div class="form-grid">${textareaField('本堂實際完成內容', 'completed', formValue('completed'), true, '寫完成的任務、作品或理解結果。')}${textareaField('孩子反應／學習證據', 'response', formValue('response'), true, '寫可觀察的行為、作品差異或學生原句。')}${textareaField('課程問題與下次優化', 'issue', formValue('issue'), true, '寫本堂遇到的問題，以及下次要改的講法、活動或材料。')}</div>
           ${uploadField('學習過程與成果', 'learning', '照片、影片可一次多選；須能對應本堂目標。', 'image/*,video/*', true)}
         </section>
@@ -1094,7 +1090,7 @@
   }
 
   function textareaField(label, name, value, required, placeholder) {
-    return `<label class="form-field"><span>${esc(label)} ${required ? '<b>*</b>' : ''}</span><textarea name="${name}" minlength="8" ${required ? 'required' : ''} placeholder="${esc(placeholder)}">${esc(value)}</textarea></label>`;
+    return `<label class="form-field"><span>${esc(label)} ${required ? '<b>*</b>' : ''}</span><textarea name="${name}" ${required ? 'minlength="8" required' : ''} placeholder="${esc(placeholder)}">${esc(value)}</textarea></label>`;
   }
 
   function uploadField(label, category, hint, accept, required) {
@@ -1544,8 +1540,14 @@
 
   function openPrepEditor(existing = null) {
     const prep = existing || state.draftPrep || {};
+    activePrepSource = prep;
     pendingFiles.prep = prep.materials || [];
-    openDrawer({ title: existing ? '編輯備課教案' : '新增備課教案', subtitle: '先把原理、引導與遊戲設計建檔，授課當天不再重寫。', body: `<form id="prep-form" novalidate><input type="hidden" name="id" value="${esc(prep.id || '')}"><section class="form-section"><div class="section-title"><span class="section-number">1</span><div><h3>課程識別</h3></div></div><div class="form-grid">${selectField('課程類型', 'courseType', COURSE_TYPES, prep.courseType || COURSE_TYPES[1], true)}${field('課程名稱', 'courseName', 'text', prep.courseName || '', true, '例：齒輪轉速實驗')}${field('教案標題', 'title', 'text', prep.title || '', true, '例：齒輪轉速與傳動')}${field('版本', 'version', 'text', prep.version || 'v1.0', true)}</div></section><section class="form-section"><div class="section-title"><span class="section-number">2</span><div><h3>正式教案</h3><p>主管需能判讀這堂課教什麼、怎麼引導、孩子會做到什麼。</p></div></div><div class="form-grid">${textareaField('教學目標', 'objective', prep.objective || '', true, '寫學生下課前能完成、說明、操作或改造什麼。')}${textareaField('課程核心原理／技能', 'principle', prep.principle || '', true, '寫這堂課真正要理解的原理、程式邏輯或操作技能。')}${textareaField('引導方法', 'guidance', prep.guidance || '', true, '老師要問什麼、怎麼拆解、什麼時候給提示。')}${textareaField('遊戲／挑戰／改造設計', 'game', prep.game || '', true, '寫規則、關卡、分組、計分或改造；不適用可寫不適用與原因。')}${textareaField('教學流程', 'flow', prep.flow || '', true, '開場、示範、操作、挑戰、分享與收尾的時間安排。')}</div>${uploadField('教案、教材與備課影片佐證', 'prep', '可一次多選 PPT、學習單、程式、作品照片或 MP4／MOV 短片；影片單檔上限 15 MB。', 'image/*,video/mp4,video/quicktime,video/x-m4v,video/webm,.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.zip,.sb3', true)}</section></form>`, footer: `<button type="button" class="btn" data-action="close-drawer">取消</button><button type="button" class="btn" data-action="save-prep-draft">${icon('save', 16)}儲存草稿</button><button type="button" data-action="submit-prep" class="btn btn-primary">${icon('send', 16)}送主管審查</button>` });
+    openDrawer({
+      title: existing ? '編輯備課檔案' : '新增備課檔案',
+      subtitle: '只需記錄這是什麼課；教材、照片或備課影片有需要再附加。',
+      body: `<form id="prep-form" novalidate><input type="hidden" name="id" value="${esc(prep.id || '')}"><section class="form-section"><div class="section-title"><span class="section-number">1</span><div><h3>課程資料</h3><p>儲存後即可在本堂紀錄直接選用。</p></div></div><div class="form-grid">${selectField('課程類型', 'courseType', COURSE_TYPES, prep.courseType || COURSE_TYPES[1], true)}${field('課程名稱', 'courseName', 'text', prep.courseName || prep.title || '', true, '例：齒輪轉速實驗')}${textareaField('上課內容／備課提醒（選填）', 'notes', prep.notes || prep.summary || '', false, '有需要再記錄本課重點、器材或上課提醒。')}</div>${uploadField('備課附件（選填）', 'prep', '可一次多選教案、教材、照片或 MP4／MOV 備課影片；影片單檔上限 15 MB。', 'image/*,video/mp4,video/quicktime,video/x-m4v,video/webm,.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.zip,.sb3', false)}</section></form>`,
+      footer: `<button type="button" class="btn" data-action="close-drawer">取消</button><button type="button" data-action="save-prep" class="btn btn-primary">${icon('save', 16)}儲存備課檔案</button>`,
+    });
   }
 
   async function runFormAction(form, action) {
@@ -1555,41 +1557,52 @@
     finally { delete form.dataset.submitting; }
   }
 
-  function capturePrep(form, status) {
+  function capturePrep(form) {
     const data = Object.fromEntries(new FormData(form).entries());
-    return { ...data, id: data.id || uid('prep'), teacher: currentUser.nickname, materials: [...pendingFiles.prep], status, reviewedBy: '', reviewedAt: '', reviewNote: '' };
+    return {
+      ...(activePrepSource || {}),
+      ...data,
+      id: data.id || activePrepSource?.id || uid('prep'),
+      teacher: currentUser.nickname,
+      title: data.courseName,
+      date: activePrepSource?.date || todayIso(),
+      materials: [...pendingFiles.prep],
+      status: 'ready',
+    };
   }
 
-  async function savePrep(form, submit) {
-    if (submit && !form.checkValidity()) { form.reportValidity(); toast('請完成所有必填教案內容', 'danger'); return; }
-    if (submit && !pendingFiles.prep.length) { toast('請至少上傳一份實際使用的教案或教材', 'danger'); return; }
-    const item = capturePrep(form, submit ? 'pending' : 'draft');
+  async function savePrep(form) {
+    if (!form.checkValidity()) { form.reportValidity(); toast('請選擇課程類型並填寫課程名稱', 'danger'); return; }
+    const item = capturePrep(form);
     const result = PREVIEW_MODE ? { ok: true, prep: item } : await API.saveTalentPrep(currentUser.nickname, item);
     if (!result?.ok) {
-      toast(`備課教案尚未儲存：${result?.error || '請稍後重試'}`, 'danger');
+      toast(`備課檔案尚未儲存：${result?.error || '請稍後重試'}`, 'danger');
       return;
     }
     const saved = result.prep || item;
     const index = state.preps.findIndex(prep => prep.id === saved.id);
     if (index >= 0) state.preps[index] = saved; else state.preps.unshift(saved);
-    state.draftPrep = submit ? null : saved;
-    persist(submit ? '教案已送審' : '教案草稿已儲存');
-    closeDrawer(); renderApp(); toast(submit ? '備課教案已送主管審查' : '教案草稿已保留');
+    state.draftPrep = null;
+    activePrepSource = null;
+    persist('備課檔案已儲存');
+    closeDrawer(); renderApp(); toast('備課檔案已儲存，可直接用於本堂紀錄');
   }
 
   function openPrepView(prep) {
-    openDrawer({ title: prep.title, subtitle: `${prep.teacher} · ${prep.courseType} · ${prep.version}`, body: `<div class="detail-stack">${detailBlock('教學目標', prep.objective)}${detailBlock('核心原理／技能', prep.principle)}${detailBlock('引導方法', prep.guidance)}${detailBlock('遊戲／挑戰／改造', prep.game)}${detailBlock('教學流程', prep.flow)}${detailAttachments('教案與教材', prep.materials)}${prep.reviewNote ? detailBlock('主管審查意見', prep.reviewNote) : ''}</div>`, footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button>` });
+    const legacyDetails = [
+      ['教學目標', prep.objective], ['核心原理／技能', prep.principle], ['引導方法', prep.guidance],
+      ['遊戲／挑戰／改造', prep.game], ['教學流程', prep.flow],
+    ].filter(([, value]) => String(value || '').trim());
+    openDrawer({
+      title: prep.courseName || prep.title || '備課檔案',
+      subtitle: `${prep.teacher} · ${prep.courseType || '未分類'}`,
+      body: `<div class="detail-stack">${prep.notes || prep.summary ? detailBlock('上課內容／備課提醒', prep.notes || prep.summary) : ''}${detailAttachments('備課附件', prep.materials)}${legacyDetails.length ? `<details><summary>查看舊版詳細教案內容</summary><div class="detail-stack">${legacyDetails.map(([label, value]) => detailBlock(label, value)).join('')}</div></details>` : ''}</div>`,
+      footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button>${isTeacher() ? `<button type="button" class="btn btn-primary" data-action="edit-prep" data-id="${esc(prep.id)}">${icon('pencil', 16)}編輯</button>` : ''}`,
+    });
   }
 
   function openPrepReviewDetail(prep) {
-    const statusText = prep.status === 'pending' ? '等待主管審查' : prep.status === 'approved' ? '已核准使用' : '已退回修改';
-    const statusClass = prep.status === 'pending' ? 'warning' : prep.status === 'approved' ? 'success' : 'strict';
-    openDrawer({
-      title: prep.title,
-      subtitle: `${prep.teacher} · ${prep.courseType} · ${prep.version}`,
-      body: `<div class="notice ${statusClass}">${icon(prep.status === 'pending' ? 'file-clock' : prep.status === 'approved' ? 'badge-check' : 'undo-2', 19)}<div><strong>${statusText}</strong><span>${prep.status === 'pending' ? '請先閱讀教案與附件，再開始正式審查。' : prep.reviewedBy ? `${prep.reviewedBy} · ${formatDate(prep.reviewedAt)}` : '可查看完整審查結果。'}</span></div></div><div class="detail-stack">${detailBlock('教學目標', prep.objective)}${detailBlock('核心原理／技能', prep.principle)}${detailBlock('引導方法', prep.guidance)}${detailBlock('遊戲／挑戰／改造', prep.game)}${detailBlock('教學流程', prep.flow)}${detailAttachments('教案與教材', prep.materials)}${prep.reviewNote ? detailBlock('主管審查意見', prep.reviewNote) : ''}</div>`,
-      footer: `<button type="button" class="btn" data-action="close-drawer">返回教案清單</button>${prep.status === 'pending' ? `<button type="button" class="btn btn-primary" data-action="review-prep" data-id="${esc(prep.id)}">${icon('file-check-2', 16)}進行審查</button>` : ''}`,
-    });
+    openPrepView(prep);
   }
 
   function detailBlock(label, value) { return `<section class="detail-block"><h3>${esc(label)}</h3><p>${nl2br(value || '—')}</p></section>`; }
@@ -1607,7 +1620,7 @@
 
   function openLogView(item) {
     if (item.lessonStatus === 'cancelled') {
-      openDrawer({ title: item.courseName || '停課紀錄', subtitle: `${formatDate(item.date)} · ${item.teacher} · ${item.site}`, body: `<div class="notice info">${icon('calendar-x-2', 19)}<div><strong>${item.backfilled ? '補登停課' : '當日停課'}</strong><span>本堂不計鐘點，也不需要教案、點名與成果證據。</span></div></div><div class="detail-stack">${detailBlock('停課原因', item.cancellationReason)}${item.cancellationNote ? detailBlock('補充說明', item.cancellationNote) : ''}${detailBlock('系統結果', '鐘點費 0 元；已列入排課回報，不判定為漏填。')}${lessonReportBlock(item)}</div>`, footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button>` });
+      openDrawer({ title: item.courseName || '停課紀錄', subtitle: `${formatDate(item.date)} · ${item.teacher} · ${item.site}`, body: `<div class="notice info">${icon('calendar-x-2', 19)}<div><strong>${item.backfilled ? '補登停課' : '當日停課'}</strong><span>本堂不計鐘點，也不需要備課檔案、點名與成果證據。</span></div></div><div class="detail-stack">${detailBlock('停課原因', item.cancellationReason)}${item.cancellationNote ? detailBlock('補充說明', item.cancellationNote) : ''}${detailBlock('系統結果', '鐘點費 0 元；已列入排課回報，不判定為漏填。')}${lessonReportBlock(item)}</div>`, footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button>` });
       return;
     }
     const prep = state.preps.find(record => record.id === item.prepId);
@@ -1621,7 +1634,7 @@
     const appUploadControl = canUploadApp
       ? `<label class="btn ${appEvidenceComplete(item) ? '' : 'btn-primary'} app-evidence-upload">${icon(appEvidenceComplete(item) ? 'refresh-cw' : 'upload', 16)}${appEvidenceComplete(item) ? '更換 APP 截圖' : '上傳 APP 截圖'}<input class="sr-only" type="file" accept="image/*" multiple data-app-evidence-id="${esc(item.id)}"></label>`
       : '';
-    openDrawer({ title: item.courseName || item.courseType, subtitle: `${formatDate(item.date)} · ${item.teacher} · ${item.site}`, body: `<div class="detail-metrics"><div><span>應到</span><strong>${item.expected}</strong></div><div><span>正式實到</span><strong>${item.present}</strong></div><div><span>補課</span><strong>${item.makeup}</strong></div><div><span>體驗</span><strong>${item.trial}</strong></div></div><div class="detail-stack">${detailBlock('本堂採用教案', prep ? `${prep.title} · ${prep.version}` : '教案已移除')}${detailBlock('實際完成內容', item.completed)}${detailBlock('孩子反應／學習證據', item.response)}${detailBlock('課程問題與下次優化', item.issue)}${detailAttachments('點名證據', item.attendanceFiles)}${detailAttachments('學習證據', item.learningFiles)}${detailAttachments('教室復原', item.roomFiles)}${appEvidence}${lessonReportBlock(item)}</div>${item.employment === 'pt' ? `<div class="calculation-card static"><span>${icon('badge-dollar-sign', 20)}</span><div><small>本堂預估鐘點</small><strong>${formatMoney(item.pay)}</strong></div></div>` : ''}`, footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button>${appUploadControl}${prep ? `<button type="button" class="btn" data-action="view-prep" data-id="${prep.id}">${icon('notebook-tabs', 16)}查看教案</button>` : ''}` });
+    openDrawer({ title: item.courseName || item.courseType, subtitle: `${formatDate(item.date)} · ${item.teacher} · ${item.site}`, body: `<div class="detail-metrics"><div><span>應到</span><strong>${item.expected}</strong></div><div><span>正式實到</span><strong>${item.present}</strong></div><div><span>補課</span><strong>${item.makeup}</strong></div><div><span>體驗</span><strong>${item.trial}</strong></div></div><div class="detail-stack">${detailBlock('本堂使用的備課檔案', prep ? (prep.courseName || prep.title || '未命名課程') : '備課檔案已移除')}${detailBlock('實際完成內容', item.completed)}${detailBlock('孩子反應／學習證據', item.response)}${detailBlock('課程問題與下次優化', item.issue)}${detailAttachments('點名證據', item.attendanceFiles)}${detailAttachments('學習證據', item.learningFiles)}${detailAttachments('教室復原', item.roomFiles)}${appEvidence}${lessonReportBlock(item)}</div>${item.employment === 'pt' ? `<div class="calculation-card static"><span>${icon('badge-dollar-sign', 20)}</span><div><small>本堂預估鐘點</small><strong>${formatMoney(item.pay)}</strong></div></div>` : ''}`, footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button>${appUploadControl}${prep ? `<button type="button" class="btn" data-action="view-prep" data-id="${prep.id}">${icon('notebook-tabs', 16)}查看備課檔案</button>` : ''}` });
   }
 
   function openPtStatement(teacher) {
@@ -1644,11 +1657,6 @@
       body: `<article class="print-sheet" id="pt-statement"><header class="statement-head"><img src="../../shared/icons/logo.png" alt="布拉克星球 Logo"><div><span>布拉克星球 KPI 系統</span><h2>才藝 PT 月度鐘點費明細</h2></div><strong>${esc(state.ui.month)}</strong></header><section class="statement-meta"><div><span>老師</span><strong>${esc(row.person.nickname)}</strong></div><div><span>固定排班</span><strong>${esc(row.person.schedule?.map(item => `${item.label} ${item.time}`).join('、') || '依班表')}</strong></div><div><span>產生日期</span><strong>${esc(todayIso().replace(/-/g, '/'))}</strong></div></section><div class="table-wrap statement-table"><table><thead><tr><th>日期</th><th>課程</th><th>狀態</th><th>正式</th><th>補課</th><th>體驗</th><th>計薪人數／級距</th><th>時數與單價</th><th>本堂金額</th></tr></thead><tbody>${rowsHtml}</tbody></table></div><section class="statement-summary"><div><span>正常上課</span><strong>${row.heldLogs.length} 堂／${row.hours} 小時</strong></div><div><span>停課</span><strong>${row.cancelledLogs.length} 堂</strong></div><div><span>鐘點費合計</span><strong>${formatMoney(row.wage)}</strong></div><div><span>續報 ${row.renewal} 人</span><strong>${eligibility}／${formatMoney(row.renewalBonus)}</strong></div><div class="grand-total"><span>本月預估合計</span><strong>${formatMoney(row.total)}</strong></div></section>${missingDates.length ? `<div class="statement-warning"><strong>續報獎金資格取消</strong><span>正常課程未於當日送出：${missingDates.join('、')}</span></div>` : ''}${appMissingDates.length ? `<div class="statement-warning"><strong>家長 APP 發布證據缺件</strong><span>${appMissingDates.join('、')}</span></div>` : ''}<footer class="statement-signatures"><span>老師核對：________________</span><span>主管／行政核對：________________</span></footer></article>`,
       footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button><button type="button" class="btn btn-primary" data-action="print-statement">${icon('printer', 16)}列印月結單</button>`,
     });
-  }
-
-  function openPrepReviewDialog(prep) {
-    closeDrawer();
-    openDialog({ title: '教案審查', body: `<div class="prep-review-context"><span class="course-icon">${icon('notebook-tabs', 19)}</span><span><strong>${esc(prep.title)}</strong><small>${esc(prep.teacher)} · ${esc(prep.courseType)} · ${esc(prep.version)}</small></span></div><div class="review-checks"><label><input type="checkbox" required><span>核心原理／技能正確且可教</span></label><label><input type="checkbox" required><span>引導方法能讓孩子自己完成</span></label><label><input type="checkbox" required><span>遊戲／挑戰／改造與目標相符</span></label><label><input type="checkbox" required><span>教材與流程可支援正式授課</span></label></div><label class="form-field"><span>審查意見 <b>*</b></span><textarea id="review-note" required placeholder="寫給老師的具體修改或採用提示。">${esc(prep.reviewNote || '')}</textarea></label>`, footer: `<button type="button" class="btn btn-danger" data-action="finish-prep-review" data-id="${prep.id}" data-result="returned">退回修改</button><button type="button" class="btn btn-primary" data-action="finish-prep-review" data-id="${prep.id}" data-result="approved">核准版本</button>` });
   }
 
   function openScoreEditor(teacher) {
@@ -1749,8 +1757,8 @@
   }
 
   const TEST_VIEW_WRITE_ACTIONS = new Set([
-    'submit-log', 'save-log-draft', 'submit-prep', 'save-prep-draft',
-    'retry-report', 'finish-prep-review', 'setup-automation', 'enable-push',
+    'submit-log', 'save-log-draft', 'save-prep',
+    'retry-report', 'setup-automation', 'enable-push',
     'test-notifications',
   ]);
 
@@ -1820,9 +1828,8 @@
       toast('未完成草稿已刪除');
     }
     else if (action === 'new-prep') openPrepEditor();
-    else if (action === 'submit-prep') await runFormAction($('#prep-form'), () => savePrep($('#prep-form'), true));
+    else if (action === 'save-prep') await runFormAction($('#prep-form'), () => savePrep($('#prep-form')));
     else if (action === 'edit-prep') openPrepEditor(state.preps.find(item => item.id === control.dataset.id));
-    else if (action === 'save-prep-draft') { const form = $('#prep-form'); if (form) await savePrep(form, false); }
     else if (action === 'view-prep') { const prep = state.preps.find(item => item.id === control.dataset.id); if (prep) { closeDrawer(); openPrepView(prep); } }
     else if (action === 'view-log') { const item = state.logs.find(log => log.id === control.dataset.id); if (item) openLogView(item); }
     else if (action === 'remove-upload') {
@@ -1852,22 +1859,6 @@
       toast(result.reused ? '已開啟既有日報' : '日報 PDF 已補建完成');
     }
     else if (action === 'view-prep-review') { const prep = state.preps.find(item => item.id === control.dataset.id); if (prep) openPrepReviewDetail(prep); }
-    else if (action === 'review-prep') { const prep = state.preps.find(item => item.id === control.dataset.id); if (prep) openPrepReviewDialog(prep); }
-    else if (action === 'finish-prep-review') {
-      const note = $('#review-note')?.value.trim();
-      const checks = $$('.review-checks input');
-      if (!note) { toast('請填寫審查意見', 'danger'); return; }
-      if (control.dataset.result === 'approved' && checks.some(item => !item.checked)) { toast('核准前請完成四項檢查', 'danger'); return; }
-      const prep = state.preps.find(item => item.id === control.dataset.id);
-      if (prep) {
-        const result = PREVIEW_MODE
-          ? { ok: true, prep: { ...prep, status: control.dataset.result, reviewNote: note, reviewedBy: currentUser.nickname, reviewedAt: todayIso() } }
-          : await API.reviewTalentPrep(prep.id, control.dataset.result, note);
-        if (!result?.ok) { toast(`審查未儲存：${result?.error || '請稍後重試'}`, 'danger'); return; }
-        Object.assign(prep, result.prep);
-        persist(); closeDialog(); renderApp(); toast(prep.status === 'approved' ? '教案版本已核准' : '已退回老師修改');
-      }
-    }
     else if (action === 'edit-score') openScoreEditor(control.dataset.teacher);
     else if (action === 'export-own') exportOwn();
     else if (action === 'export-settlement') exportSettlement();
