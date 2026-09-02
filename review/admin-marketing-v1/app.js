@@ -127,6 +127,7 @@
     ['followup_scheduled', '已約下次聯絡'], ['converted', '已報名一期'], ['not_enrolled', '未報名／暫不考慮'],
   ];
   const TRIAL_BONUS_AMOUNT = 50;
+  const TRIAL_START_DATE = '2026-08-15';
   const NAV = {
     worker: [
       { route: 'today', label: '今日工作', icon: 'layout-dashboard' },
@@ -904,7 +905,7 @@
     const approved = item.bonusStatus === 'approved';
     const importPanel = isNew ? `<section class="trial-import"><label for="trial-message-import">貼上家長的試上訊息</label><textarea id="trial-message-import" placeholder="可直接貼上 LINE 訊息，例如：\n學生：王小明\n日期：9/1\n時間：19:00-20:30\n課程：機器人入門\n老師：皮皮老師\n電話：0912-345-678"></textarea><div class="trial-import-actions"><small id="trial-parse-status" class="trial-parse-status">系統只在目前頁面辨識，不會保存整段對話。</small><button type="button" class="button small teal" data-action="parse-trial-message">${icon('scan-text')}辨識並帶入</button></div></section>` : '';
     const body = `${importPanel}<input type="hidden" name="trialId" value="${esc(item.id || '')}"><div class="form-grid">
-      <div class="field"><label for="trial-date">預約試上日期 <span class="required">*</span></label><input id="trial-date" name="date" type="date" value="${esc(item.date || todayIso())}" ${isNew ? '' : 'readonly'} required><div class="field-help">家長預約後即可提前登記，不必等到試上當天。</div></div>
+      <div class="field"><label for="trial-date">預約試上日期 <span class="required">*</span></label><input id="trial-date" name="date" type="date" min="${TRIAL_START_DATE}" value="${esc(item.date || todayIso())}" ${isNew ? '' : 'readonly'} required><div class="field-help">自 2026/08/15 起登記；家長預約後即可提前建立。</div></div>
       <div class="field"><label for="trial-student">學生姓名 <span class="required">*</span></label><input id="trial-student" name="studentName" value="${esc(item.studentName || '')}" ${approved ? 'readonly' : ''} required></div>
       <div class="field"><label for="trial-course">試上課程 <span class="required">*</span></label><input id="trial-course" name="course" value="${esc(item.course || '')}" placeholder="例：機器人入門" required></div>
       <div class="field"><label for="trial-time">試上時段</label><input id="trial-time" name="trialTime" value="${esc(item.trialTime || '')}" placeholder="例：19:00–20:30"></div>
@@ -1182,6 +1183,7 @@
     const enrollmentCourse = status === 'converted' ? String(data.get('enrollmentCourse') || '').trim() : '';
     const firstEnrollmentChoice = String(data.get('firstEnrollment') || '');
     if (!studentName || !course || !teacher || !contactRef) throw new Error('學生、課程、授課老師與家長識別資料皆為必填');
+    if (date < TRIAL_START_DATE) throw new Error('試上追蹤自 2026/08/15 起實施，請選擇 8/15 或之後的日期');
     if (!['converted', 'not_enrolled'].includes(status) && !nextFollowupDate) throw new Error('尚未結案的學生必須設定下一次追蹤日期');
     if (nextFollowupDate && nextFollowupDate < todayIso()) throw new Error('下一次追蹤日期不可早於今天');
     if (status === 'converted') {

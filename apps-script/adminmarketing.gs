@@ -5,6 +5,7 @@
 
 const ADMIN_MARKETING_RECORD_TYPES_ = ['daily', 'daily_check', 'tuesday', 'environment', 'project', 'trial', 'trial_day', 'assignment', 'score', 'message'];
 const ADMIN_MARKETING_TRIAL_BONUS_ = 50;
+const ADMIN_MARKETING_TRIAL_START_DATE_ = '2026-08-15';
 const ADMIN_MARKETING_KPI_ = [
   { key: 'daily', label: '行政處理與工作留痕', max: 20 },
   { key: 'promotion', label: '美宣產出與發布品質', max: 25 },
@@ -502,6 +503,9 @@ function saveAdminMarketingRecord(params) {
   const existingRow = findObject(SHEET_NAMES.ADMIN_MARKETING_RECORDS, 'record_id', data.id);
   const original = existingRow ? adminMarketingRecordObject_(existingRow) : null;
   if (type === 'trial') {
+    if (!original && data.date < ADMIN_MARKETING_TRIAL_START_DATE_) {
+      return { ok: false, error: '試上追蹤自 2026/08/15 起實施，不可建立更早日期的紀錄' };
+    }
     if (!original && data.date < todayStr()) {
       if (!managerTrialEntry || !data.lateReason) return { ok: false, error: '過去日期屬補登；請由小魚或柏翰填寫原因' };
     }

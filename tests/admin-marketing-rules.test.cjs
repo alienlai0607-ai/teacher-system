@@ -107,6 +107,8 @@ assert.equal(saveTrial(workerUser, '2026-08-26').ok, true, '行政本人應可�
 assert.equal(saveTrial(workerUser, '2026-09-10').ok, true, '行政本人應可預先登記未來試上');
 assert.match(saveTrial(workerUser, '2026-08-25').error, /過去日期屬補登/, '行政本人不得自行補登過去試上');
 assert.match(saveTrial(managerUser, '2026-08-25').error, /填寫原因/, '主管補登過去試上必須填原因');
+assert.match(saveTrial(managerUser, '2026-08-14', '補登舊資料').error, /2026\/08\/15 起實施/, '起算日前的試上不得建立');
+assert.equal(saveTrial(managerUser, '2026-08-15', '制度起算日補登').ok, true, '主管應可補登制度起算日的試上');
 assert.equal(saveTrial(managerUser, '2026-08-25', '家長訊息延遲轉交').ok, true, '小魚應可填原因後補登過去試上');
 
 assert.throws(() => context.validateAdminMarketingRecord_('trial', {
@@ -211,6 +213,8 @@ assert.doesNotMatch(uiSource, /renderIcons\(\)/, '行政表單收尾不得呼叫
 assert.match(uiSource, /button\?\.isConnected[\s\S]*hydrateIcons\(\)/, '行政表單完成後需恢復按鈕並重新繪製圖示');
 assert.match(uiSource, /return iso;/, '貼上訊息時需能辨識未來試上日期');
 assert.doesNotMatch(uiSource, /id="trial-date"[^>]*max=/, '預約試上日期不得限制為今天以前');
+assert.match(uiSource, /const TRIAL_START_DATE = '2026-08-15'/, '行政試上制度需有固定起算日');
+assert.match(uiSource, /id="trial-date"[^>]*min="\$\{TRIAL_START_DATE\}"/, '試上日期欄不得選擇制度起算日前日期');
 assert.match(uiSource, /mayReplaceDefaultDate/, '貼上未來日期時需取代新表單預設的今天');
 assert.match(uiSource, /state\.ui\.month = date\.slice\(0, 7\)/, '跨月試上儲存後需切到預約月份');
 assert.match(uiSource, /trialTime/, '試上時段需能帶入、儲存並重新顯示');
@@ -227,8 +231,8 @@ assert.match(workspacesCssSource, /@media \(max-width: 820px\)[\s\S]*\.workspace
 assert.match(workspacesCssSource, /\.workspace-quick-title \{[^}]*width: 100%;[^}]*flex: 0 0 auto;/, '手機工作身分標題高度需依內容決定');
 assert.match(workspacesCssSource, /grid-template-columns: repeat\(auto-fit, minmax\(136px, 1fr\)\)/, '手機三身分按鈕需保留可讀寬度');
 assert.match(uiHtmlSource, /workspaces\.css\?v=20260901-workspace-wrap-1/, '行政頁需載入防溢出的工作身分樣式');
-assert.match(uiHtmlSource, /app\.js\?v=20260902-admin-stability-5/, '行政穩定版表單需使用獨立快取版本');
-assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=admin-marketing(?:-manager)?&v=20260902-admin-stability-5/g) || []).length, 2, '行政與主管入口都需避開舊版快取');
+assert.match(uiHtmlSource, /app\.js\?v=20260902-admin-stability-6/, '行政穩定版表單需使用獨立快取版本');
+assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=admin-marketing(?:-manager)?&v=20260902-admin-stability-6/g) || []).length, 2, '行政與主管入口都需避開舊版快取');
 assert.match(uiSource, /此學生已有試上追蹤紀錄，請更新原紀錄/, '前端需在重複新增時立即阻擋');
 assert.match(uiSource, /列印月報/, '主管需能列印每月獎金明細');
 assert.match(uiSource, /actionNode\.classList\.contains\('dialog-backdrop'\) && event\.target !== actionNode/, '點擊表單內按鈕不得被背景誤判為關閉對話框');
