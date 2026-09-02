@@ -1535,12 +1535,12 @@
     rows.push(['【每日彙整】'], ['日期', '狀態', '今日成果', '持續追蹤', '最近待辦', '老師補充', '親師狀態', '門口交接備註', '主管與老師對話'], ...dailyRows, []);
 
     const activities = state.activities.filter(item => item.teacher === teacher && item.type !== 'lessonprep' && inMonth(item.date)).slice().sort(byDate);
-    rows.push(['【工作紀錄明細】'], ['日期', '分類', '工作類型', '標題', '課程／班級', '教案／教材有效處', '孩子共鳴環節', '教案／教材更新', '班級經營目標', '班級經營做法', '班級經營結果', '班級經營問題', '班級經營下一步', '追蹤日期', '備課檔案', '成果份數', '成果對話']);
+    rows.push(['【工作紀錄明細】'], ['日期', '分類', '工作類型', '標題', '孩子共鳴環節', '教案／教材更新', '班級經營目標', '班級經營做法', '班級經營結果', '班級經營問題', '班級經營下一步', '追蹤日期', '備課檔案', '成果份數', '成果對話']);
     activities.forEach(activity => {
       const source = prepSourceById(activity.prepSourceId);
       rows.push([
         activity.date, activityTrackMeta(activityTrack(activity.type)).shortLabel, ACTIVITY_TYPES[activity.type]?.label || activity.type,
-        activity.title, activity.className || '', activity.prepFeedback?.strengths || '', activity.prepFeedback?.resonance || '', activity.prepFeedback?.changes || '',
+        activity.title, activity.prepFeedback?.resonance || '', activity.prepFeedback?.changes || '',
         activity.objective || '', activity.action || '', activity.result || '', activity.issue || '', activity.nextAction || '',
         activity.dueDate || '', source?.title || '', (activity.evidence || []).length, activityFeedbackExport(activity),
       ]);
@@ -1960,14 +1960,13 @@
   function prepFeedbackComplete(activity) {
     if (!activityNeedsPrepSource(activity.type)) return true;
     const feedback = activity.prepFeedback || {};
-    return ['strengths', 'resonance', 'changes'].every(key => String(feedback[key] || '').trim().length >= 8);
+    return ['resonance', 'changes'].every(key => String(feedback[key] || '').trim().length >= 8);
   }
 
   function activityFeedbackSummary(activity, empty = '') {
     if (!activityNeedsPrepSource(activity.type)) return String(activity.result || '').trim() || empty;
     const feedback = activity.prepFeedback || {};
     return [
-      feedback.strengths ? `有效處：${feedback.strengths}` : '',
       feedback.resonance ? `孩子共鳴：${feedback.resonance}` : '',
       feedback.changes ? `下次調整：${feedback.changes}` : '',
     ].filter(Boolean).join('；') || empty;
@@ -2032,7 +2031,7 @@
   function activityComplete(activity) {
     if (activity.type === 'lessonprep') return activityPreparationReady(activity);
     const feedbackOnly = activityNeedsPrepSource(activity.type);
-    const identityReady = Boolean(activity.title && activity.className);
+    const identityReady = Boolean(activity.title);
     const basic = feedbackOnly
       ? identityReady
       : identityReady && String(activity.objective || '').length >= 8 && String(activity.action || '').length >= 8 && String(activity.result || '').length >= 8 && String(activity.nextAction || '').length >= 6 && String(activity.owner || '').trim() && String(activity.dueDate || '').trim();
@@ -2052,7 +2051,7 @@
       ];
     }
     const feedbackOnly = activityNeedsPrepSource(activity.type);
-    const identityReady = Boolean(activity.title && activity.className);
+    const identityReady = Boolean(activity.title);
     const basic = feedbackOnly
       ? identityReady
       : Boolean(identityReady && String(activity.objective || '').length >= 8 && String(activity.action || '').length >= 8 && String(activity.result || '').length >= 8 && String(activity.nextAction || '').length >= 6 && String(activity.owner || '').trim() && String(activity.dueDate || '').trim() && activityDetailsComplete(activity));
@@ -2209,11 +2208,11 @@
     const evidenceActionLabel = evidence.length ? '查看證據' : (isCrossDay ? '上傳本日產出' : '上傳成果');
     const completionLabel = complete ? '資料完整' : missing.length === 1 ? `缺${missing[0].label}` : `缺 ${missing.length} 項`;
     const titleBadges = `<span class="badge ${complete ? 'green' : 'red'}">${esc(completionLabel)}</span>${activity.isSample ? `<span class="badge blue">${icon('sparkles', 12)}完整範例</span>` : ''}`;
-    const resultPreview = feedbackOnly ? activity.prepFeedback?.strengths : activity.result;
+    const resultPreview = feedbackOnly ? activity.prepFeedback?.resonance : activity.result;
     const contextMeta = feedbackOnly
-      ? esc(activity.className || '未指定課程／班級')
-      : `${esc(activity.className || '未指定班級')} · ${(activity.students || []).length ? `${activity.students.length} 位關聯學生` : '全班'}`;
-    const feedbackDetails = feedbackOnly ? `<div class="activity-outcome"><strong>有效處：</strong>${esc(activity.prepFeedback?.strengths || '尚未填寫')}</div><div class="activity-outcome"><strong>孩子共鳴：</strong>${esc(activity.prepFeedback?.resonance || '尚未填寫')}</div><div class="activity-outcome"><strong>下次調整：</strong>${esc(activity.prepFeedback?.changes || '尚未填寫')}</div>` : `<div class="activity-outcome"><strong>結果：</strong>${esc(activity.result || '尚未填寫')}</div>`;
+      ? esc(prepSource?.title || config.label)
+      : (activity.students || []).length ? `${activity.students.length} 位關聯學生` : '全班紀錄';
+    const feedbackDetails = feedbackOnly ? `<div class="activity-outcome"><strong>孩子共鳴：</strong>${esc(activity.prepFeedback?.resonance || '尚未填寫')}</div><div class="activity-outcome"><strong>下次調整：</strong>${esc(activity.prepFeedback?.changes || '尚未填寫')}</div>` : `<div class="activity-outcome"><strong>結果：</strong>${esc(activity.result || '尚未填寫')}</div>`;
     return `<article class="activity-row">
       <div class="activity-icon ${config.tone}">${icon(config.icon, 20)}</div>
       <div class="activity-main">
@@ -2447,7 +2446,7 @@
     const guide = activityGuide(type);
     const feedback = activityPrepFeedbackExamples(type);
     const examples = activityNeedsPrepSource(type)
-      ? [['教案／教材有效處', feedback.strengths], ['孩子共鳴環節', feedback.resonance], ['下次要更新什麼', feedback.changes]]
+      ? [['孩子共鳴環節', feedback.resonance], ['下次要更新什麼', feedback.changes]]
       : [['目標', guide.objective[2]], ['做法', guide.action[2]], ['結果', guide.result[2]], ['問題', guide.issue[2]], ['下一步', guide.next[2]]];
     return `<div class="activity-example-head"><span class="activity-icon ${ACTIVITY_TYPES[type]?.tone || ''}">${icon(ACTIVITY_TYPES[type]?.icon || 'clipboard-list', 18)}</span><div><strong>${esc(ACTIVITY_TYPES[type]?.label || '工作紀錄')}怎麼寫</strong><small>只填本類型真正需要的內容</small></div></div><div class="activity-example-grid">${examples.map(([label, example]) => `<div><span>${label}</span><p>${esc(example)}</p></div>`).join('')}</div>`;
   }
@@ -2467,7 +2466,6 @@
     }[selectedType];
     const prepExamples = activityPrepFeedbackExamples(selectedType);
     const fieldExamples = activityNeedsPrepSource(selectedType) ? [
-      ['這份教案／教材哪裡有效', '寫出實際有效的教學設計、教材位置與學生反應。', prepExamples.strengths],
       ['孩子對哪個教案環節最有反應', '記錄最投入、主動回應或理解明顯改變的環節。', prepExamples.resonance],
       ['這份教案／教材要更新什麼', '寫出下次要調整的講法、流程或教材。', prepExamples.changes],
     ] : [guide.objective, guide.action, guide.result, guide.issue, guide.next];
@@ -2485,17 +2483,17 @@
       <div class="notice-band info">${icon('scale', 19)}<div><div class="notice-title">隨時查閱評分標準</div><div class="notice-copy">手機請從底部「更多」進入；電腦請從左側選單開啟。正式填寫頁只保留工作欄位，不重複放制度說明。</div></div></div>
 
       <section class="panel guide-section">
-        <div class="panel-head"><div><div class="panel-title">${icon('list-tree')}工作類型與欄位怎麼寫</div><div class="panel-subtitle">課程只填三項課後備課回饋；班級經營保留事件紀錄</div></div></div>
+        <div class="panel-head"><div><div class="panel-title">${icon('list-tree')}工作類型與欄位怎麼寫</div><div class="panel-subtitle">課程只填兩項課後備課回饋；班級經營保留事件紀錄</div></div></div>
         <div class="panel-body">
           <div class="guide-type-picker">${Object.entries(ACTIVITY_TYPES).filter(([key, item]) => key !== 'lessonprep' && item.selectable !== false).map(([key, item]) => `<button type="button" class="guide-type-button ${selectedType === key ? 'active' : ''}" data-action="set-guide-type" data-type="${key}">${icon(item.icon, 16)}<span>${esc(item.label)}</span></button>`).join('')}</div>
           <div class="guide-selected-head"><span class="activity-icon ${config.tone}">${icon(config.icon, 21)}</span><div><strong>${esc(config.label)}</strong><p>${esc(purpose)}</p></div><span class="badge ${activityTrackMeta(config.track).tone}">${esc(activityTrackMeta(config.track).shortLabel)}</span></div>
-          <div class="guide-specific-fields"><strong>這種類型要填</strong><div>${activityNeedsPrepSource(selectedType) ? '<span>選擇備課檔案，再完成三項課後備課回饋</span>' : '<span>班級經營事件、關聯學生、實際做法、結果與下一步</span>'}</div></div>
+          <div class="guide-specific-fields"><strong>這種類型要填</strong><div>${activityNeedsPrepSource(selectedType) ? '<span>選擇備課檔案，再完成孩子反應與下次調整</span>' : '<span>班級經營事件、關聯學生、實際做法、結果與下一步</span>'}</div></div>
           <div class="guide-field-list">${fieldExamples.map((field, index) => `<article><span class="guide-field-number">${index + 1}</span><div><strong>${esc(field[0])}</strong><small>${esc(field[1])}</small><p><span>範例</span>${esc(field[2])}</p></div></article>`).join('')}</div>
         </div>
       </section>
 
       <div class="guide-split">
-        <section class="panel guide-section"><div class="panel-head"><div><div class="panel-title">${icon('package-check')}備課檔案怎麼用</div><div class="panel-subtitle">先記錄課程，授課當天直接選用</div></div></div><div class="panel-body"><div class="guide-source-flow"><div><span>1</span><strong>新增備課檔案</strong><small>選擇課程類型並填寫課程名稱。</small></div><div><span>2</span><strong>上傳教案或教材</strong><small>至少一份，可上傳文件、簡報、照片或備課影片。</small></div><div><span>3</span><strong>授課當天選用</strong><small>儲存後即可使用，不需主管審核。</small></div><div><span>4</span><strong>留下課後回饋</strong><small>記錄有效處、孩子反應與下次調整。</small></div></div><div class="guide-rule">${icon('info', 17)}<span>只有班級經營需要選擇特殊狀況學生；課業指導與學科外課程不顯示關聯學生。</span></div></div></section>
+        <section class="panel guide-section"><div class="panel-head"><div><div class="panel-title">${icon('package-check')}備課檔案怎麼用</div><div class="panel-subtitle">先記錄課程，授課當天直接選用</div></div></div><div class="panel-body"><div class="guide-source-flow"><div><span>1</span><strong>新增備課檔案</strong><small>選擇課程類型並填寫課程名稱。</small></div><div><span>2</span><strong>上傳教案或教材</strong><small>至少一份，可上傳文件、簡報、照片或備課影片。</small></div><div><span>3</span><strong>授課當天選用</strong><small>儲存後即可使用，不需主管審核。</small></div><div><span>4</span><strong>留下課後回饋</strong><small>記錄孩子反應與下次調整。</small></div></div><div class="guide-rule">${icon('info', 17)}<span>只有班級經營需要選擇特殊狀況學生；課業指導與學科外課程不顯示關聯學生。</span></div></div></section>
         <section class="panel guide-section"><div class="panel-head"><div><div class="panel-title">${icon('scan-search')}什麼才算可判讀證據</div><div class="panel-subtitle">主管要能直接看懂資料呈現的成果</div></div></div><div class="panel-body"><div class="guide-evidence-compare"><div><span class="badge yellow">授課前</span><strong>備課檔案</strong><p>記錄課程名稱，並保留至少一份教案、任務單、簡報或教材。</p></div><div><span class="badge blue">授課後</span><strong>成果證據</strong><p>學生作品、訂正前後、測試數據或行為變化；避免只有看不出成果的廣角照。</p></div></div><div class="guide-rule">${icon('scan-line', 17)}<span>工作結果由系統帶入，老師不需重寫，也不必另外說明主管要看哪裡。</span></div><div class="guide-rule">${icon('images', 17)}<span>可從相簿一次選多張；選錯照片可按右上角叉號移除，照片重點標記為選用功能。</span></div><div class="guide-rule">${icon('badge-check', 17)}<span>主管會依成果內容的完整性、清楚度與可判讀性進行判斷與評分。</span></div><div class="guide-rule">${icon('eye', 17)}<span>工作頁的「課程與工作證據標準」第一次完整顯示；完成第一份成果證據後預設收合，可隨時按「查看證據標準」再次開啟。</span></div></div></section>
       </div>
 
@@ -2936,7 +2934,7 @@
   function renderActivityPrepFeedbackFields(type, feedback = {}) {
     if (!activityNeedsPrepSource(type)) return '<div id="activity-prep-feedback-fields" hidden></div>';
     const examples = activityPrepFeedbackExamples(type);
-    return `<div id="activity-prep-feedback-fields" class="prep-feedback-block span-2"><div class="prep-feedback-head">${icon('message-square-heart', 19)}<div><strong>課後備課回饋</strong></div></div><div class="form-grid"><div class="form-field span-2"><label class="form-label" for="activity-prep-strengths">這份教案／教材哪裡有效 <span class="required">*</span></label><textarea id="activity-prep-strengths" name="prepStrengths" minlength="8" placeholder="${esc(examples.strengths || '寫出有效的教學設計、教材位置與學生反應。')}" required>${esc(feedback.strengths || '')}</textarea></div><div class="form-field span-2"><label class="form-label" for="activity-student-resonance">孩子對哪個教案環節最有反應 <span class="required">*</span></label><textarea id="activity-student-resonance" name="studentResonance" minlength="8" placeholder="${esc(examples.resonance || '寫出學生最投入、主動回應或理解明顯改變的環節。')}" required>${esc(feedback.resonance || '')}</textarea></div><div class="form-field span-2"><label class="form-label" for="activity-prep-changes">這份教案／教材要更新什麼 <span class="required">*</span></label><textarea id="activity-prep-changes" name="prepChanges" minlength="8" placeholder="${esc(examples.changes || '寫出下次要調整的講法、流程或教材；若不用改，也要寫明原因。')}" required>${esc(feedback.changes || '')}</textarea></div></div></div>`;
+    return `<div id="activity-prep-feedback-fields" class="prep-feedback-block span-2"><div class="prep-feedback-head">${icon('message-square-heart', 19)}<div><strong>課後備課回饋</strong></div></div><div class="form-grid"><div class="form-field span-2"><label class="form-label" for="activity-student-resonance">孩子對哪個教案環節最有反應 <span class="required">*</span></label><textarea id="activity-student-resonance" name="studentResonance" minlength="8" placeholder="${esc(examples.resonance || '寫出學生最投入、主動回應或理解明顯改變的環節。')}" required>${esc(feedback.resonance || '')}</textarea></div><div class="form-field span-2"><label class="form-label" for="activity-prep-changes">這份教案／教材要更新什麼 <span class="required">*</span></label><textarea id="activity-prep-changes" name="prepChanges" minlength="8" placeholder="${esc(examples.changes || '寫出下次要調整的講法、流程或教材；若不用改，也要寫明原因。')}" required>${esc(feedback.changes || '')}</textarea></div></div></div>`;
   }
 
   function renderActivityResultSection(value) {
@@ -2973,7 +2971,7 @@
       robotics: { label: '機器人／STEAM 課程名稱', placeholder: '例：循線機器人挑戰' },
       portfolio: { label: '學習歷程主題', placeholder: '例：橋梁作品成長紀錄' },
       sel: { label: 'SEL 活動名稱', placeholder: '例：衝突時怎麼說' },
-    }[type] || { label: '班級／對象', placeholder: '例：四年級 A 班' };
+    }[type] || { label: '課程名稱', placeholder: '例：四年級數學' };
     const titlePlaceholder = {
       project: '例：菜單成本｜第一版定價',
       robotics: '例：循線機器人｜感測器與轉向',
@@ -2991,7 +2989,7 @@
       resultTitle: '備課內容', resultSubtitle: '集中整理教案與教材', resultBadge: '備課檔案',
       ownerLabel: '備課老師', dueLabel: '更新日期',
     } : {
-      classLabel: classFieldCopy.label, classPlaceholder: classFieldCopy.placeholder, hideClass: singleCourseName,
+      classLabel: '', classPlaceholder: '', hideClass: true,
       titleLabel: singleCourseName ? classFieldCopy.label : '紀錄標題', titlePlaceholder: singleCourseName ? classFieldCopy.placeholder : titlePlaceholder, hideStudents: type !== 'classroom',
       prepTitle: '本堂使用的備課檔案', prepSubtitle: '選擇這堂課使用的課程名稱', prepBadge: '授課前選取',
       prepSummaryLabel: '', prepSummaryPlaceholder: '',
@@ -3035,13 +3033,13 @@
     };
     const copy = activityFormCopy(value.type);
     const formTrack = value.formTrack || activityTrack(value.type);
-    const canonicalTitle = copy.hideClass ? (value.className || value.title || '') : (value.title || '');
+    const canonicalTitle = value.title || (activityTrack(value.type) === 'enrichment' ? value.className : '') || '';
     return `<form id="activity-form" data-form="activity" data-activity-track="${esc(formTrack)}">
       <input type="hidden" name="id" value="${esc(value.id)}">
       <input type="hidden" name="type" value="${esc(value.type)}">
       <div id="activity-track-indicator">${renderActivityTrackIndicator(value.type)}</div>
       <div class="form-grid">
-        ${copy.hideClass ? '<input type="hidden" name="className" value="">' : `<div class="form-field"><label class="form-label" id="activity-class-label" for="activity-class">${esc(copy.classLabel)} <span class="required">*</span></label><input id="activity-class" name="className" value="${esc(value.className)}" placeholder="${esc(copy.classPlaceholder)}" required></div>`}
+        <input type="hidden" name="className" value="${esc(value.className || '')}">
         <div class="form-field span-2"><label class="form-label" id="activity-title-label" for="activity-title">${esc(copy.titleLabel)} <span class="required">*</span></label><input id="activity-title" name="title" value="${esc(canonicalTitle)}" placeholder="${esc(copy.titlePlaceholder)}" required></div>
         <div id="activity-students-field" class="form-field span-2" ${copy.hideStudents ? 'hidden' : ''}><div class="form-label">關聯學生（本班 ${assignedStudents(value.teacher || state.context.teacher).length} 人）</div><div class="chip-list">${renderStudentChoices(value.teacher || state.context.teacher, value.students || [])}</div></div>
       </div>
@@ -4623,7 +4621,7 @@
   function renderArchivedActivityRow(activity, submissionId) {
     const config = ACTIVITY_TYPES[activity.type] || ACTIVITY_TYPES.tutoring;
     const evidenceCount = (activity.evidence || []).reduce((count, item) => count + evidenceAttachments(item).filter(attachmentRecorded).length, 0);
-    return `<button type="button" class="archived-activity-row" data-action="view-archived-activity" data-submission-id="${esc(submissionId)}" data-activity-id="${esc(activity.id)}"><span class="activity-icon ${config.tone}">${icon(config.icon, 19)}</span><span class="archived-activity-main"><strong>${esc(activity.title)}</strong><small>${esc(config.label)} · ${esc(activity.className || '未指定班級')}</small><span>${esc(truncate(activityFeedbackSummary(activity, '尚未填寫課後回饋'), 100))}</span></span><span class="archived-activity-meta"><span class="badge ${evidenceCount ? 'blue' : 'red'}">成果 ${evidenceCount} 份</span>${icon('chevron-right', 17)}</span></button>`;
+    return `<button type="button" class="archived-activity-row" data-action="view-archived-activity" data-submission-id="${esc(submissionId)}" data-activity-id="${esc(activity.id)}"><span class="activity-icon ${config.tone}">${icon(config.icon, 19)}</span><span class="archived-activity-main"><strong>${esc(activity.title)}</strong><small>${esc(config.label)}</small><span>${esc(truncate(activityFeedbackSummary(activity, '尚未填寫課後回饋'), 100))}</span></span><span class="archived-activity-meta"><span class="badge ${evidenceCount ? 'blue' : 'red'}">成果 ${evidenceCount} 份</span>${icon('chevron-right', 17)}</span></button>`;
   }
 
   function renderActivityFullDetail(activity) {
@@ -4632,7 +4630,6 @@
     const details = (feedbackOnly ? [] : activityDetailSchema(activity.type)).map(field => `<div class="metadata-row"><div class="metadata-label">${esc(field.label)}</div><div class="metadata-value">${field.control === 'date' ? formatDate(activity.details?.[field.key]) : nl2br(activity.details?.[field.key] || '未填寫')}</div></div>`).join('');
     const evidence = activity.evidence || [];
     const outcomeRows = feedbackOnly ? [
-      ['這份教案／教材哪裡有效', activity.prepFeedback?.strengths],
       ['孩子對哪個教案環節最有反應', activity.prepFeedback?.resonance],
       ['這份教案／教材要更新什麼', activity.prepFeedback?.changes],
     ] : [
@@ -4680,7 +4677,7 @@
     const checks = [
       ['已登記成果檔案', evidenceReady(evidence)],
       ['對應工作紀錄可追溯', Boolean(linkedResult || evidence.claim)],
-      ['課程／班級可追溯', Boolean(activity.className)],
+      ['工作紀錄可追溯', Boolean(activity.title)],
       ['隱私確認完成', Boolean(evidence.privacy)],
     ];
     return `<div class="stack"><div class="detail-split">
@@ -4823,7 +4820,7 @@
       ? `<div class="prep-file-list">${references.map(item => { const cloudUrl = materialCloudUrl(item); return `<div class="prep-file-row read-only">${icon('file-check-2', 18)}<div class="prep-file-main">${cloudUrl ? `<a class="file-name-link" href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer"><strong>${esc(item.fileName)}</strong>${icon('external-link', 13)}</a>` : `<strong>${esc(item.fileName)}</strong>`}<small>${esc(item.size || '')}${item.addedAt ? ` · ${formatDate(String(item.addedAt).slice(0, 10))}` : ''}</small>${item.note ? `<p>${esc(item.note)}</p>` : ''}</div>${statusBadge(cloudUrl ? '已歸檔' : '未上傳', cloudUrl ? 'green' : 'red')}</div>`; }).join('')}${legacyOutputs.map(item => `<div class="prep-file-row read-only">${icon('archive', 18)}<div class="prep-file-main"><strong>${esc(item.title || item.fileName || '舊版備課附件')}</strong><small>舊版資料保留</small>${item.claim ? `<p>${esc(item.claim)}</p>` : ''}</div></div>`).join('')}</div>`
       : '<div class="prep-file-empty">尚未上傳教案或教材；補上一份後即可供授課紀錄選用。</div>';
     const usageList = usageRecords.length
-      ? `<div class="prep-version-uses">${usageRecords.map(item => { const feedback = item.prepFeedback || {}; return `<article><div class="prep-use-head"><div><strong>${esc(item.title)}</strong><small>${formatDate(item.date)} · ${esc(item.className || '未指定班級')}</small></div>${statusBadge(prepFeedbackComplete(item) ? '回饋完整' : '待補', prepFeedbackComplete(item) ? 'green' : 'red')}</div><div class="prep-feedback-review"><div><strong>有效處</strong><p>${esc(feedback.strengths || '尚未填寫')}</p></div><div><strong>孩子共鳴</strong><p>${esc(feedback.resonance || '尚未填寫')}</p></div><div><strong>下次調整</strong><p>${esc(feedback.changes || '尚未填寫')}</p></div></div></article>`; }).join('')}</div>`
+      ? `<div class="prep-version-uses">${usageRecords.map(item => { const feedback = item.prepFeedback || {}; return `<article><div class="prep-use-head"><div><strong>${esc(item.title)}</strong><small>${formatDate(item.date)}</small></div>${statusBadge(prepFeedbackComplete(item) ? '回饋完整' : '待補', prepFeedbackComplete(item) ? 'green' : 'red')}</div><div class="prep-feedback-review"><div><strong>孩子共鳴</strong><p>${esc(feedback.resonance || '尚未填寫')}</p></div><div><strong>下次調整</strong><p>${esc(feedback.changes || '尚未填寫')}</p></div></div></article>`; }).join('')}</div>`
       : '<div class="prep-file-empty">這份備課檔案尚未被授課紀錄選用。</div>';
     return `<div class="notice-band info">${icon('folder-open', 19)}<div><div class="notice-title">${esc(activity.title)}</div><div class="notice-copy">${esc(activity.details?.targetCourse || '尚未分類')} · ${formatDate(activity.date)} 建立 · ${formatDate(updatedDate)} 更新</div></div></div>
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('book-open')}課程資料</div></div></div><div class="panel-body"><div class="metadata-list"><div class="metadata-row"><div class="metadata-label">課程名稱</div><div class="metadata-value">${esc(activity.title)}</div></div><div class="metadata-row"><div class="metadata-label">課程類型</div><div class="metadata-value">${esc(activity.details?.targetCourse || '尚未分類')}</div></div><div class="metadata-row"><div class="metadata-label">上課內容／提醒</div><div class="metadata-value">${nl2br(activity.prep?.summary || '未填寫')}</div></div></div></div></section>
@@ -4839,7 +4836,7 @@
     const feedback = activity.prepFeedback || {};
     const updatedDate = source ? String(source.updatedAt || '').slice(0, 10) || source.date : '';
     return `<section class="evidence-stage"><div class="evidence-stage-head"><span class="evidence-stage-number">1</span><div><strong>使用的備課檔案</strong><small>${source ? `${esc(source.title)} · ${formatDate(source.date)} 建立 · ${formatDate(updatedDate)} 更新` : '尚未選擇備課檔案'}</small></div>${statusBadge(sourceReady ? '可追溯' : '待補連結', sourceReady ? 'green' : 'red')}</div>${source ? `<div class="plan-evidence-link"><div><strong>${esc(source.title)}</strong><small>${esc(source.details?.targetCourse || '尚未分類')} · ${(source.prepEvidence || []).length} 份附件</small></div><button type="button" class="btn btn-small" data-action="open-evidence" data-activity-id="${source.id}">${icon('arrow-right', 14)}查看備課檔案</button></div>${source.prep?.summary ? `<div class="prep-source-summary"><strong>上課內容／提醒</strong><p>${esc(source.prep.summary)}</p></div>` : ''}` : ''}</section>
-      <section class="evidence-stage"><div class="evidence-stage-head"><span class="evidence-stage-number">2</span><div><strong>課後回饋</strong><small>主管可直接看到教案成效、孩子反應與更新方向</small></div>${statusBadge(prepFeedbackComplete(activity) ? '回饋完整' : '待補回饋', prepFeedbackComplete(activity) ? 'blue' : 'red')}</div><div class="prep-feedback-review"><div><strong>這份教案／教材哪裡有效</strong><p>${esc(feedback.strengths || '尚未填寫')}</p></div><div><strong>孩子對哪個教案環節最有反應</strong><p>${esc(feedback.resonance || '尚未填寫')}</p></div><div><strong>這份教案／教材要更新什麼</strong><p>${esc(feedback.changes || '尚未填寫')}</p></div></div></section>
+      <section class="evidence-stage"><div class="evidence-stage-head"><span class="evidence-stage-number">2</span><div><strong>課後回饋</strong><small>主管可直接看到孩子反應與下次調整</small></div>${statusBadge(prepFeedbackComplete(activity) ? '回饋完整' : '待補回饋', prepFeedbackComplete(activity) ? 'blue' : 'red')}</div><div class="prep-feedback-review"><div><strong>孩子對哪個教案環節最有反應</strong><p>${esc(feedback.resonance || '尚未填寫')}</p></div><div><strong>這份教案／教材要更新什麼</strong><p>${esc(feedback.changes || '尚未填寫')}</p></div></div></section>
       <section class="evidence-stage"><div class="evidence-stage-head"><span class="evidence-stage-number">3</span><div><strong>學生實際成果與變化證據</strong><small>用作品、訂正、測試數據或可觀察行為呈現本堂結果</small></div>${statusBadge(hasEvidence ? '已上傳' : '待補', hasEvidence ? 'blue' : 'red')}</div>${evidence.length ? `<div class="evidence-grid">${evidence.map(item => renderEvidenceCard({ activity, evidence: item })).join('')}</div>` : '<div class="prep-file-empty">尚未加入成果證據。</div>'}</section>`;
   }
 
@@ -5253,7 +5250,7 @@
     const type = String(data.get('type') || activityDraft.type || 'tutoring');
     const feedbackOnly = activityNeedsPrepSource(type);
     const title = String(data.get('title') || '').trim();
-    const className = activityTrack(type) === 'enrichment' ? title : String(data.get('className') || '').trim();
+    const className = activityTrack(type) === 'enrichment' ? title : String(data.get('className') || activityDraft.className || title).trim();
     const details = feedbackOnly ? {} : clone(activityDraft.detailCache?.[type] || activityDraft.details || {});
     Object.assign(activityDraft, {
       id: String(data.get('id') || activityDraft.id || ''),
@@ -5384,7 +5381,7 @@
     const prepEvidence = [];
     const feedbackOnly = activityNeedsPrepSource(type);
     const title = String(data.get('title') || '').trim();
-    const className = activityTrack(type) === 'enrichment' ? title : String(data.get('className') || '').trim();
+    const className = activityTrack(type) === 'enrichment' ? title : String(data.get('className') || existing?.className || title).trim();
     const details = feedbackOnly ? {} : clone(activityDraft?.detailCache?.[type] || activityDraft?.details || {});
     const activity = {
       id,
@@ -5407,7 +5404,7 @@
       status: 'complete',
       prep: { summary: '', adjustment: '' },
       prepFeedback: activityNeedsPrepSource(type) ? {
-        strengths: String(data.get('prepStrengths') || '').trim(),
+        strengths: String(existing?.prepFeedback?.strengths || '').trim(),
         resonance: String(data.get('studentResonance') || '').trim(),
         changes: String(data.get('prepChanges') || '').trim(),
       } : { strengths: '', resonance: '', changes: '' },
@@ -5426,7 +5423,7 @@
       return;
     }
     if (activityNeedsPrepSource(type) && !prepFeedbackComplete(activity)) {
-      toast('請完整填寫教案有效處、孩子共鳴與需要調整的地方', 'danger');
+      toast('請完整填寫孩子反應與下次要調整的地方', 'danger');
       return;
     }
     const planPending = !activityPlanReady(activity);
@@ -6708,13 +6705,9 @@
     const copy = activityFormCopy(type);
     const guide = activityGuide(type);
     const setText = (selector, value) => { const node = $(selector); if (node) node.textContent = value; };
-    const classLabel = $('#activity-class-label');
     const titleLabel = $('#activity-title-label');
-    if (classLabel) classLabel.innerHTML = `${esc(copy.classLabel)} <span class="required">*</span>`;
     if (titleLabel) titleLabel.innerHTML = `${esc(copy.titleLabel)} <span class="required">*</span>`;
-    const classInput = $('#activity-class');
     const titleInput = $('#activity-title');
-    if (classInput) classInput.placeholder = copy.classPlaceholder;
     if (titleInput) titleInput.placeholder = copy.titlePlaceholder;
     const students = $('#activity-students-field');
     if (students) students.hidden = copy.hideStudents;

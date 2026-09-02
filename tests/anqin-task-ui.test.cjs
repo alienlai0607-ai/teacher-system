@@ -90,8 +90,8 @@ assert.match(source, /function applyPreviewReviewContext\(/, '安親審查模式
 assert.match(source, /if \(!applyPreviewReviewContext\(control\.dataset\.role\)\) state\.ui\.role = control\.dataset\.role/, '切換審查角色時必須同步身份範圍');
 assert.match(source, /applyPreviewReviewContext\(LOCAL_REVIEW_ROLE\)/, '網址指定主管視角時首次載入就必須套用正確身份');
 assert.match(source, /GLOBAL_MANAGER_NICKNAMES\.some\(name => sameReviewIdentity\(name, managerNickname\)\)/, '小魚在審查與正式登入都必須擁有全教室檢視範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260902-anqin-stability-3/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260902-anqin-stability-3/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260902-anqin-stability-4/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260902-anqin-stability-4/, '登入備援路徑也必須避開舊版快取');
 
 const activityFormSource = source.slice(source.indexOf('function renderActivitySpecificFields('), source.indexOf('function renderEvidenceAttachmentList('));
 assert.match(activityFormSource, /if \(activityNeedsPrepSource\(type\)\) return '';/, '課業指導與學科外不得重複顯示舊課程內容欄位');
@@ -99,8 +99,16 @@ assert.match(activityFormSource, /hideStudents: type !== 'classroom'/, '只有�
 assert.match(activityFormSource, /singleCourseName \? classFieldCopy\.label : '紀錄標題'/, '學科外只保留一個類型專屬課程名稱');
 assert.match(activityFormSource, /<input type="hidden" name="type"/, '進入表單後課程類型必須固定，不得再次顯示重複下拉選單');
 assert.doesNotMatch(activityFormSource, /id="activity-type"/, '正式填寫表單不得再出現課程類型下拉選單');
+assert.doesNotMatch(activityFormSource, /id="activity-class"|id="activity-class-label"|班級／對象/, '工作紀錄不得再要求班級或對象欄位');
+assert.match(activityFormSource, /<input type="hidden" name="className"/, '舊紀錄的班級值需隱藏保留，避免編輯歷史資料時遺失');
 assert.match(source, /function openActivityTypePicker\(/, '學科內外入口需先用簡單選單選定紀錄類型');
 assert.match(activityFormSource, /function renderActivityResultSection\([\s\S]*activityNeedsPrepSource\(value\.type\)[\s\S]*renderActivityPrepFeedbackFields/, '課程紀錄只保留課後備課回饋');
+const prepFeedbackFormSource = source.slice(source.indexOf('function renderActivityPrepFeedbackFields('), source.indexOf('function renderActivityResultSection('));
+assert.doesNotMatch(prepFeedbackFormSource, /activity-prep-strengths|prepStrengths|這份教案／教材哪裡有效/, '課後回饋不得再要求重複的教案有效處');
+assert.match(prepFeedbackFormSource, /activity-student-resonance[\s\S]*activity-prep-changes/, '課後回饋只保留孩子反應與下次調整');
+const prepFeedbackCompletionSource = source.slice(source.indexOf('function prepFeedbackComplete('), source.indexOf('function activityFeedbackSummary('));
+assert.match(prepFeedbackCompletionSource, /\['resonance', 'changes'\]/, '完成度只能檢查仍顯示的兩項課後回饋');
+assert.doesNotMatch(prepFeedbackCompletionSource, /strengths/, '已刪除的教案有效處不得在背景阻擋送出');
 assert.doesNotMatch(source, /<option value="attendance">出席<\/option>/, '學生追蹤不得再提供出席類型');
 
 const prepFormSource = source.slice(source.indexOf('function renderCoursePrepForm('), source.indexOf('function renderActivityForm('));

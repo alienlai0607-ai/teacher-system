@@ -762,7 +762,7 @@
       ${compliance.missing.length ? `<div class="notice strict">${icon('ban', 19)}<div><strong>當月續報獎金資格已取消</strong><span>未當日送出：${compliance.missing.map(item => formatDate(item.date)).join('、')}。過期課堂不開放補寫。</span></div></div>` : ''}
       ${compliance.appMissing.length ? `<div class="notice warning">${icon('image-off', 19)}<div><strong>家長 APP 發布證據尚未完成</strong><span>待上傳：${compliance.appMissing.map(item => `${formatDate(item.date)} ${item.courseName || item.courseType}`).join('、')}。完成前不列入續報獎金資格。</span></div><button type="button" class="btn btn-small" data-action="navigate" data-route="weekly">前往上傳</button></div>` : ''}
       <section class="panel"><div class="panel-head"><div><h2>本月明細</h2><p>計薪實到＝正式實到＋補課；體驗不計。</p></div></div><div class="panel-body">${logs.length ? logs.map(renderPayRow).join('') : renderEmpty('本月尚無記錄', '送出第一堂後，系統會自動列出鐘點級距。', 'badge-dollar-sign')}</div></section>
-      <section class="rule-strip"><div><strong>2–4 人</strong><span>500／小時</span></div><div><strong>5–7 人</strong><span>600／小時</span></div><div><strong>8–10 人</strong><span>800／小時</span></div><div class="partner"><strong>黑豹／善化</strong><span>每堂固定 900，無續報獎金</span></div></section>`;
+      <section class="rule-strip"><div><strong>2–4 人</strong><span>500／小時</span></div><div><strong>5–7 人</strong><span>600／小時</span></div><div><strong>8–10 人</strong><span>800／小時</span></div>${normalizeName(currentUser.nickname) === normalizeName('黑豹老師') ? '<div class="partner"><strong>黑豹／善化</strong><span>每堂固定 900，無續報獎金</span></div>' : ''}</section>`;
   }
 
   function renderPayRow(item) {
