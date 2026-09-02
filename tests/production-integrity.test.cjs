@@ -88,6 +88,7 @@ const context = vm.createContext({
     previews: [{ fileId: params.file_ids[0], dataUrl: 'data:image/png;base64,AAAA' }],
     errors: [],
   }),
+  pdfPhotoUri_: () => 'data:image/png;base64,AAAA',
   nowIso: () => '2026-09-02T12:00:00',
   systemMaintenanceUser_: () => null,
 });
@@ -103,5 +104,7 @@ assert.equal(result.summary.passed, 4);
 assert.equal(result.summary.failed, 0);
 assert.equal(systemLog, null, '試算表 QA 資料必須清理');
 assert.equal(Array.from(files.values()).every(file => file.isTrashed()), true, 'Drive QA 檔案必須全部移到垃圾桶');
+assert.match(source, /const pdfPhoto = pdfPhotoUri_\(fileId\)/, '正式健康檢查必須實際驗證照片能嵌入 PDF');
+assert.match(source, /pdf_embed: 'passed'/, '健康檢查結果需回報 PDF 圖片已通過');
 
 console.log('production-integrity.test.cjs passed');

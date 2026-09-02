@@ -3662,11 +3662,13 @@ function runProductionIntegrityCheck(params) {
         requireCheck_(preview && preview.ok, '私密照片預覽端點執行失敗');
         requireCheck_(Array.isArray(preview.previews) && preview.previews.length === 1, '私密照片預覽未回傳圖片');
         requireCheck_(/^data:image\//.test(String(preview.previews[0].dataUrl || '')), '照片預覽不是可顯示的影像資料');
+        const pdfPhoto = pdfPhotoUri_(fileId);
+        requireCheck_(/^data:image\/(?:png|jpeg|jpg|gif);base64,/.test(String(pdfPhoto || '')), 'PDF 無法嵌入雲端照片');
       } finally {
         file.setTrashed(true);
       }
       requireCheck_(file.isTrashed(), '測試照片清理失敗');
-      return { format: 'image/png', preview: 'passed', privacy: 'private', cleanup: 'passed' };
+      return { format: 'image/png', preview: 'passed', pdf_embed: 'passed', privacy: 'private', cleanup: 'passed' };
     });
 
     runCheck_('material_roundtrip', '教材檔案建立、讀回與內容核對', function () {
@@ -4699,21 +4701,33 @@ function pdfSafeUrl_(value) {
   return /^https:\/\/[^\s"'<>]+$/i.test(url) ? pdfEsc_(url) : '';
 }
 
-/** 取縮圖 dataURI（lh3 縮到 w360 控制檔案大小；失敗回空字串跳過該圖） */
+/** 只把 PDF 轉檔器確定支援的真實圖片轉成 data URI。 */
+function pdfImageDataUri_(blob, maxBytes) {
+  if (!blob) return '';
+  const contentType = String(blob.getContentType() || '').toLowerCase();
+  if (!/^image\/(?:jpeg|jpg|png|gif)$/.test(contentType)) return '';
+  const bytes = blob.getBytes();
+  if (!bytes || !bytes.length || bytes.length > Number(maxBytes || 950000)) return '';
+  return 'data:' + contentType + ';base64,' + Utilities.base64Encode(bytes);
+}
+
+/**
+ * 取 PDF 圖片 data URI。
+ * 先由具有權限的 Apps Script 直接讀取 Drive；只有原檔過大時才嘗試授權縮圖。
+ * Google 的未登入頁也可能回傳 HTTP 200，因此每一個來源都必須驗證 MIME 類型。
+ */
 function pdfPhotoUri_(fileId) {
   if (!fileId) return '';
   try {
-    const r = UrlFetchApp.fetch('https://lh3.googleusercontent.com/d/' + fileId + '=w360', { muteHttpExceptions: true });
-    if (r.getResponseCode() === 200) {
-      const blob = r.getBlob();
-      return 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes());
-    }
+    const direct = pdfImageDataUri_(DriveApp.getFileById(fileId).getBlob(), 950000);
+    if (direct) return direct;
   } catch (e) {}
-  try {   // 備援：直接抓原檔（老闆帳號有權限）
-    const blob = DriveApp.getFileById(fileId).getBlob();
-    if (blob.getBytes().length < 600000) {
-      return 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes());
-    }
+  try {
+    const r = UrlFetchApp.fetch('https://lh3.googleusercontent.com/d/' + encodeURIComponent(fileId) + '=w360', {
+      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+      muteHttpExceptions: true,
+    });
+    if (r.getResponseCode() === 200) return pdfImageDataUri_(r.getBlob(), 950000);
   } catch (e) {}
   return '';
 }
@@ -4805,19 +4819,23 @@ function pdfLogCard_(l) {
   // 照片牆（每列 4 張）
   if (photos.length) {
     const KPI_LABEL = { 1: '課業', 2: '環境', 3: '課程', 5: '親師', 6: '行政' };
-    h += '<div style="margin-top:8px;"><span style="color:#C77A12; font-weight:bold;">📷 照片（' + photos.length + '）</span></div>';
-    h += '<table style="border-collapse:collapse; margin-top:4px;"><tr>';
-    let cell = 0;
-    photos.forEach(p => {
-      const uri = pdfPhotoUri_(p.fileId);
-      if (!uri) return;
-      if (cell > 0 && cell % 4 === 0) h += '</tr><tr>';
-      h += '<td style="padding:3px; vertical-align:top; text-align:center;">'
-         + '<img src="' + uri + '" style="width:150px; border-radius:6px;"><br>'
-         + '<span style="font-size:9px; color:#999;">' + (KPI_LABEL[p.kpi] || '') + '</span></td>';
-      cell++;
-    });
-    h += '</tr></table>';
+    const previews = photos.map(function (photo) {
+      return { photo: photo, uri: pdfPhotoUri_(photo.fileId) };
+    }).filter(function (item) { return /^data:image\//.test(item.uri); });
+    if (previews.length) {
+      h += '<div style="margin-top:8px;"><span style="color:#C77A12; font-weight:bold;">📷 照片（' + previews.length + '）</span></div>';
+      h += '<table style="border-collapse:collapse; margin-top:4px;"><tr>';
+      previews.forEach(function (item, index) {
+        if (index > 0 && index % 4 === 0) h += '</tr><tr>';
+        h += '<td style="padding:3px; vertical-align:top; text-align:center;">'
+           + '<img src="' + item.uri + '" style="width:150px; border-radius:6px;"><br>'
+           + '<span style="font-size:9px; color:#999;">' + (KPI_LABEL[item.photo.kpi] || '') + '</span></td>';
+      });
+      h += '</tr></table>';
+    }
+    if (previews.length < photos.length) {
+      h += '<div style="margin-top:5px; color:#A85A26; font-size:10px;">另有 ' + (photos.length - previews.length) + ' 張原檔無法轉成 PDF 預覽，請由下方成果附件開啟原檔。</div>';
+    }
   }
 
   const linkedAttachments = attachments.filter(a => pdfSafeUrl_(a.url));
@@ -4930,6 +4948,37 @@ function reportRecipientUsers_(log) {
   });
 }
 
+/** 以 Drive API 原地替換 PDF 內容，讓既有 LINE／APP 連結繼續有效。 */
+function replacePdfContent_(fileId, blob) {
+  try {
+    const response = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files/' + encodeURIComponent(fileId) + '?uploadType=media', {
+      method: 'patch',
+      contentType: 'application/pdf',
+      payload: blob.getBytes(),
+      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+      muteHttpExceptions: true,
+    });
+    const code = response.getResponseCode();
+    return code >= 200 && code < 300;
+  } catch (error) {
+    return false;
+  }
+}
+
+function savePersonPdf_(folder, fileName, blob) {
+  const matches = folder.getFilesByName(fileName);
+  if (matches.hasNext()) {
+    const existing = matches.next();
+    if (replacePdfContent_(existing.getId(), blob)) {
+      while (matches.hasNext()) matches.next().setTrashed(true);
+      return existing;
+    }
+    existing.setTrashed(true);
+    while (matches.hasNext()) matches.next().setTrashed(true);
+  }
+  return folder.createFile(blob);
+}
+
 /** 單人日報 PDF（老師送出當下即時生成） */
 function generatePersonKpiPdf_(nickname, dateStr) {
   const log = findObject(SHEET_NAMES.LOGS, 'log_id', 'LOG-' + String(dateStr).replace(/-/g, '') + '-' + nickname);
@@ -4945,14 +4994,32 @@ function generatePersonKpiPdf_(nickname, dateStr) {
   const teacherFolder = getOrCreateChildFolder_(departmentFolder, nickname);
   const workFolder = getOrCreateChildFolder_(teacherFolder, '安親');
   const ymF = getOrCreateChildFolder_(workFolder, String(dateStr).slice(0, 7));
-  const dup = ymF.getFilesByName('KPI_' + nickname + '_' + dateStr + '.pdf');
-  while (dup.hasNext()) dup.next().setTrashed(true);
-  const file = ymF.createFile(blob);
+  const file = savePersonPdf_(ymF, 'KPI_' + nickname + '_' + dateStr + '.pdf', blob);
   const ownerUser = findUserByNickname(nickname);
   const recipients = reportRecipientUsers_(log);
   secureKpiReportPath_(root, departmentFolder, teacherFolder, workFolder, ymF, ownerUser, 'anqin', recipients);
   secureKpiDriveItem_(file, ownerUser, 'anqin', recipients);
   return { url: 'https://drive.google.com/file/d/' + file.getId() + '/view', folderUrl: workFolder.getUrl(), log: log };
+}
+
+/** 管理維護：重建今天所有已送出的單人 PDF，並保留既有檔案網址。 */
+function repairTodayKpiPdfImages() {
+  const dateStr = todayStr();
+  const logs = sheetToObjects(SHEET_NAMES.LOGS).filter(function (log) {
+    return String(log.date || '') === dateStr && Boolean(log.submitted_at);
+  });
+  const repaired = [];
+  const failed = [];
+  logs.forEach(function (log) {
+    try {
+      const result = generatePersonKpiPdf_(log.nickname, dateStr);
+      if (!result) throw new Error('PDF 產生失敗');
+      repaired.push({ nickname: log.nickname, url: result.url });
+    } catch (error) {
+      failed.push({ nickname: log.nickname, error: String(error && error.message || error) });
+    }
+  });
+  return { ok: failed.length === 0, date: dateStr, repaired: repaired, failed: failed };
 }
 
 /**

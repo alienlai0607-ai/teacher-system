@@ -166,11 +166,13 @@ function runProductionIntegrityCheck(params) {
         requireCheck_(preview && preview.ok, '私密照片預覽端點執行失敗');
         requireCheck_(Array.isArray(preview.previews) && preview.previews.length === 1, '私密照片預覽未回傳圖片');
         requireCheck_(/^data:image\//.test(String(preview.previews[0].dataUrl || '')), '照片預覽不是可顯示的影像資料');
+        const pdfPhoto = pdfPhotoUri_(fileId);
+        requireCheck_(/^data:image\/(?:png|jpeg|jpg|gif);base64,/.test(String(pdfPhoto || '')), 'PDF 無法嵌入雲端照片');
       } finally {
         file.setTrashed(true);
       }
       requireCheck_(file.isTrashed(), '測試照片清理失敗');
-      return { format: 'image/png', preview: 'passed', privacy: 'private', cleanup: 'passed' };
+      return { format: 'image/png', preview: 'passed', pdf_embed: 'passed', privacy: 'private', cleanup: 'passed' };
     });
 
     runCheck_('material_roundtrip', '教材檔案建立、讀回與內容核對', function () {

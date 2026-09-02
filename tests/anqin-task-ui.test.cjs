@@ -14,6 +14,7 @@ const authBackend = fs.readFileSync(path.join(root, 'apps-script/auth.gs'), 'utf
 const logsBackend = fs.readFileSync(path.join(root, 'apps-script/logs.gs'), 'utf8');
 const evaluationBackend = fs.readFileSync(path.join(root, 'apps-script/evaluation.gs'), 'utf8');
 const pdfReport = fs.readFileSync(path.join(root, 'apps-script/pdfreport.gs'), 'utf8');
+const allInOneBackend = fs.readFileSync(path.join(root, 'apps-script/_all_in_one.gs'), 'utf8');
 const coursePrepBackend = fs.readFileSync(path.join(root, 'apps-script/courseprep.gs'), 'utf8');
 const qaHarness = fs.readFileSync(path.join(root, 'review/anqin-v2/qa-harness.js'), 'utf8');
 
@@ -327,6 +328,33 @@ assert.match(source, /function preserveActivityMedia\(/, '雲端草稿不得用�
 assert.match(sharedAuth, /24 \* 3600 \* 1000/, '正式登入應維持完整工作日並降低填寫途中過期風險');
 assert.match(pdfReport, /教案／教材有效處/, '正式 PDF 需使用新的課後備課回饋欄位');
 assert.match(pdfReport, /parent_handoff_confirmed/, '正式 PDF 需保留無重要事項時的門口交接證據');
+const pdfPhotoSource = pdfReport.slice(pdfReport.indexOf('function pdfImageDataUri_('), pdfReport.indexOf('function pdfRow_('));
+assert.match(pdfPhotoSource, /DriveApp\.getFileById\(fileId\)\.getBlob\(\)/, 'PDF 圖片需由有權限的後端直接讀取 Drive 原檔');
+assert.match(pdfPhotoSource, /\^image\\\/\(\?:jpeg\|jpg\|png\|gif\)\$/, 'PDF 嵌入前需驗證回傳內容確實為支援的圖片格式');
+assert.match(pdfPhotoSource, /Authorization: 'Bearer ' \+ ScriptApp\.getOAuthToken\(\)/, '縮圖備援也必須帶入 Drive 授權');
+assert.ok(pdfPhotoSource.indexOf('DriveApp.getFileById') < pdfPhotoSource.indexOf('UrlFetchApp.fetch'), 'PDF 不得優先使用可能回傳登入頁的未授權縮圖');
+assert.match(pdfReport, /function savePersonPdf_\([\s\S]*replacePdfContent_/, '重建 PDF 時需原地更新既有檔案，避免舊通知連結失效');
+assert.match(pdfReport, /function repairTodayKpiPdfImages\(/, '需提供可重建今日既有破圖 PDF 的維護程序');
+assert.match(allInOneBackend, /function repairTodayKpiPdfImages\(/, '正式貼入 Apps Script 的整合檔也必須包含 PDF 修復程序');
+
+const validPdfBytes = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+const pdfPhotoContext = vm.createContext({
+  String,
+  Number,
+  encodeURIComponent,
+  DriveApp: { getFileById: () => ({ getBlob: () => ({ getContentType: () => 'image/jpeg', getBytes: () => Array.from(validPdfBytes) }) }) },
+  UrlFetchApp: { fetch: () => { throw new Error('有效 Drive 圖片不應再走外部縮圖'); } },
+  ScriptApp: { getOAuthToken: () => 'test-token' },
+  Utilities: { base64Encode: bytes => Buffer.from(bytes).toString('base64') },
+});
+vm.runInContext(pdfPhotoSource, pdfPhotoContext);
+assert.match(pdfPhotoContext.pdfPhotoUri_('private-photo'), /^data:image\/jpeg;base64,/, '私密 Drive 照片必須可轉成 PDF 內嵌圖片');
+pdfPhotoContext.DriveApp = { getFileById: () => ({ getBlob: () => ({ getContentType: () => 'image/jpeg', getBytes: () => new Array(950001).fill(1) }) }) };
+pdfPhotoContext.UrlFetchApp = { fetch: () => ({
+  getResponseCode: () => 200,
+  getBlob: () => ({ getContentType: () => 'text/html', getBytes: () => [60, 104, 116, 109, 108, 62] }),
+}) };
+assert.equal(pdfPhotoContext.pdfPhotoUri_('html-login-page'), '', 'HTTP 200 的 Google 登入頁不得再被誤當成照片嵌入 PDF');
 assert.match(qaHarness, /此驗收頁只允許在本機使用/, '隔離驗收頁不得在正式網域啟用');
 assert.match(qaHarness, /action === 'uploadFile' \|\| action === 'uploadPhoto'/, '隔離驗收頁需實際走過檔案與照片上傳介面');
 assert.match(qaHarness, /action === 'getAttachmentPreviews'/, '隔離驗收頁需模擬跨裝置私密照片讀回');
