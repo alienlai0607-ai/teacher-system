@@ -230,7 +230,9 @@ assert.match(talentUiSource, /\.\.\.values,[\s\S]*id: editingId \|\| existingLog
 assert.match(talentUiSource, /state\.logs = \(Array\.isArray\(state\.logs\)[\s\S]*id: uid\('log'\)/, '舊本機課堂缺少編號時需自動修復');
 assert.match(talentUiSource, /class="record-actions"[\s\S]*data-action="edit-log"[\s\S]*data-action="view-log"/, '編輯與查看按鈕需放入獨立動作列，避免疊在同一座標');
 assert.match(talentStyleSource, /\.record-actions \{ display: flex;[\s\S]*gap: 6px;/, '編輯與查看按鈕需保留可點擊間距');
-assert.match(talentIndexSource, /app\.js\?v=20260902-talent-stability-9/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
+assert.match(talentIndexSource, /app\.js\?v=20260902-talent-stability-10/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
+assert.match(talentUiSource, /completed: String\(values\.issue \|\| ''\)\.trim\(\), response: String\(values\.issue \|\| ''\)\.trim\(\)/, '簡化後的才藝表單需相容尚未更新的舊後端驗證');
+assert.match(talentUiSource, /function talentSubmissionError\(/, '才藝送出錯誤不得直接顯示內部欄位名稱');
 const talentPaySource = talentUiSource.slice(talentUiSource.indexOf('function renderPay()'), talentUiSource.indexOf('function renderPayRow('));
 assert.match(talentPaySource, /normalizeName\(currentUser\.nickname\) === normalizeName\('黑豹老師'\)[\s\S]*黑豹／善化/, '黑豹合作校鐘點卡只能由黑豹本人條件顯示');
 assert.doesNotMatch(talentPaySource, /<div class="partner"><strong>黑豹／善化<\/strong><span>每堂固定 900，無續報獎金<\/span><\/div><\/section>/, '黑豹特殊規則不得無條件顯示給其他 PT');

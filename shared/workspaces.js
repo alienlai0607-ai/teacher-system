@@ -29,7 +29,7 @@
       shortLabel: '才藝正職',
       description: '工作日誌、KPI 與獎金',
       icon: 'sparkles',
-      path: 'review/talent-v2/index.html?workspace=talent-fulltime&v=20260902-talent-stability-9',
+      path: 'review/talent-v2/index.html?workspace=talent-fulltime&v=20260902-talent-stability-10',
     },
     'talent-pt': {
       id: 'talent-pt',
@@ -38,7 +38,7 @@
       shortLabel: '才藝 PT',
       description: '上課紀錄、鐘點與續報',
       icon: 'clock-3',
-      path: 'review/talent-v2/index.html?workspace=talent-pt&v=20260902-talent-stability-9',
+      path: 'review/talent-v2/index.html?workspace=talent-pt&v=20260902-talent-stability-10',
     },
     'talent-manager': {
       id: 'talent-manager',
@@ -47,7 +47,7 @@
       shortLabel: '才藝主管',
       description: '備課查閱、評分與結算',
       icon: 'chart-no-axes-combined',
-      path: 'review/talent-v2/index.html?workspace=talent-manager&v=20260902-talent-stability-9',
+      path: 'review/talent-v2/index.html?workspace=talent-manager&v=20260902-talent-stability-10',
     },
     'talent-payroll': {
       id: 'talent-payroll',
@@ -56,7 +56,7 @@
       shortLabel: '才藝薪資',
       description: 'PT 月度鐘點與續報資格',
       icon: 'calculator',
-      path: 'review/talent-v2/index.html?workspace=talent-payroll&v=20260902-talent-stability-9',
+      path: 'review/talent-v2/index.html?workspace=talent-payroll&v=20260902-talent-stability-10',
     },
     'admin-marketing': {
       id: 'admin-marketing',
@@ -65,7 +65,7 @@
       shortLabel: '行政美宣',
       description: '行政日誌、美宣產出與期限追蹤',
       icon: 'megaphone',
-      path: 'review/admin-marketing-v1/index.html?workspace=admin-marketing&v=20260902-admin-stability-6',
+      path: 'review/admin-marketing-v1/index.html?workspace=admin-marketing&v=20260902-admin-stability-7',
     },
     'admin-marketing-manager': {
       id: 'admin-marketing-manager',
@@ -74,7 +74,7 @@
       shortLabel: '行政美宣主管',
       description: '期限管理、週 KPI 與主管評核',
       icon: 'clipboard-list',
-      path: 'review/admin-marketing-v1/index.html?workspace=admin-marketing-manager&v=20260902-admin-stability-6',
+      path: 'review/admin-marketing-v1/index.html?workspace=admin-marketing-manager&v=20260902-admin-stability-7',
     },
   };
 

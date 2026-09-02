@@ -115,6 +115,14 @@ function adminMarketingAttachments_(items, required) {
 function adminMarketingTrialIdentity_(data) {
   const name = adminMarketingText_(data && data.studentName, 160).replace(/\s+/g, '').toLowerCase();
   const contact = adminMarketingText_(data && data.contactRef, 160).replace(/[\s\-()]/g, '').toLowerCase();
+  const course = adminMarketingText_(data && data.course, 220).replace(/\s+/g, '').toLowerCase();
+  const date = adminMarketingText_(data && data.date, 10);
+  return name && contact && course && date ? name + '|' + contact + '|' + course + '|' + date : '';
+}
+
+function adminMarketingStudentIdentity_(data) {
+  const name = adminMarketingText_(data && data.studentName, 160).replace(/\s+/g, '').toLowerCase();
+  const contact = adminMarketingText_(data && data.contactRef, 160).replace(/[\s\-()]/g, '').toLowerCase();
   return name && contact ? name + '|' + contact : '';
 }
 
@@ -124,7 +132,6 @@ function adminMarketingTrialBonusEligibility_(data) {
   if (!data.enrollmentDate || !data.paymentDate || !data.enrollmentCourse) {
     return { eligible: false, error: '報名、繳費日期或正式課程尚未完整' };
   }
-  if (!Array.isArray(data.followups) || !data.followups.length) return { eligible: false, error: '尚未留下家長追蹤紀錄' };
   if (!Array.isArray(data.paymentEvidence) || !data.paymentEvidence.length) return { eligible: false, error: '尚未附報名或繳費證明' };
   return { eligible: true, amount: ADMIN_MARKETING_TRIAL_BONUS_ };
 }
@@ -298,10 +305,6 @@ function validateAdminMarketingTrial_(data) {
   if (!data.studentName || !data.course || !data.teacher || !data.contactRef || !data.owner) {
     throw new Error('學生姓名、試上課程、授課老師、家長識別資料與負責人皆為必填');
   }
-  if (['waiting_contact', 'contacted', 'considering', 'followup_scheduled'].indexOf(data.status) >= 0 && !data.nextFollowupDate) {
-    throw new Error('尚未結案的試上學生必須設定下一次追蹤日期');
-  }
-  if (data.nextFollowupDate && data.nextFollowupDate < todayStr()) throw new Error('下一次追蹤日期不可早於今天');
   data.followups = (Array.isArray(data.followups) ? data.followups : []).slice(0, 100).map(function (raw) {
     const item = raw || {};
     const cleaned = {
@@ -331,7 +334,6 @@ function validateAdminMarketingTrial_(data) {
     if (!data.enrollmentDate || !data.paymentDate || !data.enrollmentCourse) {
       throw new Error('已報名一期必須填寫報名日期、繳費日期與正式課程');
     }
-    if (data.firstEnrollment && !data.followups.length) throw new Error('首報獎金需至少有一筆家長追蹤紀錄');
   }
   return data;
 }
@@ -510,7 +512,7 @@ function saveAdminMarketingRecord(params) {
       if (!managerTrialEntry || !data.lateReason) return { ok: false, error: '過去日期屬補登；請由小魚或柏翰填寫原因' };
     }
     const duplicate = adminMarketingFindDuplicateTrial_('', data, data.id);
-    if (duplicate) return { ok: false, error: '此學生已有試上追蹤紀錄，請更新原紀錄，不要重複新增' };
+    if (duplicate) return { ok: false, error: '這位學生在同一天已有相同課程的試上預約，請更新原紀錄' };
     if (original && original.bonusStatus === 'approved') {
       const locked = ['studentName', 'contactRef', 'status', 'firstEnrollment', 'enrollmentDate', 'paymentDate', 'enrollmentCourse'];
       const changed = locked.some(function (key) { return String(original[key] == null ? '' : original[key]) !== String(data[key] == null ? '' : data[key]); });
@@ -562,11 +564,11 @@ function reviewAdminMarketingTrialBonus(params) {
   if (result === 'approved') {
     const eligibility = adminMarketingTrialBonusEligibility_(data);
     if (!eligibility.eligible) return { ok: false, error: eligibility.error };
-    const identity = adminMarketingTrialIdentity_(data);
+    const identity = adminMarketingStudentIdentity_(data);
     const duplicateApproved = adminMarketingTrialRows_().some(function (row) {
       if (row.record_id === data.id) return false;
       const other = adminMarketingRecordObject_(row);
-      return other.bonusStatus === 'approved' && adminMarketingTrialIdentity_(other) === identity;
+      return other.bonusStatus === 'approved' && adminMarketingStudentIdentity_(other) === identity;
     });
     if (duplicateApproved) return { ok: false, error: '此學生過去已有核准的首報獎金，不能重複發放' };
   }

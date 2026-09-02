@@ -386,6 +386,16 @@
     window.setTimeout(() => node.remove(), 3200);
   }
 
+  function talentSubmissionError(error) {
+    const message = String(error || '請稍後重試');
+    const labels = {
+      courseType: '課程類型', courseName: '課程名稱', siteType: '上課地點類型', site: '上課地點',
+      prepId: '本堂使用的備課檔案', completed: '課程問題及下次優化', response: '課程問題及下次優化',
+      issue: '課程問題及下次優化', parentStatus: '親師溝通狀態',
+    };
+    return message.replace(/本堂必填內容不完整：([A-Za-z0-9_]+)/g, (_, key) => `請完成「${labels[key] || '本堂必填資料'}」`);
+  }
+
   function modeRole() { return workspace.role; }
   function isTeacher() { return ['fulltime', 'pt'].includes(modeRole()); }
   function isPt() { return modeRole() === 'pt'; }
@@ -1594,6 +1604,8 @@
       ...(existingLog || {}),
       ...values,
       id: editingId || existingLog?.id || uid('log'), updatedAt: String(values.updatedAt || existingLog?.updatedAt || ''), teacher: currentUser.nickname, employment: currentUser.employment === 'fulltime' ? 'fulltime' : 'pt', lessonStatus: 'held',
+      // 舊版後端仍檢查這兩個欄位；保留相容值，正式畫面與新版日報只使用 issue。
+      completed: String(values.issue || '').trim(), response: String(values.issue || '').trim(),
       expected, present, leave, absent, makeup: Number(values.makeup || 0), trial: Number(values.trial || 0), duration: Number(values.duration || 1.5),
       scheduleLabel: selectedSchedule?.label || '', scheduleTime: selectedSchedule?.time || '',
       siteType, roomDone: Boolean(form.elements.roomDone.checked), attendanceFiles: [...pendingFiles.attendance], learningFiles: [...pendingFiles.learning], roomFiles: [...pendingFiles.room],
@@ -1608,7 +1620,7 @@
     const result = PREVIEW_MODE ? { ok: true, lesson: item } : await API.saveTalentLesson(currentUser.nickname, item);
     if (!result?.ok) {
       if (submitButton) { submitButton.disabled = false; submitButton.innerHTML = `${icon(editingId ? 'save' : 'send', 16)}${editingId ? '更新紀錄' : '送出紀錄'}`; hydrateIcons(); }
-      toast(`紀錄尚未送出：${result?.error || '請稍後重試'}；草稿仍保留`, 'danger');
+      toast(`紀錄尚未送出：${talentSubmissionError(result?.error)}；草稿仍保留`, 'danger');
       return;
     }
     putLocalLesson(result.lesson || item);

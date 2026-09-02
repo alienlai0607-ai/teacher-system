@@ -65,14 +65,20 @@ const trial = context.validateAdminMarketingRecord_('trial', {
   status: 'waiting_contact', followups: [], paymentEvidence: [],
 });
 assert.equal(trial.status, 'waiting_contact');
-assert.equal(context.adminMarketingTrialIdentity_(trial), '小布|0912345678');
+assert.equal(context.adminMarketingStudentIdentity_(trial), '小布|0912345678');
+assert.equal(context.adminMarketingTrialIdentity_(trial), '小布|0912345678|機器人試上|2026-08-26');
+assert.notEqual(
+  context.adminMarketingTrialIdentity_(trial),
+  context.adminMarketingTrialIdentity_({ ...trial, course: '樂高小創客' }),
+  '同一學生的不同試上課程必須能建立為不同預約',
+);
 
 const futureTrial = context.validateAdminMarketingRecord_('trial', {
   ...trial, id: 'trial-future', date: '2026-09-10', nextFollowupDate: '2026-08-27',
 });
 assert.equal(futureTrial.date, '2026-09-10');
 assert.equal(futureTrial.nextFollowupDate, '2026-08-27');
-assert.match(deployedBackendSource, /下一次追蹤日期不可早於今天/, '部署用合併檔需包含未來試上規則');
+assert.doesNotMatch(deployedBackendSource, /尚未結案的試上學生必須設定下一次追蹤日期|下一次追蹤日期不可早於今天/, '試上預約不得強迫行政另外維護追蹤日期');
 assert.doesNotMatch(deployedBackendSource, /試上日期不可晚於今天/, '部署用合併檔不得保留未來試上限制');
 
 const workerUser = {
@@ -111,17 +117,17 @@ assert.match(saveTrial(managerUser, '2026-08-14', '補登舊資料').error, /202
 assert.equal(saveTrial(managerUser, '2026-08-15', '制度起算日補登').ok, true, '主管應可補登制度起算日的試上');
 assert.equal(saveTrial(managerUser, '2026-08-25', '家長訊息延遲轉交').ok, true, '小魚應可填原因後補登過去試上');
 
-assert.throws(() => context.validateAdminMarketingRecord_('trial', {
+assert.doesNotThrow(() => context.validateAdminMarketingRecord_('trial', {
   ...trial, id: 'trial-missing-next', nextFollowupDate: '', status: 'considering',
-}), /下一次追蹤日期/);
-assert.throws(() => context.validateAdminMarketingRecord_('trial', {
+}));
+assert.doesNotThrow(() => context.validateAdminMarketingRecord_('trial', {
   ...trial, id: 'trial-bad-next', nextFollowupDate: '2026-08-25', status: 'considering',
-}), /不可早於今天/);
+}));
 
 const convertedTrial = context.validateAdminMarketingRecord_('trial', {
   ...trial, id: 'trial-converted', status: 'converted', nextFollowupDate: '', firstEnrollment: true,
   enrollmentDate: '2026-08-26', paymentDate: '2026-08-26', enrollmentCourse: '機器人一期',
-  followups: [{ id: 'followup-1', date: '2026-08-26', method: 'line', note: '家長確認報名一期' }],
+  followups: [],
   paymentEvidence: driveEvidence,
 });
 assert.equal(context.adminMarketingTrialBonusEligibility_(convertedTrial).eligible, true);
@@ -190,7 +196,7 @@ assert.doesNotMatch(adminDashboardSource, /test-view-grid/, '測試入口不得�
 assert.match(sharedUiSource, /admin\/dashboard\.html\?v=20260827-test-view-fast-1#test-view/, '離開測試視角需直接回快速切換頁');
 assert.match(uiSource, /data-action="open-test-view"/, '行政美宣主管視角需能進入快速測試');
 assert.match(uiSource, /data-action="exit-impersonation"/, '行政美宣測試視角需能一鍵換老師');
-assert.match(uiSource, /route: 'trials', label: '家長追蹤'/, '行政需有集中的家長追蹤頁');
+assert.match(uiSource, /route: 'trials', label: '試上名單'/, '行政需有簡單明確的試上名單頁');
 assert.match(uiSource, /route: 'trials', label: '家長與獎金'/, '主管需有首報獎金審核頁');
 assert.match(uiSource, /主管.*回覆今日工作[\s\S]*data-route="performance"/, '今日工作需直接顯示主管回覆並提供對話入口');
 assert.match(uiSource, /admin-marketing-review-\$\{id\}[\s\S]*conversationRecord\.messages/, '主管逐筆回覆需同步到可來回回覆的月度對話');
@@ -231,9 +237,12 @@ assert.match(workspacesCssSource, /@media \(max-width: 820px\)[\s\S]*\.workspace
 assert.match(workspacesCssSource, /\.workspace-quick-title \{[^}]*width: 100%;[^}]*flex: 0 0 auto;/, '手機工作身分標題高度需依內容決定');
 assert.match(workspacesCssSource, /grid-template-columns: repeat\(auto-fit, minmax\(136px, 1fr\)\)/, '手機三身分按鈕需保留可讀寬度');
 assert.match(uiHtmlSource, /workspaces\.css\?v=20260901-workspace-wrap-1/, '行政頁需載入防溢出的工作身分樣式');
-assert.match(uiHtmlSource, /app\.js\?v=20260902-admin-stability-6/, '行政穩定版表單需使用獨立快取版本');
-assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=admin-marketing(?:-manager)?&v=20260902-admin-stability-6/g) || []).length, 2, '行政與主管入口都需避開舊版快取');
-assert.match(uiSource, /此學生已有試上追蹤紀錄，請更新原紀錄/, '前端需在重複新增時立即阻擋');
+assert.match(uiHtmlSource, /app\.js\?v=20260902-admin-stability-7/, '行政穩定版表單需使用獨立快取版本');
+assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=admin-marketing(?:-manager)?&v=20260902-admin-stability-7/g) || []).length, 2, '行政與主管入口都需避開舊版快取');
+assert.match(uiSource, /trialIdentity\(item\.studentName, item\.contactRef, item\.course, item\.date\)/, '重複預約需依學生、課程與日期判定');
+assert.match(uiSource, /同一學生可登記不同課程/, '行政需清楚知道同一學生可登記多門試上課');
+assert.doesNotMatch(uiSource, /首報獎金至少要有一筆家長追蹤紀錄|新增一筆追蹤/, '首報不得強迫另建一筆重複的家長追蹤');
+assert.doesNotMatch(backendSource, /首報獎金需至少有一筆家長追蹤紀錄|尚未留下家長追蹤紀錄/, '後端首報資格不得保留已刪除的追蹤門檻');
 assert.match(uiSource, /列印月報/, '主管需能列印每月獎金明細');
 assert.match(uiSource, /actionNode\.classList\.contains\('dialog-backdrop'\) && event\.target !== actionNode/, '點擊表單內按鈕不得被背景誤判為關閉對話框');
 assert.match(uiSource, /function selectedPerformanceMonth\(\)/, '行政查看 KPI 應使用獨立的評核月份');
