@@ -67,6 +67,9 @@ assert.equal(driveAttachment[0].url, 'https://drive.google.com/file/d/abc/view')
 assert.throws(() => context.talentAttachments_([{ fileName: 'fake.jpg', url: 'https://example.com/fake.jpg' }], true), /尚未完整上傳/);
 assert.equal(context.talentAppEvidence_([{ fileName: 'app.png', mimeType: 'image/png', url: 'https://drive.google.com/file/d/app/view' }], true).length, 1);
 assert.throws(() => context.talentAppEvidence_([{ fileName: 'app.pdf', mimeType: 'application/pdf', url: 'https://drive.google.com/file/d/app/view' }], true), /只接受圖片/);
+const simplifiedLesson = { courseType: '樂高小創客', courseName: '齒輪課', siteType: 'self', site: '布拉克自營教室', prepId: 'prep-1', issue: '齒輪容易鬆脫，下次先示範固定方式。', parentStatus: 'complete' };
+assert.doesNotThrow(() => context.validateTalentLessonRequiredFields_(simplifiedLesson), '省略 completed 與 response 後仍須能通過後端必填檢核');
+assert.throws(() => context.validateTalentLessonRequiredFields_({ ...simplifiedLesson, issue: '  ' }), /issue/, '唯一保留的課程問題及下次優化不得空白');
 
 const archiveSource = fs.readFileSync(path.join(root, 'apps-script/archivefiles.gs'), 'utf8');
 const setupSource = fs.readFileSync(path.join(root, 'apps-script/setup.gs'), 'utf8');
@@ -215,12 +218,19 @@ assert.match(talentUiSource, /已有相同課程類型與名稱的備課檔案/,
 assert.match(talentUiSource, /route: 'records', label: '我的紀錄'/, '才藝老師查看過去內容的入口需直接命名為我的紀錄');
 assert.match(talentUiSource, /const teacherPriority = \['today', 'prep', 'records'/, '才藝手機底部需直接顯示我的紀錄，不得藏到更多');
 assert.match(talentUiSource, /aria-label="編輯今日紀錄"/, '才藝老師需能從我的紀錄直接編輯當日內容');
+assert.match(talentUiSource, /textareaField\('課程問題及下次優化', 'issue', formValue\('issue'\), true,/, '才藝正職與 PT 只需填寫一個必填的課後文字欄位');
+assert.doesNotMatch(talentUiSource, /textareaField\('本堂實際完成內容'|textareaField\('孩子反應／學習證據'/, '才藝課堂表單不得再要求重複的完成內容與孩子反應文字');
+assert.match(backendSource, /function validateTalentLessonRequiredFields_\(lesson\)/, '才藝後端必填規則需可獨立驗證');
+assert.match(backendSource, /\['courseType', 'courseName', 'siteType', 'site', 'prepId', 'issue', 'parentStatus'\]/, '才藝後端只應要求課程問題及下次優化，不可再卡住已刪除欄位');
+assert.doesNotMatch(backendSource, /\['courseType'[^\]]*'completed'[^\]]*'response'/, '後端必填清單不得殘留已刪除欄位');
+assert.doesNotMatch(backendSource, /<h3>本堂實際完成內容<\/h3>|<h3>孩子反應／學習證據<\/h3>/, '才藝正式日報不得再輸出已刪除段落');
+assert.match(backendSource, /<h3>課程問題及下次優化<\/h3>/, '才藝正式日報需保留唯一的課後文字欄位');
 assert.match(talentUiSource, /const draft = existing \|\| state\.draftLog \|\| \{ id: uid\('log'\) \}/, '新增課堂編輯器一開啟就必須取得非空白紀錄編號');
 assert.match(talentUiSource, /\.\.\.values,[\s\S]*id: editingId \|\| existingLog\?\.id \|\| uid\('log'\)/, '表單內的空白隱藏欄位不可覆蓋系統產生的課堂編號');
 assert.match(talentUiSource, /state\.logs = \(Array\.isArray\(state\.logs\)[\s\S]*id: uid\('log'\)/, '舊本機課堂缺少編號時需自動修復');
 assert.match(talentUiSource, /class="record-actions"[\s\S]*data-action="edit-log"[\s\S]*data-action="view-log"/, '編輯與查看按鈕需放入獨立動作列，避免疊在同一座標');
 assert.match(talentStyleSource, /\.record-actions \{ display: flex;[\s\S]*gap: 6px;/, '編輯與查看按鈕需保留可點擊間距');
-assert.match(talentIndexSource, /app\.js\?v=20260902-talent-stability-7/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
+assert.match(talentIndexSource, /app\.js\?v=20260902-talent-stability-8/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
 assert.match(talentUiSource, /PREVIEW_MODE && state\.ui\.route === 'cloud-reports'[\s\S]*loadCloudFolders/, '審查模式重新整理雲端日報頁時不得無限停在載入中');
 assert.match(talentUiSource, /window\.setTimeout\(\(\) => URL\.revokeObjectURL\(url\), 1000\)/, 'CSV 下載需延後釋放 Blob，避免 Safari 或內嵌瀏覽器下載空檔');
 assert.match(talentUiSource, /route: 'weekly', label: '家長 APP'/, 'PT 與正職都要有家長 APP 發布確認入口');

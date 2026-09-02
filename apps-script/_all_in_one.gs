@@ -5545,6 +5545,12 @@ function saveTalentDraft(params) {
   return { ok: true, draft: saved.draft, updatedAt: saved.updatedAt };
 }
 
+function validateTalentLessonRequiredFields_(lesson) {
+  ['courseType', 'courseName', 'siteType', 'site', 'prepId', 'issue', 'parentStatus'].forEach(function (key) {
+    if (!String(lesson[key] || '').trim()) throw new Error('本堂必填內容不完整：' + key);
+  });
+}
+
 function saveTalentLesson(params) {
   const actor = params.__actor;
   const nickname = String(params.nickname || actor && actor.nickname || '').trim();
@@ -5613,9 +5619,7 @@ function saveTalentLesson(params) {
     lesson.appPublishedAt = '';
     lesson.backfilled = lesson.date !== todayStr();
   } else {
-    ['courseType', 'courseName', 'siteType', 'site', 'prepId', 'completed', 'response', 'issue', 'parentStatus'].forEach(function (key) {
-      if (!String(lesson[key] || '').trim()) throw new Error('本堂必填內容不完整：' + key);
-    });
+    validateTalentLessonRequiredFields_(lesson);
     ['expected', 'present', 'leave', 'absent', 'makeup', 'trial'].forEach(function (key) {
       lesson[key] = Math.max(0, Math.floor(Number(lesson[key] || 0)));
     });
@@ -6007,9 +6011,7 @@ function generateTalentLessonPdf_(lesson, user) {
       ? '<strong>' + talentHtmlEsc_(prep.courseName || prep.title || '備課檔案') + '</strong><div class="muted">' + talentHtmlEsc_(prep.courseType || '') + '</div>' + (prep.notes ? '<p>' + talentHtmlEsc_(prep.notes) + '</p>' : '')
       : '原備課檔案已不存在') + '</div>';
     if (prep) html += talentAttachmentLinks_('備課附件', prep.materials);
-    html += '<h3>本堂實際完成內容</h3><div class="box">' + talentHtmlEsc_(lesson.completed) + '</div>';
-    html += '<h3>孩子反應／學習證據</h3><div class="box">' + talentHtmlEsc_(lesson.response) + '</div>';
-    html += '<h3>課程問題與下次優化</h3><div class="box">' + talentHtmlEsc_(lesson.issue) + '</div>';
+    html += '<h3>課程問題及下次優化</h3><div class="box">' + talentHtmlEsc_(lesson.issue) + '</div>';
     html += '<h3>親師溝通</h3><div class="box">' + talentHtmlEsc_(lesson.parentStatus === 'complete' ? '全班回報完成' : lesson.parentStatus === 'followup' ? '有個別追蹤' : '尚未完成') + (lesson.parentFollowup ? '<br>' + talentHtmlEsc_(lesson.parentFollowup) : '') + '</div>';
     if (lesson.siteType === 'partner') {
       html += '<h3>家長 APP 發布確認</h3><div class="box">合作校課程免發布，不列入缺件。</div>';

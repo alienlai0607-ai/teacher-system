@@ -52,7 +52,7 @@
   const COURSE_TYPES = ['幼兒積木', '樂高簡易積木', '樂高小創客', 'WeDo 機器人', 'SPIKE 機器人', '科學實驗', 'FLL challenge戰隊培訓班', '其他才藝課程'];
   const KPI_DIMENSIONS = [
     { key: 'prep', label: '備課檔案與課程準備', max: 25, description: '課程名稱清楚、實際備課資料可查閱' },
-    { key: 'evidence', label: '本堂紀錄與學習證據', max: 25, description: '記錄完整、證據對應課程、下次調整具體' },
+    { key: 'evidence', label: '課程紀錄與成果證據', max: 25, description: '問題與下次優化具體、照片證據對應課程' },
     { key: 'communication', label: 'APP 與親師溝通', max: 20, description: '週六前完成 APP、溝通與個案追蹤完整' },
     { key: 'attendance', label: '出席與班級穩定追蹤', max: 15, description: '點名一致、缺席追蹤、續報追蹤' },
     { key: 'room', label: '教室整理與安全復原', max: 10, description: '每堂完成整理確認與課後照片' },
@@ -176,7 +176,7 @@
         { id: 'prep_spike_1', teacher: '小明老師', courseType: 'SPIKE 機器人', courseName: '循線挑戰', title: '感測值與條件判斷', version: 'v1.0', objective: '學生能說明黑白反射差異並完成循線。', principle: '反射光感測值作為程式條件判斷依據。', guidance: '先實測黑白值，再讓學生自己設定中間值並觀察結果。', game: '循線計時闖關與彎道改造。', flow: '原理 15 分鐘／程式 20 分鐘／測試改造 45 分鐘／反思 10 分鐘。', materials: ['SPIKE_循線_v1.0.pdf'], status: 'pending', reviewedBy: '', reviewedAt: '', reviewNote: '' },
       ] : [],
       logs: PREVIEW_MODE ? [
-        { id: 'log_sample_1', teacher: '紅豆老師', employment: 'pt', date, lessonStatus: 'held', courseType: 'WeDo 機器人', courseName: '齒輪轉速實驗', siteType: 'self', site: '布拉克自營教室', duration: 1.5, expected: 6, present: 5, leave: 1, absent: 0, makeup: 1, trial: 1, prepId: 'prep_robot_1', completed: '完成兩組齒輪配置測試，5 位學生能說明速度差異。', response: '學生對限時挑戰參與度高，有兩組主動要求改造。', issue: '一組尚會同時更換兩個齒輪，下次改用變因卡限制。', parentStatus: 'complete', roomDone: true, attendanceFiles: ['點名簿_0826.jpg'], learningFiles: ['齒輪測試.jpg', '挑戰影片.mov'], roomFiles: ['課後教室.jpg'], newCount: 0, renewalCount: 1, appStatus: 'pending', status: 'submitted', pay: 900, createdAt: new Date().toISOString(), sample: true },
+        { id: 'log_sample_1', teacher: '紅豆老師', employment: 'pt', date, lessonStatus: 'held', courseType: 'WeDo 機器人', courseName: '齒輪轉速實驗', siteType: 'self', site: '布拉克自營教室', duration: 1.5, expected: 6, present: 5, leave: 1, absent: 0, makeup: 1, trial: 1, prepId: 'prep_robot_1', issue: '一組尚會同時更換兩個齒輪，下次改用變因卡限制。', parentStatus: 'complete', roomDone: true, attendanceFiles: ['點名簿_0826.jpg'], learningFiles: ['齒輪測試.jpg', '挑戰影片.mov'], roomFiles: ['課後教室.jpg'], newCount: 0, renewalCount: 1, appStatus: 'pending', status: 'submitted', pay: 900, createdAt: new Date().toISOString(), sample: true },
       ] : [],
       scores: PREVIEW_MODE ? [
         { teacher: '浩浩老師', month, scores: { prep: 23, evidence: 22, communication: 18, attendance: 14, room: 10, improvement: 4 }, reason: '本月資料完整，一筆 APP 紀錄逾期補齊。', published: false },
@@ -510,7 +510,7 @@
     const schedules = todaySchedule();
     const logs = ownLogs().filter(item => item.date === todayIso());
     const primary = schedules[0];
-    return `${pageHead('今日上課', '從排課開始，完成點名、教學紀錄、證據與課後復原。', `<button type="button" class="btn btn-primary" data-action="new-log">${icon('plus', 17)}新增本堂紀錄</button>`)}
+    return `${pageHead('今日上課', '從排課開始，完成點名、課程問題及下次優化、證據及課後復原。', `<button type="button" class="btn btn-primary" data-action="new-log">${icon('plus', 17)}新增本堂紀錄</button>`)}
       <section class="status-grid">
         <article class="status-card"><span class="status-icon yellow">${icon('calendar-days', 20)}</span><div><small>今日排課</small><strong>${schedules.length ? schedules.map(item => item.time).join('、') : '無固定排課'}</strong><span>${schedules.length ? schedules.map(item => item.site).join('、') : '休假日不會產生缺件'}</span></div></article>
         <article class="status-card"><span class="status-icon blue">${icon('clipboard-check', 20)}</span><div><small>今日紀錄</small><strong>${logs.length} 堂</strong><span>${logs.filter(item => item.status === 'submitted').length} 堂已送出</span></div></article>
@@ -536,7 +536,7 @@
     const appLabel = item.siteType === 'partner' ? 'APP 免發布' : appEvidenceComplete(item) ? 'APP 已確認' : 'APP 待上傳';
     return `<article class="record-row">
       <div class="record-date"><strong>${formatDate(item.date)}</strong><span>${esc(item.duration)} 小時</span></div>
-      <div class="record-main"><div class="record-title">${esc(item.courseName || item.courseType)} ${statusBadge(item.status)}</div><div class="record-meta">${esc(item.site)} · 計薪實到 ${count} 人 · ${esc(item.teacher)}</div><div class="record-note">${esc(item.completed)}</div></div>
+      <div class="record-main"><div class="record-title">${esc(item.courseName || item.courseType)} ${statusBadge(item.status)}</div><div class="record-meta">${esc(item.site)} · 計薪實到 ${count} 人 · ${esc(item.teacher)}</div><div class="record-note">${esc(item.issue || '未填課程問題及下次優化')}</div></div>
       <div class="record-side">${item.employment === 'pt' ? `<strong>${formatMoney(item.pay)}</strong><span>${appLabel}</span>` : `<strong>${appLabel}</strong><span>${item.siteType === 'partner' ? '合作校' : '最晚週六'}</span>`}<div class="record-actions">${isTeacher() && item.date === todayIso() && normalizeName(item.teacher) === normalizeName(currentUser.nickname) ? `<button type="button" class="icon-button" data-action="edit-log" data-id="${item.id}" aria-label="編輯今日紀錄" title="編輯今日紀錄">${icon('pencil', 16)}</button>` : ''}<button type="button" class="icon-button" data-action="view-log" data-id="${item.id}" aria-label="查看紀錄">${icon('chevron-right', 18)}</button></div></div>
     </article>`;
   }
@@ -828,7 +828,7 @@
 
   function renderLogReview() {
     const logs = state.logs.slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
-    return `${pageHead('工作紀錄', '查看備課檔案、學習證據與課後調整是否相互對應。')}
+    return `${pageHead('工作紀錄', '查看課程問題、下次優化與成果證據是否相互對應。')}
       <section class="panel"><div class="panel-head"><div><h2>所有課堂</h2><p>${logs.length} 筆紀錄</p></div></div><div class="panel-body">${logs.length ? logs.map(renderLogRow).join('') : renderEmpty('尚無紀錄', '老師送出後會出現在這裡。', 'scan-search')}</div></section>`;
   }
 
@@ -1083,7 +1083,7 @@
         </div>${uploadField('點名簿照片', 'attendance', '要看得出日期、課程與圈記；可一次多選。', 'image/*', true)}</section>
         <section class="form-section"><div class="section-title"><span class="section-number">${isPt() ? '3' : '2'}</span><div><h3>備課檔案與教學日誌</h3><p>選擇這堂課使用的課程檔案，不需要主管審核。</p></div></div>
           <label class="form-field span-all"><span>本堂使用的備課檔案 <b>*</b></span><select name="prepId" required><option value="">請選擇課程</option>${prepOptions.map(prep => `<option value="${prep.id}" ${formValue('prepId') === prep.id ? 'selected' : ''}>${esc(prep.courseName || prep.title || '未命名課程')} · ${esc(prep.courseType || '未分類')}</option>`).join('')}</select>${prepOptions.length ? '' : '<small class="field-error">目前沒有可使用的備課檔案，請先建立課程並上傳至少一份教案或教材。</small>'}</label>
-          <div class="form-grid">${textareaField('本堂實際完成內容', 'completed', formValue('completed'), true, '寫完成的任務、作品或理解結果。')}${textareaField('孩子反應／學習證據', 'response', formValue('response'), true, '寫可觀察的行為、作品差異或學生原句。')}${textareaField('課程問題與下次優化', 'issue', formValue('issue'), true, '寫本堂遇到的問題，以及下次要改的講法、活動或材料。')}</div>
+          <div class="form-grid"><div class="span-all">${textareaField('課程問題及下次優化', 'issue', formValue('issue'), true, '寫本堂遇到的問題，以及下次要調整的講法、活動或材料。')}</div></div>
           ${uploadField('學習過程與成果', 'learning', '照片、影片可一次多選；須能對應本堂目標。', 'image/*,video/*', true)}
         </section>
         <section class="form-section"><div class="section-title"><span class="section-number">${isPt() ? '4' : '3'}</span><div><h3>溝通、復原與獎金事件</h3><p>新生與續報只在自營教室顯示，沿用同一張點名照片。</p></div></div>
@@ -1800,7 +1800,7 @@
     const appUploadControl = canUploadApp
       ? `<label class="btn ${appEvidenceComplete(item) ? '' : 'btn-primary'} app-evidence-upload">${icon(appEvidenceComplete(item) ? 'refresh-cw' : 'upload', 16)}${appEvidenceComplete(item) ? '更換 APP 截圖' : '上傳 APP 截圖'}<input class="sr-only" type="file" accept="image/*" multiple data-app-evidence-id="${esc(item.id)}"></label>`
       : '';
-    openDrawer({ title: item.courseName || item.courseType, subtitle: `${formatDate(item.date)} · ${item.teacher} · ${item.site}`, body: `<div class="detail-metrics"><div><span>應到</span><strong>${item.expected}</strong></div><div><span>正式實到</span><strong>${item.present}</strong></div><div><span>補課</span><strong>${item.makeup}</strong></div><div><span>體驗</span><strong>${item.trial}</strong></div></div><div class="detail-stack">${detailBlock('本堂使用的備課檔案', prep ? (prep.courseName || prep.title || '未命名課程') : '備課檔案已移除')}${detailBlock('實際完成內容', item.completed)}${detailBlock('孩子反應／學習證據', item.response)}${detailBlock('課程問題與下次優化', item.issue)}${detailAttachments('點名證據', item.attendanceFiles)}${detailAttachments('學習證據', item.learningFiles)}${detailAttachments('教室復原', item.roomFiles)}${appEvidence}${lessonReportBlock(item)}</div>${item.employment === 'pt' ? `<div class="calculation-card static"><span>${icon('badge-dollar-sign', 20)}</span><div><small>本堂預估鐘點</small><strong>${formatMoney(item.pay)}</strong></div></div>` : ''}`, footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button>${appUploadControl}${prep ? `<button type="button" class="btn" data-action="view-prep" data-id="${prep.id}">${icon('notebook-tabs', 16)}查看備課檔案</button>` : ''}` });
+    openDrawer({ title: item.courseName || item.courseType, subtitle: `${formatDate(item.date)} · ${item.teacher} · ${item.site}`, body: `<div class="detail-metrics"><div><span>應到</span><strong>${item.expected}</strong></div><div><span>正式實到</span><strong>${item.present}</strong></div><div><span>補課</span><strong>${item.makeup}</strong></div><div><span>體驗</span><strong>${item.trial}</strong></div></div><div class="detail-stack">${detailBlock('本堂使用的備課檔案', prep ? (prep.courseName || prep.title || '未命名課程') : '備課檔案已移除')}${detailBlock('課程問題及下次優化', item.issue)}${detailAttachments('點名證據', item.attendanceFiles)}${detailAttachments('學習證據', item.learningFiles)}${detailAttachments('教室復原', item.roomFiles)}${appEvidence}${lessonReportBlock(item)}</div>${item.employment === 'pt' ? `<div class="calculation-card static"><span>${icon('badge-dollar-sign', 20)}</span><div><small>本堂預估鐘點</small><strong>${formatMoney(item.pay)}</strong></div></div>` : ''}`, footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button>${appUploadControl}${prep ? `<button type="button" class="btn" data-action="view-prep" data-id="${prep.id}">${icon('notebook-tabs', 16)}查看備課檔案</button>` : ''}` });
   }
 
   function openPtStatement(teacher) {
