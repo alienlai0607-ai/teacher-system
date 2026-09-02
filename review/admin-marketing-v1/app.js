@@ -318,6 +318,14 @@
     const normalizedDate = String(date || '').slice(0, 10);
     return name && contact && normalizedCourse && normalizedDate ? `${name}|${contact}|${normalizedCourse}|${normalizedDate}` : '';
   }
+  function trialContact(item) {
+    return String(item?.contactDisplay || item?.contactRef || '').trim();
+  }
+  function legacyTrialContactRef(contactRef, course, date) {
+    const raw = String(contactRef || '').trim();
+    const suffix = [String(date || '').slice(0, 10), String(course || '').trim()].filter(Boolean).join(' ');
+    return suffix ? `${raw}｜試上 ${suffix}`.slice(0, 160) : raw;
+  }
   function trialBonusBadge(item) {
     if (item.bonusStatus === 'approved') return '<span class="badge success">首報獎金 50 元已核准</span>';
     if (item.bonusStatus === 'pending_review') return '<span class="badge warning">50 元待主管確認</span>';
@@ -605,7 +613,7 @@
     const action = isManager
       ? `<button class="button small" data-action="view-trial" data-id="${esc(item.id)}">${icon('eye')}查看</button>${['pending_review','rejected'].includes(item.bonusStatus) ? `<button class="button small teal" data-action="review-trial-bonus" data-id="${esc(item.id)}">${icon('badge-check')}${item.bonusStatus === 'rejected' ? '重新審核' : '確認獎金'}</button>` : ''}`
       : `<button class="button small" data-action="open-trial" data-id="${esc(item.id)}">${icon('pencil')}更新</button>`;
-    return `<article class="trial-row"><div class="trial-main"><div class="record-head"><div class="record-title"><strong>${esc(item.studentName)}</strong><small>${formatDate(item.date)} 試上 · ${esc(item.course)} · ${esc(item.teacher)}</small></div>${statusBadge(item.status)}</div><div class="trial-meta"><span>${icon('phone',14)}${esc(maskContact(item.contactRef))}</span>${item.nextFollowupDate && !['converted','not_enrolled'].includes(item.status) ? `<span class="${overdue ? 'text-danger' : ''}">${icon('calendar-clock',14)}${overdue ? '已逾期 ' : '下次 '}${formatDate(item.nextFollowupDate)}</span>` : ''}</div>${lastFollowup ? `<p class="record-copy trial-last"><strong>最近追蹤：</strong>${esc(lastFollowup.note)}</p>` : ''}<div class="record-actions">${trialBonusBadge(item)}${action}</div></div></article>`;
+    return `<article class="trial-row"><div class="trial-main"><div class="record-head"><div class="record-title"><strong>${esc(item.studentName)}</strong><small>${formatDate(item.date)} 試上 · ${esc(item.course)} · ${esc(item.teacher)}</small></div>${statusBadge(item.status)}</div><div class="trial-meta"><span>${icon('phone',14)}${esc(maskContact(trialContact(item)))}</span>${item.nextFollowupDate && !['converted','not_enrolled'].includes(item.status) ? `<span class="${overdue ? 'text-danger' : ''}">${icon('calendar-clock',14)}${overdue ? '已逾期 ' : '下次 '}${formatDate(item.nextFollowupDate)}</span>` : ''}</div>${lastFollowup ? `<p class="record-copy trial-last"><strong>最近追蹤：</strong>${esc(lastFollowup.note)}</p>` : ''}<div class="record-actions">${trialBonusBadge(item)}${action}</div></div></article>`;
   }
 
   function renderTrialBonusTable(summary) {
@@ -909,10 +917,10 @@
     const body = `${importPanel}<input type="hidden" name="trialId" value="${esc(item.id || '')}"><div class="form-grid">
       <div class="field"><label for="trial-date">預約試上日期 <span class="required">*</span></label><input id="trial-date" name="date" type="date" min="${TRIAL_START_DATE}" value="${esc(item.date || todayIso())}" ${isNew ? '' : 'readonly'} required><div class="field-help">自 2026/08/15 起登記；家長預約後即可提前建立。</div></div>
       <div class="field"><label for="trial-student">學生姓名 <span class="required">*</span></label><input id="trial-student" name="studentName" value="${esc(item.studentName || '')}" ${approved ? 'readonly' : ''} required></div>
-      <div class="field"><label for="trial-course">試上課程 <span class="required">*</span></label><input id="trial-course" name="course" value="${esc(item.course || '')}" placeholder="例：機器人入門" required></div>
+      <div class="field"><label for="trial-course">試上課程 <span class="required">*</span></label><input id="trial-course" name="course" value="${esc(item.course || '')}" placeholder="例：機器人入門" ${approved ? 'readonly' : ''} required></div>
       <div class="field"><label for="trial-time">試上時段</label><input id="trial-time" name="trialTime" value="${esc(item.trialTime || '')}" placeholder="例：19:00–20:30"></div>
       <div class="field"><label for="trial-teacher">授課老師 <span class="required">*</span></label><input id="trial-teacher" name="teacher" value="${esc(item.teacher || '')}" required></div>
-      <div class="field"><label for="trial-contact">家長聯絡方式／識別資料 <span class="required">*</span></label><input id="trial-contact" name="contactRef" value="${esc(item.contactRef || '')}" placeholder="手機末碼、LINE 名稱或其他可辨識資料" ${approved ? 'readonly' : ''} required></div>
+      <div class="field"><label for="trial-contact">家長聯絡方式／識別資料 <span class="required">*</span></label><input id="trial-contact" name="contactRef" value="${esc(trialContact(item))}" placeholder="手機末碼、LINE 名稱或其他可辨識資料" ${approved ? 'readonly' : ''} required></div>
       ${isNew ? '<input type="hidden" name="status" value="waiting_contact">' : `<div class="field"><label for="trial-status">目前結果 <span class="required">*</span></label><select id="trial-status" name="status" ${approved ? 'disabled' : ''}>${TRIAL_STATUSES.map(([value,label]) => `<option value="${value}" ${(item.status || 'waiting_contact') === value ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>${approved ? `<input type="hidden" name="status" value="${esc(item.status)}">` : ''}</div>`}
       ${isNew ? '' : `<div class="field" data-trial-next><label for="trial-next">提醒日期 <span class="conditional">需要系統提醒時再填</span></label><input id="trial-next" name="nextFollowupDate" type="date" value="${esc(item.nextFollowupDate || '')}"></div>`}
     </div>${isNew ? '<div class="notice mt-16">新增後會先顯示「已預約／待試上」；試上結束後再按更新選擇結果。</div>' : ''}<details class="compact-details mt-16" ${item.note ? 'open' : ''}><summary>${icon('message-square-more')}家長回覆／特殊備註（選填）</summary><div class="compact-details-body"><div class="field full"><label for="trial-note">備註</label><textarea id="trial-note" name="note" placeholder="只有需要保留的家長回覆或特殊狀況才填">${esc(item.note || '')}</textarea></div></div></details>
@@ -974,7 +982,7 @@
     const evidence = (item.paymentEvidence || []).map(file => `<a class="badge success" href="${esc(file.url)}" target="_blank" rel="noopener">${icon('paperclip',12)}${esc(file.fileName)}</a>`).join('');
     const review = withReview ? `<div class="field mt-16"><label for="trial-review-note">主管審核說明</label><textarea id="trial-review-note" name="note" placeholder="不符合時必須寫明原因">${esc(item.bonusReviewNote || '')}</textarea></div><div class="grid cols-2 mt-16"><label class="check-row"><input type="radio" name="result" value="approved" ${item.bonusStatus !== 'rejected' ? 'checked' : ''}><span>確認符合，核發 50 元</span></label><label class="check-row"><input type="radio" name="result" value="rejected" ${item.bonusStatus === 'rejected' ? 'checked' : ''}><span>不符合</span></label></div>` : '';
     const trialLabel = [formatDate(item.date), item.trialTime, item.course].filter(Boolean).join(' · ');
-    const body = `<input type="hidden" name="recordId" value="${esc(item.id)}"><div class="detail-grid"><div><span>學生</span><strong>${esc(item.studentName)}</strong></div><div><span>家長識別</span><strong>${esc(item.contactRef)}</strong></div><div><span>試上</span><strong>${esc(trialLabel)}</strong></div><div><span>授課老師</span><strong>${esc(item.teacher)}</strong></div><div><span>目前狀態</span><strong>${esc(trialStatusLabel(item.status))}</strong></div><div><span>負責人</span><strong>${esc(item.owner || workerName)}</strong></div>${item.status === 'converted' ? `<div><span>正式報名</span><strong>${formatDate(item.enrollmentDate)} · ${esc(item.enrollmentCourse)}</strong></div><div><span>繳費確認</span><strong>${formatDate(item.paymentDate)}</strong></div><div><span>首次報名</span><strong>${item.firstEnrollment ? '是' : '否，不計獎金'}</strong></div><div><span>獎金狀態</span><strong>${item.bonusStatus === 'approved' ? '已核准 50 元' : item.bonusStatus === 'rejected' ? '不符合' : '待主管確認'}</strong></div>` : ''}</div>${evidence ? `<div class="file-list mt-16">${evidence}</div>` : ''}<h3>處理時間軸</h3>${renderTrialTimeline(item)}${review}`;
+    const body = `<input type="hidden" name="recordId" value="${esc(item.id)}"><div class="detail-grid"><div><span>學生</span><strong>${esc(item.studentName)}</strong></div><div><span>家長識別</span><strong>${esc(trialContact(item))}</strong></div><div><span>試上</span><strong>${esc(trialLabel)}</strong></div><div><span>授課老師</span><strong>${esc(item.teacher)}</strong></div><div><span>目前狀態</span><strong>${esc(trialStatusLabel(item.status))}</strong></div><div><span>負責人</span><strong>${esc(item.owner || workerName)}</strong></div>${item.status === 'converted' ? `<div><span>正式報名</span><strong>${formatDate(item.enrollmentDate)} · ${esc(item.enrollmentCourse)}</strong></div><div><span>繳費確認</span><strong>${formatDate(item.paymentDate)}</strong></div><div><span>首次報名</span><strong>${item.firstEnrollment ? '是' : '否，不計獎金'}</strong></div><div><span>獎金狀態</span><strong>${item.bonusStatus === 'approved' ? '已核准 50 元' : item.bonusStatus === 'rejected' ? '不符合' : '待主管確認'}</strong></div>` : ''}</div>${evidence ? `<div class="file-list mt-16">${evidence}</div>` : ''}<h3>處理時間軸</h3>${renderTrialTimeline(item)}${review}`;
     showDialog(dialogShell(withReview ? '確認首報獎金' : '試上追蹤明細', `${item.studentName} · ${formatDate(item.date)} 試上`, body, withReview ? '儲存審核' : '', withReview ? 'trial-bonus-form' : ''), true);
   }
 
@@ -1167,7 +1175,7 @@
     const id = String(data.get('trialId') || '') || uid('admin-marketing-trial');
     const existing = trialRecords().find(item => item.id === id) || {};
     const status = String(data.get('status') || 'waiting_contact');
-    const followups = Array.isArray(existing.followups) ? existing.followups.slice() : [];
+    let followups = Array.isArray(existing.followups) ? existing.followups.slice() : [];
     const studentName = String(data.get('studentName') || '').trim();
     const contactRef = String(data.get('contactRef') || '').trim();
     const date = String(data.get('date') || todayIso());
@@ -1186,12 +1194,15 @@
       if (!enrollmentDate || !paymentDate || !enrollmentCourse || !firstEnrollmentChoice) throw new Error('請完整填寫報名、繳費、正式課程與是否首次報名');
       if (enrollmentDate > todayIso() || paymentDate > todayIso()) throw new Error('報名與繳費日期不可晚於今天');
       if (enrollmentDate < date || paymentDate < date) throw new Error('報名與繳費日期不可早於試上日期');
+      if (firstEnrollmentChoice === 'yes' && !followups.length) {
+        followups = [{ id: uid('trial-followup'), date: paymentDate, method: 'other', note: '系統依首次正式報名與完成繳費自動建立', nextDate: '', author: currentUser.nickname, at: new Date().toISOString() }];
+      }
     }
-    const duplicate = trialRecords().find(item => item.id !== id && trialIdentity(item.studentName, item.contactRef, item.course, item.date) === trialIdentity(studentName, contactRef, course, date));
+    const duplicate = trialRecords().find(item => item.id !== id && trialIdentity(item.studentName, trialContact(item), item.course, item.date) === trialIdentity(studentName, contactRef, course, date));
     if (duplicate) throw new Error('這位學生在同一天已有相同課程的試上預約，請更新原紀錄');
     const newEvidence = await uploadFiles(form.elements.paymentEvidence, 'trial-payment');
     const record = {
-      ...existing, id, date, studentName, course, trialTime, teacher, contactRef,
+      ...existing, id, date, studentName, course, trialTime, teacher, contactDisplay: contactRef, contactRef: legacyTrialContactRef(contactRef, course, date),
       interest: String(data.get('interest') || 'unknown'), owner: workerName, nextFollowupDate,
       note: String(data.get('note') || '').trim(), status, followups,
       enrollmentDate, paymentDate, enrollmentCourse,

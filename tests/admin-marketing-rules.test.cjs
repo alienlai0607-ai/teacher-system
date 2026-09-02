@@ -72,6 +72,14 @@ assert.notEqual(
   context.adminMarketingTrialIdentity_({ ...trial, course: '樂高小創客' }),
   '同一學生的不同試上課程必須能建立為不同預約',
 );
+const legacyCompatibleTrial = context.validateAdminMarketingRecord_('trial', {
+  ...trial,
+  id: 'trial-legacy-contact',
+  contactRef: '0912-345-678｜試上 2026-08-26 機器人試上',
+  contactDisplay: '0912-345-678',
+});
+assert.equal(legacyCompatibleTrial.contactRef, '0912-345-678', '新版後端需自動清理舊後端相容用的內部聯絡識別');
+assert.equal(context.adminMarketingStudentIdentity_(legacyCompatibleTrial), '小布|0912345678');
 
 const futureTrial = context.validateAdminMarketingRecord_('trial', {
   ...trial, id: 'trial-future', date: '2026-09-10', nextFollowupDate: '2026-08-27',
@@ -237,12 +245,15 @@ assert.match(workspacesCssSource, /@media \(max-width: 820px\)[\s\S]*\.workspace
 assert.match(workspacesCssSource, /\.workspace-quick-title \{[^}]*width: 100%;[^}]*flex: 0 0 auto;/, '手機工作身分標題高度需依內容決定');
 assert.match(workspacesCssSource, /grid-template-columns: repeat\(auto-fit, minmax\(136px, 1fr\)\)/, '手機三身分按鈕需保留可讀寬度');
 assert.match(uiHtmlSource, /workspaces\.css\?v=20260901-workspace-wrap-1/, '行政頁需載入防溢出的工作身分樣式');
-assert.match(uiHtmlSource, /app\.js\?v=20260902-admin-stability-7/, '行政穩定版表單需使用獨立快取版本');
-assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=admin-marketing(?:-manager)?&v=20260902-admin-stability-7/g) || []).length, 2, '行政與主管入口都需避開舊版快取');
-assert.match(uiSource, /trialIdentity\(item\.studentName, item\.contactRef, item\.course, item\.date\)/, '重複預約需依學生、課程與日期判定');
+assert.match(uiHtmlSource, /app\.js\?v=20260902-admin-stability-8/, '行政穩定版表單需使用獨立快取版本');
+assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=admin-marketing(?:-manager)?&v=20260902-admin-stability-8/g) || []).length, 2, '行政與主管入口都需避開舊版快取');
+assert.match(uiSource, /trialIdentity\(item\.studentName, trialContact\(item\), item\.course, item\.date\)/, '重複預約需依學生、課程與日期判定');
 assert.match(uiSource, /同一學生可登記不同課程/, '行政需清楚知道同一學生可登記多門試上課');
 assert.doesNotMatch(uiSource, /首報獎金至少要有一筆家長追蹤紀錄|新增一筆追蹤/, '首報不得強迫另建一筆重複的家長追蹤');
 assert.doesNotMatch(backendSource, /首報獎金需至少有一筆家長追蹤紀錄|尚未留下家長追蹤紀錄/, '後端首報資格不得保留已刪除的追蹤門檻');
+assert.match(uiSource, /function legacyTrialContactRef\(/, '正式後端尚未更新時，不同課程仍需取得不同的內部預約識別');
+assert.match(uiSource, /contactDisplay: contactRef, contactRef: legacyTrialContactRef\(contactRef, course, date\)/, '畫面需保留原聯絡資料，不顯示內部相容識別');
+assert.match(uiSource, /系統依首次正式報名與完成繳費自動建立/, '舊後端需要的首報事件應由系統自動建立，不得增加行政填寫工作');
 assert.match(uiSource, /列印月報/, '主管需能列印每月獎金明細');
 assert.match(uiSource, /actionNode\.classList\.contains\('dialog-backdrop'\) && event\.target !== actionNode/, '點擊表單內按鈕不得被背景誤判為關閉對話框');
 assert.match(uiSource, /function selectedPerformanceMonth\(\)/, '行政查看 KPI 應使用獨立的評核月份');

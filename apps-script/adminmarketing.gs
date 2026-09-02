@@ -114,7 +114,7 @@ function adminMarketingAttachments_(items, required) {
 
 function adminMarketingTrialIdentity_(data) {
   const name = adminMarketingText_(data && data.studentName, 160).replace(/\s+/g, '').toLowerCase();
-  const contact = adminMarketingText_(data && data.contactRef, 160).replace(/[\s\-()]/g, '').toLowerCase();
+  const contact = adminMarketingText_(data && (data.contactDisplay || data.contactRef), 160).replace(/[\s\-()]/g, '').toLowerCase();
   const course = adminMarketingText_(data && data.course, 220).replace(/\s+/g, '').toLowerCase();
   const date = adminMarketingText_(data && data.date, 10);
   return name && contact && course && date ? name + '|' + contact + '|' + course + '|' + date : '';
@@ -122,7 +122,7 @@ function adminMarketingTrialIdentity_(data) {
 
 function adminMarketingStudentIdentity_(data) {
   const name = adminMarketingText_(data && data.studentName, 160).replace(/\s+/g, '').toLowerCase();
-  const contact = adminMarketingText_(data && data.contactRef, 160).replace(/[\s\-()]/g, '').toLowerCase();
+  const contact = adminMarketingText_(data && (data.contactDisplay || data.contactRef), 160).replace(/[\s\-()]/g, '').toLowerCase();
   return name && contact ? name + '|' + contact : '';
 }
 
@@ -295,7 +295,8 @@ function validateAdminMarketingTrial_(data) {
   data.studentName = adminMarketingText_(data.studentName, 160);
   data.course = adminMarketingText_(data.course, 220);
   data.teacher = adminMarketingText_(data.teacher, 160);
-  data.contactRef = adminMarketingText_(data.contactRef, 160);
+  data.contactDisplay = adminMarketingText_(data.contactDisplay || data.contactRef, 160);
+  data.contactRef = data.contactDisplay;
   data.interest = ['high', 'medium', 'low', 'unknown'].indexOf(data.interest) >= 0 ? data.interest : 'unknown';
   data.owner = adminMarketingText_(data.owner || data.nickname, 160);
   data.note = adminMarketingText_(data.note, 1800);
