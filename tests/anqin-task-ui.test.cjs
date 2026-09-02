@@ -90,8 +90,8 @@ assert.match(source, /function applyPreviewReviewContext\(/, '安親審查模式
 assert.match(source, /if \(!applyPreviewReviewContext\(control\.dataset\.role\)\) state\.ui\.role = control\.dataset\.role/, '切換審查角色時必須同步身份範圍');
 assert.match(source, /applyPreviewReviewContext\(LOCAL_REVIEW_ROLE\)/, '網址指定主管視角時首次載入就必須套用正確身份');
 assert.match(source, /GLOBAL_MANAGER_NICKNAMES\.some\(name => sameReviewIdentity\(name, managerNickname\)\)/, '小魚在審查與正式登入都必須擁有全教室檢視範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260902-anqin-stability-4/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260902-anqin-stability-4/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260902-anqin-stability-5/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260902-anqin-stability-5/, '登入備援路徑也必須避開舊版快取');
 
 const activityFormSource = source.slice(source.indexOf('function renderActivitySpecificFields('), source.indexOf('function renderEvidenceAttachmentList('));
 assert.match(activityFormSource, /if \(activityNeedsPrepSource\(type\)\) return '';/, '課業指導與學科外不得重複顯示舊課程內容欄位');
@@ -198,6 +198,16 @@ assert.match(sharedApi, /getSessionIdentity: \(\) => call\('getSessionIdentity'\
 assert.match(apiRouter, /'getSessionIdentity': \(\) => getSessionIdentity\(params\)/, 'Apps Script 路由需提供工作階段身分校正');
 assert.match(authBackend, /function getSessionIdentity\(params\)/, '後端需由驗簽結果回傳目前正式身分');
 assert.match(source, /if \(dailySubmitInFlight\) return/, '日結送出需防止連點產生重複請求');
+const dailySubmitSource = source.slice(source.indexOf('async function submitDaily()'), source.indexOf('async function submitWeekly()'));
+assert.match(dailySubmitSource, /integrationRuntime\.cloudMessage = '正在確認並送出今日紀錄'/, '老師按下送出後需立即顯示送出中狀態');
+assert.match(dailySubmitSource, /finally \{[\s\S]*dailySubmitInFlight = false;[\s\S]*renderApp\(\);/, '送出完成或失敗後都必須重新恢復可操作畫面');
+assert.match(dailySubmitSource, /function showDailySubmissionReceipt\(/, '日結送出後需顯示固定的送出收據');
+assert.match(dailySubmitSource, /今日紀錄已成功送出/, '送出收據需清楚宣告成功');
+assert.match(dailySubmitSource, /送出時間/, '送出收據需提供實際送出時間');
+assert.match(dailySubmitSource, /data-action="close-dialog">我知道了/, '成功收據需由老師主動確認後才關閉');
+assert.match(dailySubmitSource, /data-action="view-daily-submission-status"/, '收據需提供可直接查看送出狀態的入口');
+assert.match(source, /action === 'view-daily-submission-status'[^]*closeDialog\(\); persist\(\); renderApp\(\);/, '查看送出狀態前需先關閉收據，避免畫面被遮住');
+assert.match(dailySubmitSource, /showDailySubmissionReceipt\(submission, '雲端紀錄、主管通知、追蹤事項與 PDF 都已完成。'\)/, '雲端正式送出完成時需顯示完整成功收據');
 assert.match(source, /duplicate = Array\.from\(root\.children\)/, '相同提示不得在畫面上重複堆疊');
 const evidenceRemovalSource = source.slice(source.indexOf("else if (action === 'remove-evidence-attachment')"), source.indexOf("else if (action === 'remove-operation-photo')"));
 assert.match(evidenceRemovalSource, /if \(!evidenceDraft\.attachments\.length\)[\s\S]{0,500}evidenceDraft\.fileName = '';[\s\S]{0,500}evidenceDraft\.cloudFileId = '';/, '刪除最後一張成果照片時必須同步清除舊版欄位，避免幽靈附件復活');

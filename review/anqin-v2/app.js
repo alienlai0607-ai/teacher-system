@@ -6185,12 +6185,27 @@
 
   async function submitDaily() {
     if (dailySubmitInFlight) return;
+    const form = $('#daily-summary-form');
+    if (form) saveDailySummaryForm(form, false);
     dailySubmitInFlight = true;
+    integrationRuntime.cloudMessage = '正在確認並送出今日紀錄';
+    updateSaveIndicator('saving', '正在送出');
+    renderApp();
     try {
       return await submitDailyRequest();
     } finally {
       dailySubmitInFlight = false;
+      renderApp();
     }
+  }
+
+  function showDailySubmissionReceipt(submission, message, type = 'success') {
+    const isWarning = type === 'warning';
+    openDialog({
+      title: isWarning ? '已送出，尚有後續提醒' : '今日紀錄已成功送出',
+      body: `<div class="notice-band ${isWarning ? 'warning' : 'success'}">${icon(isWarning ? 'triangle-alert' : 'circle-check', 22)}<div><div class="notice-title">${isWarning ? '資料已送出，請查看後續提醒' : '主管已可查看本次紀錄'}</div><div class="notice-copy">${esc(message)}</div></div></div><div class="metadata-list mt-16"><div class="metadata-row"><div class="metadata-label">送出日期</div><div class="metadata-value">${formatDate(submission.date)}</div></div><div class="metadata-row"><div class="metadata-label">送出時間</div><div class="metadata-value">${formatTime(submission.submittedAt)}</div></div><div class="metadata-row"><div class="metadata-label">目前狀態</div><div class="metadata-value">待主管審查</div></div></div>`,
+      footer: '<button type="button" class="btn" data-action="view-daily-submission-status">查看送出狀態</button><button type="button" class="btn btn-primary" data-action="close-dialog">我知道了</button>',
+    });
   }
 
   async function submitDailyRequest() {
@@ -6245,13 +6260,23 @@
         state.daily.submittedAt = submission.submittedAt;
         persist('已同步雲端');
         renderApp();
-        if (pdfResult?.ok && notificationComplete && taskSync.ok) toast('已正式送出，主管通知、追蹤事項與 PDF 已完成', 'success');
-        else if (pdfResult?.ok && !notificationComplete) {
+        if (pdfResult?.ok && notificationComplete && taskSync.ok) {
+          toast('已正式送出，主管通知、追蹤事項與 PDF 已完成', 'success');
+          showDailySubmissionReceipt(submission, '雲端紀錄、主管通知、追蹤事項與 PDF 都已完成。');
+        } else if (pdfResult?.ok && !notificationComplete) {
           const taskWarning = taskSync.ok ? '' : `；另有 ${taskSync.failed} 項追蹤事項尚未同步`;
-          toast(`已正式送出並建立 PDF；${pendingNotifications.join('、') || '主管'}通知尚未送達，請到「帳號與通知」檢查綁定${taskWarning}`, 'warning');
+          const message = `已建立 PDF；${pendingNotifications.join('、') || '主管'}通知尚未送達，請到「帳號與通知」檢查綁定${taskWarning}`;
+          toast(`已正式送出並${message}`, 'warning');
+          showDailySubmissionReceipt(submission, message, 'warning');
+        } else if (pdfResult?.ok) {
+          const message = `${taskSync.failed} 項追蹤事項尚未同步，請稍後到「追蹤事項」確認。`;
+          toast(`已正式送出；${message}`, 'warning');
+          showDailySubmissionReceipt(submission, message, 'warning');
+        } else {
+          const message = `PDF 未完成：${pdfResult?.error || '請稍後重試'}。今日紀錄已正式送出。`;
+          toast(`已正式送出；${message}`, 'warning');
+          showDailySubmissionReceipt(submission, message, 'warning');
         }
-        else if (pdfResult?.ok) toast(`已正式送出；${taskSync.failed} 項追蹤事項尚未同步`, 'danger');
-        else toast(`已正式送出；PDF 未完成：${pdfResult?.error || '請稍後重試'}`, 'danger');
       } catch (error) {
         integrationRuntime.cloudStatus = 'error';
         integrationRuntime.cloudErrorContext = 'submit';
@@ -6268,6 +6293,7 @@
     state.daily.status = 'submitted';
     state.daily.submittedAt = submission.submittedAt;
     persist(); renderApp(); toast('審查紀錄已送出；未通知真人主管', 'success');
+    showDailySubmissionReceipt(submission, '審查模式已完成送出；本次不會通知真人主管。');
   }
 
   async function submitWeekly() {
@@ -7214,6 +7240,10 @@
     else if (action === 'today-tab') {
       state.ui.todayTab = control.dataset.tab;
       persist(); renderApp();
+    }
+    else if (action === 'view-daily-submission-status') {
+      state.ui.todayTab = 'submit';
+      closeDialog(); persist(); renderApp();
     }
     else if (action === 'set-view-filter') {
       const filters = getFilters(control.dataset.filterGroup, {});
