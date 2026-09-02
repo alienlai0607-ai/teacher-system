@@ -3801,31 +3801,46 @@ function addTask(params) {
   let assignees = params.assignees;
   if (typeof assignees === 'string') assignees = assignees.split(',').map(s => s.trim()).filter(Boolean);
   if (!Array.isArray(assignees) || !assignees.length) return { ok: false, error: '請指定至少一位老師' };
+  const requestedTaskId = String(params.task_id || '').trim();
+  if (requestedTaskId && assignees.length !== 1) return { ok: false, error: '指定事項編號時只能指派一位老師' };
+  const existingRequestedTask = requestedTaskId ? findObject(SHEET_NAMES.TASKS, 'task_id', requestedTaskId) : null;
+  if (existingRequestedTask && existingRequestedTask.assignee !== assignees[0]) return { ok: false, error: '事項編號已由其他老師使用' };
 
   const due = params.due_date || todayStr();
   const now = nowIso();
   let created = 0;
+  let updated = 0;
+  const taskIds = [];
   assignees.forEach(nk => {
     const u = findUserByNickname(nk);
     if (!u) return;
-    appendRow(SHEET_NAMES.TASKS, {
-      task_id: Utilities.getUuid(),
+    const taskId = requestedTaskId || Utilities.getUuid();
+    const existing = requestedTaskId ? existingRequestedTask : null;
+    const row = {
+      task_id: taskId,
       title: String(title).trim(),
       detail: params.detail || '',
       assignee: nk,
       department: normalizeDepartment_(u.department),
       due_date: due,
       status: 'open',
-      created_by: created_by,
-      created_at: now,
+      created_by: existing ? existing.created_by : created_by,
+      created_at: existing ? existing.created_at : now,
       updated_at: now,
       done_at: ''
-    });
-    created++;
-    if (params.notify !== false) notifyUser_(u, '🆕 你有新事項：' + title, (params.detail ? params.detail + '\n' : '') + '期限 ' + due);
+    };
+    if (existing) {
+      upsertRow(SHEET_NAMES.TASKS, 'task_id', row);
+      updated++;
+    } else {
+      appendRow(SHEET_NAMES.TASKS, row);
+      created++;
+      if (params.notify !== false) notifyUser_(u, '🆕 你有新事項：' + title, (params.detail ? params.detail + '\n' : '') + '期限 ' + due);
+    }
+    taskIds.push(taskId);
   });
-  logSystem(created_by, 'add_task', title, { assignees: assignees, due: due });
-  return { ok: true, created: created };
+  logSystem(created_by, 'add_task', title, { assignees: assignees, due: due, created: created, updated: updated });
+  return { ok: true, created: created, updated: updated, task_ids: taskIds, updated_at: now };
 }
 
 /** V2 老師將自己的追蹤事項同步到雲端，供提醒排程與跨裝置使用。 */
@@ -5725,6 +5740,7 @@ function saveTalentPrep(params) {
   prep.status = 'ready';
   prep.date = String(prep.date || todayStr()).slice(0, 10);
   prep.materials = talentAttachments_(prep.materials, true);
+  if (!prep.materials.length) return { ok: false, error: '請至少上傳一份教案或教材資料' };
   const normalizedTitle = String(prep.courseName || '').trim().replace(/\s+/g, ' ').toLowerCase();
   const normalizedCourseType = String(prep.courseType || '').trim().replace(/\s+/g, ' ').toLowerCase();
   const lock = LockService.getScriptLock();
@@ -6766,7 +6782,28 @@ function reviewAdminMarketingRecord(params) {
   data.reviewedAt = nowIso();
   const saved = upsertAdminMarketingRecord_(existing.record_type, existing.nickname, data, actor.nickname);
   updateRow(SHEET_NAMES.ADMIN_MARKETING_RECORDS, existing._row, { reviewed_at: data.reviewedAt });
-  return { ok: true, record: saved };
+  const month = String(data.date || todayStr()).slice(0, 7);
+  const conversationId = 'admin-marketing-message-' + existing.nickname + '-' + month;
+  const messageId = 'admin-marketing-review-' + existing.record_id;
+  const conversationRow = findObject(SHEET_NAMES.ADMIN_MARKETING_RECORDS, 'record_id', conversationId);
+  const conversation = conversationRow ? adminMarketingRecordObject_(conversationRow) : {
+    id: conversationId, type: 'message', nickname: existing.nickname,
+    date: month + '-01', month: month, messages: [], status: 'active'
+  };
+  conversation.messages = (Array.isArray(conversation.messages) ? conversation.messages : []).filter(function (message) {
+    return message.id !== messageId;
+  });
+  if (data.reviewComment) {
+    conversation.messages.push({
+      id: messageId, author: actor.nickname, role: actor.role,
+      text: '針對 ' + data.date + ' 工作紀錄：' + data.reviewComment,
+      at: data.reviewedAt
+    });
+  }
+  const conversationSaved = (data.reviewComment || conversationRow)
+    ? upsertAdminMarketingRecord_('message', existing.nickname, conversation, actor.nickname)
+    : null;
+  return { ok: true, record: saved, conversation: conversationSaved };
 }
 
 function saveAdminMarketingScore(params) {

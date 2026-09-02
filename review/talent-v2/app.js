@@ -3,6 +3,8 @@
 
   const APP_VERSION = 14;
   const TALENT_EFFECTIVE_DATE = '2026-09-01';
+  const MAX_TALENT_FILE_BYTES = 25 * 1024 * 1024;
+  const IMAGE_COMPRESSION_THRESHOLD_BYTES = 2.2 * 1024 * 1024;
   const PREVIEW_MODE = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
     || window.location.hostname.endsWith('.trycloudflare.com');
   const reviewRibbon = document.getElementById('review-ribbon');
@@ -207,6 +209,7 @@
   }
 
   let state = loadState();
+  state.logs = (Array.isArray(state.logs) ? state.logs : []).map(item => item?.id ? item : { ...item, id: uid('log') });
   state.settings = state.settings || { ptStrictStart: TALENT_EFFECTIVE_DATE, ptExceptions: [] };
   state.users = Array.isArray(state.users) ? state.users : [];
   state.pendingUsers = Array.isArray(state.pendingUsers) ? state.pendingUsers : [];
@@ -526,7 +529,7 @@
       return `<article class="record-row">
         <div class="record-date"><strong>${formatDate(item.date)}</strong><span>${item.backfilled ? '補登停課' : '當日回報'}</span></div>
         <div class="record-main"><div class="record-title">${esc(item.courseName || '停課')} ${statusBadge('cancelled')}</div><div class="record-meta">${esc(item.site)} · ${esc(item.teacher)}</div><div class="record-note">${esc(item.cancellationReason)}${item.cancellationNote ? ` · ${esc(item.cancellationNote)}` : ''}</div></div>
-        <div class="record-side"><strong>${formatMoney(0)}</strong><span>不計鐘點</span><button type="button" class="icon-button" data-action="view-log" data-id="${item.id}" aria-label="查看停課紀錄">${icon('chevron-right', 18)}</button></div>
+        <div class="record-side"><strong>${formatMoney(0)}</strong><span>不計鐘點</span><div class="record-actions"><button type="button" class="icon-button" data-action="view-log" data-id="${item.id}" aria-label="查看停課紀錄">${icon('chevron-right', 18)}</button></div></div>
       </article>`;
     }
     const count = Number(item.present || 0) + Number(item.makeup || 0);
@@ -534,7 +537,7 @@
     return `<article class="record-row">
       <div class="record-date"><strong>${formatDate(item.date)}</strong><span>${esc(item.duration)} 小時</span></div>
       <div class="record-main"><div class="record-title">${esc(item.courseName || item.courseType)} ${statusBadge(item.status)}</div><div class="record-meta">${esc(item.site)} · 計薪實到 ${count} 人 · ${esc(item.teacher)}</div><div class="record-note">${esc(item.completed)}</div></div>
-      <div class="record-side">${item.employment === 'pt' ? `<strong>${formatMoney(item.pay)}</strong><span>${appLabel}</span>` : `<strong>${appLabel}</strong><span>${item.siteType === 'partner' ? '合作校' : '最晚週六'}</span>`}${isTeacher() && item.date === todayIso() && normalizeName(item.teacher) === normalizeName(currentUser.nickname) ? `<button type="button" class="icon-button" data-action="edit-log" data-id="${item.id}" aria-label="編輯今日紀錄" title="編輯今日紀錄">${icon('pencil', 16)}</button>` : ''}<button type="button" class="icon-button" data-action="view-log" data-id="${item.id}" aria-label="查看紀錄">${icon('chevron-right', 18)}</button></div>
+      <div class="record-side">${item.employment === 'pt' ? `<strong>${formatMoney(item.pay)}</strong><span>${appLabel}</span>` : `<strong>${appLabel}</strong><span>${item.siteType === 'partner' ? '合作校' : '最晚週六'}</span>`}<div class="record-actions">${isTeacher() && item.date === todayIso() && normalizeName(item.teacher) === normalizeName(currentUser.nickname) ? `<button type="button" class="icon-button" data-action="edit-log" data-id="${item.id}" aria-label="編輯今日紀錄" title="編輯今日紀錄">${icon('pencil', 16)}</button>` : ''}<button type="button" class="icon-button" data-action="view-log" data-id="${item.id}" aria-label="查看紀錄">${icon('chevron-right', 18)}</button></div></div>
     </article>`;
   }
 
@@ -887,7 +890,7 @@
     const canApprove = currentUser.role === 'admin';
     return `${pageHead('新生與續報核准', '老師填寫的是申報數；管理員核對點名與繳費後才列入正式獎金。', monthControl())}
       ${!canApprove ? `<div class="notice info">${icon('eye', 19)}<div><strong>目前是檢視權限</strong><span>小魚可查看進度；正式核准由柏翰管理員完成。</span></div></div>` : ''}
-      <section class="panel"><div class="panel-head"><div><h2>${state.ui.month} 申報紀錄</h2><p>${logs.filter(item => item.bonusApproval !== 'approved').length} 筆待核准</p></div></div><div class="table-wrap"><table><thead><tr><th>日期</th><th>老師</th><th>課程</th><th>新生申報</th><th>續報申報</th><th>狀態</th><th></th></tr></thead><tbody>${logs.length ? logs.map(item => `<tr><td>${formatDate(item.date)}</td><td><strong>${esc(item.teacher)}</strong></td><td>${esc(item.courseName)}</td><td>${Number(item.newCount || 0)} 人</td><td>${Number(item.renewalCount || 0)} 人</td><td>${item.bonusApproval === 'approved' ? statusBadge('approved') : statusBadge('pending')}</td><td>${canApprove ? `<button type="button" class="btn btn-small ${item.bonusApproval === 'approved' ? '' : 'btn-primary'}" data-action="open-bonus-approval" data-id="${esc(item.id)}">${icon(item.bonusApproval === 'approved' ? 'eye' : 'badge-check', 15)}${item.bonusApproval === 'approved' ? '查看／調整' : '核准'}</button>` : '—'}</td></tr>`).join('') : '<tr><td colspan="7">本月沒有新生或續報申報</td></tr>'}</tbody></table></div></section>`;
+      <section class="panel"><div class="panel-head"><div><h2>${state.ui.month} 申報紀錄</h2><p>${logs.filter(item => item.bonusApproval !== 'approved').length} 筆待核准</p></div></div><div class="table-wrap"><table><thead><tr><th>日期</th><th>老師</th><th>課程</th><th>新生申報</th><th>續報申報</th><th>狀態</th><th></th></tr></thead><tbody>${logs.length ? logs.map(item => `<tr><td>${formatDate(item.date)}</td><td><strong>${esc(item.teacher)}</strong></td><td>${esc(item.courseName)}</td><td>${Number(item.newCount || 0)} 人</td><td>${Number(item.renewalCount || 0)} 人</td><td>${item.bonusApproval === 'approved' ? statusBadge('bonus-approved') : statusBadge('bonus-pending')}</td><td>${canApprove ? `<button type="button" class="btn btn-small ${item.bonusApproval === 'approved' ? '' : 'btn-primary'}" data-action="open-bonus-approval" data-id="${esc(item.id)}">${icon(item.bonusApproval === 'approved' ? 'eye' : 'badge-check', 15)}${item.bonusApproval === 'approved' ? '查看／調整' : '核准'}</button>` : '—'}</td></tr>`).join('') : '<tr><td colspan="7">本月沒有新生或續報申報</td></tr>'}</tbody></table></div></section>`;
   }
 
   function openBonusApproval(item) {
@@ -980,7 +983,7 @@
     }
     return `${pageHead(isPt() ? 'PT 使用與規則' : modeRole() === 'fulltime' ? '正職使用與規則' : '才藝部制度規則', '將說明集中在這裡，正式填寫頁面只保留當下需要的提示。')}
       <section class="guide-grid">
-        <article class="guide-card"><span>${icon('route', 22)}</span><div><h2>一次填寫流程</h2><ol><li>課前在「備課檔案」建立課程類型與課程名稱；教材、照片或備課影片有需要再附加，不需主管審核。</li><li>上課當天選擇固定班次與本堂使用的備課檔案。</li><li>上傳點名、學習證據與教室復原照片。</li><li>發布家長 APP 後，到「家長 APP」上傳完成截圖；合作校免上傳。</li><li>當日需要補充時，從「我的紀錄」開啟並按「更新紀錄」；PT 一般課堂跨日後不開放修改。</li></ol></div></article>
+        <article class="guide-card"><span>${icon('route', 22)}</span><div><h2>一次填寫流程</h2><ol><li>課前在「備課檔案」建立課程類型與課程名稱，並至少附上一份教案、教材、照片或備課影片；儲存後直接可用，不需主管審核。</li><li>上課當天選擇固定班次與本堂使用的備課檔案。</li><li>上傳點名、學習證據與教室復原照片。</li><li>發布家長 APP 後，到「家長 APP」上傳完成截圖；合作校免上傳。</li><li>當日需要補充時，從「我的紀錄」開啟並按「更新紀錄」；PT 一般課堂跨日後不開放修改。</li></ol></div></article>
         <article class="guide-card"><span>${icon('images', 22)}</span><div><h2>證據怎麼拍</h2><ul><li>點名簿要看得出日期、課程與圈記。</li><li>過程證據要看得出操作、討論或引導。</li><li>成果證據要能對應本堂目標，不以張數加分。</li><li>可一次多選照片與影片；選錯可先按叉號移除再送出。</li></ul></div></article>
         ${isPt() || ['manager', 'payroll'].includes(modeRole()) ? `<article class="guide-card"><span>${icon('badge-dollar-sign', 22)}</span><div><h2>PT 鐘點規則</h2><ul><li>制度自 2026/09/01 起正式判定。</li><li>2–4 人 500／小時；5–7 人 600／小時；8–10 人 800／小時。</li><li>體驗不計級距，補課計入。</li><li>正常上課若任一堂未於當日送出，當月續報獎金資格取消且不能補寫。</li><li>自營教室每堂需上傳家長 APP 發布截圖；合作校免上傳。</li><li>停課可補選過去排課日；需填原因，不計鐘點，也不算漏填。</li><li>黑豹善化合作校每堂固定 900，無續報獎金。</li><li>PT 沒有新生獎金；自營教室續報獎金須通過當月履約。</li></ul></div></article>` : ''}
         ${['fulltime', 'manager'].includes(modeRole()) ? `<article class="guide-card"><span>${icon('gauge', 22)}</span><div><h2>正職 KPI 獎金</h2><ul><li>80–84 分：符合職務標準，不另發。</li><li>85–89 分：1,000 元。</li><li>90–94 分：1,500 元。</li><li>95–100 分：2,500 元。</li></ul></div></article>` : ''}
@@ -994,7 +997,7 @@
 
   function statusBadge(status) {
     const map = {
-      ready: ['可使用', 'green'], approved: ['舊版已核准', 'green'], pending: ['舊版待審', 'gray'], returned: ['舊版退回', 'gray'], draft: ['舊版草稿', 'gray'], submitted: ['已送出', 'green'], cancelled: ['已停課', 'gray'], published: ['已發布', 'green'], '正常': ['正常', 'green'], '待開通': ['待開通', 'yellow'], complete: ['完整', 'green'], '資格取消': ['資格取消', 'red'], '待完成': ['待完成', 'yellow']
+      ready: ['可使用', 'green'], approved: ['舊版已核准', 'green'], pending: ['舊版待審', 'gray'], returned: ['舊版退回', 'gray'], draft: ['舊版草稿', 'gray'], submitted: ['已送出', 'green'], cancelled: ['已停課', 'gray'], published: ['已發布', 'green'], 'bonus-approved': ['已核准', 'green'], 'bonus-pending': ['待核准', 'yellow'], '正常': ['正常', 'green'], '待開通': ['待開通', 'yellow'], complete: ['完整', 'green'], '資格取消': ['資格取消', 'red'], '待完成': ['待完成', 'yellow']
     };
     const item = map[status] || [status, 'gray'];
     return `<span class="badge ${item[1]}">${esc(item[0])}</span>`;
@@ -1034,7 +1037,8 @@
   }
 
   function openLogEditor(existing = null) {
-    const draft = existing || state.draftLog || {};
+    const draft = existing || state.draftLog || { id: uid('log') };
+    if (!draft.id) draft.id = uid('log');
     const editing = Boolean(existing || (draft.id && state.logs.some(item => item.id === draft.id)));
     activeLogSource = draft;
     const availableSchedules = schedulesForDate(currentUser, draft.date || todayIso());
@@ -1079,7 +1083,7 @@
           <div class="form-grid">${selectField('親師溝通狀態', 'parentStatus', ['complete|全班回報完成', 'followup|有個別追蹤', 'pending|尚未完成'], formValue('parentStatus', 'complete'), true, true)}<label class="check-card"><input type="checkbox" name="roomDone" ${formValue('roomDone', false) ? 'checked' : ''} required><span>${icon('sparkles', 20)}<strong>教室與器材已復原 <b>*</b></strong><small>課後完成後勾選</small></span></label></div>
           <label class="form-field span-all followup-field" ${formValue('parentStatus', 'complete') === 'followup' ? '' : 'hidden'}><span>個別追蹤與下一步 <b>*</b></span><textarea name="parentFollowup" placeholder="只記錄需要繼續處理的具體狀況。">${esc(formValue('parentFollowup'))}</textarea></label>
           ${uploadField('課後教室復原照片', 'room', '不需要另寫照片判讀說明。', 'image/*', true)}
-          <div class="app-publish-fields">${uploadField('家長 APP 發布完成截圖', 'app', '截圖需同時看得到發布日期與課程名稱；可一次選多張。若尚未發布，可先送出本堂紀錄，最晚週六前到「家長 APP」補上。', 'image/*', true)}</div>
+          <div class="app-publish-fields">${uploadField('家長 APP 發布完成截圖', 'app', '截圖需同時看得到發布日期與課程名稱；可一次選多張。若尚未發布，可先送出本堂紀錄，最晚週六前到「家長 APP」補上。', 'image/*', false)}</div>
           <div class="bonus-fields"><div class="form-grid">${isPt() ? '' : numberField('新生確定報名', 'newCount', formValue('newCount', 0), false, '藍筆圈選「新」')}${numberField('續報確定', 'renewalCount', formValue('renewalCount', 0), false, '紅筆圈選「續」')}</div></div>
           ${isPt() ? '<div id="pay-preview" class="calculation-card"></div>' : ''}
         </section></div>
@@ -1217,7 +1221,11 @@
   }
 
   async function compressImage(file) {
-    if (!isImageFile(file) || file.size <= 2.2 * 1024 * 1024) return file;
+    if (!isImageFile(file)) return file;
+    if (file.size > MAX_TALENT_FILE_BYTES) throw new Error(`${file.name} 超過 25 MB 上限`);
+    const needsFormatConversion = /(?:heic|heif)$/i.test(String(file.name || ''))
+      || /image\/(?:heic|heif)/i.test(String(file.type || ''));
+    if (!needsFormatConversion && file.size <= IMAGE_COMPRESSION_THRESHOLD_BYTES) return file;
     const url = URL.createObjectURL(file);
     try {
       const image = new Image();
@@ -1242,22 +1250,22 @@
 
   async function uploadTalentFile(file, category) {
     if (TEST_VIEW_MODE) throw new Error('測試視角為唯讀，不能上傳正式附件');
-    if (PREVIEW_MODE) {
-      return { id: uid('preview_file'), fileName: file.name, mimeType: file.type || '', url: '', category };
-    }
+    if (file.size > MAX_TALENT_FILE_BYTES) throw new Error(`${file.name} 超過 25 MB 上限`);
     let source = file;
     const isImage = isImageFile(file);
     if (isImage) source = await compressImage(file);
-    if (!isImage && source.size > 15 * 1024 * 1024) throw new Error(`${file.name} 超過 15 MB；備課影片請先剪短或壓縮後再上傳`);
+    if (PREVIEW_MODE) {
+      return { id: uid('preview_file'), fileName: source.name, mimeType: source.type || file.type || '', url: '', category, size: source.size };
+    }
     const base64 = await fileAsBase64(source);
     const result = isImage
       ? await API.uploadPhoto({ nickname: currentUser.nickname, date: todayIso(), kpi: `talent-${category}`, mimeType: source.type || 'image/jpeg', base64, description: category })
-      : await API.uploadFile({ nickname: currentUser.nickname, date: todayIso(), category: `talent-${category}`, fileName: file.name, mimeType: source.type || 'application/octet-stream', base64 });
+      : await API.uploadFile({ nickname: currentUser.nickname, date: todayIso(), category: `talent-${category}`, fileName: source.name, mimeType: source.type || 'application/octet-stream', base64 });
     if (!result?.ok) throw new Error(result?.error || `${file.name} 上傳失敗`);
     return {
       id: result.fileId || uid('file'),
       fileId: result.fileId || '',
-      fileName: result.fileName || file.name,
+      fileName: result.fileName || source.name,
       mimeType: source.type || file.type || '',
       url: result.url || '',
       category,
@@ -1278,27 +1286,40 @@
     if (summary) summary.textContent = `正在上傳 0 / ${files.length}`;
     const uploaded = [];
     let skipped = 0;
+    const failed = [];
     try {
       for (let index = 0; index < files.length; index += 1) {
         if (summary) summary.textContent = `正在上傳 ${index + 1} / ${files.length}：${files[index].name}`;
-        let fingerprint = '';
-        if (category === 'prep') {
-          fingerprint = await fileContentFingerprint(files[index]);
-          const duplicate = [...(pendingFiles[category] || []), ...uploaded].some(item => item.fingerprint === fingerprint);
-          if (duplicate) {
-            skipped += 1;
-            continue;
-          }
+        const file = files[index];
+        if (file.size > MAX_TALENT_FILE_BYTES) {
+          failed.push(`${file.name}（超過 25 MB）`);
+          continue;
         }
-        const uploadedFile = await uploadTalentFile(files[index], category);
-        uploadedFile.fingerprint = fingerprint;
-        uploadedFile.size = files[index].size;
-        uploaded.push(uploadedFile);
+        try {
+          let fingerprint = '';
+          if (category === 'prep') {
+            fingerprint = await fileContentFingerprint(file);
+            const duplicate = [...(pendingFiles[category] || []), ...uploaded].some(item => item.fingerprint === fingerprint);
+            if (duplicate) {
+              skipped += 1;
+              continue;
+            }
+          }
+          const uploadedFile = await uploadTalentFile(file, category);
+          uploadedFile.fingerprint = fingerprint;
+          uploadedFile.size = uploadedFile.size || file.size;
+          uploaded.push(uploadedFile);
+        } catch (error) {
+          failed.push(`${file.name}（${error.message || '上傳失敗'}）`);
+        }
       }
       pendingFiles[category] = [...(pendingFiles[category] || []), ...uploaded];
       refreshUploadControl(category);
       if (input.closest('#log-form')) captureLogDraft();
-      toast(skipped ? `${uploaded.length} 個檔案已上傳；${skipped} 個相同檔案已略過` : `${uploaded.length} 個檔案已上傳`, skipped ? 'warning' : 'success');
+      const messages = [`${uploaded.length} 個檔案已上傳`];
+      if (skipped) messages.push(`${skipped} 個相同檔案已略過`);
+      if (failed.length) messages.push(`${failed.length} 個未上傳：${failed.join('、')}`);
+      toast(messages.join('；'), failed.length ? 'danger' : skipped ? 'warning' : 'success');
     } catch (error) {
       if (uploaded.length) pendingFiles[category] = [...(pendingFiles[category] || []), ...uploaded];
       const itemList = document.querySelector(`[data-file-items="${category}"]`);
@@ -1333,11 +1354,17 @@
     input.disabled = true;
     if (label) label.innerHTML = `${icon('loader-circle', 15)}正在上傳 0／${files.length}`;
     const uploaded = [];
+    const failed = [];
     try {
       for (let index = 0; index < files.length; index += 1) {
         if (label) label.innerHTML = `${icon('loader-circle', 15)}正在上傳 ${index + 1}／${files.length}`;
-        uploaded.push(await uploadTalentFile(files[index], 'app-publish'));
+        try {
+          uploaded.push(await uploadTalentFile(files[index], 'app-publish'));
+        } catch (error) {
+          failed.push(`${files[index].name}（${error.message || '上傳失敗'}）`);
+        }
       }
+      if (!uploaded.length) throw new Error(failed.join('、') || '沒有可儲存的 APP 截圖');
       const result = PREVIEW_MODE
         ? { ok: true, lesson: { ...item, appStatus: 'published', appFiles: uploaded, appUpdatedAt: new Date().toISOString(), appPublishedAt: new Date().toISOString() } }
         : await API.updateTalentAppStatus(currentUser.nickname, item.id, 'published', uploaded);
@@ -1346,7 +1373,10 @@
       persist('APP 證據已儲存');
       if (input.closest('#drawer-root')) closeDrawer();
       renderApp();
-      toast(result.warning || `${files.length} 張家長 APP 發布截圖已綁定本堂課`, result.warning ? 'warning' : 'success');
+      const uploadMessage = failed.length
+        ? `${uploaded.length} 張已綁定；${failed.length} 張未上傳：${failed.join('、')}`
+        : `${uploaded.length} 張家長 APP 發布截圖已綁定本堂課`;
+      toast(result.warning || uploadMessage, result.warning || failed.length ? 'warning' : 'success');
     } catch (error) {
       toast(error.message || '家長 APP 發布證據上傳失敗，請重試', 'danger');
       if (label && originalLabel) label.innerHTML = originalLabel;
@@ -1555,8 +1585,9 @@
       : '';
     const item = {
       ...(existingLog || {}),
-      id: editingId || uid('log'), updatedAt: String(values.updatedAt || existingLog?.updatedAt || ''), teacher: currentUser.nickname, employment: currentUser.employment === 'fulltime' ? 'fulltime' : 'pt', lessonStatus: 'held',
-      ...values, expected, present, leave, absent, makeup: Number(values.makeup || 0), trial: Number(values.trial || 0), duration: Number(values.duration || 1.5),
+      ...values,
+      id: editingId || existingLog?.id || uid('log'), updatedAt: String(values.updatedAt || existingLog?.updatedAt || ''), teacher: currentUser.nickname, employment: currentUser.employment === 'fulltime' ? 'fulltime' : 'pt', lessonStatus: 'held',
+      expected, present, leave, absent, makeup: Number(values.makeup || 0), trial: Number(values.trial || 0), duration: Number(values.duration || 1.5),
       scheduleLabel: selectedSchedule?.label || '', scheduleTime: selectedSchedule?.time || '',
       siteType, roomDone: Boolean(form.elements.roomDone.checked), attendanceFiles: [...pendingFiles.attendance], learningFiles: [...pendingFiles.learning], roomFiles: [...pendingFiles.room],
       appFiles, appStatus: siteType === 'partner' ? 'not_required' : appFiles.length ? 'published' : 'pending', appUpdatedAt: appEvidenceAt, appPublishedAt: appEvidenceAt,
@@ -1591,7 +1622,7 @@
     openDrawer({
       title: existing ? '編輯備課檔案' : '新增備課檔案',
       subtitle: '填寫課程名稱，並至少上傳一份教案或教材，不需主管審核。',
-      body: `<form id="prep-form" novalidate><input type="hidden" name="id" value="${esc(prep.id || '')}"><section class="form-section"><div class="section-title"><span class="section-number">1</span><div><h3>課程資料</h3><p>儲存後即可在本堂紀錄直接選用。</p></div></div><div class="form-grid">${selectField('課程類型', 'courseType', courseTypeOptions(selectedCourseType), selectedCourseType, true)}${field('課程名稱', 'courseName', 'text', prep.courseName || prep.title || '', true, '例：齒輪轉速實驗')}${textareaField('上課內容／備課提醒（選填）', 'notes', prep.notes || prep.summary || '', false, '有需要再記錄本課重點、器材或上課提醒。')}</div>${uploadField('教案或教材附件', 'prep', '至少一份；可一次多選教案、簡報、學習單、照片或 MP4／MOV 備課影片，影片單檔上限 15 MB。', 'image/*,video/mp4,video/quicktime,video/x-m4v,video/webm,.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.zip,.sb3', true)}</section></form>`,
+      body: `<form id="prep-form" novalidate><input type="hidden" name="id" value="${esc(prep.id || '')}"><section class="form-section"><div class="section-title"><span class="section-number">1</span><div><h3>課程資料</h3><p>儲存後即可在本堂紀錄直接選用。</p></div></div><div class="form-grid">${selectField('課程類型', 'courseType', courseTypeOptions(selectedCourseType), selectedCourseType, true)}${field('課程名稱', 'courseName', 'text', prep.courseName || prep.title || '', true, '例：齒輪轉速實驗')}${textareaField('上課內容／備課提醒（選填）', 'notes', prep.notes || prep.summary || '', false, '有需要再記錄本課重點、器材或上課提醒。')}</div>${uploadField('教案或教材附件', 'prep', '至少一份；可一次多選教案、簡報、學習單、照片或 MP4／MOV 備課影片，單檔上限 25 MB。', 'image/*,video/mp4,video/quicktime,video/x-m4v,video/webm,.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.zip,.sb3', true)}</section></form>`,
       footer: `${existing ? `<button type="button" class="btn btn-danger" style="margin-right:auto" data-action="open-delete-prep" data-id="${esc(prep.id)}">${icon('trash-2', 16)}刪除備課檔案</button>` : ''}<button type="button" class="btn" data-action="close-drawer">取消</button><button type="button" data-action="save-prep" class="btn btn-primary">${icon('save', 16)}儲存備課檔案</button>`,
     });
   }
@@ -1840,7 +1871,13 @@
     const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.href = url; link.download = filename; document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    // Safari and some in-app browsers still read the Blob after click returns.
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   function exportOwn() {
@@ -2168,5 +2205,6 @@
   if (state.ui.route === 'performance') state.ui.performanceMonth = scoreMonthsFor(currentUser.nickname, true)[0] || currentMonth();
   if (state.ui.route === 'scoring') state.ui.scoringMonth = allScoreMonths()[0] || currentMonth();
   renderApp();
+  if (PREVIEW_MODE && state.ui.route === 'cloud-reports' && cloudRuntime.foldersStatus === 'idle') window.setTimeout(loadCloudFolders, 0);
   if (!PREVIEW_MODE) window.setTimeout(loadCloudData, 0);
 })();

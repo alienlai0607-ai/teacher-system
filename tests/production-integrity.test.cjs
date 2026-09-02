@@ -15,6 +15,8 @@ assert.match(auth, /adminOnly[\s\S]*'runProductionIntegrityCheck'/);
 assert.match(api, /runProductionIntegrityCheck: \(\) => call\('runProductionIntegrityCheck'\)/);
 assert.match(app, /data-action="run-cloud-delivery-check"/);
 assert.match(app, /一般連線成功不等於資料能交付/);
+assert.match(api, /const API_URL = window\.APP_CONFIG\.API_URL/);
+assert.doesNotMatch(api, /const URL = window\.APP_CONFIG\.API_URL/, 'API 網址不得遮蔽瀏覽器原生 URL 建構式');
 
 const source = tasks.slice(
   tasks.indexOf('function runProductionIntegrityCheck('),

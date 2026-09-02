@@ -21,7 +21,9 @@
   const HEALTH_PROBE_KEY = `${STORAGE_KEY}_health_probe`;
   const IS_REVIEW_BUILD = window.location.pathname.includes('/review/');
   const IS_QA_HARNESS = window.location.pathname.endsWith('/qa-harness.html');
-  const LOCAL_REVIEW_NICKNAME = new URLSearchParams(window.location.search).get('reviewUser') || '';
+  const LOCAL_REVIEW_PARAMS = new URLSearchParams(window.location.search);
+  const LOCAL_REVIEW_NICKNAME = LOCAL_REVIEW_PARAMS.get('reviewUser') || '';
+  const LOCAL_REVIEW_ROLE = LOCAL_REVIEW_PARAMS.get('role') === 'manager' ? 'manager' : 'teacher';
   const IS_PREVIEW_REVIEW_SESSION = IS_REVIEW_BUILD
     && (['127.0.0.1', 'localhost'].includes(window.location.hostname)
       || window.location.hostname.endsWith('.trycloudflare.com'))
@@ -326,7 +328,8 @@
   function managerScopeDepartment() {
     if (state.ui.role !== 'manager') return '';
     const session = legacySession();
-    if (session?.role === 'admin' || (session?.role === 'manager' && GLOBAL_MANAGER_NICKNAMES.includes(session.nickname))) return '';
+    const managerNickname = session?.role === 'manager' ? session.nickname : state.context.manager;
+    if (session?.role === 'admin' || GLOBAL_MANAGER_NICKNAMES.some(name => sameReviewIdentity(name, managerNickname))) return '';
     return normalizeDepartmentScope(state.context.department);
   }
 
@@ -354,6 +357,25 @@
 
   function staffMember(nickname) {
     return state.people.find(person => person.nickname === nickname) || null;
+  }
+
+  function applyPreviewReviewContext(role = 'teacher') {
+    if (!IS_PREVIEW_REVIEW_SESSION) return false;
+    const requestedPerson = state.people.find(person => sameReviewIdentity(person.nickname, LOCAL_REVIEW_NICKNAME));
+    if (!requestedPerson) return false;
+    const nextRole = role === 'manager' ? 'manager' : 'teacher';
+    state.context.department = normalizeDepartmentScope(requestedPerson.department);
+    if (nextRole === 'manager') {
+      state.context.manager = requestedPerson.role === 'manager'
+        ? requestedPerson.nickname
+        : MANAGER_BY_DEPARTMENT[state.context.department] || state.context.manager;
+    } else {
+      state.context.teacher = requestedPerson.canTeach
+        ? requestedPerson.nickname
+        : state.people.find(person => person.role === 'teacher' && normalizeDepartmentScope(person.department) === state.context.department)?.nickname || state.context.teacher;
+    }
+    state.ui.role = nextRole;
+    return true;
   }
 
   function assignedStudents(teacher = state.context.teacher) {
@@ -896,6 +918,13 @@
     return session.role === 'teacher' && sameReviewIdentity(session.nickname, state.context.teacher);
   }
 
+  function formalCloudSessionReady() {
+    const session = legacySession();
+    if (!session || session.status === 'suspended' || session.impersonate === true || !session.session_token) return false;
+    if (session.role === 'teacher') return sameReviewIdentity(session.nickname, state.context.teacher);
+    return session.role === 'manager' || session.role === 'admin';
+  }
+
   async function ensureCloudTeacherIdentity() {
     const current = legacySession();
     if (cloudIdentityReady()) return { ok: true, user: current };
@@ -1097,18 +1126,40 @@
     });
   }
 
-  function appendFeedbackMessage(key, text, role = state.ui.role, author = '') {
+  function cloudFeedbackMessageMeta(result) {
+    const row = result?.feedback || result || {};
+    const feedbackId = row.feedback_id || row.id || '';
+    return {
+      id: feedbackId ? `cloud_${feedbackId}` : '',
+      createdAt: row.created_at || '',
+    };
+  }
+
+  function appendFeedbackMessage(key, text, role = state.ui.role, author = '', metadata = {}) {
     const value = String(text || '').trim();
     if (!value) return null;
     state.feedbackThreads = state.feedbackThreads || {};
     const messages = state.feedbackThreads[key] || (state.feedbackThreads[key] = []);
     const normalizedRole = role === 'teacher' ? 'teacher' : 'manager';
     const normalizedAuthor = author || (normalizedRole === 'teacher' ? state.context.teacher : state.context.manager);
+    if (metadata.id) {
+      const existing = messages.find(item => item.id === metadata.id);
+      if (existing) return existing;
+    }
     const latest = messages[messages.length - 1];
     if (latest && latest.role === normalizedRole && latest.author === normalizedAuthor && latest.text === value) return latest;
-    const message = { id: uid('msg'), author: normalizedAuthor, role: normalizedRole, text: value, createdAt: new Date().toISOString() };
+    const message = { id: metadata.id || uid('msg'), author: normalizedAuthor, role: normalizedRole, text: value, createdAt: metadata.createdAt || new Date().toISOString() };
     messages.push(message);
     return message;
+  }
+
+  function sameFeedbackMessage(left, right) {
+    if (left.id && right.id && left.id === right.id) return true;
+    if (left.author !== right.author || left.text !== right.text) return false;
+    const leftTime = Date.parse(left.createdAt || '');
+    const rightTime = Date.parse(right.createdAt || '');
+    if (!Number.isFinite(leftTime) || !Number.isFinite(rightTime)) return true;
+    return Math.abs(leftTime - rightTime) <= 5 * 60 * 1000;
   }
 
   function feedbackMessageTime(value) {
@@ -1156,6 +1207,8 @@
     const session = legacySession();
     const context = cloudFeedbackContext(threadKey);
     if (!session || !context) return { ok: false, error: '找不到正式登入身分或對話資料' };
+    if (state.ui.role === 'teacher' && session.role !== 'teacher') return { ok: false, error: '老師工作區與目前登入身分不一致，請重新整理' };
+    if (state.ui.role === 'manager' && !['manager', 'admin'].includes(session.role)) return { ok: false, error: '主管工作區與目前登入身分不一致，請重新整理' };
     const teacherNickname = backendNickname(context.teacher);
     if (session.role === 'teacher' && !sameReviewIdentity(session.nickname, teacherNickname)) return { ok: false, error: '只能回覆自己的資料' };
     if (session.role === 'manager' && !managerScopeMatches(context.teacher, context.department)) return { ok: false, error: '沒有回覆其他教室資料的權限' };
@@ -1636,6 +1689,13 @@
     return '';
   }
 
+  function refreshSystemStatusNotice() {
+    const root = $('#system-status-root');
+    if (!root) return;
+    root.innerHTML = renderSystemStatusNotice();
+    hydrateIcons();
+  }
+
   function hydrateIcons() {
     if (window.lucide && typeof window.lucide.createIcons === 'function') {
       window.lucide.createIcons({ attrs: { 'stroke-width': 1.9 } });
@@ -1739,7 +1799,7 @@
         </div>
       </aside>
 
-      <main class="app-main" id="main-content">${renderSystemStatusNotice()}${window.KPI_WORKSPACES?.renderQuickSwitcher?.(workspaceUser, { currentId: workspaceId }) || ''}${renderRoute()}</main>
+      <main class="app-main" id="main-content"><div id="system-status-root">${renderSystemStatusNotice()}</div>${window.KPI_WORKSPACES?.renderQuickSwitcher?.(workspaceUser, { currentId: workspaceId }) || ''}${renderRoute()}</main>
 
       <nav class="mobile-bottom-nav" aria-label="行動版主要導覽">
         ${renderMobileNav(primaryNav, nav)}
@@ -2023,10 +2083,20 @@
     state.daily.submittedAt = '';
     const existing = state.submissions.find(item => item.date === date && item.teacher === teacher);
     if (existing && ['pending', 'accepted', 'clarify'].includes(existing.status)) {
+      existing.previousSubmittedAt = existing.previousSubmittedAt || existing.submittedAt || '';
       existing.previousStatus = existing.status;
       existing.status = 'draft';
     }
+    if (wasSubmitted || existing?.previousStatus) {
+      state.integration = state.integration || {};
+      state.integration.dailyDraftSyncPending = false;
+    }
     return wasSubmitted;
+  }
+
+  function dailyNeedsResubmit() {
+    const existing = state.submissions.find(item => item.date === state.daily.date && item.teacher === state.context.teacher);
+    return !state.daily.submittedAt && existing?.status === 'draft' && Boolean(existing.previousStatus);
   }
 
   function todaySectionStatus() {
@@ -2060,13 +2130,14 @@
     const prepRequired = activities.filter(activity => activityNeedsPrepSource(activity.type));
     const prepReady = prepRequired.filter(activityPreparationReady).length;
     const completion = dailyCompletion();
+    const needsResubmit = dailyNeedsResubmit();
     const tabStatus = todaySectionStatus();
     const actions = `<button type="button" class="btn" data-action="open-student-case">${icon('user-round-plus', 16)}<span class="btn-label-mobile-hide">快速記學生</span></button><button type="button" class="btn" data-action="open-activity" data-type="lessonprep">${icon('notebook-tabs', 16)}<span class="btn-label-mobile-hide">新增備課檔案</span></button>`;
     return `<div class="page">
       ${pageHead('今日工作紀錄', `${formatDate(state.daily.date)} · ${state.context.department} · ${state.context.teacher}`, actions)}
       ${renderGuideInvite()}
       <div class="status-strip">
-        <div class="status-cell"><div class="status-label">今日完成度</div><div class="status-value">${completion}%</div><div class="status-note">${state.daily.status === 'submitted' ? '已送出' : '草稿'}</div></div>
+        <div class="status-cell"><div class="status-label">今日完成度</div><div class="status-value">${completion}%</div><div class="status-note">${state.daily.status === 'submitted' ? '已送出' : needsResubmit ? '待重新送出' : '草稿'}</div></div>
         <div class="status-cell"><div class="status-label">今日課程</div><div class="status-value">${Number(tracks.academic.covered || tracks.enrichment.covered)}/1</div><div class="status-note">學科內／學科外擇一</div></div>
         <div class="status-cell"><div class="status-label">備課／成果</div><div class="status-value">${prepReady}/${prepRequired.length}</div><div class="status-note">成果 ${evidenceReadyCount}/${evidenceRequired.length} 筆</div></div>
         <div class="status-cell"><div class="status-label">待追蹤</div><div class="status-value">${openTasks().length}</div><div class="status-note">${openTasks().filter(item => item.priority === 'high').length} 項優先</div></div>
@@ -2329,6 +2400,7 @@
   function renderTodaySubmit() {
     const completion = dailyCompletion();
     const submitting = integrationRuntime.cloudStatus === 'submitting';
+    const needsResubmit = dailyNeedsResubmit();
     const status = todaySectionStatus();
     const tracks = dailyTrackStatus();
     const summary = buildDailySummary();
@@ -2340,9 +2412,10 @@
     if (!status.operations) blockers.push('今日值日班務尚未確認');
     return `<div class="content-grid wide-aside">
       <section class="panel">
-        <div class="panel-head"><div><div class="panel-title">${icon('send')}確認並送出</div></div><span class="badge ${completion === 100 ? 'green' : 'yellow'}">完成度 ${completion}%</span></div>
+        <div class="panel-head"><div><div class="panel-title">${icon(needsResubmit ? 'refresh-cw' : 'send')}${needsResubmit ? '確認並重新送出' : '確認並送出'}</div></div><span class="badge ${completion === 100 ? 'green' : 'yellow'}">完成度 ${completion}%</span></div>
         <div class="panel-body">
           ${state.daily.submittedAt ? `<div class="notice-band success">${icon('circle-check', 19)}<div><div class="notice-title">已於 ${formatTime(state.daily.submittedAt)} 送出</div><div class="notice-copy">${state.integration.cloudSyncEnabled ? '修改後需重新送出，主管才會收到最新版本。' : '目前為審查紀錄，未通知真人主管。'}</div></div></div>` : ''}
+          ${needsResubmit ? `<div class="notice-band warning">${icon('refresh-cw', 19)}<div><div class="notice-title">內容已修改，尚未重新送出</div><div class="notice-copy">主管目前看到的是前一版；按下重新送出後才會更新。</div></div></div>` : ''}
           <form id="daily-summary-form" data-form="daily-summary">
             <div class="summary-list">
               <div class="summary-line"><span class="summary-index">1</span><div><div class="summary-title">今日成果</div><div class="summary-copy">${esc(summary.keyResult)}</div></div></div>
@@ -2350,7 +2423,7 @@
               <div class="summary-line"><span class="summary-index">3</span><div><div class="summary-title">最近待辦</div><div class="summary-copy">${esc(summary.tomorrowPriority)}</div></div></div>
             </div>
             <div class="form-field mt-16"><label class="form-label" for="summary-teacher-note">給主管補充（選填）</label><textarea id="summary-teacher-note" name="teacherNote" placeholder="補充紀錄未呈現的背景或需要主管協助的事項。">${esc(state.daily.summary.teacherNote || '')}</textarea></div>
-            <div class="flex gap-8 mt-16"><button type="button" class="btn btn-primary" data-action="submit-daily" ${blockers.length || submitting ? 'disabled' : ''}>${icon(submitting || state.daily.submittedAt ? 'refresh-cw' : 'send', 16)}${submitting ? '正在送出' : state.daily.submittedAt ? '更新送出' : '確認送出'}</button></div>
+            <div class="flex gap-8 mt-16"><button type="button" class="btn btn-primary" data-action="submit-daily" ${blockers.length || submitting ? 'disabled' : ''}>${icon(submitting || state.daily.submittedAt || needsResubmit ? 'refresh-cw' : 'send', 16)}${submitting ? '正在送出' : needsResubmit ? '重新送出' : state.daily.submittedAt ? '更新送出' : '確認送出'}</button></div>
           </form>
         </div>
       </section>
@@ -2399,15 +2472,15 @@
       ['這份教案／教材要更新什麼', '寫出下次要調整的講法、流程或教材。', prepExamples.changes],
     ] : [guide.objective, guide.action, guide.result, guide.issue, guide.next];
     const dailySteps = [
-      ['1', '學科內', '從學科內入口新增；安親課業指導每天至少一筆，班級經營有實際事件時再記。'],
-      ['2', '學科外（如有則填）', '當天有特色課程才從學科外入口新增；選取備課檔案後，只填課後備課回饋與成果證據。'],
+      ['1', '選擇今天的課程', '依實際內容從學科內或學科外入口新增；兩類至少擇一。'],
+      ['2', '完整記錄已新增課程', '新增任何一類後，都要完成該筆課後備課回饋與成果證據。'],
       ['3', '選取備課檔案並補成果', '選擇本堂課使用的課程名稱；班級經營不需要備課檔案。'],
       ['4', '完成學生、親師與班務', '有狀況就留下追蹤；無重要親師事項也要親自在門口完成交接；值日班務四項各拍一張。'],
       ['5', '確認後送主管', '送出後仍可編輯；只要修改就會退回待送出，重新確認後再送主管。'],
     ];
     return `<div class="page guide-page">
       ${pageHead('填寫指南', '說明與範例集中管理，不占用正式填寫畫面', `<button type="button" class="btn btn-primary" data-action="navigate" data-route="today">${icon('clipboard-pen-line', 16)}<span>開始今天的紀錄</span></button>`)}
-      <section class="guide-start-band"><div><span class="guide-kicker">每日工作順序</span><h2>先完成課業輔導，有特色課程再記錄</h2><p>課業輔導每天必填；學科外當天有開課才填，新增後仍須完整留下教學與成果。</p></div><div class="guide-day-flow">${dailySteps.map(([number, title, copy]) => `<div class="guide-day-step"><span>${number}</span><div><strong>${esc(title)}</strong><small>${esc(copy)}</small></div></div>`).join('')}</div></section>
+      <section class="guide-start-band"><div><span class="guide-kicker">每日工作順序</span><h2>依今天實際課程，選一個入口開始</h2><p>學科內或學科外至少記錄一筆；若兩類都有上課，兩類都要分別留下完整紀錄。</p></div><div class="guide-day-flow">${dailySteps.map(([number, title, copy]) => `<div class="guide-day-step"><span>${number}</span><div><strong>${esc(title)}</strong><small>${esc(copy)}</small></div></div>`).join('')}</div></section>
       <div class="notice-band info">${icon('folder-down', 19)}<div><div class="notice-title">每月雲端歸檔</div><div class="notice-copy">到「我的紀錄」選擇匯出月份；系統會依老師、年份與月份命名，並把各日期紀錄及主管對話收進同一份月檔。</div></div></div>
       <div class="notice-band info">${icon('scale', 19)}<div><div class="notice-title">隨時查閱評分標準</div><div class="notice-copy">手機請從底部「更多」進入；電腦請從左側選單開啟。正式填寫頁只保留工作欄位，不重複放制度說明。</div></div></div>
 
@@ -2468,6 +2541,11 @@
     const scoreValues = ANQIN_KPI_STANDARDS.map((category, index) => Number(evaluation[`score_k${index + 1}`] || 0));
     const invalidScores = scoreValues.map((score, index) => !Number.isFinite(score) || score < 0 || score > ANQIN_KPI_STANDARDS[index].points);
     const hasInvalidScores = invalidScores.some(Boolean);
+    const calculatedTotal = Math.max(0, scoreValues.reduce((sum, score) => sum + (Number.isFinite(score) ? score : 0), 0) - Number(evaluation.makeup_penalty || 0));
+    const tier = evaluationTier(calculatedTotal);
+    const grade = String(evaluation.grade || '').trim() || tier.grade;
+    const fallbackBonus = Number(String(tier.bonus || '').replace(/[^0-9]/g, '')) || 0;
+    const bonus = evaluation.bonus !== undefined && evaluation.bonus !== null && evaluation.bonus !== '' ? Number(evaluation.bonus) : fallbackBonus;
     const scoreRows = ANQIN_KPI_STANDARDS.map((category, index) => {
       const score = scoreValues[index];
       return `<div class="evaluation-score-row"><div class="evaluation-score-category">${icon(category.icon, 16)}<strong>${esc(category.name)}</strong></div><div class="evaluation-score-value">${invalidScores[index] ? statusBadge('待主管確認', 'red') : `<strong>${score}</strong><span>/ ${category.points}</span>`}</div></div>`;
@@ -2477,7 +2555,7 @@
     return `<div class="page evaluation-page">
       ${pageHead('主管評核', `${esc(month)} · ${state.context.teacher}`, actions)}
       ${hasInvalidScores ? `<div class="notice-band danger">${icon('triangle-alert', 19)}<div><div class="notice-title">這份評核需要主管重新確認</div><div class="notice-copy">部分舊資料超過新版項目配分，系統暫不顯示錯誤分數與總分。</div></div></div>` : ''}
-      <div class="status-strip"><div class="status-cell"><div class="status-label">KPI 總分</div><div class="status-value">${hasInvalidScores ? '待確認' : `${Number(evaluation.total_score || 0)} / 100`}</div></div><div class="status-cell"><div class="status-label">等第</div><div class="status-value status-value-badge">${statusBadge(hasInvalidScores ? '待確認' : (evaluation.grade || '—'), hasInvalidScores ? 'red' : 'blue')}</div></div><div class="status-cell"><div class="status-label">績效獎金</div><div class="status-value">${hasInvalidScores ? '待確認' : granted ? `NT$${Number(evaluation.bonus || 0).toLocaleString('zh-TW')}` : '未核發'}</div></div><div class="status-cell"><div class="status-label">評核狀態</div><div class="status-value status-value-badge">${statusBadge(hasInvalidScores ? '需修正' : '已完成', hasInvalidScores ? 'red' : 'green')}</div></div></div>
+      <div class="status-strip"><div class="status-cell"><div class="status-label">KPI 總分</div><div class="status-value">${hasInvalidScores ? '待確認' : `${calculatedTotal} / 100`}</div></div><div class="status-cell"><div class="status-label">等第</div><div class="status-value status-value-badge">${statusBadge(hasInvalidScores ? '待確認' : grade, hasInvalidScores ? 'red' : 'blue')}</div></div><div class="status-cell"><div class="status-label">績效獎金</div><div class="status-value">${hasInvalidScores ? '待確認' : granted ? `NT$${bonus.toLocaleString('zh-TW')}` : '未核發'}</div></div><div class="status-cell"><div class="status-label">評核狀態</div><div class="status-value status-value-badge">${statusBadge(hasInvalidScores ? '需修正' : '已完成', hasInvalidScores ? 'red' : 'green')}</div></div></div>
       <div class="content-grid mt-16"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('chart-no-axes-column-increasing')}各項評分</div></div></div><div class="panel-body flush"><div class="evaluation-score-list">${scoreRows}</div></div></section><aside class="stack"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('message-square-text')}主管建議</div></div></div><div class="panel-body"><p class="text-small">${nl2br(managerComment || '主管未填寫其他建議。')}</p>${interviewNotes ? `<div class="section-divider"></div><h3 class="section-title">面談紀錄</h3><p class="text-small">${nl2br(interviewNotes)}</p>` : ''}</div></section>${Number(evaluation.makeup_penalty || 0) || Number(evaluation.late_penalty || 0) ? `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('circle-alert')}扣分紀錄</div></div></div><div class="panel-body"><div class="metadata-list">${Number(evaluation.makeup_penalty || 0) ? `<div class="metadata-row"><div class="metadata-label">補繳</div><div class="metadata-value">${Number(evaluation.makeup_count || 0)} 次，扣 ${Number(evaluation.makeup_penalty)} 分</div></div>` : ''}${Number(evaluation.late_penalty || 0) ? `<div class="metadata-row"><div class="metadata-label">遲到</div><div class="metadata-value">${Number(evaluation.score_late_count || 0)} 次，扣 ${Number(evaluation.late_penalty)} 分</div></div>` : ''}</div></div></section>` : ''}</aside></div>
     </div>`;
   }
@@ -3101,6 +3179,13 @@
           image.classList.add('cloud-preview-error');
         }
       });
+      const retryAt = Date.now();
+      const hasNextBatch = $$('img[data-cloud-preview-id]').some(image => {
+        const fileId = image.dataset.cloudPreviewId;
+        return fileId && !cloudPreviewCache.has(fileId) && !cloudPreviewPending.has(fileId)
+          && retryAt - Number(cloudPreviewFailedAt.get(fileId) || 0) > 60000;
+      });
+      if (hasNextBatch) scheduleCloudPreviewHydration();
     }
   }
 
@@ -3950,12 +4035,16 @@
         text: String(row.content || '').trim(),
         createdAt: row.created_at || new Date().toISOString(),
       })).filter(message => message.text);
-      const merged = [...local, ...cloudMessages].filter((message, index, all) => all.findIndex(other => other.id === message.id || (other.author === message.author && other.text === message.text && other.createdAt === message.createdAt)) === index);
+      const merged = [...local, ...cloudMessages]
+        .filter((message, index, all) => all.findIndex(other => sameFeedbackMessage(other, message)) === index)
+        .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
       state.feedbackThreads[key] = merged;
       const latestManagerRow = rows.filter(row => row.from_nickname !== backendNickname(submission.teacher)).at(-1);
       if (latestManagerRow) {
         submission.feedback = latestManagerRow.content || '';
-        submission.status = latestManagerRow.tag === '需改進' ? 'clarify' : 'accepted';
+        if (cloudDecisionIsCurrent(latestManagerRow.created_at, submission.submittedAt)) {
+          submission.status = latestManagerRow.tag === '需改進' ? 'clarify' : 'accepted';
+        }
       }
       updated += 1;
     });
@@ -3972,15 +4061,17 @@
         text: String(row.content || '').trim(),
         createdAt: row.created_at || new Date().toISOString(),
       })).filter(message => message.text);
-      state.feedbackThreads[key] = [...local, ...cloudMessages].filter((message, index, all) => all.findIndex(other => other.id === message.id || (other.author === message.author && other.text === message.text && other.createdAt === message.createdAt)) === index);
+      state.feedbackThreads[key] = [...local, ...cloudMessages]
+        .filter((message, index, all) => all.findIndex(other => sameFeedbackMessage(other, message)) === index)
+        .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
       const latestDecision = rows.filter(row => row.from_nickname !== backendNickname(context.teacher) && ['已知悉', '需改進'].includes(row.tag)).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))).at(-1);
       if (latestDecision) {
         const [kind, id, secondaryId] = key.split(':');
         const needsChanges = latestDecision.tag === '需改進';
-        const teacherOwnsThread = legacySession()?.role === 'teacher' && sameReviewIdentity(legacySession()?.nickname, context.teacher);
+        const teacherOwnsThread = state.ui.role === 'teacher' && sameReviewIdentity(state.context.teacher, context.teacher);
         if (kind === 'plan') {
           const plan = state.lessonPlans.find(item => item.id === id);
-          if (plan) {
+          if (plan && cloudDecisionIsCurrent(latestDecision.created_at, plan.updatedAt)) {
             plan.status = needsChanges ? 'changes' : 'approved'; plan.managerFeedback = latestDecision.content || '';
             if (teacherOwnsThread && needsChanges) upsertDerivedTask(`plan:${id}`, `修正教案「${plan.title}」：${latestDecision.content || ''}`, '主管交辦', plan.teacher, addDays(state.daily.date, 2), 'high');
             if (teacherOwnsThread && !needsChanges) { const task = state.tasks.find(item => item.ref === `plan:${id}`); if (task) { task.status = 'done'; scheduleTaskCloudSync(task); } }
@@ -3989,7 +4080,7 @@
         if (kind === 'evidence') {
           const activity = state.activities.find(item => item.id === id);
           const evidence = activity?.evidence?.find(item => item.id === secondaryId);
-          if (evidence) {
+          if (evidence && cloudDecisionIsCurrent(latestDecision.created_at, evidence.updatedAt)) {
             evidence.status = needsChanges ? 'clarify' : 'accepted'; evidence.managerFeedback = latestDecision.content || '';
             if (teacherOwnsThread && needsChanges) upsertDerivedTask(`evidence:${secondaryId}`, `補充證據「${evidence.title}」：${latestDecision.content || ''}`, '主管交辦', activity.teacher, addDays(state.daily.date, 1), 'high');
             if (teacherOwnsThread && !needsChanges) { const task = state.tasks.find(item => item.ref === `evidence:${secondaryId}`); if (task) { task.status = 'done'; scheduleTaskCloudSync(task); } }
@@ -3997,7 +4088,7 @@
         }
         if (kind === 'operation') {
           const operation = operationRecordById(id);
-          if (operation) {
+          if (operation && cloudDecisionIsCurrent(latestDecision.created_at, operation.updatedAt)) {
             operation.reviewStatus = needsChanges ? 'clarify' : 'accepted'; operation.managerFeedback = latestDecision.content || '';
             if (teacherOwnsThread && needsChanges) upsertDerivedTask(`operations:${id}`, `補充 ${formatShortDate(operation.date)} 班務證據：${latestDecision.content || ''}`, '主管交辦', operation.dutyOwner, addDays(state.daily.date, 1), 'high');
             if (teacherOwnsThread && !needsChanges) { const task = state.tasks.find(item => item.ref === `operations:${id}`); if (task) { task.status = 'done'; scheduleTaskCloudSync(task); } }
@@ -4007,6 +4098,14 @@
       updated += 1;
     });
     return updated;
+  }
+
+  function cloudDecisionIsCurrent(decisionAt, contentUpdatedAt) {
+    if (!contentUpdatedAt) return true;
+    const decisionStamp = Date.parse(decisionAt || '');
+    const contentStamp = Date.parse(contentUpdatedAt || '');
+    if (!Number.isFinite(decisionStamp) || !Number.isFinite(contentStamp)) return true;
+    return decisionStamp >= contentStamp;
   }
 
   async function syncTeacherCloudData(notify = true) {
@@ -4207,9 +4306,10 @@
     const primary = evidencePrimaryAttachment(evidence);
     const previewUrl = attachmentPreviewUrl(primary);
     const status = evidence.status === 'accepted' ? ['已採認', 'green'] : evidence.status === 'clarify' ? ['待補充', 'red'] : ['待審查', 'yellow'];
+    const inspectLabel = state.ui.role === 'manager' ? '判讀' : '查看';
     return `<article class="evidence-card">
       <div class="evidence-thumb">${previewUrl ? `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(primary)} alt="${esc(evidence.title)}">${renderPins(evidence.pins)}` : icon(primary?.mimeType === 'application/pdf' ? 'file-text' : evidence.type === 'plan_asset' ? 'archive' : 'image', 44)}<span class="badge blue quality-pill">${icon('images', 12)}${attachments.length} 份</span></div>
-      <div class="evidence-card-body"><div class="evidence-title">${esc(evidence.title)}</div><div class="evidence-caption">${esc(truncate(evidence.claim, 82))}</div><div class="evidence-meta"><span class="badge ${status[1]}">${status[0]}</span><button type="button" class="btn btn-small" data-action="inspect-evidence" data-activity-id="${activity.id}" data-evidence-id="${evidence.id}">判讀</button></div></div>
+      <div class="evidence-card-body"><div class="evidence-title">${esc(evidence.title)}</div><div class="evidence-caption">${esc(truncate(evidence.claim, 82))}</div><div class="evidence-meta"><span class="badge ${status[1]}">${status[0]}</span><button type="button" class="btn btn-small" data-action="inspect-evidence" data-activity-id="${activity.id}" data-evidence-id="${evidence.id}">${inspectLabel}</button></div></div>
     </article>`;
   }
 
@@ -4541,7 +4641,7 @@
     ];
     const contextCopy = feedbackOnly ? '課後備課回饋' : (activity.students || []).length ? `${activity.students.length} 位關聯學生` : '全班紀錄';
     const detailSection = details ? `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('list-tree')}依工作類型填寫</div></div></div><div class="panel-body"><div class="metadata-list">${details}</div></div></section>` : '';
-    return `<div class="stack"><div class="notice-band info">${icon(config.icon, 19)}<div><div class="notice-title">${esc(config.label)} · ${esc(activity.className || '未指定班級')}</div><div class="notice-copy">${formatDate(activity.date)} · ${esc(activity.teacher || state.context.teacher)} · ${esc(contextCopy)}</div></div></div><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}${feedbackOnly ? '課後備課回饋' : '完整填寫內容'}</div></div></div><div class="panel-body"><div class="metadata-list">${outcomeRows.map(([label, value]) => `<div class="metadata-row"><div class="metadata-label">${label}</div><div class="metadata-value">${nl2br(value || '未填寫')}</div></div>`).join('')}</div></div></section>${detailSection}<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('images')}成果證據</div><div class="panel-subtitle">${evidence.length} 筆證據</div></div></div><div class="panel-body">${evidence.length ? evidence.map(item => { const attachments = evidenceAttachments(item); return `<article class="archived-evidence-block"><div><strong>${esc(item.title)}</strong><p>${esc(item.claim)}</p>${item.observation ? `<small>舊版補充說明：${esc(item.observation)}</small>` : ''}</div><div class="archived-evidence-thumbs">${attachments.map(attachment => { const previewUrl = attachmentPreviewUrl(attachment, 180); const cloudUrl = materialCloudUrl(attachment); const media = previewUrl ? `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(attachment)} alt="${esc(attachment.fileName)}">` : `<span>${icon('file-check-2', 18)}</span>`; return cloudUrl ? `<a href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer" aria-label="開啟 ${esc(attachment.fileName)}">${media}</a>` : media; }).join('')}</div></article>`; }).join('') : '<div class="text-small muted">此筆送出紀錄沒有成果證據。</div>'}</div></section></div>`;
+    return `<div class="stack"><div class="notice-band info">${icon(config.icon, 19)}<div><div class="notice-title">${esc(config.label)} · ${esc(activity.className || '未指定班級')}</div><div class="notice-copy">${formatDate(activity.date)} · ${esc(activity.teacher || state.context.teacher)} · ${esc(contextCopy)}</div></div></div><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}${feedbackOnly ? '課後備課回饋' : '完整填寫內容'}</div></div></div><div class="panel-body"><div class="metadata-list">${outcomeRows.map(([label, value]) => `<div class="metadata-row"><div class="metadata-label">${label}</div><div class="metadata-value">${nl2br(value || '未填寫')}</div></div>`).join('')}</div></div></section>${detailSection}<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('images')}成果證據</div><div class="panel-subtitle">${evidence.length} 筆證據</div></div></div><div class="panel-body">${evidence.length ? evidence.map(item => { const attachments = evidenceAttachments(item); const currentActivity = state.activities.find(entry => entry.id === activity.id); const currentEvidence = currentActivity?.evidence?.find(entry => entry.id === item.id) || item; const review = currentEvidence.status === 'accepted' ? ['已採認', 'green'] : currentEvidence.status === 'clarify' ? ['待補充', 'red'] : ['待審查', 'yellow']; const supplement = currentEvidence.status === 'clarify' ? `<div class="notice-band warning">${icon('message-square-warning', 18)}<div><div class="notice-title">主管要求補充</div><div class="notice-copy">${esc(currentEvidence.managerFeedback || '請補充可供判讀的成果內容。')}</div></div>${state.ui.role === 'teacher' ? `<button type="button" class="btn btn-small" data-action="edit-evidence" data-activity-id="${esc(activity.id)}" data-evidence-id="${esc(item.id)}">立即補件</button>` : ''}</div>` : ''; return `<article class="archived-evidence-block"><div><div class="flex gap-8 align-center"><strong>${esc(item.title)}</strong><span class="badge ${review[1]}">${review[0]}</span></div><p>${esc(item.claim)}</p>${item.observation ? `<small>舊版補充說明：${esc(item.observation)}</small>` : ''}</div><div class="archived-evidence-thumbs">${attachments.map(attachment => { const previewUrl = attachmentPreviewUrl(attachment, 180); const cloudUrl = materialCloudUrl(attachment); const media = previewUrl ? `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(attachment)} alt="${esc(attachment.fileName)}">` : `<span>${icon('file-check-2', 18)}</span>`; return cloudUrl ? `<a href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer" aria-label="開啟 ${esc(attachment.fileName)}">${media}</a>` : media; }).join('')}</div>${supplement}</article>`; }).join('') : '<div class="text-small muted">此筆送出紀錄沒有成果證據。</div>'}</div></section></div>`;
   }
 
   function renderSubmissionReview(submission, readOnly = false) {
@@ -4878,12 +4978,13 @@
       return;
     }
     if (!ensureManagerScope(submission.teacher, submission.department)) return;
+    const returnAction = state.ui.role === 'manager' ? 'open-review' : 'open-record';
     openDrawer({
       title: activity.title,
       subtitle: `${formatDate(submission.date)} 送出快照 · ${submission.teacher}`,
       body: renderActivityFullDetail({ ...activity, date: submission.date }),
       wide: true,
-      footer: `<button type="button" class="btn" data-action="open-record" data-submission-id="${submission.id}">${icon('arrow-left', 16)}返回當日紀錄</button><button type="button" class="btn" data-action="close-drawer">關閉</button>`,
+      footer: `<button type="button" class="btn" data-action="${returnAction}" data-submission-id="${submission.id}">${icon('arrow-left', 16)}返回當日紀錄</button><button type="button" class="btn" data-action="close-drawer">關閉</button>`,
     });
   }
 
@@ -4979,7 +5080,8 @@
       { label: '未送出暫存', tone: 'good', value: `${openDraftCount} 份`, copy: openDraftCount ? '重新打開對應表單即可繼續填寫。' : '目前沒有待恢復的表單內容。' },
     ];
     if (state.integration.cloudSyncEnabled) {
-      checks.push({ label: '正式雲端身分', tone: cloudIdentityReady() ? 'good' : 'bad', value: cloudIdentityReady() ? '相符' : '未完成', copy: formalIdentityMessage() });
+      const formalSessionReady = formalCloudSessionReady();
+      checks.push({ label: '正式雲端身分', tone: formalSessionReady ? 'good' : 'bad', value: formalSessionReady ? '已驗證' : '未完成', copy: formalIdentityMessage() });
     }
     return checks;
   }
@@ -5416,8 +5518,12 @@
     state.operations.evidenceByCheck = evidenceByCheck;
     state.operations.exception = exceptionEntries.map(([, config]) => config.label).join('、');
     state.operations.action = exceptionEntries.map(([key, config]) => `${config.label}：${evidenceByCheck[key].action}`).join('；');
-    state.operations.confirmedAt = new Date().toISOString();
-    if (state.operations.reviewStatus === 'clarify' && state.operations.managerFeedback) state.operations.previousManagerFeedback = state.operations.managerFeedback;
+    const savedAt = new Date().toISOString();
+    const wasReviewed = ['clarify', 'accepted'].includes(state.operations.reviewStatus) || Boolean(state.operations.reviewedAt);
+    state.operations.confirmedAt = savedAt;
+    state.operations.updatedAt = savedAt;
+    if (wasReviewed) state.operations.resubmittedAt = savedAt;
+    if (state.operations.managerFeedback) state.operations.previousManagerFeedback = state.operations.managerFeedback;
     state.operations.reviewStatus = 'pending';
     state.operations.managerFeedback = '';
     state.operations.reviewedAt = '';
@@ -5467,15 +5573,67 @@
     closeDrawer(); persist(); renderApp(); toast('事項已新增', 'success');
   }
 
+  function derivedTaskCloudId(ref) {
+    return `v2_${String(ref || '').replace(/[^a-zA-Z0-9_-]+/g, '_')}`;
+  }
+
   function upsertDerivedTask(ref, title, source, owner, dueDate, priority, done = false) {
     if (!title) return;
-    let task = state.tasks.find(item => item.ref === ref);
+    const deterministicId = derivedTaskCloudId(ref);
+    const matches = state.tasks.filter(item => item.ref === ref || item.id === deterministicId || (item.owner === owner && item.title === title));
+    let task = matches.find(item => item.cloudSyncStatus === 'saved') || matches[0];
     if (!task) {
-      task = { id: uid('task'), ref };
+      task = { id: deterministicId, ref };
       state.tasks.push(task);
+    } else if (matches.length > 1) {
+      state.tasks = state.tasks.filter(item => item === task || !matches.includes(item));
     }
-    Object.assign(task, { title, source, owner, dueDate, priority, status: done ? 'done' : 'open' });
+    Object.assign(task, { ref, title, source, owner, dueDate, priority, status: done ? 'done' : 'open' });
     scheduleTaskCloudSync(task);
+    return task;
+  }
+
+  async function saveManagerDerivedTaskToCloud(task) {
+    if (!task || !state.integration.cloudSyncEnabled) return { ok: true, localOnly: true };
+    const session = legacySession();
+    if (!session || !['manager', 'admin'].includes(session.role)) return { ok: false, error: '目前不是主管或管理員帳號' };
+    if (!window.API?.addTask) return { ok: false, error: '主管待辦服務尚未載入' };
+    task.cloudSyncStatus = 'saving';
+    const cloudTaskId = derivedTaskCloudId(task.ref || task.id);
+    const result = await API.addTask({
+      task_id: cloudTaskId,
+      title: task.title,
+      detail: '由主管評核建立；完成後請回到原紀錄補充或修正。',
+      assignees: [backendNickname(task.owner)],
+      due_date: task.dueDate,
+      notify: true,
+    });
+    task.cloudSyncStatus = result?.ok ? 'saved' : 'error';
+    if (result?.ok) {
+      task.cloudTaskId = cloudTaskId;
+      task.cloudUpdatedAt = result.updated_at || new Date().toISOString();
+    }
+    return result;
+  }
+
+  async function completeManagerDerivedTask(ref) {
+    const task = state.tasks.find(item => item.ref === ref || item.id === derivedTaskCloudId(ref));
+    if (!task) return { ok: true, missing: true };
+    task.status = 'done';
+    if (!state.integration.cloudSyncEnabled) return { ok: true, localOnly: true };
+    const session = legacySession();
+    if (!session || !['manager', 'admin'].includes(session.role) || !window.API?.updateTaskStatus) return { ok: true, deferred: true };
+    const candidateIds = [...new Set([task.cloudTaskId, derivedTaskCloudId(ref), task.id].filter(Boolean))];
+    let result = { ok: false, error: '找不到對應的雲端待辦' };
+    for (const taskId of candidateIds) {
+      result = await API.updateTaskStatus({ task_id: taskId, status: 'done' });
+      if (result?.ok) {
+        task.cloudTaskId = taskId;
+        break;
+      }
+    }
+    task.cloudSyncStatus = result?.ok ? 'saved' : 'error';
+    return result;
   }
 
   async function syncTaskToCloud(task) {
@@ -5599,11 +5757,15 @@
       return;
     }
     const score = evidenceQuality(draft);
+    const savedAt = new Date().toISOString();
+    const wasReviewed = ['clarify', 'accepted'].includes(draft.status) || Boolean(draft.reviewedAt);
     const item = {
       id: draft.id || uid('ev'), fileName: draft.fileName, mimeType: draft.mimeType, dataUrl: draft.dataUrl || '', type: draft.type,
       stage: draft.stage, title: draft.title, claim: draft.claim, observation: draft.observation, students: draft.students,
       privacy: draft.privacy, pins: clone(draft.pins || []), quality: score, status: evidenceReady(draft) ? 'pending' : 'draft',
-      createdAt: draft.createdAt || new Date().toISOString(), placeholder: !attachments.some(attachmentAvailable),
+      createdAt: draft.createdAt || savedAt, updatedAt: savedAt, resubmittedAt: wasReviewed ? savedAt : (draft.resubmittedAt || ''),
+      managerFeedback: draft.managerFeedback || '', previousManagerFeedback: wasReviewed ? (draft.managerFeedback || draft.previousManagerFeedback || '') : (draft.previousManagerFeedback || ''),
+      reviewedAt: '', reviewedBy: '', placeholder: !attachments.some(attachmentAvailable),
       attachments: clone(attachments), primaryAttachmentId: draft.primaryAttachmentId || attachments[0].id,
     };
     const activityId = form.elements.activityId.value;
@@ -5644,7 +5806,7 @@
       learnerContext: String(data.get('learnerContext') || '').trim(), objectives: String(data.get('objectives') || '').trim(),
       assessment: String(data.get('assessment') || '').trim(), differentiation: planDraft.differentiation || '',
       safetyPrivacy: planDraft.safetyPrivacy || '', reflection: String(data.get('reflection') || '').trim(),
-      updatedAt: state.daily.date,
+      updatedAt: new Date().toISOString(),
     });
     planDraft.flow = $$('[data-flow-row]', form).map(row => {
       const inputs = $$('input', row);
@@ -5738,15 +5900,20 @@
     if (!identity.ok) throw new Error(identity.error || '請先登入目前老師的正式帳號');
     if (!window.API?.uploadFile) throw new Error('教材雲端服務尚未載入');
 
-    const dataUrl = await readFileAsDataUrl(file);
+    const isImage = String(file.type || '').startsWith('image/');
+    const dataUrl = isImage ? await fileToPreview(file) : await readFileAsDataUrl(file);
+    if (isImage && !dataUrl) throw new Error(`${file.name} 無法轉成可上傳照片，請改用 JPG、PNG 或 PDF`);
     const payload = dataUrlPayload(dataUrl);
     if (!payload) throw new Error(`${file.name} 無法讀取`);
     const category = planMaterialCategory(file.name);
+    const uploadName = isImage
+      ? `${file.name.replace(/\.[^.]+$/, '') || '備課圖片'}.jpg`
+      : file.name;
     let result = await API.uploadFile({
       nickname: cloudTeacherNickname(),
       date: state.daily.date,
-      fileName: file.name,
-      mimeType: file.type || payload.mimeType || 'application/octet-stream',
+      fileName: uploadName,
+      mimeType: isImage ? payload.mimeType : (file.type || payload.mimeType || 'application/octet-stream'),
       base64: payload.base64,
       category,
     });
@@ -5758,8 +5925,9 @@
     }
     if (!result?.ok) throw new Error(result?.error || `${file.name} 上傳失敗`);
     return {
-      id: uid('mat'), category, name: result.fileName || file.name, size: formatFileSize(file.size), status: 'ready',
-      mimeType: file.type || payload.mimeType || '', cloudUrl: result.url || '', cloudFileId: result.fileId || '', uploadedAt: new Date().toISOString(),
+      id: uid('mat'), category, name: result.fileName || uploadName,
+      size: formatFileSize(isImage ? dataUrlByteLength(dataUrl) : file.size), status: 'ready',
+      mimeType: isImage ? payload.mimeType : (file.type || payload.mimeType || ''), cloudUrl: result.url || '', cloudFileId: result.fileId || '', uploadedAt: new Date().toISOString(),
     };
   }
 
@@ -5782,7 +5950,8 @@
       keyResult: state.daily.summary.keyResult, followup: state.daily.summary.followup, tomorrowPriority: state.daily.summary.tomorrowPriority,
       teacherNote: state.daily.summary.teacherNote || '', parentStatus: state.daily.parentStatus || '',
       parentHandoffConfirmed: Boolean(state.daily.parentHandoffConfirmed), parentHandoffNote: state.daily.parentHandoffNote || '',
-      feedback: existing?.feedback || '',
+      feedback: existing?.feedback || '', previousStatus: existing?.previousStatus || '',
+      previousSubmittedAt: existing?.previousSubmittedAt || '',
     };
   }
 
@@ -5817,8 +5986,8 @@
         parentHandoffNote: state.daily.parentHandoffNote || '',
         noStudentFollowupConfirmed: state.daily.noStudentFollowupConfirmed,
         summary: clone(state.daily.summary || {}),
-        status: state.daily.status,
-        submittedAt: state.daily.submittedAt,
+        status: submission.status === 'draft' ? 'draft' : 'submitted',
+        submittedAt: submission.submittedAt || '',
       },
       prepSources,
       lessonPlans: state.lessonPlans.filter(plan => plan.teacher === submission.teacher && planIds.has(plan.id)),
@@ -5965,6 +6134,12 @@
   }
 
   async function syncDailyDraftToCloud() {
+    if (dailyNeedsResubmit()) {
+      state.integration.dailyDraftSyncPending = false;
+      persist('修改內容已保留，重新送出後更新主管版本');
+      refreshSystemStatusNotice();
+      return { ok: true, skipped: true, reason: 'awaiting-resubmit' };
+    }
     if (!state.integration.cloudSyncEnabled || state.daily.submittedAt || !cloudIdentityReady() || !window.API?.saveLog) {
       return { ok: true, skipped: true };
     }
@@ -5982,6 +6157,7 @@
       state.integration.dailyDraftSyncPending = true;
       persist('本機草稿已保留');
       updateSaveIndicator('error', '本機已儲存，雲端草稿待重試');
+      refreshSystemStatusNotice();
       return result;
     }
     integrationRuntime.draftSyncStatus = 'saved';
@@ -5989,11 +6165,12 @@
     state.integration.lastCloudDraftAt = integrationRuntime.draftSyncAt;
     state.integration.dailyDraftSyncPending = false;
     persist('本機與雲端草稿已儲存');
+    refreshSystemStatusNotice();
     return result;
   }
 
   function scheduleDailyCloudDraftSync() {
-    if (!state.integration.cloudSyncEnabled || state.daily.submittedAt || !cloudIdentityReady()) return;
+    if (!state.integration.cloudSyncEnabled || state.daily.submittedAt || dailyNeedsResubmit() || !cloudIdentityReady()) return;
     state.integration.dailyDraftSyncPending = true;
     persist('本機已儲存，等待雲端同步');
     window.clearTimeout(cloudDraftTimer);
@@ -6004,6 +6181,7 @@
         state.integration.dailyDraftSyncPending = true;
         persist('本機草稿已保留');
         updateSaveIndicator('error', '本機已儲存，雲端草稿待重試');
+        refreshSystemStatusNotice();
       });
     }, 900);
   }
@@ -6029,6 +6207,8 @@
     }
     const existing = state.submissions.find(item => item.date === state.daily.date && item.teacher === state.context.teacher);
     const submission = createDailySubmissionRecord(existing);
+    submission.previousStatus = '';
+    submission.previousSubmittedAt = '';
     if (state.integration.cloudSyncEnabled) {
       const identity = await ensureCloudTeacherIdentity();
       if (!identity.ok) {
@@ -6416,26 +6596,38 @@
     const accepted = selected.filter(file => file.size <= MAX_DOCUMENT_FILE_BYTES);
     const fileName = $('#evidence-file-name');
     if (fileName) fileName.textContent = `正在壓縮並上傳 ${accepted.length} 份檔案…`;
-    try {
-      let added = 0;
-      let replaced = 0;
-      for (const file of accepted) {
+    let added = 0;
+    let replaced = 0;
+    let skipped = 0;
+    let retainedForRetry = 0;
+    const failed = oversized.map(file => `${file.name}（超過 25 MB）`);
+    for (const file of accepted) {
+      try {
         const fingerprint = await hashFile(file);
         const duplicateIndex = evidenceDraft.attachments.findIndex(item => item.fingerprint === fingerprint);
         const duplicate = duplicateIndex >= 0 ? evidenceDraft.attachments[duplicateIndex] : null;
         const duplicateComplete = duplicate && Boolean(materialCloudUrl(duplicate) || duplicate.cloudFileId || duplicate.dataUrl);
-        if (duplicateComplete) continue;
+        if (duplicateComplete) {
+          skipped += 1;
+          continue;
+        }
         const isImage = String(file.type || '').startsWith('image/');
         let dataUrl = isImage ? await fileToPreview(file) : '';
         let cloudFile = null;
+        let uploadError = '';
         if (isImage && !dataUrl) throw new Error(`${file.name} 無法轉成可上傳照片`);
         if (isImage && state.integration.cloudSyncEnabled) {
           const activity = state.activities.find(item => item.id === evidenceDraft.activityId);
           updateSaveIndicator('saving', `正在上傳 ${file.name}`);
-          cloudFile = await uploadCompressedPhoto(dataUrl, {
-            kpi: activity ? activityKpiNumber(activity) : 5,
-            description: evidenceDraft.title || activity?.title || file.name,
-          });
+          try {
+            cloudFile = await uploadCompressedPhoto(dataUrl, {
+              kpi: activity ? activityKpiNumber(activity) : 5,
+              description: evidenceDraft.title || activity?.title || file.name,
+            });
+          } catch (error) {
+            uploadError = error.message || '雲端上傳失敗';
+            retainedForRetry += 1;
+          }
           if (cloudFile) {
             applyCloudPreview(cloudFile.cloudFileId, dataUrl);
             dataUrl = '';
@@ -6456,8 +6648,8 @@
           fingerprint,
           cloudUrl: cloudFile?.cloudUrl || '',
           cloudFileId: cloudFile?.cloudFileId || '',
-          uploadStatus: cloudFile ? 'uploaded' : dataUrl ? 'local' : 'incomplete',
-          uploadError: '',
+          uploadStatus: cloudFile ? 'uploaded' : dataUrl ? (uploadError ? 'retry' : 'local') : 'incomplete',
+          uploadError,
           placeholder: !dataUrl && !cloudFile?.cloudUrl,
         };
         if (duplicateIndex >= 0) {
@@ -6471,19 +6663,21 @@
         if (!evidenceDraft.primaryAttachmentId) evidenceDraft.primaryAttachmentId = attachment.id;
         added += 1;
         refreshEvidenceAttachmentUI();
+        if (uploadError) failed.push(`${file.name}（已保留本機，送出時會重試：${uploadError}）`);
+      } catch (error) {
+        failed.push(`${file.name}（${error.message || '處理失敗'}）`);
       }
-      syncEvidencePrimaryFields(evidenceDraft);
-      refreshEvidenceAttachmentUI();
-      input.value = '';
-      if (files.length > availableSlots) toast(`已加入前 ${availableSlots} 份；每筆上限 ${MAX_EVIDENCE_FILES} 份`, 'danger');
-      else if (oversized.length) toast(`${oversized.length} 份超過 25 MB，其他 ${added} 份已上傳`, 'danger');
-      else if (added < accepted.length) toast(`已加入 ${added} 份；重複檔案已略過`, 'success');
-      else toast(`${added} 份成果已上傳${replaced ? `，其中 ${replaced} 份已修復` : ''}`, 'success');
-    } catch (error) {
-      input.value = '';
-      refreshEvidenceAttachmentUI();
-      toast(`部分檔案處理失敗：${error.message || '已加入的內容仍會保留'}`, 'danger');
     }
+    syncEvidencePrimaryFields(evidenceDraft);
+    refreshEvidenceAttachmentUI();
+    input.value = '';
+    const summary = [`已加入 ${added} 份成果`];
+    if (replaced) summary.push(`修復 ${replaced} 份`);
+    if (skipped) summary.push(`${skipped} 份相同檔案已略過`);
+    if (retainedForRetry) summary.push(`${retainedForRetry} 份先保留本機，正式送出時會再上傳`);
+    if (files.length > availableSlots) summary.push(`超過上限的 ${files.length - availableSlots} 份未加入`);
+    if (failed.length) summary.push(`${failed.length} 份需注意：${failed.join('、')}`);
+    toast(summary.join('；'), failed.length ? 'warning' : 'success');
   }
 
   function placeEvidencePin(event, canvas) {
@@ -6651,8 +6845,13 @@
     input.disabled = true;
     let uploaded = 0;
     let skipped = 0;
-    try {
-      for (const file of files) {
+    const failed = [];
+    for (const file of files) {
+      if (file.size > MAX_DOCUMENT_FILE_BYTES) {
+        failed.push(`${file.name}（超過 25 MB）`);
+        continue;
+      }
+      try {
         const fileFingerprint = await hashFile(file);
         const duplicateIndex = (activityDraft.prepEvidence || []).findIndex(item => item.fileFingerprint === fileFingerprint);
         const duplicate = duplicateIndex >= 0 ? activityDraft.prepEvidence[duplicateIndex] : null;
@@ -6673,13 +6872,15 @@
         } else activityDraft.prepEvidence.push(uploadedFile);
         uploaded += 1;
         updateSaveIndicator('saving', `附件已上傳 ${uploaded}/${files.length}`);
+      } catch (error) {
+        failed.push(`${file.name}（${error.message || '上傳失敗'}）`);
       }
-      updateSaveIndicator('saved', '附件已歸檔');
-      toast(skipped ? `${uploaded} 份附件已上傳；${skipped} 份相同檔案已略過` : `${uploaded} 份附件已上傳`, skipped ? 'warning' : 'success');
-    } catch (error) {
-      updateSaveIndicator('error', '附件上傳未完成');
-      toast(`附件上傳未完成：${error.message || '請稍後重試'}`, 'danger');
     }
+    updateSaveIndicator(failed.length ? 'error' : 'saved', failed.length ? '部分附件未上傳' : '附件已歸檔');
+    const summary = [`${uploaded} 份附件已上傳`];
+    if (skipped) summary.push(`${skipped} 份相同檔案已略過`);
+    if (failed.length) summary.push(`${failed.length} 份未上傳：${failed.join('、')}`);
+    toast(summary.join('；'), failed.length ? 'danger' : skipped ? 'warning' : 'success');
     const node = $('#prep-file-list');
     if (node) node.innerHTML = $('#course-prep-form') ? renderSimplePrepFiles(activityDraft.prepEvidence || []) : renderPrepEvidenceList(activityDraft.prepEvidence || []);
     input.disabled = false;
@@ -6765,7 +6966,13 @@
       const dataUrl = await fileToPreview(file);
       if (!dataUrl) throw new Error('照片無法壓縮');
       updateSaveIndicator('saving', `正在上傳${OPERATION_CHECKS[key].label}照片`);
-      const cloudFile = await uploadCompressedPhoto(dataUrl, { kpi: 6, description: OPERATION_CHECKS[key].label });
+      let cloudFile = null;
+      let uploadError = '';
+      try {
+        cloudFile = await uploadCompressedPhoto(dataUrl, { kpi: 6, description: OPERATION_CHECKS[key].label });
+      } catch (error) {
+        uploadError = error.message || '雲端上傳失敗';
+      }
       if (cloudFile) applyCloudPreview(cloudFile.cloudFileId, dataUrl);
       state.operations.evidenceByCheck = state.operations.evidenceByCheck || {};
       const currentStatus = input.closest('.operation-proof-item')?.querySelector(`[name="status_${key}"]:checked`)?.value || 'normal';
@@ -6778,7 +6985,8 @@
         dataUrl: cloudFile ? '' : dataUrl,
         cloudUrl: cloudFile?.cloudUrl || '',
         cloudFileId: cloudFile?.cloudFileId || '',
-        uploadStatus: cloudFile ? 'uploaded' : 'local',
+        uploadStatus: cloudFile ? 'uploaded' : (uploadError ? 'retry' : 'local'),
+        uploadError,
         placeholder: false,
         fingerprint,
         addedAt: new Date().toISOString(),
@@ -6801,7 +7009,10 @@
       scheduleDailyCloudDraftSync();
       hydrateIcons();
       scheduleCloudPreviewHydration();
-      toast(`${OPERATION_CHECKS[key].label}照片已上傳`, 'success');
+      updateSaveIndicator(uploadError ? 'error' : 'saved', uploadError ? '照片已保留，待雲端重試' : '照片已上傳');
+      toast(uploadError
+        ? `${OPERATION_CHECKS[key].label}照片已保留在這台裝置，正式送出時會再上傳`
+        : `${OPERATION_CHECKS[key].label}照片已上傳`, uploadError ? 'warning' : 'success');
     } catch (error) {
       input.value = '';
       updateSaveIndicator('error', '照片上傳未完成');
@@ -6832,8 +7043,12 @@
       submission.status = kind === 'submission-accept' ? 'accepted' : 'clarify';
       submission.reviewedAt = new Date().toISOString();
       submission.reviewedBy = reviewer;
-      appendFeedbackMessage(feedbackThreadKey('submission', id), reviewMessage, 'manager', reviewer);
-      if (kind === 'submission-clarify') upsertDerivedTask(`review:${id}`, `補充 ${formatShortDate(submission.date)} 日報：${feedback}`, '主管交辦', submission.teacher, addDays(state.daily.date, 1), 'high');
+      appendFeedbackMessage(feedbackThreadKey('submission', id), reviewMessage, 'manager', reviewer, cloudFeedbackMessageMeta(cloudResult));
+      if (kind === 'submission-clarify') {
+        const task = upsertDerivedTask(`review:${id}`, `補充 ${formatShortDate(submission.date)} 日報：${feedback}`, '主管交辦', submission.teacher, addDays(state.daily.date, 1), 'high');
+        const taskResult = await saveManagerDerivedTaskToCloud(task);
+        if (!taskResult?.ok) { persist(); renderApp(); toast(`主管意見已送出，但補件待辦建立失敗：${taskResult?.error || '請重試'}`, 'danger'); return; }
+      } else await completeManagerDerivedTask(`review:${id}`);
     }
     if (kind === 'evidence-accept' || kind === 'evidence-clarify') {
       const activity = state.activities.find(item => item.id === id);
@@ -6854,8 +7069,12 @@
       evidence.managerFeedback = reviewMessage;
       evidence.reviewedAt = new Date().toISOString();
       evidence.reviewedBy = reviewer;
-      appendFeedbackMessage(threadKey, reviewMessage, 'manager', reviewer);
-      if (kind === 'evidence-clarify') upsertDerivedTask(`evidence:${secondaryId}`, `補充證據「${evidence.title}」：${feedback}`, '主管交辦', activity.teacher, addDays(state.daily.date, 1), 'high');
+      appendFeedbackMessage(threadKey, reviewMessage, 'manager', reviewer, cloudFeedbackMessageMeta(cloudResult));
+      if (kind === 'evidence-clarify') {
+        const task = upsertDerivedTask(`evidence:${secondaryId}`, `補充證據「${evidence.title}」：${feedback}`, '主管交辦', activity.teacher, addDays(state.daily.date, 1), 'high');
+        const taskResult = await saveManagerDerivedTaskToCloud(task);
+        if (!taskResult?.ok) { persist(); renderApp(); toast(`主管意見已送出，但補件待辦建立失敗：${taskResult?.error || '請重試'}`, 'danger'); return; }
+      } else await completeManagerDerivedTask(`evidence:${secondaryId}`);
     }
     if (kind === 'plan-approve' || kind === 'plan-changes') {
       const plan = state.lessonPlans.find(item => item.id === id);
@@ -6875,8 +7094,12 @@
       plan.status = kind === 'plan-approve' ? 'approved' : 'changes';
       plan.reviewedAt = new Date().toISOString();
       plan.reviewedBy = reviewer;
-      appendFeedbackMessage(threadKey, reviewMessage, 'manager', reviewer);
-      if (kind === 'plan-changes') upsertDerivedTask(`plan:${id}`, `修正教案「${plan.title}」：${feedback}`, '主管交辦', plan.teacher, addDays(state.daily.date, 2), 'high');
+      appendFeedbackMessage(threadKey, reviewMessage, 'manager', reviewer, cloudFeedbackMessageMeta(cloudResult));
+      if (kind === 'plan-changes') {
+        const task = upsertDerivedTask(`plan:${id}`, `修正教案「${plan.title}」：${feedback}`, '主管交辦', plan.teacher, addDays(state.daily.date, 2), 'high');
+        const taskResult = await saveManagerDerivedTaskToCloud(task);
+        if (!taskResult?.ok) { persist(); renderApp(); toast(`主管意見已送出，但修改待辦建立失敗：${taskResult?.error || '請重試'}`, 'danger'); return; }
+      } else await completeManagerDerivedTask(`plan:${id}`);
     }
     if (kind === 'operation-accept' || kind === 'operation-clarify') {
       const operation = operationRecordById(id);
@@ -6900,13 +7123,12 @@
       operation.reviewStatus = kind === 'operation-accept' ? 'accepted' : 'clarify';
       operation.reviewedAt = new Date().toISOString();
       operation.reviewedBy = reviewer;
-      appendFeedbackMessage(threadKey, reviewMessage, 'manager', reviewer);
+      appendFeedbackMessage(threadKey, reviewMessage, 'manager', reviewer, cloudFeedbackMessageMeta(cloudResult));
       if (kind === 'operation-clarify') {
-        upsertDerivedTask(`operations:${id}`, `補充 ${formatShortDate(operation.date)} 班務證據：${feedback}`, '主管交辦', operation.dutyOwner, addDays(state.daily.date, 1), 'high');
-      } else {
-        const task = state.tasks.find(item => item.ref === `operations:${id}`);
-        if (task) task.status = 'done';
-      }
+        const task = upsertDerivedTask(`operations:${id}`, `補充 ${formatShortDate(operation.date)} 班務證據：${feedback}`, '主管交辦', operation.dutyOwner, addDays(state.daily.date, 1), 'high');
+        const taskResult = await saveManagerDerivedTaskToCloud(task);
+        if (!taskResult?.ok) { persist(); renderApp(); toast(`主管意見已送出，但班務補件待辦建立失敗：${taskResult?.error || '請重試'}`, 'danger'); return; }
+      } else await completeManagerDerivedTask(`operations:${id}`);
     }
     closeDrawer(); persist(); renderApp(); toast(kind.includes('accept') || kind.includes('approve') ? '審查已完成' : '已建立補充待辦', 'success');
   }
@@ -6992,7 +7214,7 @@
     }
     else if (action === 'navigate') navigate(control.dataset.route);
     else if (action === 'switch-role') {
-      state.ui.role = control.dataset.role;
+      if (!applyPreviewReviewContext(control.dataset.role)) state.ui.role = control.dataset.role;
       state.ui.route = defaultRoute(state.ui.role);
       closeDialog(); closeDrawer(); persist(); renderApp();
     }
@@ -7037,7 +7259,7 @@
           toast(`回覆未送出：${cloudResult?.error || '雲端連線失敗'}`, 'danger');
           return;
         }
-        appendFeedbackMessage(key, message);
+        appendFeedbackMessage(key, message, state.ui.role, '', cloudFeedbackMessageMeta(cloudResult));
         const inline = thread?.dataset.feedbackInline === 'true';
         persist('對話已儲存');
         if (thread) thread.outerHTML = renderFeedbackThread(key, { inline });
@@ -7104,6 +7326,15 @@
       if (removingPrimary) {
         evidenceDraft.primaryAttachmentId = evidenceDraft.attachments[0]?.id || '';
         evidenceDraft.pins = [];
+      }
+      if (!evidenceDraft.attachments.length) {
+        evidenceDraft.primaryAttachmentId = '';
+        evidenceDraft.fileName = '';
+        evidenceDraft.mimeType = '';
+        evidenceDraft.dataUrl = '';
+        evidenceDraft.cloudUrl = '';
+        evidenceDraft.cloudFileId = '';
+        evidenceDraft.placeholder = false;
       }
       refreshEvidenceAttachmentUI();
     }
@@ -7617,12 +7848,7 @@
   }
   applyLegacySessionContext();
   if (IS_PREVIEW_REVIEW_SESSION) {
-    const requestedPerson = state.people.find(person => normalizeReviewNickname(person.nickname) === normalizeReviewNickname(LOCAL_REVIEW_NICKNAME));
-    if (requestedPerson) {
-      state.ui.role = 'teacher';
-      state.context.teacher = requestedPerson.nickname;
-      state.context.department = requestedPerson.department;
-    }
+    applyPreviewReviewContext(LOCAL_REVIEW_ROLE);
   }
   const rolledFromDate = rollWorkspaceToToday();
   if (rolledFromDate) persist(`已保留 ${formatShortDate(rolledFromDate)} 紀錄並開始今天`);

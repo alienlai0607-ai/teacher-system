@@ -2,10 +2,14 @@
   'use strict';
 
   const APP_VERSION = 3;
+  const MAX_ADMIN_FILE_BYTES = 25 * 1024 * 1024;
+  const IMAGE_COMPRESSION_THRESHOLD_BYTES = 2.2 * 1024 * 1024;
   const PREVIEW_MODE = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
     || window.location.hostname.endsWith('.trycloudflare.com');
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+  const selectedFilesByInput = new WeakMap();
+  let uploadWarning = '';
   const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, char => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
   })[char]);
@@ -541,6 +545,7 @@
         ${quickAction('一樓環境', envStatus, env?.status === 'needs_action' ? `期限 ${formatDate(env.improvementDue)}` : '', env ? 'sparkles' : 'circle', 'open-environment', env?.status === 'needs_action' ? 'attention' : env ? 'done' : '')}
         ${quickAction('今日試上', trialStatus, '', todayTrials.length || noTrial ? 'user-round-check' : 'user-round-search', 'go-trials', todayTrials.length || noTrial ? 'done' : '')}
       </div>
+      ${daily?.reviewComment ? `<div class="notice mt-16">${icon('message-square-text')}<div><strong>${esc(daily.reviewedBy || '主管')}回覆今日工作</strong><br>${nl2br(daily.reviewComment)}<div class="record-actions mt-16"><button class="button small" data-route="performance">前往回覆</button></div></div></div>` : ''}
       <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('notebook-pen')}今天的工作</div><div class="panel-subtitle">${daily?.items?.length || 0} 項；不使用主觀完成百分比</div></div><button class="button small" data-action="open-work-item">${icon('plus')}新增</button></div><div class="panel-body flush">${renderTodayItems(daily)}</div></section>
       <div class="grid cols-2 mt-16">
         <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('calendar-clock')}接下來要處理</div><div class="panel-subtitle">只列有期限且尚未完成的工作</div></div></div><div class="panel-body flush">${renderPriorityList()}</div></section>
@@ -667,7 +672,7 @@
     const historyControl = evaluationHistoryControl('performance-history-form', month, scoreMonths(true));
     return `<section class="page">${pageHead('我的 KPI', `${month} · 已直接開啟最近一次公布的主管評核`, historyControl)}
       <div class="grid cols-4">${metric('影片宣傳', `${weekly.video}/2`, '本週完成並有證據', 'video')}${metric('照片宣傳', `${weekly.photo}/3`, '本週完成並有證據', 'images')}${metric('首報獎金', `$${trials.bonus}`, `${trials.approved.length} 人已核准 · ${trials.pending.length} 人待審`, 'badge-dollar-sign')}${metric('逾期交辦', weekly.overdue, weekly.overdue ? '請主動說明原因與新期限' : '目前沒有逾期', 'clock-alert')}</div>
-      <div class="grid cols-2 mt-16"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('gauge')}主管評核</div><div class="panel-subtitle">100 分制</div></div>${score ? `<span class="badge success">${score.total} 分</span>` : '<span class="badge warning">尚未公布</span>'}</div><div class="panel-body">${score ? renderKpiBars(score.scores) : emptyState('lock-keyhole', '主管尚未公布評核', '主管公布第一份評核後，系統會自動開啟最近一次結果。')}</div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('messages-square')}與主管對話</div><div class="panel-subtitle">主管：小魚</div></div></div><div class="panel-body">${renderMessages(messages)}<form id="message-form" class="mt-16"><input type="hidden" name="month" value="${esc(month)}"><div class="field"><label for="message-text">回覆主管</label><textarea id="message-text" name="text" placeholder="補充進度、說明原因或回覆主管建議"></textarea></div><div class="record-actions"><button class="button teal" type="submit">${icon('send')}送出回覆</button></div></form></div></section></div>
+      <div class="grid cols-2 mt-16"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('gauge')}主管評核</div><div class="panel-subtitle">100 分制</div></div>${score ? `<span class="badge success">${score.total} 分</span>` : '<span class="badge warning">尚未公布</span>'}</div><div class="panel-body">${score ? `${renderKpiBars(score.scores)}${score.comment ? `<div class="notice mt-16">${icon('message-square-text')}<div><strong>主管評語</strong><br>${nl2br(score.comment)}</div></div>` : ''}` : emptyState('lock-keyhole', '主管尚未公布評核', '主管公布第一份評核後，系統會自動開啟最近一次結果。')}</div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('messages-square')}與主管對話</div><div class="panel-subtitle">主管：小魚</div></div></div><div class="panel-body">${renderMessages(messages)}<form id="message-form" class="mt-16"><input type="hidden" name="month" value="${esc(month)}"><div class="field"><label for="message-text">回覆主管</label><textarea id="message-text" name="text" placeholder="補充進度、說明原因或回覆主管建議"></textarea></div><div class="record-actions"><button class="button teal" type="submit">${icon('send')}送出回覆</button></div></form></div></section></div>
     </section>`;
   }
   function renderKpiBars(scores = {}) {
@@ -833,22 +838,38 @@
     const removed = new Set(formData.getAll(fieldName).map(String));
     return (Array.isArray(files) ? files : []).filter(file => !removed.has(String(file.id || file.fileId || file.url)));
   }
+  function selectedFilesFor(input) {
+    return selectedFilesByInput.get(input) || Array.from(input?.files || []);
+  }
+  function selectedFileKey(file) {
+    return [file?.name || '', Number(file?.size || 0), Number(file?.lastModified || 0), file?.type || ''].join('|');
+  }
+  function mergeSelectedFiles(input) {
+    if (!input) return;
+    const combined = [];
+    const seen = new Set();
+    [...selectedFilesFor(input), ...Array.from(input.files || [])].forEach(file => {
+      const key = selectedFileKey(file);
+      if (seen.has(key)) return;
+      seen.add(key);
+      combined.push(file);
+    });
+    selectedFilesByInput.set(input, combined);
+    input.value = '';
+    renderSelectedFiles(input);
+  }
   function renderSelectedFiles(input) {
     if (!input?.id) return;
     const target = $(`[data-file-preview="${input.id}"]`);
     if (!target) return;
-    const files = Array.from(input.files || []);
+    const files = selectedFilesFor(input);
     target.innerHTML = files.map((file, index) => `<span class="selected-file"><span>${icon('paperclip', 13)}${esc(file.name)}</span><button type="button" data-action="remove-selected-file" data-input-id="${esc(input.id)}" data-index="${index}" aria-label="移除 ${esc(file.name)}">${icon('x', 14)}</button></span>`).join('');
     hydrateIcons();
   }
   function removeSelectedFile(inputId, index) {
     const input = document.getElementById(inputId);
     if (!input) return;
-    const transfer = new DataTransfer();
-    Array.from(input.files || []).forEach((file, fileIndex) => {
-      if (fileIndex !== Number(index)) transfer.items.add(file);
-    });
-    input.files = transfer.files;
+    selectedFilesByInput.set(input, selectedFilesFor(input).filter((file, fileIndex) => fileIndex !== Number(index)));
     renderSelectedFiles(input);
   }
 
@@ -868,7 +889,7 @@
   function openWorkItem(itemId = '', recordId = '') {
     const daily = (recordId ? workerRecords('daily').find(record => record.id === recordId) : null) || todayDaily();
     const item = (daily?.items || []).find(entry => entry.id === itemId) || state.drafts.workItem || {};
-    const body = `<input type="hidden" name="itemId" value="${esc(item.id || '')}"><input type="hidden" name="recordId" value="${esc(daily?.id || '')}"><div class="form-grid"><div class="field"><label for="work-category">工作類型 <span class="required">*</span></label><select id="work-category" name="category" required><option value="">請選擇</option>${CATEGORIES.map(([key,label]) => `<option value="${key}" ${item.category === key ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></div><div class="field"><label for="work-title">工作名稱 <span class="required">*</span></label><input id="work-title" name="title" value="${esc(item.title || '')}" placeholder="例：9 月體驗週海報" required></div><div class="field full"><label for="completed-today">本次處理結果 <span class="required">*</span></label><textarea id="completed-today" name="completedToday" placeholder="例：完成第一版海報並送主管確認" required>${esc(item.completedToday || '')}</textarea></div><div class="field full"><label for="work-status">目前狀態 <span class="required">*</span></label><select id="work-status" name="status"><option value="completed" ${item.status === 'completed' ? 'selected' : ''}>已完成</option><option value="in_progress" ${item.status === 'in_progress' || !item.status ? 'selected' : ''}>還要繼續</option><option value="waiting" ${item.status === 'waiting' ? 'selected' : ''}>等待主管／外部資料</option></select></div><div class="field full" data-work-next><label for="remaining">下一步 <span class="required">*</span></label><input id="remaining" name="remaining" value="${esc(item.remaining || '')}" placeholder="例：確認課程時間與 QR Code"></div><div class="field" data-work-next><label for="due-date">下次完成期限 <span class="required">*</span></label><input id="due-date" name="dueDate" type="date" value="${esc(item.dueDate || '')}"></div><div class="field full"><label for="work-evidence">附件 <span class="conditional">美宣標記完成時必填</span></label><input id="work-evidence" name="evidence" type="file" multiple accept="image/*,video/*,.pdf,.ppt,.pptx"><div class="field-help">可一次選多個檔案，也可在儲存前移除點錯的檔案。</div><div class="selected-files" data-file-preview="work-evidence"></div>${existingFileControls(item.evidence || [])}</div></div>`;
+    const body = `<input type="hidden" name="itemId" value="${esc(item.id || '')}"><input type="hidden" name="recordId" value="${esc(daily?.id || '')}"><div class="form-grid"><div class="field"><label for="work-category">工作類型 <span class="required">*</span></label><select id="work-category" name="category" required><option value="">請選擇</option>${CATEGORIES.map(([key,label]) => `<option value="${key}" ${item.category === key ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></div><div class="field"><label for="work-title">工作名稱 <span class="required">*</span></label><input id="work-title" name="title" value="${esc(item.title || '')}" placeholder="例：9 月體驗週海報" required></div><div class="field full"><label for="completed-today">本次處理結果 <span class="required">*</span></label><textarea id="completed-today" name="completedToday" placeholder="例：完成第一版海報並送主管確認" required>${esc(item.completedToday || '')}</textarea></div><div class="field full"><label for="work-status">目前狀態 <span class="required">*</span></label><select id="work-status" name="status"><option value="completed" ${item.status === 'completed' ? 'selected' : ''}>已完成</option><option value="in_progress" ${item.status === 'in_progress' || !item.status ? 'selected' : ''}>還要繼續</option><option value="waiting" ${item.status === 'waiting' ? 'selected' : ''}>等待主管／外部資料</option></select></div><div class="field full" data-work-next><label for="remaining">下一步 <span class="required">*</span></label><input id="remaining" name="remaining" value="${esc(item.remaining || '')}" placeholder="例：確認課程時間與 QR Code"></div><div class="field" data-work-next><label for="due-date">下次完成期限 <span class="required">*</span></label><input id="due-date" name="dueDate" type="date" value="${esc(item.dueDate || '')}"></div><div class="field full"><label for="work-evidence">附件 <span class="conditional">美宣標記完成時必填</span></label><input id="work-evidence" name="evidence" type="file" multiple accept="image/*,video/*,.pdf,.ppt,.pptx"><div class="field-help">可分次多選並逐檔移除；單檔上限 25 MB，大圖會自動壓縮。</div><div class="selected-files" data-file-preview="work-evidence"></div>${existingFileControls(item.evidence || [])}</div></div>`;
     showDialog(dialogShell(itemId ? '編輯工作' : '新增工作', '完成填結果；未完成再填下一步與期限', body, '儲存', 'work-item-form'));
     updateWorkFormVisibility();
   }
@@ -928,10 +949,13 @@
     const requiredMissing = [
       ['#trial-student', '學生'], ['#trial-course', '課程'], ['#trial-teacher', '老師'], ['#trial-contact', '聯絡資料'],
     ].filter(([selector]) => !String($(selector)?.value || '').trim()).map(([, label]) => label);
+    const recognized = fields.filter(([key]) => parsed[key]).map(([, , label]) => label);
     status.className = `trial-parse-status ${requiredMissing.length ? 'is-partial' : 'is-ready'}`;
     status.textContent = filled.length
       ? `已帶入：${filled.join('、')}。${requiredMissing.length ? `請再確認：${requiredMissing.join('、')}。` : '必填資料已齊，請確認內容後儲存。'}`
-      : '尚未辨識到可帶入的資料，請確認訊息中有姓名、課程、老師或電話等資訊。';
+      : recognized.length
+        ? `已辨識：${recognized.join('、')}。欄位已有相同內容，請確認後儲存。`
+        : '尚未辨識到可帶入的資料，請確認訊息中有姓名、課程、老師或電話等資訊。';
   }
 
   function renderTrialTimeline(item) {
@@ -1049,24 +1073,64 @@
       reader.readAsDataURL(file);
     });
   }
+  function isImageFile(file) {
+    return String(file?.type || '').startsWith('image/') || /\.(?:jpe?g|png|webp|gif|heic|heif)$/i.test(String(file?.name || ''));
+  }
+  async function compressAdminImage(file) {
+    if (!isImageFile(file)) return file;
+    if (file.size > MAX_ADMIN_FILE_BYTES) throw new Error(`${file.name} 超過 25 MB 上限`);
+    const needsFormatConversion = /(?:heic|heif)$/i.test(String(file.name || ''))
+      || /image\/(?:heic|heif)/i.test(String(file.type || ''));
+    if (!needsFormatConversion && file.size <= IMAGE_COMPRESSION_THRESHOLD_BYTES) return file;
+    const url = URL.createObjectURL(file);
+    try {
+      const image = new Image();
+      await new Promise((resolve, reject) => {
+        image.onload = resolve;
+        image.onerror = () => reject(new Error(`${file.name} 無法轉換，請改用 JPG 或 PNG`));
+        image.src = url;
+      });
+      const maxSide = 1600;
+      const scale = Math.min(1, maxSide / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+      if (!blob) throw new Error(`${file.name} 壓縮失敗`);
+      return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
   async function uploadFiles(input, category) {
-    const files = Array.from(input?.files || []);
+    const files = selectedFilesFor(input);
     const output = [];
+    const failed = [];
     for (const file of files) {
-      if (file.size > 15 * 1024 * 1024) throw new Error(`${file.name} 超過 15 MB`);
-      if (PREVIEW_MODE) {
-        output.push({ id: uid('file'), fileName: file.name, url: `preview://${encodeURIComponent(file.name)}`, mimeType: file.type, category });
+      if (file.size > MAX_ADMIN_FILE_BYTES) {
+        failed.push(`${file.name}（超過 25 MB）`);
         continue;
       }
-      const dataUrl = await readFile(file);
-      const payload = { nickname: currentUser.nickname, date: todayIso(), fileName: file.name, mimeType: file.type, base64: dataUrl.split(',')[1] || '' };
-      const imageEvidence = String(file.type || '').startsWith('image/') && file.size <= 8 * 1024 * 1024;
-      const result = imageEvidence
-        ? await window.API.uploadPhoto({ ...payload, kpi: `admin-marketing-${category}` })
-        : await window.API.uploadFile({ ...payload, category: `admin-marketing-${category}` });
-      if (!result?.ok) throw new Error(result?.error || `${file.name} 上傳失敗`);
-      output.push({ id: result.fileId, fileId: result.fileId, fileName: result.fileName || file.name, url: result.url, mimeType: file.type, category });
+      try {
+        const source = isImageFile(file) ? await compressAdminImage(file) : file;
+        if (PREVIEW_MODE) {
+          output.push({ id: uid('file'), fileName: source.name, url: `preview://${encodeURIComponent(source.name)}`, mimeType: source.type || file.type, category, size: source.size });
+          continue;
+        }
+        const dataUrl = await readFile(source);
+        const payload = { nickname: currentUser.nickname, date: todayIso(), fileName: source.name, mimeType: source.type || file.type, base64: dataUrl.split(',')[1] || '' };
+        const result = isImageFile(source)
+          ? await window.API.uploadPhoto({ ...payload, kpi: `admin-marketing-${category}` })
+          : await window.API.uploadFile({ ...payload, category: `admin-marketing-${category}` });
+        if (!result?.ok) throw new Error(result?.error || `${file.name} 上傳失敗`);
+        output.push({ id: result.fileId, fileId: result.fileId, fileName: result.fileName || source.name, url: result.url, mimeType: source.type || file.type, category, size: source.size });
+      } catch (error) {
+        failed.push(`${file.name}（${error.message || '上傳失敗'}）`);
+      }
     }
+    if (failed.length && !output.length) throw new Error(`附件未上傳：${failed.join('、')}`);
+    if (failed.length) uploadWarning = `${output.length} 個附件已儲存；${failed.length} 個未上傳：${failed.join('、')}`;
     return output;
   }
   async function saveRecord(type, record) {
@@ -1340,11 +1404,19 @@
     if (PREVIEW_MODE) {
       const item = state.records.find(record => record.id === id);
       item.reviewStatus = resultValue; item.reviewComment = note; item.reviewedBy = currentUser.nickname; item.reviewedAt = new Date().toISOString();
+      const month = String(item.date || todayIso()).slice(0, 7);
+      const conversationId = `admin-marketing-message-${normalizeName(workerName)}-${month}`;
+      const messageId = `admin-marketing-review-${id}`;
+      const conversationRecord = state.records.find(record => record.id === conversationId) || { id: conversationId, type: 'message', nickname: workerName, date: `${month}-01`, month, messages: [], status: 'active' };
+      conversationRecord.messages = (conversationRecord.messages || []).filter(message => message.id !== messageId);
+      if (note) conversationRecord.messages.push({ id: messageId, author: currentUser.nickname, role: currentUser.role, text: `針對 ${formatDate(item.date)} 工作紀錄：${note}`, at: item.reviewedAt });
+      upsertLocal(conversationRecord);
       persist();
     } else {
       const result = await window.API.reviewAdminMarketingRecord(id, resultValue, note);
       if (!result?.ok) throw new Error(result?.error || '審查儲存失敗');
       upsertLocal(result.record);
+      if (result.conversation) upsertLocal(result.conversation);
     }
     closeDialog(); renderApp(); toast(note ? '主管回覆已儲存' : '已清除主管回覆');
   }
@@ -1388,9 +1460,26 @@
 
   async function runForm(handler, form) {
     const button = form.querySelector('[type="submit"]');
-    if (button) button.disabled = true;
-    try { await handler(form); }
-    catch (error) { toast(error.message || '操作失敗', 'danger'); if (button) button.disabled = false; }
+    const buttonHtml = button?.innerHTML || '';
+    if (button) {
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      button.textContent = '正在處理…';
+    }
+    uploadWarning = '';
+    try {
+      await handler(form);
+      if (uploadWarning) toast(uploadWarning, 'warning');
+    }
+    catch (error) { toast(error.message || '操作失敗', 'danger'); }
+    finally {
+      if (button?.isConnected) {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        button.innerHTML = buttonHtml;
+        hydrateIcons();
+      }
+    }
   }
 
   let trialParseTimer = 0;
@@ -1412,7 +1501,10 @@
       closeDialog();
     } else if (action === 'open-work-item') openWorkItem(actionNode.dataset.id || '', actionNode.dataset.recordId || '');
     else if (action === 'open-trial') openTrial(actionNode.dataset.id || '');
-    else if (action === 'parse-trial-message') applyTrialMessageParsing(true);
+    else if (action === 'parse-trial-message') {
+      window.clearTimeout(trialParseTimer);
+      applyTrialMessageParsing(true);
+    }
     else if (action === 'view-trial') openTrialDetail(actionNode.dataset.id || '', false);
     else if (action === 'review-trial-bonus') openTrialDetail(actionNode.dataset.id || '', true);
     else if (action === 'mark-no-trial') openNoTrialConfirm();
@@ -1467,7 +1559,7 @@
     if (event.target.id === 'assignment-status') updateAssignmentVisibility();
     if (event.target.matches('#daily-check-form input[name="status"]')) updateDailyCheckVisibility();
     if (event.target.matches('#environment-form input[name="environmentStatus"]')) updateEnvironmentVisibility();
-    if (event.target.matches('input[type="file"]')) renderSelectedFiles(event.target);
+    if (event.target.matches('input[type="file"]')) mergeSelectedFiles(event.target);
   });
   document.addEventListener('submit', event => {
     event.preventDefault();

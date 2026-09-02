@@ -510,6 +510,7 @@ function saveTalentPrep(params) {
   prep.status = 'ready';
   prep.date = String(prep.date || todayStr()).slice(0, 10);
   prep.materials = talentAttachments_(prep.materials, true);
+  if (!prep.materials.length) return { ok: false, error: '請至少上傳一份教案或教材資料' };
   const normalizedTitle = String(prep.courseName || '').trim().replace(/\s+/g, ' ').toLowerCase();
   const normalizedCourseType = String(prep.courseType || '').trim().replace(/\s+/g, ' ').toLowerCase();
   const lock = LockService.getScriptLock();

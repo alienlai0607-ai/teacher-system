@@ -1,6 +1,6 @@
 // Apps Script API 包裝
 window.API = (function () {
-  const URL = window.APP_CONFIG.API_URL;
+  const API_URL = window.APP_CONFIG.API_URL;
   let authRedirectScheduled = false;
   const IMPERSONATION_READ_ACTIONS = new Set([
     'ping', 'whoami', 'getSessionIdentity', 'listUsers',
@@ -43,7 +43,7 @@ window.API = (function () {
     const sessionToken = window.AUTH?.getSession?.()?.session_token || '';
     if (sessionToken && !payload.session_token) payload.session_token = sessionToken;
     try {
-      const res = await fetch(URL, {
+      const res = await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // 避免 CORS preflight
         body: JSON.stringify(payload),

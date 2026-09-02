@@ -15,6 +15,7 @@ const logsBackend = fs.readFileSync(path.join(root, 'apps-script/logs.gs'), 'utf
 const evaluationBackend = fs.readFileSync(path.join(root, 'apps-script/evaluation.gs'), 'utf8');
 const pdfReport = fs.readFileSync(path.join(root, 'apps-script/pdfreport.gs'), 'utf8');
 const coursePrepBackend = fs.readFileSync(path.join(root, 'apps-script/courseprep.gs'), 'utf8');
+const qaHarness = fs.readFileSync(path.join(root, 'review/anqin-v2/qa-harness.js'), 'utf8');
 
 const taskRenderer = source.slice(source.indexOf('function taskPriorityMeta('), source.indexOf('function expectedBackendDepartment('));
 assert.match(taskRenderer, /function openTaskDetail\(/, '追蹤事項必須能開啟完整內容對話框');
@@ -81,8 +82,16 @@ assert.match(source, /const TEST_VIEW_WRITE_ACTIONS = new Set\([\s\S]*'send-feed
 assert.match(source, /if \(TEST_VIEW_MODE\)[\s\S]{0,220}表單流程正常，最後寫入已攔截/, '安親表單需在正式寫入前由測試模式攔截');
 assert.match(source, /TEST_VIEW_MODE && fileInput[\s\S]{0,220}不會上傳正式檔案/, '安親測試視角選擇附件後不得上傳正式檔案');
 assert.match(source, /可以開啟、輸入與切換完整流程/, '安親測試狀態需明確說明可互動範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260902-delivery-integrity-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260902-delivery-integrity-1/, '登入備援路徑也必須避開舊版快取');
+assert.match(qaHarness, /failOnceActions[\s\S]*QA 模擬網路中斷/, '隔離驗收頁需能重現一次性網路中斷並驗證重試流程');
+assert.match(source, /if \(hasNextBatch\) scheduleCloudPreviewHydration\(\)/, '私密照片超過單批上限時必須繼續讀取下一批，不得留下空白縮圖');
+assert.match(source, /先保留本機，正式送出時會再上傳/, '成果照片雲端失敗時需保留壓縮後檔案供正式送出重試');
+assert.match(source, /照片已保留在這台裝置，正式送出時會再上傳/, '班務照片雲端失敗時也需保留本機副本');
+assert.match(source, /function applyPreviewReviewContext\(/, '安親審查模式需以同一個身份來源同步角色、教室與主管');
+assert.match(source, /if \(!applyPreviewReviewContext\(control\.dataset\.role\)\) state\.ui\.role = control\.dataset\.role/, '切換審查角色時必須同步身份範圍');
+assert.match(source, /applyPreviewReviewContext\(LOCAL_REVIEW_ROLE\)/, '網址指定主管視角時首次載入就必須套用正確身份');
+assert.match(source, /GLOBAL_MANAGER_NICKNAMES\.some\(name => sameReviewIdentity\(name, managerNickname\)\)/, '小魚在審查與正式登入都必須擁有全教室檢視範圍');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260902-anqin-stability-3/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260902-anqin-stability-3/, '登入備援路徑也必須避開舊版快取');
 
 const activityFormSource = source.slice(source.indexOf('function renderActivitySpecificFields('), source.indexOf('function renderEvidenceAttachmentList('));
 assert.match(activityFormSource, /if \(activityNeedsPrepSource\(type\)\) return '';/, '課業指導與學科外不得重複顯示舊課程內容欄位');
@@ -175,11 +184,15 @@ assert.match(logsBackend, /function getAttachmentPreviews\(params\)/, '後端需
 assert.match(logsBackend, /actorCanAccessUser_\(actor, owner\)/, '後端需依老師與主管資料範圍驗證照片權限');
 assert.match(logsBackend, /dataUrl: 'data:' \+ mimeType \+ ';base64,'/, '後端需回傳瀏覽器可直接顯示的圖片資料');
 assert.match(source, /function ensureCloudTeacherIdentity\([\s\S]{0,1200}API\.getSessionIdentity/, '前端需向後端重新確認正式老師身分');
+assert.match(source, /function formalCloudSessionReady\(\)[\s\S]{0,500}session\.role === 'manager' \|\| session\.role === 'admin'/, '主管與管理員的健康檢查不得被老師身分規則誤判');
+assert.match(source, /const formalSessionReady = formalCloudSessionReady\(\)/, '健康檢查需使用角色相容的正式工作階段判定');
 assert.match(sharedApi, /getSessionIdentity: \(\) => call\('getSessionIdentity'\)/, '共用 API 需提供工作階段身分校正');
 assert.match(apiRouter, /'getSessionIdentity': \(\) => getSessionIdentity\(params\)/, 'Apps Script 路由需提供工作階段身分校正');
 assert.match(authBackend, /function getSessionIdentity\(params\)/, '後端需由驗簽結果回傳目前正式身分');
 assert.match(source, /if \(dailySubmitInFlight\) return/, '日結送出需防止連點產生重複請求');
 assert.match(source, /duplicate = Array\.from\(root\.children\)/, '相同提示不得在畫面上重複堆疊');
+const evidenceRemovalSource = source.slice(source.indexOf("else if (action === 'remove-evidence-attachment')"), source.indexOf("else if (action === 'remove-operation-photo')"));
+assert.match(evidenceRemovalSource, /if \(!evidenceDraft\.attachments\.length\)[\s\S]{0,500}evidenceDraft\.fileName = '';[\s\S]{0,500}evidenceDraft\.cloudFileId = '';/, '刪除最後一張成果照片時必須同步清除舊版欄位，避免幽靈附件復活');
 
 const evidenceRuntime = vm.createContext({
   materialCloudUrl: item => String(item?.cloudUrl || item?.url || ''),
@@ -227,6 +240,28 @@ assert.equal(resubmitContext.state.daily.submittedAt, '');
 assert.equal(resubmitContext.state.submissions[0].status, 'draft', '主管端不得繼續把舊快照視為最新正式版本');
 assert.equal(resubmitContext.state.submissions[0].previousStatus, 'accepted', '需保留修改前狀態供稽核判讀');
 assert.match(source, /needsResubmit \? '待重新送出'/, '老師歷史紀錄需明確標示修改後尚未重新送出');
+assert.match(source, /function dailyNeedsResubmit\(\)/, '今日工作區需辨識已修改但尚未重新送出的版本');
+assert.match(source, /內容已修改，尚未重新送出/, '今日送出頁需說明主管仍看到前一版');
+assert.match(source, /needsResubmit \? '重新送出'/, '修改後的送出按鈕需清楚標示重新送出');
+const cloudSnapshotSource = source.slice(source.indexOf('function buildCloudSnapshot('), source.indexOf('function activityKpiNumber('));
+assert.match(cloudSnapshotSource, /status: submission\.status === 'draft' \? 'draft' : 'submitted'/, '正式雲端快照必須使用本次送出狀態，不得沿用本機舊草稿狀態');
+assert.match(cloudSnapshotSource, /submittedAt: submission\.submittedAt \|\| ''/, '正式雲端快照必須保存本次實際送出時間');
+const cloudDraftSyncSource = source.slice(source.indexOf('async function syncDailyDraftToCloud('), source.indexOf('function scheduleDailyCloudDraftSync('));
+assert.match(cloudDraftSyncSource, /if \(dailyNeedsResubmit\(\)\)[\s\S]{0,260}reason: 'awaiting-resubmit'/, '修改已送出日報時不得用背景草稿覆蓋主管仍在看的正式版本');
+assert.match(source, /function cloudDecisionIsCurrent\(decisionAt, contentUpdatedAt\)/, '雲端同步需比較主管決定與老師補件的時間版本');
+assert.match(source, /cloudDecisionIsCurrent\(latestManagerRow\.created_at, submission\.submittedAt\)/, '重新送出的日報不得被舊主管意見改回待補件');
+assert.match(source, /cloudDecisionIsCurrent\(latestDecision\.created_at, evidence\.updatedAt\)/, '重新上傳的成果證據不得被舊主管意見改回待補件');
+assert.match(source, /cloudDecisionIsCurrent\(latestDecision\.created_at, operation\.updatedAt\)/, '重新送出的班務照片不得被舊主管意見改回待補件');
+assert.match(source, /state\.operations\.updatedAt = savedAt/, '班務補件送出時需建立可比較的新版時間');
+assert.match(source, /createdAt: draft\.createdAt \|\| savedAt, updatedAt: savedAt/, '成果補件儲存時需建立可比較的新版時間');
+assert.doesNotMatch(source, /課業輔導每天必填/, '填寫指南不得保留與二擇一規則衝突的舊文案');
+assert.match(source, /學科內或學科外至少記錄一筆/, '填寫指南需明確說明兩類至少擇一');
+assert.match(source, /const returnAction = state\.ui\.role === 'manager' \? 'open-review' : 'open-record'/, '主管查看單筆工作後需返回審查頁，不得掉回唯讀頁');
+assert.match(source, /function cloudFeedbackMessageMeta\(result\)/, '即時對話需沿用雲端訊息編號');
+assert.match(source, /metadata\.id \|\| uid\('msg'\)/, '畫面暫存訊息需使用雲端編號，避免重開後重複');
+assert.match(source, /function sameFeedbackMessage\(left, right\)/, '舊版暫存訊息與雲端訊息需能安全去重');
+assert.match(source, /Math\.abs\(leftTime - rightTime\) <= 5 \* 60 \* 1000/, '只合併短時間內同作者同內容的重複訊息');
+assert.match(source, /sort\(\(a, b\) => String\(a\.createdAt \|\| ''\)\.localeCompare\(String\(b\.createdAt \|\| ''\)\)\)/, '主管與老師對話重讀後需依時間排序');
 
 const parentFormSource = source.slice(source.indexOf('function renderTodayParents('), source.indexOf('function renderTodayOperations('));
 assert.match(parentFormSource, /無重要事項/, '親師溝通需提供無重要事項模式');
@@ -257,6 +292,12 @@ const prepUploadSource = source.slice(source.indexOf('async function handlePrepF
 assert.match(prepUploadSource, /fileFingerprint = await hashFile\(file\)/, '安親備課附件需以內容指紋辨識重複選檔');
 assert.match(prepUploadSource, /相同檔案已略過/, '重複附件需略過並清楚告知老師');
 assert.match(prepUploadSource, /duplicateIndex >= 0/, '先前未完成的同一附件必須允許重新選擇並修復');
+assert.match(prepUploadSource, /if \(file\.size > MAX_DOCUMENT_FILE_BYTES\) \{[\s\S]{0,160}continue;/, '超限附件必須在讀取內容前單獨略過，避免耗盡瀏覽器記憶體');
+assert.match(prepUploadSource, /for \(const file of files\)[\s\S]{0,800}try \{[\s\S]{0,1400}catch \(error\)/, '單一附件失敗不得中止同批其他正常附件');
+assert.match(prepUploadSource, /部分附件未上傳/, '混合批次需明確回報部分成功與部分失敗');
+const planMaterialUploadSource = source.slice(source.indexOf('async function uploadPlanMaterial('), source.indexOf('function formatFileSize('));
+assert.match(planMaterialUploadSource, /isImage \? await fileToPreview\(file\) : await readFileAsDataUrl\(file\)/, '備課圖片需先壓縮，文件則保留原始內容');
+assert.match(planMaterialUploadSource, /\.jpg`[\s\S]{0,260}mimeType: isImage \? payload\.mimeType/, '壓縮後圖片的檔名與 MIME 類型必須一致');
 const evidenceUploadSource = source.slice(source.indexOf('async function handleEvidenceFile('), source.indexOf('function placeEvidencePin('));
 assert.match(evidenceUploadSource, /uploadCompressedPhoto\(dataUrl/, '成果照片需在選取時壓縮並立即上傳');
 assert.match(evidenceUploadSource, /if \(cloudFile\) \{[\s\S]*?applyCloudPreview\([\s\S]*?dataUrl = '';[\s\S]*?\}/, '照片成功上傳後需保留當次預覽並清除本機草稿的大型內容');
@@ -268,5 +309,27 @@ assert.match(source, /function preserveActivityMedia\(/, '雲端草稿不得用�
 assert.match(sharedAuth, /24 \* 3600 \* 1000/, '正式登入應維持完整工作日並降低填寫途中過期風險');
 assert.match(pdfReport, /教案／教材有效處/, '正式 PDF 需使用新的課後備課回饋欄位');
 assert.match(pdfReport, /parent_handoff_confirmed/, '正式 PDF 需保留無重要事項時的門口交接證據');
+assert.match(qaHarness, /此驗收頁只允許在本機使用/, '隔離驗收頁不得在正式網域啟用');
+assert.match(qaHarness, /action === 'uploadFile' \|\| action === 'uploadPhoto'/, '隔離驗收頁需實際走過檔案與照片上傳介面');
+assert.match(qaHarness, /action === 'getAttachmentPreviews'/, '隔離驗收頁需模擬跨裝置私密照片讀回');
+assert.match(qaHarness, /action === 'listArchivedKpiFiles'/, '隔離驗收頁需讓老師實際讀回既有 PDF 檔案');
+assert.match(qaHarness, /action === 'listTeacherReportFolders'/, '隔離驗收頁需讓主管實際讀回老師雲端日報資料夾');
+assert.match(qaHarness, /isGlobalManager[\s\S]{0,260}folder\.department === department/, '隔離驗收頁需阻擋教室主管看到其他教室的雲端日報');
+assert.match(qaHarness, /cloudStore\.logs\[key\] = storedLog/, '隔離驗收需保存老師送出的雲端日報，才能交由主管重讀');
+assert.match(qaHarness, /Object\.values\(cloudStore\.logs\)/, '隔離驗收需提供主管日報清單，不得只回傳空成功');
+assert.match(qaHarness, /action === 'addFeedback'/, '隔離驗收需保存主管與老師對話');
+assert.match(qaHarness, /action === 'saveEval'/, '隔離驗收需保存主管評核並讓老師重新讀取');
+assert.match(qaHarness, /total_score: totalScore, grade: tier\.grade, bonus: tier\.bonus/, '隔離驗收雲端需像正式後端一樣計算評核總分、等第與獎金');
+assert.match(qaHarness, /role !== 'teacher' \|\| item\.status === 'submitted'/, '老師不得讀到主管尚未完成的評核草稿');
+assert.match(source, /const calculatedTotal = Math\.max\(0, scoreValues\.reduce/, '老師評核總分需由各項分數重新核算，避免缺少彙總欄位時錯顯示 0 分');
+assert.match(source, /const grade = String\(evaluation\.grade/, '老師評核需在舊資料缺少等第時依總分補算');
+assert.match(source, /function saveManagerDerivedTaskToCloud\(task\)/, '主管要求補件時需直接建立正式雲端待辦');
+assert.match(source, /主管工作區與目前登入身分不一致/, '對話送出前需阻擋工作區與登入角色錯置');
+assert.match(source, /主管要求補充[\s\S]{0,420}立即補件/, '老師查看原始證據時需直接看到主管補件要求與入口');
+assert.match(source, /const cloudTaskId = derivedTaskCloudId\(task\.ref \|\| task\.id\)[\s\S]{0,220}task_id: cloudTaskId[\s\S]{0,220}assignees: \[backendNickname\(task\.owner\)\]/, '主管補件待辦需以固定編號寫給正確老師');
+assert.match(source, /item\.owner === owner && item\.title === title/, '舊版與雲端匯入的同一補件待辦需自動去重');
+assert.match(source, /\[task\.cloudTaskId, derivedTaskCloudId\(ref\), task\.id\]/, '主管採認後需相容關閉新版與既有補件待辦');
+assert.match(qaHarness, /action === 'addTask'/, '隔離驗收需保存主管建立的補件待辦');
+assert.match(qaHarness, /Object\.values\(cloudStore\.tasks \|\| \{\}\)/, '老師重新登入後需能讀回雲端補件待辦');
 
 console.log('PASS anqin task dialog, simplified course records, resubmission, multi-photo controls, and parent handoff rules');

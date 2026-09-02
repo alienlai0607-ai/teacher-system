@@ -635,7 +635,28 @@ function reviewAdminMarketingRecord(params) {
   data.reviewedAt = nowIso();
   const saved = upsertAdminMarketingRecord_(existing.record_type, existing.nickname, data, actor.nickname);
   updateRow(SHEET_NAMES.ADMIN_MARKETING_RECORDS, existing._row, { reviewed_at: data.reviewedAt });
-  return { ok: true, record: saved };
+  const month = String(data.date || todayStr()).slice(0, 7);
+  const conversationId = 'admin-marketing-message-' + existing.nickname + '-' + month;
+  const messageId = 'admin-marketing-review-' + existing.record_id;
+  const conversationRow = findObject(SHEET_NAMES.ADMIN_MARKETING_RECORDS, 'record_id', conversationId);
+  const conversation = conversationRow ? adminMarketingRecordObject_(conversationRow) : {
+    id: conversationId, type: 'message', nickname: existing.nickname,
+    date: month + '-01', month: month, messages: [], status: 'active'
+  };
+  conversation.messages = (Array.isArray(conversation.messages) ? conversation.messages : []).filter(function (message) {
+    return message.id !== messageId;
+  });
+  if (data.reviewComment) {
+    conversation.messages.push({
+      id: messageId, author: actor.nickname, role: actor.role,
+      text: '針對 ' + data.date + ' 工作紀錄：' + data.reviewComment,
+      at: data.reviewedAt
+    });
+  }
+  const conversationSaved = (data.reviewComment || conversationRow)
+    ? upsertAdminMarketingRecord_('message', existing.nickname, conversation, actor.nickname)
+    : null;
+  return { ok: true, record: saved, conversation: conversationSaved };
 }
 
 function saveAdminMarketingScore(params) {

@@ -305,31 +305,46 @@ function addTask(params) {
   let assignees = params.assignees;
   if (typeof assignees === 'string') assignees = assignees.split(',').map(s => s.trim()).filter(Boolean);
   if (!Array.isArray(assignees) || !assignees.length) return { ok: false, error: '請指定至少一位老師' };
+  const requestedTaskId = String(params.task_id || '').trim();
+  if (requestedTaskId && assignees.length !== 1) return { ok: false, error: '指定事項編號時只能指派一位老師' };
+  const existingRequestedTask = requestedTaskId ? findObject(SHEET_NAMES.TASKS, 'task_id', requestedTaskId) : null;
+  if (existingRequestedTask && existingRequestedTask.assignee !== assignees[0]) return { ok: false, error: '事項編號已由其他老師使用' };
 
   const due = params.due_date || todayStr();
   const now = nowIso();
   let created = 0;
+  let updated = 0;
+  const taskIds = [];
   assignees.forEach(nk => {
     const u = findUserByNickname(nk);
     if (!u) return;
-    appendRow(SHEET_NAMES.TASKS, {
-      task_id: Utilities.getUuid(),
+    const taskId = requestedTaskId || Utilities.getUuid();
+    const existing = requestedTaskId ? existingRequestedTask : null;
+    const row = {
+      task_id: taskId,
       title: String(title).trim(),
       detail: params.detail || '',
       assignee: nk,
       department: normalizeDepartment_(u.department),
       due_date: due,
       status: 'open',
-      created_by: created_by,
-      created_at: now,
+      created_by: existing ? existing.created_by : created_by,
+      created_at: existing ? existing.created_at : now,
       updated_at: now,
       done_at: ''
-    });
-    created++;
-    if (params.notify !== false) notifyUser_(u, '🆕 你有新事項：' + title, (params.detail ? params.detail + '\n' : '') + '期限 ' + due);
+    };
+    if (existing) {
+      upsertRow(SHEET_NAMES.TASKS, 'task_id', row);
+      updated++;
+    } else {
+      appendRow(SHEET_NAMES.TASKS, row);
+      created++;
+      if (params.notify !== false) notifyUser_(u, '🆕 你有新事項：' + title, (params.detail ? params.detail + '\n' : '') + '期限 ' + due);
+    }
+    taskIds.push(taskId);
   });
-  logSystem(created_by, 'add_task', title, { assignees: assignees, due: due });
-  return { ok: true, created: created };
+  logSystem(created_by, 'add_task', title, { assignees: assignees, due: due, created: created, updated: updated });
+  return { ok: true, created: created, updated: updated, task_ids: taskIds, updated_at: now };
 }
 
 /** V2 老師將自己的追蹤事項同步到雲端，供提醒排程與跨裝置使用。 */
