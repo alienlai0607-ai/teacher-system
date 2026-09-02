@@ -915,7 +915,7 @@
       renderApp();
       return { ok: true, folders: [] };
     }
-    const cacheKey = `talent_report_folders_v2_${normalizeName(currentUser.nickname)}`;
+    const cacheKey = `talent_report_folders_v3_${normalizeName(currentUser.nickname)}`;
     let cachedFolders = [];
     try {
       const cached = JSON.parse(sessionStorage.getItem(cacheKey) || 'null');
@@ -967,7 +967,14 @@
       body = renderEmpty('目前沒有日報資料夾', '老師送出第一筆正式才藝日報後會自動歸檔。', 'folder-search');
     } else {
       body = `<div class="cloud-folder-list">${cloudRuntime.folders.map(folder => {
-        const content = `<span class="course-icon">${icon(folder.url ? 'folder-open' : 'folder-clock', 21)}</span><span><strong>${esc(folder.nickname)}${folder.status === 'deleted' ? ' · 離職保留' : folder.status === 'suspended' ? ' · 帳號停用' : ''}</strong><small>${esc(folder.department)} · ${folder.reportCount ? `${folder.reportCount} 份日報${folder.latestDate ? ` · 最近 ${formatDate(folder.latestDate)}` : ''}` : '尚未產生正式日報'}${folder.opensTeacherFolder ? ' · 開啟老師資料夾' : ''}</small></span><span class="badge ${folder.reportCount ? 'green' : 'gray'}">${folder.reportCount || 0} 份</span>${folder.url ? icon('external-link', 17) : ''}`;
+        const accountStatus = folder.status === 'pending'
+          ? ' · 待開通'
+          : folder.status === 'deleted'
+            ? ' · 離職保留'
+            : folder.status === 'suspended'
+              ? ' · 帳號停用'
+              : '';
+        const content = `<span class="course-icon">${icon(folder.url ? 'folder-open' : 'folder-clock', 21)}</span><span><strong>${esc(folder.nickname)}${accountStatus}</strong><small>${esc(folder.department)} · ${folder.reportCount ? `${folder.reportCount} 份日報${folder.latestDate ? ` · 最近 ${formatDate(folder.latestDate)}` : ''}` : '尚未產生正式日報'}${folder.opensTeacherFolder ? ' · 開啟老師資料夾' : ''}</small></span><span class="badge ${folder.reportCount ? 'green' : 'gray'}">${folder.reportCount || 0} 份</span>${folder.url ? icon('external-link', 17) : ''}`;
         return folder.url
           ? `<a class="cloud-folder-row" href="${esc(folder.url)}" target="_blank" rel="noopener noreferrer">${content}</a>`
           : `<div class="cloud-folder-row is-disabled" aria-disabled="true">${content}</div>`;

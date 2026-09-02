@@ -4427,7 +4427,10 @@ function listArchivedKpiFiles(params) {
 
 function teacherReportUsersFor_(viewer, scope) {
   let users = sheetToObjects(SHEET_NAMES.USERS).filter(function (user) {
-    if (['active', 'suspended', 'deleted'].indexOf(String(user.status || '')) < 0) return false;
+    const allowedStatuses = scope === 'talent'
+      ? ['active', 'pending', 'suspended', 'deleted']
+      : ['active', 'suspended', 'deleted'];
+    if (allowedStatuses.indexOf(String(user.status || '')) < 0) return false;
     if (scope === 'talent') {
       const assignments = talentAssignments_(user);
       return assignments.indexOf('talent-fulltime') >= 0 || assignments.indexOf('talent-pt') >= 0;
@@ -4546,7 +4549,7 @@ function listTeacherReportFolders(params) {
     if (scope === 'talent' && assignments.indexOf('talent-manager') < 0) return { ok: false, error: '沒有才藝日報查看權限' };
     if (scope === 'anqin' && assignments.indexOf('anqin-manager') < 0) return { ok: false, error: '沒有安親日報查看權限' };
   }
-  const cacheKey = 'teacher-folders-v5-' + scope + '-' + normalizeTalentNickname_(viewer.nickname) + '-' + viewer.role + '-actor-' + normalizeTalentNickname_(actor.nickname);
+  const cacheKey = 'teacher-folders-v6-' + scope + '-' + normalizeTalentNickname_(viewer.nickname) + '-' + viewer.role + '-actor-' + normalizeTalentNickname_(actor.nickname);
   const cache = CacheService.getScriptCache();
   if (!params.refresh) {
     const cached = cache.get(cacheKey);
@@ -4605,7 +4608,7 @@ function listTeacherReportFolders(params) {
       opensTeacherFolder: Boolean(canOpenTeacherRoot && targetUrl),
     };
   }).filter(function (folder) {
-    return folder.status === 'active' || folder.reportCount > 0;
+    return folder.status === 'active' || (scope === 'talent' && folder.status === 'pending') || folder.reportCount > 0;
   });
   folders.sort(function (left, right) {
     return left.department.localeCompare(right.department, 'zh-TW') || left.nickname.localeCompare(right.nickname, 'zh-TW');

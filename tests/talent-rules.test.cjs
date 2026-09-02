@@ -84,7 +84,7 @@ assert.match(archiveSource, /function listTeacherReportFolders\(/);
 assert.match(archiveSource, /item\.removeViewer\(/, '應移除已失效的舊查看權限');
 assert.match(archiveSource, /item\.removeEditor\(/, '主管只能查看，不保留舊編輯權限');
 assert.match(archiveSource, /function revokeKpiDriveUserAccess_\(/, '刪除員工時必須立即收回雲端檔案權限');
-assert.match(archiveSource, /\['active', 'suspended', 'deleted'\]/, '雲端日報需保留離職人員歷史索引');
+assert.match(archiveSource, /\['active', 'pending', 'suspended', 'deleted'\]/, '才藝雲端日報需包含待開通人員並保留離職人員歷史索引');
 const folderListSource = archiveSource.slice(archiveSource.indexOf('function listTeacherReportFolders('), archiveSource.indexOf('/**', archiveSource.indexOf('function listTeacherReportFolders(')));
 assert.doesNotMatch(folderListSource, /getOrCreateChildFolder_/, '開啟雲端清單不得建立空白資料夾或拖慢頁面');
 assert.match(archiveSource, /function talentIndexedReportFolder_\(/, '才藝雲端日報應使用已保存的資料夾索引');
@@ -99,9 +99,9 @@ const folderUsers = [
   { nickname: '柏翰', role: 'admin', status: 'active', email: 'admin@example.com', work_assignments: ['talent-payroll'] },
   { nickname: '柳丁', role: 'manager', status: 'pending', email: 'manager@example.com', work_assignments: ['talent-manager'] },
   { nickname: '浩浩', role: 'teacher', status: 'active', email: 'hao@example.com', work_assignments: ['talent-fulltime'], department: '才藝部門' },
-  { nickname: '黑豹', role: 'teacher', status: 'active', email: 'panther@example.com', work_assignments: ['talent-pt'], department: '才藝部門' },
+  { nickname: '黑豹', role: 'teacher', status: 'pending', email: 'panther@example.com', work_assignments: ['talent-pt'], department: '才藝部門' },
 ];
-const folderRows = folderUsers.filter(user => user.role === 'teacher').map((user, index) => ({
+const folderRows = folderUsers.filter(user => user.nickname === '浩浩').map((user, index) => ({
   record_type: 'lesson', status: 'submitted', nickname: user.nickname, record_date: `2026-09-0${index + 1}`,
   reportFolderUrl: `https://drive.google.com/drive/folders/folder-${index + 1}`,
 }));
@@ -125,11 +125,13 @@ vm.runInContext(archiveSource, archiveContext);
 const simulatedFolders = archiveContext.listTeacherReportFolders({ __actor: folderUsers[0], viewer: '柏翰', view_as: '柳丁', scope: 'talent' });
 assert.equal(simulatedFolders.ok, true);
 assert.equal(simulatedFolders.folders.length, 2, '柏翰測試柳丁時應看到才藝老師，不是管理員的全工作區資料夾');
+assert.equal(simulatedFolders.folders.find(folder => folder.nickname === '黑豹')?.status, 'pending', '柳丁的雲端日報名單需顯示尚未開通的黑豹');
+assert.equal(simulatedFolders.folders.find(folder => folder.nickname === '黑豹')?.reportCount, 0, '待開通且尚無日報的老師仍需列在主管名單');
 assert.equal(addedFolderViewers.length, 0, '測試待開通柳丁時不可提前授權其 Google 帳號');
 folderUsers[1].status = 'active';
 const managerFolders = archiveContext.listTeacherReportFolders({ __actor: folderUsers[1], viewer: '柳丁', scope: 'talent' });
 assert.equal(managerFolders.ok, true);
-assert.equal(addedFolderViewers.length, 2, '柳丁正式登入後需補齊兩位老師既有日報資料夾的查看權限');
+assert.equal(addedFolderViewers.length, 1, '柳丁正式登入後只補齊已有日報資料夾的查看權限');
 assert.match(setupSource, /'deleted_at', 'deleted_by'/, '使用者資料表需保存刪除稽核欄位');
 assert.match(setupSource, /mergedAssignments\.indexOf\(assignment\) < 0/, '既有安親身分必須合併才藝工作身分，不能覆蓋或漏加');
 assert.match(setupSource, /function migrateTalentUserProfiles\(\)/, '才藝帳號遷移需可獨立執行，避免完整初始化逾時');
@@ -218,7 +220,7 @@ assert.match(talentUiSource, /\.\.\.values,[\s\S]*id: editingId \|\| existingLog
 assert.match(talentUiSource, /state\.logs = \(Array\.isArray\(state\.logs\)[\s\S]*id: uid\('log'\)/, '舊本機課堂缺少編號時需自動修復');
 assert.match(talentUiSource, /class="record-actions"[\s\S]*data-action="edit-log"[\s\S]*data-action="view-log"/, '編輯與查看按鈕需放入獨立動作列，避免疊在同一座標');
 assert.match(talentStyleSource, /\.record-actions \{ display: flex;[\s\S]*gap: 6px;/, '編輯與查看按鈕需保留可點擊間距');
-assert.match(talentIndexSource, /app\.js\?v=20260902-talent-stability-6/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
+assert.match(talentIndexSource, /app\.js\?v=20260902-talent-stability-7/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
 assert.match(talentUiSource, /PREVIEW_MODE && state\.ui\.route === 'cloud-reports'[\s\S]*loadCloudFolders/, '審查模式重新整理雲端日報頁時不得無限停在載入中');
 assert.match(talentUiSource, /window\.setTimeout\(\(\) => URL\.revokeObjectURL\(url\), 1000\)/, 'CSV 下載需延後釋放 Blob，避免 Safari 或內嵌瀏覽器下載空檔');
 assert.match(talentUiSource, /route: 'weekly', label: '家長 APP'/, 'PT 與正職都要有家長 APP 發布確認入口');
