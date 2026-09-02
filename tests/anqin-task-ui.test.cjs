@@ -91,8 +91,25 @@ assert.match(source, /function applyPreviewReviewContext\(/, '安親審查模式
 assert.match(source, /if \(!applyPreviewReviewContext\(control\.dataset\.role\)\) state\.ui\.role = control\.dataset\.role/, '切換審查角色時必須同步身份範圍');
 assert.match(source, /applyPreviewReviewContext\(LOCAL_REVIEW_ROLE\)/, '網址指定主管視角時首次載入就必須套用正確身份');
 assert.match(source, /GLOBAL_MANAGER_NICKNAMES\.some\(name => sameReviewIdentity\(name, managerNickname\)\)/, '小魚在審查與正式登入都必須擁有全教室檢視範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260902-anqin-stability-5/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260902-anqin-stability-5/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260902-anqin-stability-6/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260902-anqin-stability-6/, '登入備援路徑也必須避開舊版快取');
+
+const startupSafetySource = source.slice(source.indexOf('function stripEmbeddedMediaJson('), source.indexOf('function loadState()'));
+const startupSafetyContext = vm.createContext({ JSON, Number, Set });
+vm.runInContext(startupSafetySource, startupSafetyContext);
+const oversizedPhoto = `data:image/jpeg;base64,${'A'.repeat(20000)}`;
+const strippedStartupJson = startupSafetyContext.stripEmbeddedMediaJson(JSON.stringify({ note: '保留文字', dataUrl: oversizedPhoto }));
+assert.equal(JSON.parse(strippedStartupJson).note, '保留文字', '安全啟動清理照片時必須保留文字內容');
+assert.equal(JSON.parse(strippedStartupJson).dataUrl, '', '安全啟動不得再次解析大型內嵌照片');
+assert.match(source, /if \(SAFE_START_MODE\) backupRaw = localStorage\.getItem\(BACKUP_KEY\)[\s\S]{0,80}else raw = localStorage\.getItem\(STORAGE_KEY\)/, '安全模式不得讀取可能造成閃退的主要大型暫存');
+const loadStateSource = source.slice(source.indexOf('function loadState()'), source.indexOf('let state = loadState()'));
+assert.match(loadStateSource, /backupRaw = localStorage\.getItem\(BACKUP_KEY\)/, '安全模式需讀取不含照片的文字備份');
+assert.match(loadStateSource, /if \(SAFE_START_MODE\)[\s\S]*return normalizeLoadedState\(safeBackup\)/, '安全模式需直接由文字備份復原');
+assert.match(source, /embeddedMediaCharacters\(state, MAX_PERSISTED_MEDIA_CHARS\)/, '一般儲存需在照片暫存過大前自動改用雲端附件');
+assert.doesNotMatch(source.slice(source.indexOf("function persist(message = '草稿已儲存')"), source.indexOf('function schedulePersist()')), /clone\(state\)/, '每次儲存不得再複製整份含照片資料');
+assert.match(source, /const safePayload = JSON\.parse\(serializeStateForStorage\(payload, true\)\)/, '未送出表單草稿不得重複保存 Base64 照片');
+assert.match(source, /const historyDays = SAFE_START_MODE \? 62 : 366/, '安全開啟第一次同步不得一次載入一整年紀錄');
+assert.match(source, /function maybeShowPushPermissionReminder\(\)[\s\S]{0,100}if \(SAFE_START_MODE\) return/, '安全開啟不得同時啟動通知權限流程');
 
 const activityFormSource = source.slice(source.indexOf('function renderActivitySpecificFields('), source.indexOf('function renderEvidenceAttachmentList('));
 assert.match(activityFormSource, /if \(activityNeedsPrepSource\(type\)\) return '';/, '課業指導與學科外不得重複顯示舊課程內容欄位');

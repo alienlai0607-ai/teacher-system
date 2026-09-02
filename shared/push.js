@@ -1,6 +1,7 @@
 // OneSignal Web Push 整合
 // 載入 SDK → init → 將 subscription ID 經登入驗證後登記到後端
 (function () {
+  if (new URLSearchParams(window.location.search).get('safe') === '1') return;
   var appId = (window.APP_CONFIG && window.APP_CONFIG.ONESIGNAL_APP_ID) || '';
   if (!appId) return;
 

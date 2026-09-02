@@ -17,12 +17,20 @@
   <div id="dialog-root"></div>
   <div id="toast-root" class="toast-region" aria-live="polite" aria-atomic="true"></div>
 
+  <script>
+    window.__ANQIN_BOOT_TIMER = window.setTimeout(function () {
+      if (window.__ANQIN_BOOT_READY) return;
+      var app = document.getElementById('app');
+      if (!app || app.children.length) return;
+      app.innerHTML = '<main style="max-width:560px;margin:12vh auto;padding:24px;font-family:system-ui,sans-serif"><h1 style="font-size:24px">系統尚未完成開啟</h1><p style="line-height:1.7">可能是這台裝置保留了過大的舊照片暫存。安全開啟只清理本機暫存，已送出的雲端紀錄不會刪除。</p><a href="?safe=1" style="display:inline-block;padding:12px 18px;background:#b63b2f;color:#fff;text-decoration:none;border-radius:6px;font-weight:700">安全開啟系統</a></main>';
+    }, 6000);
+  </script>
   <script src="vendor/lucide.min.js"></script>
   <script src="../../shared/config.js?v=20260825-profile-fix-3"></script>
-  <script src="../../shared/auth.js?v=20260902-system-stability-3"></script>
-  <script src="../../shared/workspaces.js?v=20260902-workspaces-stability-10"></script>
+  <script src="../../shared/auth.js?v=20260902-system-stability-4"></script>
+  <script src="../../shared/workspaces.js?v=20260902-workspaces-stability-11"></script>
   <script src="../../shared/api.js?v=20260902-system-stability-3"></script>
-  <script src="../../shared/push.js?v=20260825-profile-fix-3"></script>
-  <script src="app.js?v=20260902-anqin-stability-5"></script>
+  <script src="../../shared/push.js?v=20260902-safe-start-1"></script>
+  <script src="app.js?v=20260902-anqin-stability-6"></script>
 </body>
 </html>

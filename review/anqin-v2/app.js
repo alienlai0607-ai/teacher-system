@@ -24,6 +24,10 @@
   const LOCAL_REVIEW_PARAMS = new URLSearchParams(window.location.search);
   const LOCAL_REVIEW_NICKNAME = LOCAL_REVIEW_PARAMS.get('reviewUser') || '';
   const LOCAL_REVIEW_ROLE = LOCAL_REVIEW_PARAMS.get('role') === 'manager' ? 'manager' : 'teacher';
+  const SAFE_START_MODE = LOCAL_REVIEW_PARAMS.get('safe') === '1';
+  const MAX_BOOT_STATE_CHARS = 1600000;
+  const MAX_BOOT_DRAFT_CHARS = 600000;
+  const MAX_PERSISTED_MEDIA_CHARS = 850000;
   const IS_PREVIEW_REVIEW_SESSION = IS_REVIEW_BUILD
     && (['127.0.0.1', 'localhost'].includes(window.location.hostname)
       || window.location.hostname.endsWith('.trycloudflare.com'))
@@ -34,6 +38,9 @@
   const MAX_IMAGE_SOURCE_BYTES = 25 * 1024 * 1024;
   const GLOBAL_MANAGER_NICKNAMES = ['小魚'];
   let loadStateIssue = '';
+  let startupStateNeedsRewrite = false;
+  let startupDraftStoreNeedsRewrite = false;
+  let startupRecoverySaved = false;
 
   function normalizeReviewNickname(value) {
     return String(value || '')
@@ -745,6 +752,46 @@
     return snapshot;
   }
 
+  function stripEmbeddedMediaJson(raw) {
+    return String(raw || '')
+      .replace(/("dataUrl"\s*:\s*)"data:[^"]*"/g, '$1""')
+      .replace(/("base64"\s*:\s*)"[A-Za-z0-9+/=]{10000,}"/g, '$1""');
+  }
+
+  function embeddedMediaCharacters(source, stopAfter = Number.POSITIVE_INFINITY) {
+    if (!source || typeof source !== 'object') return 0;
+    const stack = [source];
+    const seen = new Set();
+    let total = 0;
+    while (stack.length && total <= stopAfter) {
+      const value = stack.pop();
+      if (!value || typeof value !== 'object' || seen.has(value)) continue;
+      seen.add(value);
+      Object.entries(value).forEach(([key, item]) => {
+        if (key === 'dataUrl' && typeof item === 'string' && item.startsWith('data:')) total += item.length;
+        else if (item && typeof item === 'object') stack.push(item);
+      });
+    }
+    return total;
+  }
+
+  function serializeStateForStorage(source, omitEmbeddedMedia = false) {
+    return JSON.stringify(source, (key, value) => (
+      omitEmbeddedMedia && key === 'dataUrl' && typeof value === 'string' && value.startsWith('data:') ? '' : value
+    ));
+  }
+
+  function rewriteRecoveredStartupState(source) {
+    try {
+      const serialized = serializeStateForStorage(source, true);
+      localStorage.setItem(STORAGE_KEY, serialized);
+      localStorage.setItem(BACKUP_KEY, serialized);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
   function loadState() {
     let raw = '';
     let backupRaw = '';
@@ -755,28 +802,55 @@
         localStorage.removeItem(`${key}_open_drafts`);
         try { sessionStorage.removeItem(`${key}_open_drafts`); } catch (error) { /* no-op */ }
       });
-      raw = localStorage.getItem(STORAGE_KEY) || '';
-      backupRaw = localStorage.getItem(BACKUP_KEY) || '';
+      if (SAFE_START_MODE) backupRaw = localStorage.getItem(BACKUP_KEY) || '';
+      else raw = localStorage.getItem(STORAGE_KEY) || '';
     } catch (error) {
       loadStateIssue = '瀏覽器目前不允許讀取本機資料，已開啟空白審查資料。';
       return createSeed();
     }
-    if (!raw && !backupRaw) return createSeed();
+    if (SAFE_START_MODE) {
+      startupStateNeedsRewrite = true;
+      if (!backupRaw) {
+        loadStateIssue = '已使用安全模式開啟；本機沒有文字備份，正式資料將由雲端重新同步。';
+        return createSeed();
+      }
+      try {
+        const safeBackup = JSON.parse(backupRaw);
+        const storedVersion = Number(safeBackup.version);
+        if (!Number.isInteger(storedVersion) || storedVersion < 8 || storedVersion > APP_VERSION) throw new Error('unsupported version');
+        loadStateIssue = '已使用安全模式恢復文字資料；未完成上傳的本機照片需重新選擇。';
+        return normalizeLoadedState(safeBackup);
+      } catch (error) {
+        loadStateIssue = '安全備份無法讀取，已開啟乾淨工作區；正式資料將由雲端重新同步。';
+        return createSeed();
+      }
+    }
     let parsed = null;
     let backup = null;
     try {
-      if (raw) parsed = JSON.parse(raw);
+      if (raw) {
+        const oversized = raw.length > MAX_BOOT_STATE_CHARS;
+        parsed = JSON.parse(oversized ? stripEmbeddedMediaJson(raw) : raw);
+        if (oversized) {
+          startupStateNeedsRewrite = true;
+          loadStateIssue = '已自動清理過大的本機照片暫存，文字與雲端附件仍保留。';
+        }
+      }
     } catch (error) {
       loadStateIssue = '主要資料無法解析，系統正在嘗試安全備份。';
     }
-    try {
-      if (backupRaw) backup = JSON.parse(backupRaw);
-    } catch (error) {
-      backup = null;
-    }
-    if (backup && (!parsed || Number(backup.ui?.saveRevision || 0) > Number(parsed.ui?.saveRevision || 0))) {
-      parsed = backup;
-      loadStateIssue = '已恢復最近一次文字安全備份；未完成儲存的照片可能需要重新選擇。';
+    if (!parsed) {
+      try {
+        backupRaw = localStorage.getItem(BACKUP_KEY) || '';
+        if (backupRaw) backup = JSON.parse(backupRaw);
+      } catch (error) {
+        backup = null;
+      }
+      if (backup) {
+        parsed = backup;
+        startupStateNeedsRewrite = true;
+        loadStateIssue = '已恢復最近一次文字安全備份；未完成儲存的照片可能需要重新選擇。';
+      }
     }
     if (!parsed) {
       loadStateIssue = '主要資料與安全備份皆無法載入，已保留原資料並開啟空白審查頁。';
@@ -791,6 +865,7 @@
   }
 
   let state = loadState();
+  if (startupStateNeedsRewrite) startupRecoverySaved = rewriteRecoveredStartupState(state);
   let saveTimer = null;
   let cloudDraftTimer = null;
   let taskSyncTimer = null;
@@ -866,6 +941,7 @@
     reportFolders: [],
   };
   let openDraftStore = loadOpenDraftStore();
+  if (startupDraftStoreNeedsRewrite) writeOpenDraftStore();
 
   function backendNickname(displayName = '') {
     const value = String(displayName || '').trim();
@@ -1083,6 +1159,7 @@
   }
 
   function maybeShowPushPermissionReminder() {
+    if (SAFE_START_MODE) return;
     const session = legacySession();
     if (session?.role !== 'teacher' || session.status === 'suspended' || session.impersonate === true) return;
     if (state.ui.pushPermissionReminderSeen || !('Notification' in window) || Notification.permission !== 'default') return;
@@ -1257,7 +1334,7 @@
   }
 
   function writeSafeBackup(snapshot) {
-    const serialized = JSON.stringify(mediaFreeState(snapshot));
+    const serialized = serializeStateForStorage(snapshot, true);
     try {
       localStorage.setItem(BACKUP_KEY, serialized);
       return true;
@@ -1284,29 +1361,42 @@
     const savedAt = new Date().toISOString();
     state.ui.lastSavedAt = savedAt;
     state.ui.saveRevision = Date.now();
-    const snapshot = clone(state);
+    let primarySaved = false;
+    let mediaOmitted = false;
+    let primaryError = null;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      writeSafeBackup(snapshot);
+      mediaOmitted = embeddedMediaCharacters(state, MAX_PERSISTED_MEDIA_CHARS) > MAX_PERSISTED_MEDIA_CHARS;
+      localStorage.setItem(STORAGE_KEY, serializeStateForStorage(state, mediaOmitted));
+      primarySaved = true;
+    } catch (error) {
+      primaryError = error;
+      try {
+        localStorage.setItem(STORAGE_KEY, serializeStateForStorage(state, true));
+        primarySaved = true;
+        mediaOmitted = true;
+      } catch (fallbackError) {
+        primaryError = fallbackError;
+      }
+    }
+    const backupSaved = writeSafeBackup(state);
+    if (primarySaved) {
       runtimeHealth.loadIssue = '';
       runtimeHealth.persistError = '';
       runtimeHealth.lastPersistOk = true;
       runtimeHealth.lastPersistAt = savedAt;
-      updateSaveIndicator('saved', message);
+      updateSaveIndicator('saved', mediaOmitted ? `${message}；照片由雲端保存` : message);
       return true;
-    } catch (error) {
-      const backupSaved = writeSafeBackup(snapshot);
-      state.ui.lastSavedAt = previousSavedAt;
-      state.ui.saveRevision = previousRevision;
-      runtimeHealth.persistError = storageFailureMessage(error);
-      runtimeHealth.lastPersistOk = false;
-      updateSaveIndicator('error', backupSaved ? '照片未存入，文字已有安全備份' : '儲存失敗，請勿關閉頁面');
-      if (Date.now() - lastStorageToastAt > 5000) {
-        toast(runtimeHealth.persistError, 'danger');
-        lastStorageToastAt = Date.now();
-      }
-      return false;
     }
+    state.ui.lastSavedAt = previousSavedAt;
+    state.ui.saveRevision = previousRevision;
+    runtimeHealth.persistError = storageFailureMessage(primaryError);
+    runtimeHealth.lastPersistOk = false;
+    updateSaveIndicator('error', backupSaved ? '照片未存入，文字已有安全備份' : '儲存失敗，請勿關閉頁面');
+    if (Date.now() - lastStorageToastAt > 5000) {
+      toast(runtimeHealth.persistError, 'danger');
+      lastStorageToastAt = Date.now();
+    }
+    return false;
   }
 
   function schedulePersist() {
@@ -1318,8 +1408,16 @@
   function loadOpenDraftStore() {
     const read = storage => {
       try {
-        return JSON.parse(storage.getItem(DRAFT_KEY) || '{}');
+        if (SAFE_START_MODE) {
+          storage.removeItem(DRAFT_KEY);
+          return {};
+        }
+        const raw = storage.getItem(DRAFT_KEY) || '{}';
+        if (raw.length <= MAX_BOOT_DRAFT_CHARS) return JSON.parse(raw);
+        startupDraftStoreNeedsRewrite = true;
+        return JSON.parse(stripEmbeddedMediaJson(raw));
       } catch (error) {
+        startupDraftStoreNeedsRewrite = true;
         return {};
       }
     };
@@ -1359,16 +1457,16 @@
 
   function setOpenDraft(key, kind, payload) {
     if (!key || !payload) return false;
-    openDraftStore[key] = { kind, payload: clone(payload), savedAt: new Date().toISOString() };
-    const location = writeOpenDraftStore();
-    if (!location && kind === 'evidence') {
-      const fallback = clone(payload);
-      (fallback.attachments || []).forEach(item => { item.dataUrl = ''; item.placeholder = true; });
-      fallback.dataUrl = '';
-      fallback.placeholder = Boolean(fallback.fileName);
-      openDraftStore[key] = { kind, payload: fallback, savedAt: new Date().toISOString(), mediaOmitted: true };
-      return Boolean(writeOpenDraftStore());
+    const mediaOmitted = embeddedMediaCharacters(payload, 1) > 0;
+    const safePayload = JSON.parse(serializeStateForStorage(payload, true));
+    if (kind === 'evidence') {
+      (safePayload.attachments || []).forEach(item => {
+        if (!materialCloudUrl(item) && !item.cloudFileId && item.fileName) item.placeholder = true;
+      });
+      safePayload.placeholder = Boolean(safePayload.fileName && !materialCloudUrl(safePayload) && !safePayload.cloudFileId);
     }
+    openDraftStore[key] = { kind, payload: safePayload, savedAt: new Date().toISOString(), mediaOmitted };
+    const location = writeOpenDraftStore();
     return Boolean(location);
   }
 
@@ -4117,7 +4215,9 @@
     integrationRuntime.cloudErrorContext = '';
     integrationRuntime.cloudMessage = '正在讀取過去紀錄';
     renderApp();
-    const result = await API.listLogs({ viewer: session.nickname, nickname: session.nickname, from: addDays(state.daily.date, -366), to: state.daily.date, limit: 500 });
+    const historyDays = SAFE_START_MODE ? 62 : 366;
+    const historyLimit = SAFE_START_MODE ? 200 : 500;
+    const result = await API.listLogs({ viewer: session.nickname, nickname: session.nickname, from: addDays(state.daily.date, -historyDays), to: state.daily.date, limit: historyLimit });
     if (!result?.ok) {
       integrationRuntime.cloudStatus = 'error';
       integrationRuntime.cloudErrorContext = 'read';
@@ -7859,7 +7959,10 @@
   const initialSession = legacySession();
   const openedFromNotification = new URLSearchParams(window.location.search).get('notify') === '1';
   if (!initialSession && !IS_QA_HARNESS && !IS_PREVIEW_REVIEW_SESSION) {
-    window.location.replace(loginReturnPath(openedFromNotification ? 'review/anqin-v2/index.html?notify=1' : 'review/anqin-v2/index.html'));
+    const returnTarget = openedFromNotification
+      ? 'review/anqin-v2/index.html?notify=1'
+      : SAFE_START_MODE ? 'review/anqin-v2/index.html?safe=1' : 'review/anqin-v2/index.html';
+    window.location.replace(loginReturnPath(returnTarget));
     return;
   }
   const allowedDepartments = ['東橋教室', '永康教室', '北區教室'];
@@ -7878,6 +7981,13 @@
   if (openedFromNotification && initialSession?.role === 'teacher') state.ui.route = 'records';
   if (openedFromNotification && ['manager', 'admin'].includes(initialSession?.role)) state.ui.route = 'dashboard';
   renderApp();
+  window.__ANQIN_BOOT_READY = true;
+  if (window.__ANQIN_BOOT_TIMER) window.clearTimeout(window.__ANQIN_BOOT_TIMER);
+  if (SAFE_START_MODE && startupRecoverySaved) {
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete('safe');
+    window.history.replaceState({}, '', cleanUrl);
+  }
   window.setTimeout(maybeShowPushPermissionReminder, 350);
   if (state.ui.route === 'settings') window.setTimeout(() => refreshPushStatus(true), 0);
   if (state.ui.route === 'records') window.setTimeout(loadLegacyArchiveFiles, 0);
