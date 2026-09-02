@@ -4995,6 +4995,7 @@
   function renderCloudDeliveryCheck() {
     const session = legacySession();
     if (!session || session.role !== 'admin' || window.AUTH?.isImpersonating?.()) return '';
+    if (integrationRuntime.readiness?.services?.productionIntegrity !== true) return '';
     if (runtimeHealth.cloudDeliveryStatus === 'running') {
       return `<section class="health-delivery-section"><div class="notice-band info">${icon('loader-circle', 19)}<div><div class="notice-title">正在執行雲端實際交付驗收</div><div class="notice-copy">正在真實寫入並讀回試算表、照片預覽與教材檔案，請不要關閉此視窗。</div></div></div></section>`;
     }
@@ -5032,7 +5033,9 @@
 
   function openHealthDialog() {
     const session = legacySession();
-    const cloudCheckButton = session?.role === 'admin' && !window.AUTH?.isImpersonating?.()
+    const cloudCheckButton = session?.role === 'admin'
+      && !window.AUTH?.isImpersonating?.()
+      && integrationRuntime.readiness?.services?.productionIntegrity === true
       ? `<button type="button" class="btn btn-primary" data-action="run-cloud-delivery-check" ${runtimeHealth.cloudDeliveryStatus === 'running' ? 'disabled' : ''}>${icon('cloud-check', 15)}${runtimeHealth.cloudDeliveryStatus === 'running' ? '驗收中' : '實測雲端交付'}</button>`
       : '';
     openDialog({

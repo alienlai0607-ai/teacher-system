@@ -3550,6 +3550,7 @@ function getSystemReadiness(params) {
       materialUpload: true,
       coursePrepArchive: true,
       taskCloudSync: true,
+      productionIntegrity: true,
     },
     triggers: {
       dailyKpiPdf: triggers.indexOf('sendDailyKpiReportAuto') >= 0,
