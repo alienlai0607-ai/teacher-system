@@ -6652,8 +6652,8 @@ function saveAdminMarketingRecord(params) {
   const existingRow = findObject(SHEET_NAMES.ADMIN_MARKETING_RECORDS, 'record_id', data.id);
   const original = existingRow ? adminMarketingRecordObject_(existingRow) : null;
   if (type === 'trial') {
-    if (!original && data.date !== todayStr()) {
-      if (!managerTrialEntry || !data.lateReason) return { ok: false, error: '試上學生需於當日登錄；補登請由小魚或柏翰填寫原因' };
+    if (!original && data.date < todayStr()) {
+      if (!managerTrialEntry || !data.lateReason) return { ok: false, error: '過去日期屬補登；請由小魚或柏翰填寫原因' };
     }
     const duplicate = adminMarketingFindDuplicateTrial_('', data, data.id);
     if (duplicate) return { ok: false, error: '此學生已有試上追蹤紀錄，請更新原紀錄，不要重複新增' };

@@ -75,6 +75,40 @@ assert.equal(futureTrial.nextFollowupDate, '2026-08-27');
 assert.match(deployedBackendSource, /下一次追蹤日期不可早於今天/, '部署用合併檔需包含未來試上規則');
 assert.doesNotMatch(deployedBackendSource, /試上日期不可晚於今天/, '部署用合併檔不得保留未來試上限制');
 
+const workerUser = {
+  nickname: '皮皮老師', role: 'admin_staff', status: 'active', subtype: 'marketing',
+  work_assignments: ['talent-pt', 'admin-marketing'],
+};
+const managerUser = {
+  nickname: '小魚主管', role: 'teacher', status: 'active',
+  work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'],
+};
+context.SHEET_NAMES = { ADMIN_MARKETING_RECORDS: 'ADMIN_MARKETING_RECORDS' };
+context.parseUserListField_ = value => Array.isArray(value) ? value : [];
+context.findUserByNickname = nickname => nickname === workerUser.nickname ? workerUser : null;
+context.findObject = () => null;
+context.adminMarketingFindDuplicateTrial_ = () => null;
+context.sheetToObjects = () => [];
+context.nowIso = () => '2026-08-26T12:00:00.000Z';
+context.upsertAdminMarketingRecord_ = (type, nickname, record) => ({ ...record, type, nickname });
+const saveTrial = (actor, date, lateReason = '') => context.saveAdminMarketingRecord({
+  __actor: actor,
+  nickname: workerUser.nickname,
+  record_type: 'trial',
+  record: {
+    ...trial,
+    id: `trial-save-${date}`,
+    date,
+    nextFollowupDate: '2026-08-27',
+    lateReason,
+  },
+});
+assert.equal(saveTrial(workerUser, '2026-08-26').ok, true, '行政本人應可登記今天試上');
+assert.equal(saveTrial(workerUser, '2026-09-10').ok, true, '行政本人應可預先登記未來試上');
+assert.match(saveTrial(workerUser, '2026-08-25').error, /過去日期屬補登/, '行政本人不得自行補登過去試上');
+assert.match(saveTrial(managerUser, '2026-08-25').error, /填寫原因/, '主管補登過去試上必須填原因');
+assert.equal(saveTrial(managerUser, '2026-08-25', '家長訊息延遲轉交').ok, true, '小魚應可填原因後補登過去試上');
+
 assert.throws(() => context.validateAdminMarketingRecord_('trial', {
   ...trial, id: 'trial-missing-next', nextFollowupDate: '', status: 'considering',
 }), /下一次追蹤日期/);
