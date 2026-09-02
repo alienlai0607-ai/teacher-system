@@ -796,6 +796,9 @@
     persistError: '',
     lastPersistOk: !loadStateIssue,
     lastPersistAt: state.ui.lastSavedAt || '',
+    cloudDeliveryStatus: 'idle',
+    cloudDeliveryResult: null,
+    cloudDeliveryCheckedAt: '',
   };
   let integrationRuntime = {
     checking: false,
@@ -4986,14 +4989,56 @@
     const hasBad = checks.some(item => item.tone === 'bad');
     const hasWarn = checks.some(item => item.tone === 'warn');
     const headline = hasBad ? ['系統需要處理', 'danger', 'triangle-alert'] : hasWarn ? ['系統可使用，但有提醒', 'info', 'circle-alert'] : ['系統健康', 'success', 'badge-check'];
-    return `<div class="stack"><div class="notice-band ${headline[1]}">${icon(headline[2], 20)}<div><div class="notice-title">${headline[0]}</div><div class="notice-copy">檢查資料讀取、即時草稿、照片容量與最近儲存結果。</div></div></div><div class="health-check-list">${checks.map(item => `<div class="health-check-row ${item.tone}"><span class="health-check-icon">${icon(item.tone === 'good' ? 'check' : item.tone === 'warn' ? 'alert-triangle' : 'x', 14)}</span><div><strong>${esc(item.label)}</strong><small>${esc(item.copy)}</small></div><span class="health-check-value">${esc(item.value)}</span></div>`).join('')}</div><div class="notice-band info">${icon('shield-check', 19)}<div><div class="notice-title">資料保護機制已啟用</div><div class="notice-copy">完整資料儲存失敗時，系統會另存不含照片的文字安全備份，避免重新開啟後整筆消失。</div></div></div></div>`;
+    return `<div class="stack"><div class="notice-band ${headline[1]}">${icon(headline[2], 20)}<div><div class="notice-title">${headline[0]}</div><div class="notice-copy">檢查資料讀取、即時草稿、照片容量與最近儲存結果。</div></div></div><div class="health-check-list">${checks.map(item => `<div class="health-check-row ${item.tone}"><span class="health-check-icon">${icon(item.tone === 'good' ? 'check' : item.tone === 'warn' ? 'alert-triangle' : 'x', 14)}</span><div><strong>${esc(item.label)}</strong><small>${esc(item.copy)}</small></div><span class="health-check-value">${esc(item.value)}</span></div>`).join('')}</div>${renderCloudDeliveryCheck()}<div class="notice-band info">${icon('shield-check', 19)}<div><div class="notice-title">資料保護機制已啟用</div><div class="notice-copy">完整資料儲存失敗時，系統會另存不含照片的文字安全備份，避免重新開啟後整筆消失。</div></div></div></div>`;
+  }
+
+  function renderCloudDeliveryCheck() {
+    const session = legacySession();
+    if (!session || session.role !== 'admin' || window.AUTH?.isImpersonating?.()) return '';
+    if (runtimeHealth.cloudDeliveryStatus === 'running') {
+      return `<section class="health-delivery-section"><div class="notice-band info">${icon('loader-circle', 19)}<div><div class="notice-title">正在執行雲端實際交付驗收</div><div class="notice-copy">正在真實寫入並讀回試算表、照片預覽與教材檔案，請不要關閉此視窗。</div></div></div></section>`;
+    }
+    const result = runtimeHealth.cloudDeliveryResult;
+    if (!result) {
+      return `<section class="health-delivery-section"><div class="notice-band warning">${icon('cloud-cog', 19)}<div><div class="notice-title">雲端實際交付尚未驗收</div><div class="notice-copy">一般連線成功不等於資料能交付。請按下方按鈕，實際驗證寫入、讀回、照片預覽、教材與清理。</div></div></div></section>`;
+    }
+    const items = Array.isArray(result.checks) ? result.checks : [];
+    const passed = Number(result.summary?.passed || items.filter(item => item.ok).length || 0);
+    const total = Number(result.summary?.total || items.length || 0);
+    const allPassed = Boolean(result.ok && total > 0 && passed === total);
+    return `<section class="health-delivery-section"><div class="notice-band ${allPassed ? 'success' : 'danger'}">${icon(allPassed ? 'cloud-check' : 'cloud-alert', 19)}<div><div class="notice-title">雲端實際交付：${allPassed ? `${passed}/${total} 項通過` : `${passed}/${total} 項通過，仍有失敗`}</div><div class="notice-copy">${esc(runtimeHealth.cloudDeliveryCheckedAt || result.checked_at || '')}${result.elapsed_ms != null ? ` · 共 ${esc(String(result.elapsed_ms))} ms` : ''}</div></div></div><div class="health-check-list">${items.map(item => `<div class="health-check-row ${item.ok ? 'good' : 'bad'}"><span class="health-check-icon">${icon(item.ok ? 'check' : 'x', 14)}</span><div><strong>${esc(item.label || item.id || '未命名檢查')}</strong><small>${esc(item.ok ? '已實際寫入、讀回並完成本次測試資料清理。' : (item.error || '驗收失敗'))}</small></div><span class="health-check-value">${item.ok ? `${esc(String(item.elapsed_ms || 0))} ms` : '失敗'}</span></div>`).join('')}</div></section>`;
+  }
+
+  async function runCloudDeliveryCheck() {
+    const session = legacySession();
+    if (!session || session.role !== 'admin' || window.AUTH?.isImpersonating?.()) {
+      toast('只有柏翰管理員的正式帳號可以執行雲端實際交付驗收', 'danger');
+      return;
+    }
+    if (!window.API?.runProductionIntegrityCheck) {
+      toast('雲端實際交付驗收服務尚未載入，請重新整理後再試', 'danger');
+      return;
+    }
+    if (runtimeHealth.cloudDeliveryStatus === 'running') return;
+    runtimeHealth.cloudDeliveryStatus = 'running';
+    openHealthDialog();
+    const result = await API.runProductionIntegrityCheck();
+    runtimeHealth.cloudDeliveryResult = result || { ok: false, checks: [], error: '驗收服務沒有回傳結果' };
+    runtimeHealth.cloudDeliveryCheckedAt = result?.checked_at || new Date().toISOString();
+    runtimeHealth.cloudDeliveryStatus = result?.ok ? 'passed' : 'failed';
+    openHealthDialog();
+    toast(result?.ok ? '雲端實際交付全部通過' : `雲端實際交付仍有失敗：${result?.error || '請查看逐項結果'}`, result?.ok ? 'success' : 'danger');
   }
 
   function openHealthDialog() {
+    const session = legacySession();
+    const cloudCheckButton = session?.role === 'admin' && !window.AUTH?.isImpersonating?.()
+      ? `<button type="button" class="btn btn-primary" data-action="run-cloud-delivery-check" ${runtimeHealth.cloudDeliveryStatus === 'running' ? 'disabled' : ''}>${icon('cloud-check', 15)}${runtimeHealth.cloudDeliveryStatus === 'running' ? '驗收中' : '實測雲端交付'}</button>`
+      : '';
     openDialog({
       title: '系統健康檢查',
       body: renderHealthCheckBody(),
-      footer: `<button type="button" class="btn" data-action="run-health-check">${icon('refresh-cw', 15)}重新檢查</button><button type="button" class="btn btn-primary" data-action="close-dialog">完成</button>`,
+      footer: `<button type="button" class="btn" data-action="run-health-check">${icon('refresh-cw', 15)}重新檢查</button>${cloudCheckButton}<button type="button" class="btn" data-action="close-dialog">完成</button>`,
     });
   }
 
@@ -7207,6 +7252,7 @@
       window.location.href = `${root}admin/dashboard.html?v=20260827-test-view-fast-1#test-view`;
     }
     else if (action === 'open-health' || action === 'run-health-check') openHealthDialog();
+    else if (action === 'run-cloud-delivery-check') await runCloudDeliveryCheck();
     else if (action === 'check-integrations') await checkIntegrations();
     else if (action === 'open-formal-login') {
       window.location.href = loginReturnPath();
@@ -7353,7 +7399,7 @@
       try { sessionStorage.removeItem(DRAFT_KEY); } catch (error) { /* no-op */ }
       openDraftStore = {};
       state = createSeed();
-      runtimeHealth = { loadIssue: '', persistError: '', lastPersistOk: true, lastPersistAt: '' };
+      runtimeHealth = { loadIssue: '', persistError: '', lastPersistOk: true, lastPersistAt: '', cloudDeliveryStatus: 'idle', cloudDeliveryResult: null, cloudDeliveryCheckedAt: '' };
       closeDialog(); closeDrawer(); persist(); renderApp(); toast('審查資料已清空', 'success');
     }
     else if (action === 'confirm-delete') await confirmDelete(control.dataset.kind, control.dataset.id, control.dataset.parentId, $('[data-delete-confirm-name]')?.value || '');

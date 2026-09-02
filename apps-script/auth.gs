@@ -312,6 +312,7 @@ function authorizeTaskResource_(actor, taskId, deleting) {
 function authorizeApiAction_(action, params, actor) {
   const adminOnly = [
     'addUser', 'updateUser', 'approveUser', 'deleteUser', 'setConfig', 'setupSystemAutomation',
+    'runProductionIntegrityCheck',
     'cleanupDuplicateEvidence', 'adminStampSubmitted', 'adminBroadcast',
     'sendDailyKpiPdf', 'setupSheets', 'purgeTestData', 'approveTalentBonus'
   ];

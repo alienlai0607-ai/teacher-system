@@ -203,6 +203,7 @@ window.API = (function () {
     addAdminMarketingMessage: (nickname, month, text) => call('addAdminMarketingMessage', { nickname, month, text }),
     setConfig: (data) => call('setConfig', data),
     getSystemReadiness: (operator) => call('getSystemReadiness', { operator }),
+    runProductionIntegrityCheck: () => call('runProductionIntegrityCheck'),
     setupSystemAutomation: (operator) => call('setupSystemAutomation', { operator }),
     testMyNotifications: (operator) => call('testMyNotifications', { operator }),
     registerPushSubscription: (subscriptionId) => call('registerPushSubscription', { subscription_id: subscriptionId }),

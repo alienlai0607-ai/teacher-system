@@ -1,8 +1,8 @@
 /**
- * 布拉克星球 KPI 系統 - 合併版（All-in-One v8）
+ * 布拉克星球 KPI 系統 - 合併版（All-in-One v9）
  * 觸發詞：kpi系統
  * 此檔由 apps-script 各模組機械式合併，請勿單獨修改。
- * 合併日期：2026-09-01
+ * 合併日期：2026-09-02
  */
 
 // ════════════════════════════════════════════════════════════
@@ -147,6 +147,7 @@ function handleRequest(e, method) {
       // 事項
       'setConfig': () => setConfig(params),
       'getSystemReadiness': () => getSystemReadiness(params),
+      'runProductionIntegrityCheck': () => runProductionIntegrityCheck(params),
       'setupSystemAutomation': () => setupSystemAutomation(params),
       'testMyNotifications': () => testMyNotifications(params),
       'registerPushSubscription': () => registerPushSubscription(params),
@@ -1414,6 +1415,7 @@ function authorizeTaskResource_(actor, taskId, deleting) {
 function authorizeApiAction_(action, params, actor) {
   const adminOnly = [
     'addUser', 'updateUser', 'approveUser', 'deleteUser', 'setConfig', 'setupSystemAutomation',
+    'runProductionIntegrityCheck',
     'cleanupDuplicateEvidence', 'adminStampSubmitted', 'adminBroadcast',
     'sendDailyKpiPdf', 'setupSheets', 'purgeTestData', 'approveTalentBonus'
   ];
@@ -3556,6 +3558,147 @@ function getSystemReadiness(params) {
       dailyTaskReminder: triggers.indexOf('sendMorningReminders') >= 0 && triggers.indexOf('sendEveningPreview') >= 0,
       talentPdfRepair: triggers.indexOf('repairMissingTalentLessonReportsAuto') >= 0,
     },
+  };
+}
+
+/**
+ * 管理員手動執行的正式環境實際交付驗收。
+ * 每一項都會真的寫入後再讀回，並只清除本次建立的 QA 資料。
+ */
+function runProductionIntegrityCheck(params) {
+  const actor = params && params.__actor ? params.__actor : systemMaintenanceUser_(params);
+  if (!actor || actor.role !== 'admin' || actor.status !== 'active') {
+    return { ok: false, error: '只有啟用中的管理員可以執行正式環境驗收' };
+  }
+
+  const startedAtMs = Date.now();
+  const runId = 'QA-' + Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyyMMdd-HHmmss') + '-' + Utilities.getUuid().slice(0, 8);
+  const checks = [];
+  const lock = LockService.getScriptLock();
+
+  function requireCheck_(condition, message) {
+    if (!condition) throw new Error(message);
+  }
+
+  function runCheck_(id, label, runner) {
+    const checkStartedAt = Date.now();
+    try {
+      const detail = runner() || {};
+      checks.push({
+        id: id,
+        label: label,
+        ok: true,
+        elapsed_ms: Date.now() - checkStartedAt,
+        detail: detail,
+      });
+    } catch (error) {
+      checks.push({
+        id: id,
+        label: label,
+        ok: false,
+        elapsed_ms: Date.now() - checkStartedAt,
+        error: String(error && error.message || error || '未知錯誤'),
+      });
+    }
+  }
+
+  if (!lock.tryLock(15000)) {
+    return { ok: false, error: '系統正在處理其他雲端寫入，請稍後再執行驗收' };
+  }
+
+  try {
+    runCheck_('session_identity', '正式登入身分', function () {
+      const storedUser = findUserByNickname(actor.nickname);
+      requireCheck_(storedUser && storedUser.status === 'active', '登入帳號未在正式人員名單啟用');
+      requireCheck_(storedUser.role === 'admin', '正式帳號不是管理員角色');
+      return { nickname: storedUser.nickname, role: storedUser.role };
+    });
+
+    runCheck_('spreadsheet_roundtrip', '試算表寫入、讀回與清理', function () {
+      const payload = {
+        runId: runId,
+        message: '布拉克星球 KPI 雲端交付驗收',
+        count: 3,
+        flags: [true, false, true],
+      };
+      const rowNumber = appendRow(SHEET_NAMES.SYSTEM_LOG, {
+        timestamp: nowIso(),
+        nickname: actor.nickname,
+        action: 'production_integrity_check',
+        target: runId,
+        detail: payload,
+        ip: '',
+      });
+      try {
+        SpreadsheetApp.flush();
+        const row = findObject(SHEET_NAMES.SYSTEM_LOG, 'target', runId);
+        requireCheck_(row && row._row === rowNumber, '測試列寫入後無法由唯一編號讀回');
+        const restored = parseJsonField(row.detail);
+        requireCheck_(restored && restored.runId === payload.runId, 'JSON 物件讀回內容不一致');
+        requireCheck_(restored.message === payload.message && Number(restored.count) === payload.count, '中文或數值資料讀回內容不一致');
+      } finally {
+        const row = findObject(SHEET_NAMES.SYSTEM_LOG, 'target', runId);
+        if (row && row._row > 1) deleteRow(SHEET_NAMES.SYSTEM_LOG, row._row);
+      }
+      SpreadsheetApp.flush();
+      requireCheck_(findRow(SHEET_NAMES.SYSTEM_LOG, 'target', runId) < 0, '測試列清理失敗');
+      return { sheet: SHEET_NAMES.SYSTEM_LOG, roundtrip: 'passed', cleanup: 'passed' };
+    });
+
+    runCheck_('photo_roundtrip', '照片建立、讀回與私密預覽', function () {
+      const root = getEvidenceRootFolder_();
+      const qaFolder = getOrCreateChildFolder_(root, '_系統健康檢查');
+      const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+      const filename = runId + '-photo.png';
+      const file = qaFolder.createFile(Utilities.newBlob(Utilities.base64Decode(pngBase64), 'image/png', filename));
+      try {
+        secureKpiDriveItem_(file, actor, 'anqin', []);
+        const fileId = file.getId();
+        const stored = DriveApp.getFileById(fileId);
+        requireCheck_(stored.getName() === filename, '照片建立後檔名不一致');
+        requireCheck_(stored.getBlob().getBytes().length > 0, '照片建立後內容為空');
+        const preview = getAttachmentPreviews({ __actor: actor, file_ids: [fileId] });
+        requireCheck_(preview && preview.ok, '私密照片預覽端點執行失敗');
+        requireCheck_(Array.isArray(preview.previews) && preview.previews.length === 1, '私密照片預覽未回傳圖片');
+        requireCheck_(/^data:image\//.test(String(preview.previews[0].dataUrl || '')), '照片預覽不是可顯示的影像資料');
+      } finally {
+        file.setTrashed(true);
+      }
+      requireCheck_(file.isTrashed(), '測試照片清理失敗');
+      return { format: 'image/png', preview: 'passed', privacy: 'private', cleanup: 'passed' };
+    });
+
+    runCheck_('material_roundtrip', '教材檔案建立、讀回與內容核對', function () {
+      const root = getMaterialRootFolder_();
+      const qaFolder = getOrCreateChildFolder_(root, '_系統健康檢查');
+      const content = 'run=' + runId + '\n布拉克星球 KPI 教材交付驗收\n內容完整';
+      const filename = runId + '-material.txt';
+      const file = qaFolder.createFile(Utilities.newBlob(content, 'text/plain', filename));
+      try {
+        secureKpiDriveItem_(file, actor, 'anqin', []);
+        const stored = DriveApp.getFileById(file.getId());
+        requireCheck_(stored.getName() === filename, '教材建立後檔名不一致');
+        requireCheck_(stored.getBlob().getDataAsString('UTF-8') === content, '教材建立後內容與原始內容不一致');
+        requireCheck_(stored.getSize() > 0, '教材建立後檔案大小為 0');
+      } finally {
+        file.setTrashed(true);
+      }
+      requireCheck_(file.isTrashed(), '測試教材清理失敗');
+      return { format: 'text/plain', content_match: true, privacy: 'private', cleanup: 'passed' };
+    });
+  } finally {
+    lock.releaseLock();
+  }
+
+  const passed = checks.filter(function (check) { return check.ok; }).length;
+  const failed = checks.length - passed;
+  return {
+    ok: failed === 0,
+    run_id: runId,
+    checked_at: nowIso(),
+    elapsed_ms: Date.now() - startedAtMs,
+    summary: { total: checks.length, passed: passed, failed: failed },
+    checks: checks,
   };
 }
 

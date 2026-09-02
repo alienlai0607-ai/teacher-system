@@ -136,6 +136,7 @@ function handleRequest(e, method) {
       // 事項
       'setConfig': () => setConfig(params),
       'getSystemReadiness': () => getSystemReadiness(params),
+      'runProductionIntegrityCheck': () => runProductionIntegrityCheck(params),
       'setupSystemAutomation': () => setupSystemAutomation(params),
       'testMyNotifications': () => testMyNotifications(params),
       'registerPushSubscription': () => registerPushSubscription(params),
