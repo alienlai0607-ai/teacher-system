@@ -11,7 +11,7 @@
       shortLabel: '安親',
       description: '安親工作紀錄與班務',
       icon: 'book-open-check',
-      path: 'review/anqin-v2/index.html?v=20260902-anqin-stability-6',
+      path: 'review/anqin-v2/index.html?v=20260902-anqin-live-tasks-1',
     },
     'anqin-manager': {
       id: 'anqin-manager',
@@ -20,7 +20,7 @@
       shortLabel: '安親主管',
       description: '安親審核與主管管理',
       icon: 'clipboard-check',
-      path: 'review/anqin-v2/index.html?v=20260902-anqin-stability-6',
+      path: 'review/anqin-v2/index.html?v=20260902-anqin-live-tasks-1',
     },
     'talent-fulltime': {
       id: 'talent-fulltime',

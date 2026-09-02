@@ -655,6 +655,11 @@
     ['people', 'activities', 'studentCases', 'contacts', 'lessonPlans', 'tasks', 'submissions', 'managerNotes'].forEach(key => {
       if (!Array.isArray(parsed[key])) parsed[key] = clone(seed[key] || []);
     });
+    parsed.tasks.forEach(task => {
+      const ref = derivedTaskRef(task, parsed);
+      if (ref) task.ref = ref;
+      if (task.status === 'done') applyTaskStatusToLinkedRecord(task, parsed, false);
+    });
     const previousTeacher = parsed.context.teacher;
     const previousDepartment = parsed.context.department;
     const activeTeacher = STAFF_ROSTER.find(person => person.nickname === parsed.context.teacher && person.canTeach)
@@ -1630,7 +1635,7 @@
       dailyRows.push([state.daily.date, state.daily.submittedAt ? '已提交' : '草稿', summary.keyResult, summary.followup, summary.tomorrowPriority, state.daily.summary.teacherNote || '', state.daily.parentStatus === 'recorded' ? '有重要事項' : state.daily.parentHandoffConfirmed ? '無重要事項／已門口交接' : '', state.daily.parentHandoffNote || '', '']);
       dailyRows.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
     }
-    rows.push(['【每日彙整】'], ['日期', '狀態', '今日成果', '持續追蹤', '最近待辦', '老師補充', '親師狀態', '門口交接備註', '主管與老師對話'], ...dailyRows, []);
+    rows.push(['【每日彙整】'], ['日期', '狀態', '今日成果', '持續追蹤', '待辦摘要（送出快照）', '老師補充', '親師狀態', '門口交接備註', '主管與老師對話'], ...dailyRows, []);
 
     const activities = state.activities.filter(item => item.teacher === teacher && item.type !== 'lessonprep' && inMonth(item.date)).slice().sort(byDate);
     rows.push(['【工作紀錄明細】'], ['日期', '分類', '工作類型', '標題', '孩子共鳴環節', '教案／教材更新', '班級經營目標', '班級經營做法', '班級經營結果', '班級經營問題', '班級經營下一步', '追蹤日期', '備課檔案', '成果份數', '成果對話']);
@@ -2359,7 +2364,7 @@
         <div class="summary-list">
           <div class="summary-line"><span class="summary-index">1</span><div><div class="summary-title">今日成果</div><div class="summary-copy">${esc(truncate(summary.keyResult, 140))}</div></div></div>
           <div class="summary-line"><span class="summary-index">2</span><div><div class="summary-title">持續追蹤</div><div class="summary-copy">${esc(truncate(summary.followup, 120))}</div></div></div>
-          <div class="summary-line"><span class="summary-index">3</span><div><div class="summary-title">最近待辦</div><div class="summary-copy">${esc(truncate(summary.tomorrowPriority, 120))}</div></div></div>
+          <div class="summary-line"><span class="summary-index">3</span><div><div class="summary-title">目前待辦（即時）</div><div class="summary-copy">${esc(truncate(summary.tomorrowPriority, 120))}</div><div class="text-tiny muted mt-4">勾選完成後會立即從這裡移除。</div></div></div>
         </div>
       </div>
     </section>`;
@@ -2409,12 +2414,15 @@
   function renderStudentCaseRow(item) {
     const urgency = item.urgency === 'high' ? ['高優先', 'red'] : item.urgency === 'medium' ? ['持續追蹤', 'yellow'] : ['一般', 'blue'];
     const category = { learning: '學習', behavior: '行為／情緒', attendance: '出席', peer: '同儕互動', health: '健康' }[item.category] || item.category;
-    return `<article class="activity-row">
+    const closed = item.status === 'closed';
+    const status = closed ? ['已結案', 'green'] : urgency;
+    return `<article class="activity-row ${closed ? 'is-complete' : ''}">
       <div class="activity-icon classroom">${icon('user-round', 20)}</div>
       <div class="activity-main">
-        <div class="activity-title-row"><span class="activity-title">${esc(item.student)}</span><span class="badge ${urgency[1]}">${urgency[0]}</span><span class="badge outline">${esc(category)}</span></div>
-        <div class="activity-outcome"><strong>觀察：</strong>${esc(item.observation)}</div>
-        <div class="activity-meta">下次追蹤 ${formatDate(item.dueDate)} · ${item.parentContacted ? '已同步家長' : '尚未同步家長'}</div>
+        <div class="activity-title-row"><span class="activity-title">${esc(item.student)}</span><span class="badge ${status[1]}">${status[0]}</span><span class="badge outline">${esc(category)}</span></div>
+        <div class="activity-outcome"><strong>${closed ? '結案結果' : '目前結果'}：</strong>${esc(item.outcome || item.observation)}</div>
+        ${closed ? '' : `<div class="activity-glance"><strong>下一步</strong><span>${esc(item.nextAction || '尚未填寫')}</span></div>`}
+        <div class="activity-meta">${closed ? `已完成追蹤${item.updatedAt ? ` · ${formatDate(String(item.updatedAt).slice(0, 10))}` : ''}` : `下次追蹤 ${formatDate(item.dueDate)}`} · ${item.parentContacted ? '已同步家長' : '尚未同步家長'}</div>
       </div>
       <div class="activity-actions">${feedbackThreadMessages(feedbackThreadKey('case', item.id)).length ? `<button type="button" class="icon-button" data-action="open-case-detail" data-case-id="${item.id}" aria-label="查看主管對話" title="主管對話">${icon('messages-square', 16)}</button>` : ''}<button type="button" class="icon-button" data-action="edit-student-case" data-case-id="${item.id}" aria-label="編輯學生追蹤" title="編輯學生追蹤">${icon('pencil', 16)}</button></div>
     </article>`;
@@ -2517,7 +2525,7 @@
             <div class="summary-list">
               <div class="summary-line"><span class="summary-index">1</span><div><div class="summary-title">今日成果</div><div class="summary-copy">${esc(summary.keyResult)}</div></div></div>
               <div class="summary-line"><span class="summary-index">2</span><div><div class="summary-title">需持續追蹤</div><div class="summary-copy">${esc(summary.followup)}</div></div></div>
-              <div class="summary-line"><span class="summary-index">3</span><div><div class="summary-title">最近待辦</div><div class="summary-copy">${esc(summary.tomorrowPriority)}</div></div></div>
+              <div class="summary-line"><span class="summary-index">3</span><div><div class="summary-title">目前待辦（即時）</div><div class="summary-copy">${esc(summary.tomorrowPriority)}</div><div class="text-tiny muted mt-4">此處會依目前未完成事項即時更新。</div></div></div>
             </div>
             <div class="form-field mt-16"><label class="form-label" for="summary-teacher-note">給主管補充（選填）</label><textarea id="summary-teacher-note" name="teacherNote" placeholder="補充紀錄未呈現的背景或需要主管協助的事項。">${esc(state.daily.summary.teacherNote || '')}</textarea></div>
             <div class="flex gap-8 mt-16"><button type="button" class="btn btn-primary" data-action="submit-daily" ${blockers.length || submitting ? 'disabled' : ''}>${icon(submitting || state.daily.submittedAt || needsResubmit ? 'refresh-cw' : 'send', 16)}${submitting ? '正在送出' : needsResubmit ? '重新送出' : state.daily.submittedAt ? '更新送出' : '確認送出'}</button></div>
@@ -4170,7 +4178,7 @@
           if (plan && cloudDecisionIsCurrent(latestDecision.created_at, plan.updatedAt)) {
             plan.status = needsChanges ? 'changes' : 'approved'; plan.managerFeedback = latestDecision.content || '';
             if (teacherOwnsThread && needsChanges) upsertDerivedTask(`plan:${id}`, `修正教案「${plan.title}」：${latestDecision.content || ''}`, '主管交辦', plan.teacher, addDays(state.daily.date, 2), 'high');
-            if (teacherOwnsThread && !needsChanges) { const task = state.tasks.find(item => item.ref === `plan:${id}`); if (task) { task.status = 'done'; scheduleTaskCloudSync(task); } }
+            if (teacherOwnsThread && !needsChanges) { const task = state.tasks.find(item => item.ref === `plan:${id}`); if (task) setTaskStatus(task, 'done'); }
           }
         }
         if (kind === 'evidence') {
@@ -4179,7 +4187,7 @@
           if (evidence && cloudDecisionIsCurrent(latestDecision.created_at, evidence.updatedAt)) {
             evidence.status = needsChanges ? 'clarify' : 'accepted'; evidence.managerFeedback = latestDecision.content || '';
             if (teacherOwnsThread && needsChanges) upsertDerivedTask(`evidence:${secondaryId}`, `補充證據「${evidence.title}」：${latestDecision.content || ''}`, '主管交辦', activity.teacher, addDays(state.daily.date, 1), 'high');
-            if (teacherOwnsThread && !needsChanges) { const task = state.tasks.find(item => item.ref === `evidence:${secondaryId}`); if (task) { task.status = 'done'; scheduleTaskCloudSync(task); } }
+            if (teacherOwnsThread && !needsChanges) { const task = state.tasks.find(item => item.ref === `evidence:${secondaryId}`); if (task) setTaskStatus(task, 'done'); }
           }
         }
         if (kind === 'operation') {
@@ -4187,7 +4195,7 @@
           if (operation && cloudDecisionIsCurrent(latestDecision.created_at, operation.updatedAt)) {
             operation.reviewStatus = needsChanges ? 'clarify' : 'accepted'; operation.managerFeedback = latestDecision.content || '';
             if (teacherOwnsThread && needsChanges) upsertDerivedTask(`operations:${id}`, `補充 ${formatShortDate(operation.date)} 班務證據：${latestDecision.content || ''}`, '主管交辦', operation.dutyOwner, addDays(state.daily.date, 1), 'high');
-            if (teacherOwnsThread && !needsChanges) { const task = state.tasks.find(item => item.ref === `operations:${id}`); if (task) { task.status = 'done'; scheduleTaskCloudSync(task); } }
+            if (teacherOwnsThread && !needsChanges) { const task = state.tasks.find(item => item.ref === `operations:${id}`); if (task) setTaskStatus(task, 'done'); }
           }
         }
       }
@@ -4235,6 +4243,10 @@
       if (importCloudSnapshot(log?.kpi6_data?.v2_snapshot, log?.attachments || [])) imported += 1;
     });
     const prepSync = await syncCoursePrepsFromCloud(session);
+    state.tasks
+      .filter(task => task.owner === state.context.teacher && ['pending', 'error'].includes(task.cloudSyncStatus))
+      .forEach(task => pendingTaskSyncIds.add(task.id));
+    await flushTaskCloudSync();
     const taskSync = await syncTasksFromCloud(session);
     const threads = await syncCloudFeedback(session);
     integrationRuntime.cloudStatus = 'saved';
@@ -4752,7 +4764,7 @@
     const threadKey = feedbackThreadKey('submission', submission.id);
     const showThread = !readOnly || feedbackThreadMessages(threadKey).length > 0;
     return `<div class="stack">
-      <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('sparkles')}主管摘要</div><div class="panel-subtitle">${esc(submission.teacher)} · ${formatDate(submission.date)} · ${formatTime(submission.submittedAt)} · 系統依原始紀錄彙整</div></div>${reviewStatusBadge(submission.status)}</div><div class="panel-body"><div class="summary-list"><div class="summary-line"><span class="summary-index">1</span><div><div class="summary-title">今日成果</div><div class="summary-copy">${esc(submission.keyResult)}</div></div></div><div class="summary-line"><span class="summary-index">2</span><div><div class="summary-title">需追蹤</div><div class="summary-copy">${esc(submission.followup)}</div></div></div><div class="summary-line"><span class="summary-index">3</span><div><div class="summary-title">最近待辦</div><div class="summary-copy">${esc(submission.tomorrowPriority)}</div></div></div>${submission.teacherNote ? `<div class="summary-line"><span class="summary-index">4</span><div><div class="summary-title">老師補充</div><div class="summary-copy">${esc(submission.teacherNote)}</div></div></div>` : ''}</div></div></section>
+      <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('sparkles')}主管摘要</div><div class="panel-subtitle">${esc(submission.teacher)} · ${formatDate(submission.date)} · ${formatTime(submission.submittedAt)} · 系統依原始紀錄彙整</div></div>${reviewStatusBadge(submission.status)}</div><div class="panel-body"><div class="summary-list"><div class="summary-line"><span class="summary-index">1</span><div><div class="summary-title">今日成果</div><div class="summary-copy">${esc(submission.keyResult)}</div></div></div><div class="summary-line"><span class="summary-index">2</span><div><div class="summary-title">需追蹤</div><div class="summary-copy">${esc(submission.followup)}</div></div></div><div class="summary-line"><span class="summary-index">3</span><div><div class="summary-title">送出當時待辦（快照）</div><div class="summary-copy">${esc(submission.tomorrowPriority)}</div><div class="text-tiny muted mt-4">保留 ${formatDate(submission.date)} 送出當時內容；之後完成待辦不會改寫歷史紀錄。</div></div></div>${submission.teacherNote ? `<div class="summary-line"><span class="summary-index">4</span><div><div class="summary-title">老師補充</div><div class="summary-copy">${esc(submission.teacherNote)}</div></div></div>` : ''}</div></div></section>
       <div class="status-strip"><div class="status-cell"><div class="status-label">學科內／學科外</div><div class="status-value">${tracks.academic.count}/${tracks.enrichment.count}</div><div class="status-note">每日兩類至少擇一</div></div><div class="status-cell"><div class="status-label">備課檔案／成果</div><div class="status-value">${prepReady}/${prepRequired.length} · ${evidence}</div></div><div class="status-cell"><div class="status-label">學生追蹤</div><div class="status-value">${cases.length}</div></div><div class="status-cell"><div class="status-label">親師溝通</div><div class="status-value">${contacts.length}</div></div></div>
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-list')}工作與證據</div><div class="panel-subtitle">點選任一筆查看送出當下的完整內容</div></div></div><div class="panel-body">${activities.length ? `<div class="archived-activity-list">${activities.map(item => renderArchivedActivityRow(item, submission.id)).join('')}</div>` : `<div class="notice-band danger">${icon('file-question', 19)}<div><div class="notice-title">沒有可追溯的工作事件</div><div class="notice-copy">摘要無法連回班級、教學方法、學生結果與原始證據。</div></div></div>`}</div></section>
       <div class="detail-split"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('user-round-search')}學生追蹤</div></div></div><div class="panel-body">${cases.length ? `<div class="metadata-list">${cases.map(item => `<div class="metadata-row"><div class="metadata-label">${esc(item.student)}</div><div class="metadata-value">${esc(item.observation)}<br><span class="muted">下一步：${esc(item.nextAction)}</span></div></div>`).join('')}</div>` : '<div class="text-small muted">當日無學生追蹤紀錄。</div>'}</div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('messages-square')}親師溝通</div></div></div><div class="panel-body">${contacts.length ? `<div class="metadata-list">${contacts.map(item => `<div class="metadata-row"><div class="metadata-label">${esc(item.student)}</div><div class="metadata-value">${esc(item.summary)}<br><span class="muted">共識與後續：${esc([item.decision, item.nextAction].filter(Boolean).join('；'))}</span></div></div>`).join('')}</div>` : submission.parentHandoffConfirmed ? `<div class="notice-band success">${icon('hand-heart', 18)}<div><div class="notice-title">無重要事項，已親自完成門口交接</div><div class="notice-copy">${esc(submission.parentHandoffNote || '老師已確認完成交接')}</div></div></div>` : '<div class="text-small muted">當日沒有親師溝通或門口交接確認。</div>'}</div></section></div>
@@ -5551,7 +5563,7 @@
       student: data.get('student'), category: data.get('category'), urgency: data.get('urgency'),
       observation: data.get('observation').trim(), intervention: data.get('intervention').trim(), outcome: data.get('outcome').trim(),
       nextAction: data.get('nextAction').trim(), dueDate: data.get('dueDate'), status: data.get('status'),
-      parentContacted: data.get('parentContacted') === 'on',
+      parentContacted: data.get('parentContacted') === 'on', updatedAt: new Date().toISOString(),
     };
     if (existing) Object.assign(existing, item);
     else state.studentCases.unshift(item);
@@ -5570,7 +5582,7 @@
     const item = {
       id, date: existing ? existing.date : state.daily.date, teacher: existing ? existing.teacher : state.context.teacher,
       student: data.get('student'), channel: data.get('channel'), topic: String(data.get('topic') || '').trim(), summary: String(data.get('summary') || '').trim(),
-      decision: String(data.get('decision') || '').trim(), nextAction: '', dueDate: data.get('dueDate'), status: data.get('status'),
+      decision: String(data.get('decision') || '').trim(), nextAction: '', dueDate: data.get('dueDate'), status: data.get('status'), updatedAt: new Date().toISOString(),
     };
     if (existing) Object.assign(existing, item);
     else state.contacts.unshift(item);
@@ -5674,6 +5686,62 @@
     return `v2_${String(ref || '').replace(/[^a-zA-Z0-9_-]+/g, '_')}`;
   }
 
+  function derivedTaskRef(task, sourceState = state) {
+    const explicitRef = String(task?.ref || '').trim();
+    if (explicitRef) return explicitRef;
+    const taskIds = [task?.id, task?.cloudTaskId].filter(Boolean).map(String);
+    const candidates = [
+      ...((sourceState?.studentCases || []).map(item => `case:${item.id}`)),
+      ...((sourceState?.contacts || []).map(item => `contact:${item.id}`)),
+      ...((sourceState?.activities || []).map(item => `activity:${item.id}`)),
+    ];
+    return candidates.find(ref => taskIds.includes(derivedTaskCloudId(ref))) || '';
+  }
+
+  function linkedTrackingRecord(task, sourceState = state) {
+    const ref = derivedTaskRef(task, sourceState);
+    if (!ref) return null;
+    const separator = ref.indexOf(':');
+    if (separator < 0) return null;
+    const kind = ref.slice(0, separator);
+    const id = ref.slice(separator + 1);
+    if (kind === 'case') {
+      const record = (sourceState.studentCases || []).find(item => item.id === id);
+      return record ? { kind, ref, record } : null;
+    }
+    if (kind === 'contact') {
+      const record = (sourceState.contacts || []).find(item => item.id === id);
+      return record ? { kind, ref, record } : null;
+    }
+    return null;
+  }
+
+  function applyTaskStatusToLinkedRecord(task, sourceState = state, allowReopen = true) {
+    const linked = linkedTrackingRecord(task, sourceState);
+    if (!linked) return null;
+    if (task.status === 'done') linked.record.status = 'closed';
+    else if (allowReopen) linked.record.status = 'open';
+    if (!task.ref) task.ref = linked.ref;
+    return linked.record;
+  }
+
+  function setTaskStatus(task, status, options = {}) {
+    if (!task) return null;
+    const nextStatus = status === 'done' ? 'done' : 'open';
+    const changed = task.status !== nextStatus;
+    task.status = nextStatus;
+    task.localUpdatedAt = new Date().toISOString();
+    task.cloudSyncStatus = state.integration.cloudSyncEnabled ? 'pending' : 'local';
+    const linkedRecord = applyTaskStatusToLinkedRecord(task, state, true);
+    if (linkedRecord && linkedRecord.date === state.daily.date && linkedRecord.teacher === state.context.teacher) {
+      linkedRecord.updatedAt = task.localUpdatedAt;
+      markDailyNeedsResubmit(linkedRecord.date, linkedRecord.teacher);
+      scheduleDailyCloudDraftSync();
+    }
+    if (options.syncCloud !== false) scheduleTaskCloudSync(task);
+    return { changed, linkedRecord };
+  }
+
   function upsertDerivedTask(ref, title, source, owner, dueDate, priority, done = false) {
     if (!title) return;
     const deterministicId = derivedTaskCloudId(ref);
@@ -5685,7 +5753,8 @@
     } else if (matches.length > 1) {
       state.tasks = state.tasks.filter(item => item === task || !matches.includes(item));
     }
-    Object.assign(task, { ref, title, source, owner, dueDate, priority, status: done ? 'done' : 'open' });
+    Object.assign(task, { ref, title, source, owner, dueDate, priority, status: done ? 'done' : 'open', localUpdatedAt: new Date().toISOString() });
+    task.cloudSyncStatus = state.integration.cloudSyncEnabled ? 'pending' : 'local';
     scheduleTaskCloudSync(task);
     return task;
   }
@@ -5737,11 +5806,23 @@
     if (!task || !state.integration.cloudSyncEnabled) return { ok: true, localOnly: true };
     if (!cloudIdentityReady() || task.owner !== state.context.teacher) return { ok: false, error: '事項身分不符' };
     if (!window.API?.saveSelfTask) return { ok: false, error: '事項雲端服務尚未載入' };
+    const mutationStamp = String(task.localUpdatedAt || '');
     task.cloudSyncStatus = 'saving';
     const cloudTask = { ...task, source: taskDetailText(task) || task.source };
     const result = await API.saveSelfTask({ nickname: cloudTeacherNickname(), task: removeInlineMedia(cloudTask) });
-    task.cloudSyncStatus = result?.ok ? 'saved' : 'error';
-    if (result?.ok) task.cloudUpdatedAt = result.updated_at || new Date().toISOString();
+    if (result?.ok) {
+      task.cloudUpdatedAt = result.updated_at || new Date().toISOString();
+      if (String(task.localUpdatedAt || '') !== mutationStamp) {
+        task.cloudSyncStatus = 'pending';
+        pendingTaskSyncIds.add(task.id);
+        window.clearTimeout(taskSyncTimer);
+        taskSyncTimer = window.setTimeout(flushTaskCloudSync, 0);
+      } else {
+        task.cloudSyncStatus = 'saved';
+      }
+    } else {
+      task.cloudSyncStatus = 'error';
+    }
     return result;
   }
 
@@ -5763,8 +5844,10 @@
   }
 
   function scheduleTaskCloudSync(task) {
-    if (!task?.id || !state.integration.cloudSyncEnabled || !cloudIdentityReady()) return;
+    if (!task?.id || !state.integration.cloudSyncEnabled) return;
+    if (task.cloudSyncStatus !== 'saving') task.cloudSyncStatus = 'pending';
     pendingTaskSyncIds.add(task.id);
+    if (!cloudIdentityReady()) return;
     window.clearTimeout(taskSyncTimer);
     taskSyncTimer = window.setTimeout(flushTaskCloudSync, 900);
   }
@@ -5784,6 +5867,10 @@
       const id = String(remote.task_id || '');
       if (!id) return;
       const existing = state.tasks.find(task => task.id === id);
+      if (existing && (pendingTaskSyncIds.has(id) || ['pending', 'saving', 'error'].includes(existing.cloudSyncStatus))) {
+        scheduleTaskCloudSync(existing);
+        return;
+      }
       const remoteDetail = String(remote.detail || '').trim();
       const knownSources = ['老師自建', '主管交辦', '學生追蹤', '工作紀錄', '親師溝通'];
       const createdBy = String(remote.created_by || '').trim();
@@ -5797,8 +5884,12 @@
         priority: String(remote.due_date || '') < state.daily.date ? 'high' : 'medium', createdBy,
         cloudSyncStatus: 'saved', cloudUpdatedAt: remote.updated_at || '',
       };
+      const target = existing || item;
       if (existing) Object.assign(existing, item);
       else { state.tasks.push(item); imported += 1; }
+      const ref = derivedTaskRef(target);
+      if (ref) target.ref = ref;
+      applyTaskStatusToLinkedRecord(target, state, false);
     });
     persist('追蹤事項已更新');
     return { ok: true, imported };
@@ -7582,8 +7673,7 @@
     else if (action === 'toggle-task-detail') {
       const task = state.tasks.find(item => item.id === control.dataset.taskId && item.owner === state.context.teacher);
       if (task) {
-        task.status = task.status === 'done' ? 'open' : 'done';
-        scheduleTaskCloudSync(task);
+        setTaskStatus(task, task.status === 'done' ? 'open' : 'done');
         closeDialog();
         persist();
         renderApp();
@@ -7834,8 +7924,10 @@
     if (change === 'toggle-task') {
       const task = state.tasks.find(item => item.id === control.dataset.taskId);
       if (task) {
-        task.status = control.checked ? 'done' : 'open';
-        scheduleTaskCloudSync(task);
+        const result = setTaskStatus(task, control.checked ? 'done' : 'open');
+        toast(control.checked
+          ? result?.linkedRecord ? '事項已完成，學生追蹤已同步結案' : '事項已完成'
+          : result?.linkedRecord ? '事項已恢復，學生追蹤已同步開啟' : '事項已恢復為進行中', 'success');
       }
       persist(); renderApp();
     }

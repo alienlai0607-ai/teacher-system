@@ -30,6 +30,32 @@ assert.match(cloudTaskSync, /detail: knownSources\.includes\(remoteDetail\) \? '
 assert.match(cloudTaskSync, /source = knownSources\.includes\(remoteDetail\)/, '雲端事項需要正確辨識來源');
 assert.match(source, /source: taskDetailText\(task\) \|\| task\.source/, '更新完成狀態時不得覆蓋主管原始說明');
 assert.match(source, /count: \(\) => state\.tasks\.filter\(task => task\.owner === state\.context\.teacher && task\.status !== 'done'\)\.length/, '老師選單的待辦數量只能計算自己的未完成事項');
+assert.match(source, /目前待辦（即時）/, '今日畫面需清楚標示目前待辦會即時更新');
+assert.match(source, /送出當時待辦（快照）/, '歷史日報不得再把送出當時快照誤標成即時待辦');
+assert.match(source, /pendingTaskSyncIds\.has\(id\)[\s\S]{0,160}\['pending', 'saving', 'error'\]/, '雲端舊資料不得覆蓋正在同步的本機完成狀態');
+assert.match(source, /setTaskStatus\(task, control\.checked \? 'done' : 'open'\)/, '待辦勾選必須經過統一狀態同步流程');
+assert.match(qaHarness, /action === 'saveSelfTask'/, '隔離驗收環境需真實保存老師自行更新的待辦');
+
+const linkedTaskSource = source.slice(source.indexOf('function derivedTaskCloudId('), source.indexOf('function upsertDerivedTask('));
+const linkedTaskContext = vm.createContext({ Date });
+vm.runInContext(linkedTaskSource, linkedTaskContext);
+const linkedTaskState = {
+  studentCases: [{ id: 'case_zhiche', student: '知澈', status: 'open' }],
+  contacts: [],
+  activities: [],
+};
+const linkedTask = { id: 'v2_case_case_zhiche', status: 'done' };
+assert.equal(linkedTaskContext.derivedTaskRef(linkedTask, linkedTaskState), 'case:case_zhiche', '重新載入後仍需由固定待辦編號找回學生追蹤');
+linkedTaskContext.applyTaskStatusToLinkedRecord(linkedTask, linkedTaskState, false);
+assert.equal(linkedTaskState.studentCases[0].status, 'closed', '完成待辦必須同步結案對應學生追蹤');
+linkedTask.status = 'open';
+linkedTaskContext.applyTaskStatusToLinkedRecord(linkedTask, linkedTaskState, true);
+assert.equal(linkedTaskState.studentCases[0].status, 'open', '恢復待辦必須同步重新開啟對應學生追蹤');
+const studentCaseRowSource = source.slice(source.indexOf('function renderStudentCaseRow('), source.indexOf('function renderOpenCaseSummary('));
+assert.match(studentCaseRowSource, /closed \? \['已結案', 'green'\]/, '學生追蹤卡片必須直接顯示已結案狀態');
+assert.match(studentCaseRowSource, /closed \? '結案結果' : '目前結果'/, '追蹤卡片必須顯示最新結果，不得永遠停留在最初觀察');
+assert.match(studentCaseRowSource, /closed \? '' : `<div class="activity-glance">/, '已結案案件不得繼續顯示下一步');
+assert.match(studentCaseRowSource, /closed \? `已完成追蹤/, '已結案案件不得繼續顯示下次追蹤日期');
 
 assert.match(source, /class="evaluation-score-list"/, '老師查看主管評核時分數不可使用寬表格');
 assert.match(source, /class="manager-eval-score-input"/, '主管輸入分數需要靠近評核項目');
@@ -91,8 +117,8 @@ assert.match(source, /function applyPreviewReviewContext\(/, '安親審查模式
 assert.match(source, /if \(!applyPreviewReviewContext\(control\.dataset\.role\)\) state\.ui\.role = control\.dataset\.role/, '切換審查角色時必須同步身份範圍');
 assert.match(source, /applyPreviewReviewContext\(LOCAL_REVIEW_ROLE\)/, '網址指定主管視角時首次載入就必須套用正確身份');
 assert.match(source, /GLOBAL_MANAGER_NICKNAMES\.some\(name => sameReviewIdentity\(name, managerNickname\)\)/, '小魚在審查與正式登入都必須擁有全教室檢視範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260902-anqin-stability-6/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260902-anqin-stability-6/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260902-anqin-live-tasks-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260902-anqin-live-tasks-1/, '登入備援路徑也必須避開舊版快取');
 
 const startupSafetySource = source.slice(source.indexOf('function stripEmbeddedMediaJson('), source.indexOf('function loadState()'));
 const startupSafetyContext = vm.createContext({ JSON, Number, Set });

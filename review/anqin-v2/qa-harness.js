@@ -258,6 +258,29 @@
       });
       persistCloudStore();
       result = { ok: true, created, updated, task_ids: taskIds, updated_at: new Date().toISOString() };
+    } else if (action === 'saveSelfTask') {
+      const task = payload.task || {};
+      const taskId = String(task.id || '');
+      const existing = cloudStore.tasks[taskId];
+      const updatedAt = new Date().toISOString();
+      if (!taskId || !String(task.title || '').trim()) result = { ok: false, error: '事項資料不完整' };
+      else {
+        cloudStore.tasks[taskId] = {
+          task_id: taskId,
+          title: String(task.title || ''),
+          detail: String(task.source || task.detail || ''),
+          assignee: nickname,
+          department,
+          due_date: String(task.dueDate || '').slice(0, 10),
+          status: task.status === 'done' ? 'done' : 'open',
+          created_by: existing?.created_by || nickname,
+          created_at: existing?.created_at || updatedAt,
+          updated_at: updatedAt,
+          done_at: task.status === 'done' ? (existing?.done_at || updatedAt) : '',
+        };
+        persistCloudStore();
+        result = { ok: true, task_id: taskId, updated_at: updatedAt };
+      }
     } else if (action === 'updateTaskStatus') {
       const task = cloudStore.tasks[String(payload.task_id || '')];
       if (!task) result = { ok: false, error: 'task not found' };
