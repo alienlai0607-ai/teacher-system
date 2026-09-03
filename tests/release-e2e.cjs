@@ -64,6 +64,7 @@ const report = {
   checks: [],
   failures: [],
   browserErrors: [],
+  externalWarnings: [],
   routeAudits: [],
 };
 
@@ -75,7 +76,20 @@ function check(name, passed, detail = '') {
 function trackPage(page, label) {
   page.on('pageerror', error => report.browserErrors.push({ label, type: 'pageerror', message: error.message }));
   page.on('console', message => {
-    if (message.type() === 'error') report.browserErrors.push({ label, type: 'console', message: message.text() });
+    if (message.type() !== 'error') return;
+    const location = message.location();
+    const source = location?.url ? ` (${location.url}${location.lineNumber != null ? `:${location.lineNumber + 1}` : ''})` : '';
+    if (String(location?.url || '').startsWith('https://cdn.onesignal.com/') && message.text().includes('Failed to load resource')) {
+      report.externalWarnings.push({ label, type: 'external-push', message: `${message.text()}${source}` });
+      return;
+    }
+    report.browserErrors.push({ label, type: 'console', message: `${message.text()}${source}` });
+  });
+  page.on('response', response => {
+    const url = response.url();
+    if (url.startsWith(baseUrl) && response.status() >= 400) {
+      report.browserErrors.push({ label, type: 'response', message: `${response.status()} ${url}` });
+    }
   });
   page.on('requestfailed', request => {
     const url = request.url();
@@ -191,16 +205,65 @@ async function adminWorkflow(browser) {
     await waitForApp(page);
 
     await clickRoute(page, 'today');
+    check('行政尚未確認訊息時不會被工作紀錄誤判完成', (await page.locator('[data-action="open-daily-check"]').innerText()).includes('尚未確認'));
+    await clickAction(page, 'open-daily-check');
+    await page.locator('#daily-check-form label:has(input[name="status"][value="needs_supervisor"])').click();
+    await page.fill('#daily-check-note', '等待主管確認測試訊息');
+    await page.check('#daily-check-form input[name="reported"]');
+    await page.locator('#daily-check-form label:has(input[name="status"][value="clear"])').click();
+    check('行政訊息切回已處理會清除隱藏的主管事項', await page.evaluate(() => {
+      const form = document.querySelector('#daily-check-form');
+      const block = document.querySelector('[data-daily-issue]');
+      return Boolean(block?.hidden && form?.elements.note?.value === '' && !form?.elements.note?.required && !form?.elements.reported?.checked);
+    }));
+    await page.locator('#daily-check-form button[type="submit"]').click();
+    await page.waitForTimeout(200);
+    check('行政每日訊息確認可獨立儲存', (await page.locator('[data-action="open-daily-check"]').innerText()).includes('已確認'));
+
+    await clickAction(page, 'open-environment');
+    await page.locator('#environment-form label:has(input[name="environmentStatus"][value="issue"])').click();
+    await page.check('#environment-form input[name="issue-counter_zone"]');
+    await page.fill('#environment-issue', '櫃檯測試資料待整理');
+    await page.fill('#environment-due', tomorrow);
+    await page.locator('#environment-form label:has(input[name="environmentStatus"][value="clear"])').click();
+    check('行政環境切回正常會清除隱藏的問題資料', await page.evaluate(() => {
+      const form = document.querySelector('#environment-form');
+      const block = document.querySelector('[data-environment-issue]');
+      const issueChecks = Array.from(form?.querySelectorAll('input[name^="issue-"]') || []);
+      return Boolean(block?.hidden && issueChecks.every(input => !input.checked) && form?.elements.issue?.value === '' && !form?.elements.issue?.required && form?.elements.improvementDue?.value === '' && !form?.elements.improvementDue?.required);
+    }));
+    await page.locator('#environment-form button[type="submit"]').click();
+    await page.waitForTimeout(200);
+    check('行政環境正常狀態可一鍵儲存', (await page.locator('[data-action="open-environment"]').innerText()).includes('正常'));
+
     await clickAction(page, 'open-work-item');
     await page.selectOption('#work-category', 'admin');
     await page.fill('#work-title', '端到端儲存驗收');
     await page.fill('#completed-today', '已完成資料核對並確認附件可以重新讀取');
+    await page.fill('#remaining', '這段切換後不應保存');
+    await page.fill('#due-date', tomorrow);
     await page.selectOption('#work-status', 'completed');
+    check('行政工作切為完成會清除隱藏的下一步與期限', await page.evaluate(() => {
+      const form = document.querySelector('#work-item-form');
+      const blocks = Array.from(document.querySelectorAll('[data-work-next]'));
+      return blocks.every(node => node.hidden) && form?.elements.remaining?.value === '' && !form?.elements.remaining?.required && form?.elements.dueDate?.value === '' && !form?.elements.dueDate?.required;
+    }));
     await page.setInputFiles('#work-evidence', [imageA, largeImage, largePdfFile]);
     check('行政附件可一次複選照片與 16 MB 文件', await page.locator('[data-file-preview="work-evidence"] .selected-file').count() === 3);
+    await page.locator('[data-file-preview="work-evidence"] [data-action="remove-selected-file"]').nth(1).click();
+    check('行政新選附件可在儲存前逐檔移除', await page.locator('[data-file-preview="work-evidence"] .selected-file').count() === 2);
+    await page.setInputFiles('#work-evidence', imageB);
+    check('行政分次選檔會累加而非覆蓋', await page.locator('[data-file-preview="work-evidence"] .selected-file').count() === 3);
     await page.locator('#work-item-form button[type="submit"]').click();
     await page.waitForTimeout(250);
     check('行政可新增完成工作', (await page.locator('body').innerText()).includes('端到端儲存驗收'));
+
+    await page.locator('.record-card', { hasText: '端到端儲存驗收' }).first().locator('[data-action="open-work-item"]').click();
+    check('行政編輯時可讀回三份既有附件', await page.locator('[data-existing-file]').count() === 3);
+    await page.locator('[data-existing-file] [data-action="remove-existing-file"]').first().click();
+    check('行政既有附件按叉後立即從表單移除', await page.locator('[data-existing-file]').count() === 2);
+    await page.locator('#work-item-form button[type="submit"]').click();
+    await page.waitForTimeout(200);
 
     await clickAction(page, 'open-work-item');
     await page.selectOption('#work-category', 'project');
@@ -249,6 +312,30 @@ async function adminWorkflow(browser) {
     await page.fill('#enrollment-course', '樂高小創客一期');
     await page.selectOption('#first-enrollment', 'yes');
     await page.setInputFiles('#payment-evidence', imageA);
+    await page.selectOption('#trial-status', 'considering');
+    check('試上取消轉一期狀態會清除隱藏的報名與附件資料', await page.evaluate(() => {
+      const form = document.querySelector('#trial-form');
+      const section = document.querySelector('[data-conversion-fields]');
+      return Boolean(section?.hidden
+        && form?.elements.enrollmentDate?.value === ''
+        && form?.elements.paymentDate?.value === ''
+        && form?.elements.enrollmentCourse?.value === ''
+        && form?.elements.firstEnrollment?.value === ''
+        && document.querySelectorAll('[data-file-preview="payment-evidence"] .selected-file').length === 0);
+    }));
+    await page.fill('#trial-next', tomorrow);
+    await page.selectOption('#trial-status', 'not_enrolled');
+    check('試上結案後會清除隱藏的提醒日期', await page.evaluate(() => {
+      const form = document.querySelector('#trial-form');
+      const block = document.querySelector('[data-trial-next]');
+      return Boolean(block?.hidden && form?.elements.nextFollowupDate?.disabled && form?.elements.nextFollowupDate?.value === '');
+    }));
+    await page.selectOption('#trial-status', 'converted');
+    await page.fill('#enrollment-date', today);
+    await page.fill('#payment-date', today);
+    await page.fill('#enrollment-course', '樂高小創客一期');
+    await page.selectOption('#first-enrollment', 'yes');
+    await page.setInputFiles('#payment-evidence', imageA);
     await page.locator('#trial-form button[type="submit"]').click();
     await page.waitForTimeout(250);
     check('首次報名不需手填追蹤即可進入 50 元待審', (await page.locator('body').innerText()).includes('50 元待主管確認'));
@@ -257,6 +344,10 @@ async function adminWorkflow(browser) {
     await waitForApp(page);
     await clickRoute(page, 'today');
     check('行政工作重新整理後仍存在', (await page.locator('body').innerText()).includes('端到端儲存驗收'));
+    await page.locator('.record-card', { hasText: '端到端儲存驗收' }).first().locator('[data-action="open-work-item"]').click();
+    check('行政刪除既有附件後重新整理仍維持兩份', await page.locator('[data-existing-file]').count() === 2);
+    await page.locator('#dialog-root button[data-action="close-dialog"]').last().click();
+    await page.waitForSelector('#dialog-root .dialog', { state: 'detached' });
     await clickRoute(page, 'trials');
     check('三筆試上重新整理後仍存在', await page.locator('.trial-row', { hasText: '測試學生' }).count() === 3);
     check('首報獎金重新整理後仍存在', (await page.locator('body').innerText()).includes('50 元待主管確認'));
@@ -334,6 +425,7 @@ async function talentWorkflow(browser) {
     await page.evaluate(() => localStorage.clear());
     await page.reload({ waitUntil: 'domcontentloaded' });
     await waitForApp(page);
+    check('非黑豹才藝老師不顯示特殊鐘點頁', await page.locator('[data-route="pay"]').count() === 0);
 
     await clickRoute(page, 'prep');
     await clickAction(page, 'new-prep');
@@ -350,16 +442,27 @@ async function talentWorkflow(browser) {
     await clickRoute(page, 'today');
     const beforeCount = await page.locator('.record-row').count();
     await clickAction(page, 'new-log');
-    await page.fill('#log-form input[name="courseName"]', '端到端才藝課程');
-    await page.fill('#log-form input[name="expected"]', '5');
+    await page.selectOption('#log-form select[name="prepId"]', { label: '端到端才藝教材 · 樂高小創客' });
+    check('才藝選擇備課後自動帶入課程資料', (
+      await page.inputValue('#log-form input[name="courseType"]') === '樂高小創客'
+      && await page.inputValue('#log-form input[name="courseName"]') === '端到端才藝教材'
+    ));
     await page.fill('#log-form input[name="present"]', '5');
     await page.fill('#log-form input[name="leave"]', '0');
     await page.fill('#log-form input[name="absent"]', '0');
     await page.fill('#log-form input[name="makeup"]', '0');
     await page.fill('#log-form input[name="trial"]', '0');
-    await page.selectOption('#log-form select[name="prepId"]', { label: '端到端才藝教材 · 樂高小創客' });
+    check('才藝應到人數由點名自動計算', await page.inputValue('#log-form input[name="expected"]') === '5');
+    check('才藝課後教室復原只看照片，不再要求重複勾選', await page.locator('#log-form input[name="roomDone"]').count() === 0);
     await page.fill('#log-form textarea[name="issue"]', '本堂齒輪安裝較慢，下次先依顏色分盒並示範卡榫方向。');
-    await page.check('#log-form input[name="roomDone"]');
+    await page.selectOption('#log-form select[name="parentStatus"]', 'followup');
+    await page.fill('#log-form textarea[name="parentFollowup"]', '這段切換後不應保存');
+    await page.selectOption('#log-form select[name="parentStatus"]', 'complete');
+    check('才藝親師狀態切回完成會清除隱藏追蹤文字', await page.evaluate(() => {
+      const form = document.querySelector('#log-form');
+      const field = form?.querySelector('.followup-field');
+      return Boolean(field?.hidden && form?.elements.parentFollowup?.value === '' && !form?.elements.parentFollowup?.required);
+    }));
     await page.setInputFiles('#log-form input[data-upload-category="attendance"]', imageA);
     await page.setInputFiles('#log-form input[data-upload-category="learning"]', [imageA, largeImage]);
     await page.waitForFunction(() => {
@@ -367,20 +470,25 @@ async function talentWorkflow(browser) {
       return input && !input.disabled && document.querySelectorAll('[data-file-items="learning"] .selected-file').length === 2;
     }, null, { timeout: 30000 });
     check('才藝成果照片可一次多選', await page.locator('[data-file-items="learning"] .selected-file').count() === 2);
+    await page.locator('[data-file-items="learning"] [data-action="remove-upload"]').first().click();
+    check('才藝成果照片選錯可逐張移除', await page.locator('[data-file-items="learning"] .selected-file').count() === 1);
+    await page.setInputFiles('#log-form input[data-upload-category="learning"]', imageA);
+    await page.waitForFunction(() => document.querySelectorAll('[data-file-items="learning"] .selected-file').length === 2, null, { timeout: 12000 });
+    check('才藝移除後可重新加入且其餘照片不被覆蓋', await page.locator('[data-file-items="learning"] .selected-file').count() === 2);
     await page.setInputFiles('#log-form input[data-upload-category="room"]', imageB);
     const renewalInput = page.locator('#log-form input[name="renewalCount"]');
     if (await renewalInput.count()) await renewalInput.fill('1');
     await clickAction(page, 'submit-log');
     await page.waitForTimeout(400);
     const pageText = await page.locator('body').innerText();
-    check('才藝 PT 可正式送出', pageText.includes('端到端才藝課程'));
+    check('才藝 PT 可正式送出', pageText.includes('端到端才藝教材'));
     check('才藝送出不再顯示 completed 內部欄位', !/\bcompleted\b/i.test(pageText));
     check('才藝送出只新增一筆', await page.locator('.record-row').count() === beforeCount + 1);
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await waitForApp(page);
     await clickRoute(page, 'today');
-    check('才藝紀錄重新整理後仍存在', (await page.locator('body').innerText()).includes('端到端才藝課程'));
+    check('才藝紀錄重新整理後仍存在', (await page.locator('body').innerText()).includes('端到端才藝教材'));
     await pageHealth(page, label, 'reload');
     await page.screenshot({ path: path.join(artifactDir, 'talent-pt-workflow.png'), fullPage: true });
 
@@ -414,19 +522,16 @@ async function talentWorkflow(browser) {
     await clickRoute(fulltime, 'today');
     const fulltimeBeforeCount = await fulltime.locator('.record-row').count();
     await clickAction(fulltime, 'new-log');
-    await fulltime.selectOption('#log-form select[name="courseType"]', '科學實驗');
-    await fulltime.fill('#log-form input[name="courseName"]', '端到端正職課程');
+    await fulltime.selectOption('#log-form select[name="prepId"]', { label: '端到端正職教材 · 科學實驗' });
     await fulltime.selectOption('#log-form select[name="siteType"]', 'self');
     await fulltime.fill('#log-form input[name="site"]', '北區教室');
-    await fulltime.fill('#log-form input[name="expected"]', '4');
     await fulltime.fill('#log-form input[name="present"]', '4');
     await fulltime.fill('#log-form input[name="leave"]', '0');
     await fulltime.fill('#log-form input[name="absent"]', '0');
     await fulltime.fill('#log-form input[name="makeup"]', '0');
     await fulltime.fill('#log-form input[name="trial"]', '0');
-    await fulltime.selectOption('#log-form select[name="prepId"]', { label: '端到端正職教材 · 科學實驗' });
     await fulltime.fill('#log-form textarea[name="issue"]', '本堂材料分發較慢，下次課前依組別完成分裝。');
-    await fulltime.check('#log-form input[name="roomDone"]');
+    await fulltime.selectOption('#log-form select[name="parentStatus"]', 'complete');
     await fulltime.setInputFiles('#log-form input[data-upload-category="attendance"]', imageA);
     await fulltime.setInputFiles('#log-form input[data-upload-category="learning"]', [imageA, imageB]);
     await fulltime.setInputFiles('#log-form input[data-upload-category="room"]', imageB);
@@ -442,14 +547,14 @@ async function talentWorkflow(browser) {
     await clickAction(fulltime, 'submit-log');
     await fulltime.waitForTimeout(400);
     check('才藝正職可正式送出且只新增一筆', (
-      (await fulltime.locator('body').innerText()).includes('端到端正職課程')
+      (await fulltime.locator('body').innerText()).includes('端到端正職教材')
       && await fulltime.locator('.record-row').count() === fulltimeBeforeCount + 1
     ));
 
     await fulltime.reload({ waitUntil: 'domcontentloaded' });
     await waitForApp(fulltime);
     await clickRoute(fulltime, 'today');
-    check('才藝正職紀錄重新整理後仍存在', (await fulltime.locator('body').innerText()).includes('端到端正職課程'));
+    check('才藝正職紀錄重新整理後仍存在', (await fulltime.locator('body').innerText()).includes('端到端正職教材'));
     await pageHealth(fulltime, '才藝正職完整流程', 'reload');
     await fulltime.screenshot({ path: path.join(artifactDir, 'talent-fulltime-workflow.png'), fullPage: true });
     await fulltime.close();
@@ -471,7 +576,7 @@ async function talentWorkflow(browser) {
     await closeDrawer(manager);
 
     await clickRoute(manager, 'log-review');
-    const talentLog = manager.locator('.record-row', { hasText: '端到端才藝課程' }).first();
+    const talentLog = manager.locator('.record-row', { hasText: '端到端才藝教材' }).first();
     check('才藝主管可看到老師已送出的工作紀錄', await talentLog.count() === 1);
     await talentLog.locator('[data-action="view-log"]').click();
     const logDetailText = await manager.locator('.drawer').innerText();
@@ -560,16 +665,16 @@ async function anqinWorkflow(browser) {
     await academicButton.click();
     const tutoringChoice = page.locator('[data-action="open-activity"][data-type="tutoring"]');
     if (await tutoringChoice.count()) await tutoringChoice.first().click();
-    await page.fill('#activity-title', '直式加減法');
     const prepSourceValue = await page.locator('#activity-prep-source option', { hasText: '端到端安親教材' }).getAttribute('value');
     await page.selectOption('#activity-prep-source', prepSourceValue);
+    check('安親選擇備課後自動帶入課程名稱', await page.inputValue('#activity-title') === '端到端安親教材');
     await page.fill('#activity-student-resonance', '孩子在用色筆標出進位位置時最有反應。');
     await page.fill('#activity-prep-changes', '下次先加入一題共同示範，再讓孩子獨立練習。');
     await page.locator('button[form="activity-form"]').click();
     await page.waitForTimeout(350);
-    check('安親課業指導可只填課後備課回饋', (await page.locator('body').innerText()).includes('直式加減法'));
+    check('安親課業指導可只填課後備課回饋', (await page.locator('body').innerText()).includes('端到端安親教材'));
 
-    const activityCard = page.locator('article', { hasText: '直式加減法' }).first();
+    const activityCard = page.locator('article', { hasText: '端到端安親教材' }).first();
     const newEvidence = activityCard.locator('[data-action="new-evidence"]');
     if (await newEvidence.count()) {
       await newEvidence.click();
@@ -580,7 +685,11 @@ async function anqinWorkflow(browser) {
     await page.setInputFiles('#evidence-file', [imageA, largeImage]);
     await page.waitForFunction(() => document.querySelectorAll('#evidence-attachment-list .evidence-attachment-item').length === 2, null, { timeout: 30000 }).catch(() => {});
     check('安親成果證據可一次上傳多張', await page.locator('#evidence-attachment-list .evidence-attachment-item').count() === 2);
-    await page.fill('#evidence-title', '孩子課後練習成果');
+    await page.locator('#evidence-attachment-list [data-action="remove-evidence-attachment"]').first().click();
+    check('安親成果照片選錯可逐張移除', await page.locator('#evidence-attachment-list .evidence-attachment-item').count() === 1);
+    await page.setInputFiles('#evidence-file', imageA);
+    await page.waitForFunction(() => document.querySelectorAll('#evidence-attachment-list .evidence-attachment-item').length === 2, null, { timeout: 12000 });
+    check('安親成果照片移除後可重新加入且其餘照片保留', await page.locator('#evidence-attachment-list .evidence-attachment-item').count() === 2);
     await page.locator('.drawer-body').evaluate((drawer, selector) => {
       const target = drawer.querySelector(selector);
       drawer.scrollTop = Math.max(0, (target?.offsetTop || drawer.scrollHeight) - drawer.clientHeight / 2);
@@ -589,24 +698,77 @@ async function anqinWorkflow(browser) {
     await page.locator('label[for="evidence-privacy"]').click();
     await page.locator('button[form="evidence-form"]').click();
     await page.waitForTimeout(500);
-    const savedActivityText = await page.locator('article', { hasText: '直式加減法' }).first().innerText();
+    const savedActivityText = await page.locator('article', { hasText: '端到端安親教材' }).first().innerText();
     check('安親上傳成果後不再顯示缺成果證據', !savedActivityText.includes('缺成果證據') && !savedActivityText.includes('待補：成果證據'), savedActivityText);
 
     await clickRoute(page, 'today');
     await page.locator('[data-action="today-tab"][data-tab="students"]').click();
-    await page.locator('input[data-change="confirm-no-student"]').check();
+    await clickAction(page, 'open-student-case');
+    await page.selectOption('#case-student', { index: 1 });
+    await page.fill('#case-situation', '今天計算時會漏看進位，提醒後已能自行檢查。');
+    await page.fill('#case-intervention', '先示範圈出進位數字，再請孩子口述檢查步驟。');
+    await page.fill('#case-next', '明天確認能否在沒有提醒時完成檢查。');
+    await page.fill('#case-date', tomorrow);
+    await page.selectOption('#case-status', 'closed');
+    check('安親學生追蹤結案會清除隱藏的下一步與日期', await page.evaluate(() => {
+      const form = document.querySelector('#student-case-form');
+      return Array.from(form?.querySelectorAll('[data-case-followup]') || []).every(node => node.hidden)
+        && form?.elements.nextAction?.value === '' && !form?.elements.nextAction?.required
+        && form?.elements.dueDate?.value === '' && !form?.elements.dueDate?.required;
+    }));
+    await page.selectOption('#case-status', 'open');
+    await page.fill('#case-next', '明天確認能否在沒有提醒時完成檢查。');
+    await page.fill('#case-date', tomorrow);
+    await page.locator('button[form="student-case-form"]').click();
+    await page.waitForTimeout(350);
+    const noStudentControl = page.locator('input[data-change="confirm-no-student"]');
+    check('已有學生追蹤時無紀錄勾選會停用且不會同時成立', await noStudentControl.isDisabled() && !(await noStudentControl.isChecked()));
     await page.locator('[data-action="today-tab"][data-tab="parents"]').click();
     await page.locator('[data-action="set-parent-status"][data-status="handoff"]').click();
     await page.locator('input[data-change="parent-handoff-confirmed"]').check();
-    await page.fill('#parent-handoff-note', '今日無重大事項，已在門口親自將孩子交給家長。');
+    await page.fill('#parent-handoff-note', '這段切換後不應保存');
+    await page.locator('[data-action="set-parent-status"][data-status="recorded"]').click();
+    await page.locator('[data-action="set-parent-status"][data-status="handoff"]').click();
+    check('安親親師模式切換會清除隱藏的交接確認與備註', !(await page.locator('input[data-change="parent-handoff-confirmed"]').isChecked()) && await page.inputValue('#parent-handoff-note') === '');
+    await page.locator('input[data-change="parent-handoff-confirmed"]').check();
+    check('安親無重要事項只需確認門口交接', !(await page.locator('#parent-handoff-note').getAttribute('required')));
 
     await page.locator('[data-action="today-tab"][data-tab="operations"]').click();
+    await page.locator('label:has(input[name="status_classroom"][value="exception"])').click({ force: true });
+    await page.fill('#operation-action-classroom', '測試異常內容，切回正常後必須清除。');
+    await page.locator('label:has(input[name="status_classroom"][value="normal"])').click({ force: true });
+    check('安親班務切回正常會清除隱藏的異常內容', await page.evaluate(() => {
+      const input = document.querySelector('#operation-action-classroom');
+      return Boolean(input?.closest('.operation-action-field')?.hidden && input.value === '' && !input.required);
+    }));
     for (const key of ['classroom', 'tools', 'trash', 'toilet']) {
       await page.setInputFiles(`#operation-photo-${key}`, key === 'classroom' || key === 'trash' ? imageA : imageB);
     }
     await page.locator('#operations-form button[type="submit"]').click();
     await page.waitForTimeout(600);
     check('安親班務四張照片可上傳並送出', (await page.locator('body').innerText()).includes('4/4'));
+
+    await page.waitForFunction(() => Object.keys(window.__KPI_QA_CLOUD__?.store?.tasks || {}).length > 0, null, { timeout: 12000 });
+    await clickRoute(page, 'tasks');
+    await page.evaluate(() => {
+      const original = window.API.saveSelfTask;
+      let shouldFail = true;
+      window.API.saveSelfTask = async (...args) => {
+        if (shouldFail) {
+          shouldFail = false;
+          return { ok: false, error: '驗收模擬雲端中斷' };
+        }
+        return original(...args);
+      };
+    });
+    const taskToggle = page.locator('.task-complete-control input[data-change="toggle-task"]').first();
+    await taskToggle.click({ force: true });
+    await page.waitForTimeout(450);
+    check('安親追蹤事項雲端失敗時會回復未完成，不會假裝成功', await page.locator('.task-complete-control input[data-change="toggle-task"]').first().isChecked() === false && (await page.locator('body').innerText()).includes('事項未更新'));
+    await page.locator('.task-complete-control input[data-change="toggle-task"]').first().click({ force: true });
+    await page.waitForTimeout(450);
+    check('安親追蹤事項重試成功後才真正完成', (await page.locator('body').innerText()).includes('0 項待完成'));
+    await clickRoute(page, 'today');
 
     await page.locator('[data-action="today-tab"][data-tab="submit"]').click();
     const submit = page.locator('[data-action="submit-daily"]');
@@ -617,9 +779,9 @@ async function anqinWorkflow(browser) {
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await waitForApp(page);
-    check('安親重新整理後紀錄仍存在', (await page.locator('body').innerText()).includes('直式加減法'));
+    check('安親重新整理後紀錄仍存在', (await page.locator('body').innerText()).includes('端到端安親教材'));
     await clickRoute(page, 'records');
-    check('安親老師可從我的紀錄查看過去紀錄', /我的紀錄|直式加減法/.test(await page.locator('body').innerText()));
+    check('安親老師可從我的紀錄查看過去紀錄', /我的紀錄|端到端安親教材/.test(await page.locator('body').innerText()));
     await pageHealth(page, label, 'reload');
     await page.screenshot({ path: path.join(artifactDir, 'anqin-workflow.png'), fullPage: true });
 
@@ -693,15 +855,42 @@ async function main() {
   const browser = await chromium.launch({ headless: true, executablePath: chromePath, args: ['--no-sandbox'] });
   try {
     const only = String(process.env.KPI_QA_ONLY || '').trim();
+    const anqinSurface = (key, nickname, role, department) => ({
+      key,
+      label: `${nickname}／${role === 'manager' ? '安親主管' : '安親老師'}`,
+      url: `/review/anqin-v2/qa-harness.html?nickname=${encodeURIComponent(nickname)}&role=${role}&department=${encodeURIComponent(department)}`,
+    });
+    const talentSurface = (key, nickname, workspace) => ({
+      key,
+      label: `${nickname}／${workspace}`,
+      url: `/review/talent-v2/index.html?workspace=${workspace}&reviewUser=${encodeURIComponent(nickname)}`,
+    });
+    const adminSurface = (key, nickname, workspace) => ({
+      key,
+      label: `${nickname}／${workspace === 'admin-marketing' ? '行政美宣' : '行政主管'}`,
+      url: `/review/admin-marketing-v1/index.html?workspace=${workspace}&reviewUser=${encodeURIComponent(nickname)}`,
+    });
     const surfaces = [
-      { key: 'anqin-teacher', label: '安親老師', url: '/review/anqin-v2/qa-harness.html?nickname=%E6%B1%9F%E6%B1%9F%E8%80%81%E5%B8%AB&role=teacher&department=%E5%8C%97%E5%8D%80%E6%95%99%E5%AE%A4' },
-      { key: 'anqin-manager', label: '安親主管', url: '/review/anqin-v2/qa-harness.html?nickname=%E5%B0%8F%E9%AD%9A%E4%B8%BB%E7%AE%A1&role=manager&department=%E5%8C%97%E5%8D%80%E6%95%99%E5%AE%A4' },
-      { key: 'talent-pt', label: '才藝 PT', url: '/review/talent-v2/index.html?workspace=talent-pt&reviewUser=%E7%B4%85%E8%B1%86%E8%80%81%E5%B8%AB' },
-      { key: 'talent-fulltime', label: '才藝正職', url: '/review/talent-v2/index.html?workspace=talent-fulltime&reviewUser=RITA%E8%80%81%E5%B8%AB' },
-      { key: 'talent-manager', label: '才藝主管', url: '/review/talent-v2/index.html?workspace=talent-manager&reviewUser=%E6%9F%B3%E4%B8%81%E4%B8%BB%E7%AE%A1' },
-      { key: 'talent-payroll', label: '才藝薪資', url: '/review/talent-v2/index.html?workspace=talent-payroll&reviewUser=%E6%9F%8F%E7%BF%B0' },
-      { key: 'admin-worker', label: '行政美宣', url: '/review/admin-marketing-v1/index.html?workspace=admin-marketing&reviewUser=%E7%9A%AE%E7%9A%AE%E8%80%81%E5%B8%AB' },
-      { key: 'admin-manager', label: '行政主管', url: '/review/admin-marketing-v1/index.html?workspace=admin-marketing-manager&reviewUser=%E5%B0%8F%E9%AD%9A%E4%B8%BB%E7%AE%A1' },
+      anqinSurface('anqin-songshu', '松鼠老師', 'teacher', '東橋教室'),
+      anqinSurface('anqin-hongdou', '紅豆老師', 'teacher', '東橋教室'),
+      anqinSurface('anqin-yangyang', '羊羊老師', 'teacher', '東橋教室'),
+      anqinSurface('anqin-jiangjiang', '江江老師', 'teacher', '北區教室'),
+      anqinSurface('anqin-xiaoming', '小明老師', 'teacher', '北區教室'),
+      anqinSurface('anqin-suansuan', '酸酸主管', 'manager', '東橋教室'),
+      anqinSurface('anqin-xiaoyu', '小魚主管', 'manager', '北區教室'),
+      talentSurface('talent-haohao', '浩浩老師', 'talent-fulltime'),
+      talentSurface('talent-rita', 'RITA老師', 'talent-fulltime'),
+      talentSurface('talent-maomao', '毛毛老師', 'talent-fulltime'),
+      talentSurface('talent-pipi', '皮皮老師', 'talent-pt'),
+      talentSurface('talent-hongdou', '紅豆老師', 'talent-pt'),
+      talentSurface('talent-xiaoming', '小明老師', 'talent-pt'),
+      talentSurface('talent-heibao', '黑豹老師', 'talent-pt'),
+      talentSurface('talent-liuding', '柳丁主管', 'talent-manager'),
+      talentSurface('talent-bohan', '柏翰', 'talent-payroll'),
+      talentSurface('talent-xiaoyu', '小魚主管', 'talent-payroll'),
+      adminSurface('admin-pipi', '皮皮老師', 'admin-marketing'),
+      adminSurface('admin-xiaoyu', '小魚主管', 'admin-marketing-manager'),
+      adminSurface('admin-bohan', '柏翰', 'admin-marketing-manager'),
     ];
     if (!only || only === 'routes') {
       for (const surface of surfaces) await auditRoutes(browser, surface, { width: 390, height: 844 });
@@ -733,6 +922,7 @@ async function main() {
     checks: report.checks.length,
     failures: report.failures,
     browserErrors: report.browserErrors,
+    externalWarnings: report.externalWarnings,
     reportPath,
   }, null, 2));
   if (report.failures.length) process.exitCode = 1;

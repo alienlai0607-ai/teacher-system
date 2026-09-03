@@ -11,7 +11,7 @@
       shortLabel: '安親',
       description: '安親工作紀錄與班務',
       icon: 'book-open-check',
-      path: 'review/anqin-v2/index.html?v=20260902-anqin-live-tasks-1',
+      path: 'review/anqin-v2/index.html?v=20260903-anqin-stability-1',
     },
     'anqin-manager': {
       id: 'anqin-manager',
@@ -20,7 +20,7 @@
       shortLabel: '安親主管',
       description: '安親審核與主管管理',
       icon: 'clipboard-check',
-      path: 'review/anqin-v2/index.html?v=20260902-anqin-live-tasks-1',
+      path: 'review/anqin-v2/index.html?v=20260903-anqin-stability-1',
     },
     'talent-fulltime': {
       id: 'talent-fulltime',
@@ -29,7 +29,7 @@
       shortLabel: '才藝正職',
       description: '工作日誌、KPI 與獎金',
       icon: 'sparkles',
-      path: 'review/talent-v2/index.html?workspace=talent-fulltime&v=20260902-talent-stability-10',
+      path: 'review/talent-v2/index.html?workspace=talent-fulltime&v=20260903-talent-stability-1',
     },
     'talent-pt': {
       id: 'talent-pt',
@@ -38,7 +38,7 @@
       shortLabel: '才藝 PT',
       description: '上課紀錄、鐘點與續報',
       icon: 'clock-3',
-      path: 'review/talent-v2/index.html?workspace=talent-pt&v=20260902-talent-stability-10',
+      path: 'review/talent-v2/index.html?workspace=talent-pt&v=20260903-talent-stability-1',
     },
     'talent-manager': {
       id: 'talent-manager',
@@ -47,7 +47,7 @@
       shortLabel: '才藝主管',
       description: '備課查閱、評分與結算',
       icon: 'chart-no-axes-combined',
-      path: 'review/talent-v2/index.html?workspace=talent-manager&v=20260902-talent-stability-10',
+      path: 'review/talent-v2/index.html?workspace=talent-manager&v=20260903-talent-stability-1',
     },
     'talent-payroll': {
       id: 'talent-payroll',
@@ -56,7 +56,7 @@
       shortLabel: '才藝薪資',
       description: 'PT 月度鐘點與續報資格',
       icon: 'calculator',
-      path: 'review/talent-v2/index.html?workspace=talent-payroll&v=20260902-talent-stability-10',
+      path: 'review/talent-v2/index.html?workspace=talent-payroll&v=20260903-talent-stability-1',
     },
     'admin-marketing': {
       id: 'admin-marketing',
@@ -65,7 +65,7 @@
       shortLabel: '行政美宣',
       description: '行政日誌、美宣產出與期限追蹤',
       icon: 'megaphone',
-      path: 'review/admin-marketing-v1/index.html?workspace=admin-marketing&v=20260902-admin-stability-8',
+      path: 'review/admin-marketing-v1/index.html?workspace=admin-marketing&v=20260903-admin-stability-1',
     },
     'admin-marketing-manager': {
       id: 'admin-marketing-manager',
@@ -74,7 +74,7 @@
       shortLabel: '行政美宣主管',
       description: '期限管理、週 KPI 與主管評核',
       icon: 'clipboard-list',
-      path: 'review/admin-marketing-v1/index.html?workspace=admin-marketing-manager&v=20260902-admin-stability-8',
+      path: 'review/admin-marketing-v1/index.html?workspace=admin-marketing-manager&v=20260903-admin-stability-1',
     },
   };
 

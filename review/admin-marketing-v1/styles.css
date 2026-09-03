@@ -393,7 +393,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .dialog-body { min-height: 0; flex: 1 1 auto; padding: 18px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .dialog-foot { flex: 0 0 auto; display: flex; justify-content: flex-end; gap: 9px; padding: 13px 18px calc(13px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: #fffaf7; }
 
-.toast-region { position: fixed; z-index: 120; right: 18px; bottom: 22px; display: grid; gap: 8px; width: min(360px, calc(100vw - 36px)); }
+.toast-region { position: fixed; z-index: 120; right: 18px; bottom: 22px; display: grid; gap: 8px; width: min(360px, calc(100vw - 36px)); pointer-events: none; }
 .toast { padding: 12px 14px; border-radius: 7px; background: #37302d; color: #fff; box-shadow: 0 12px 36px rgba(0,0,0,.22); line-height: 1.5; }
 .toast.danger { background: #9a3434; }
 .toast.success { background: #276c49; }

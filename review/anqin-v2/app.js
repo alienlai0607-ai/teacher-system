@@ -2137,7 +2137,7 @@
     const identityReady = Boolean(activity.title);
     const basic = feedbackOnly
       ? identityReady
-      : identityReady && String(activity.objective || '').length >= 8 && String(activity.action || '').length >= 8 && String(activity.result || '').length >= 8 && String(activity.nextAction || '').length >= 6 && String(activity.owner || '').trim() && String(activity.dueDate || '').trim();
+      : identityReady && String(activity.objective || '').length >= 8 && String(activity.action || activity.result || '').length >= 8;
     if (!basic || !activityDetailsComplete(activity)) return false;
     if (!activityPreparationReady(activity)) return false;
     if (!activityPlanReady(activity)) return false;
@@ -2157,7 +2157,7 @@
     const identityReady = Boolean(activity.title);
     const basic = feedbackOnly
       ? identityReady
-      : Boolean(identityReady && String(activity.objective || '').length >= 8 && String(activity.action || '').length >= 8 && String(activity.result || '').length >= 8 && String(activity.nextAction || '').length >= 6 && String(activity.owner || '').trim() && String(activity.dueDate || '').trim() && activityDetailsComplete(activity));
+      : Boolean(identityReady && String(activity.objective || '').length >= 8 && String(activity.action || activity.result || '').length >= 8 && activityDetailsComplete(activity));
     const hasEvidence = (activity.evidence || []).some(evidenceReady);
     const checks = [{ key: 'record', label: feedbackOnly ? '課程資料' : '工作內容', ready: basic }];
     if (activityNeedsPrepSource(activity.type)) {
@@ -2207,7 +2207,7 @@
       activities: dailyRequiredTracksReady(activities) && activities.every(activityComplete),
       students: state.daily.noStudentFollowupConfirmed || state.studentCases.some(item => item.date === state.daily.date && item.teacher === state.context.teacher),
       parents: state.contacts.some(item => item.date === state.daily.date && item.teacher === state.context.teacher)
-        || (state.daily.parentStatus === 'handoff' && state.daily.parentHandoffConfirmed && String(state.daily.parentHandoffNote || '').trim().length >= 4),
+        || (state.daily.parentStatus === 'handoff' && state.daily.parentHandoffConfirmed),
       operations: operationsComplete(),
       submit: Boolean(state.daily.submittedAt),
     };
@@ -2402,7 +2402,7 @@
         <div class="panel-body">
           ${cases.length ? `<div class="activity-list">${cases.map(renderStudentCaseRow).join('')}</div>` : renderEmpty('user-check', '今天沒有追蹤紀錄', '若全班狀況穩定，可直接確認今日無需個別追蹤。', '新增學生追蹤', 'open-student-case')}
           <div class="section-divider"></div>
-          <label class="choice-chip"><input type="checkbox" data-change="confirm-no-student" ${state.daily.noStudentFollowupConfirmed ? 'checked' : ''}>${icon('circle-check', 15)}今日無需個別追蹤</label>
+          <label class="choice-chip ${cases.length ? 'is-disabled' : ''}"><input type="checkbox" data-change="confirm-no-student" ${state.daily.noStudentFollowupConfirmed ? 'checked' : ''} ${cases.length ? 'disabled' : ''}>${icon('circle-check', 15)}${cases.length ? '已有學生追蹤紀錄' : '今日無需個別追蹤'}</label>
         </div>
       </section>
       <aside class="stack">
@@ -2445,7 +2445,7 @@
             <button type="button" class="${handoffMode ? 'active' : ''}" data-action="set-parent-status" data-status="handoff">無重要事項</button>
           </div>
           <div class="section-divider"></div>
-          ${handoffMode ? `<section class="activity-form-section"><div class="activity-section-title"><span>${icon('hand-heart', 18)}</span><div><strong>今日門口交接</strong></div></div><div class="form-grid"><div class="form-field span-2"><label class="choice-chip"><input type="checkbox" data-change="parent-handoff-confirmed" ${state.daily.parentHandoffConfirmed ? 'checked' : ''}>${icon('circle-check', 15)}已親自在門口攜帶並交接孩子給家長 <span class="required">*</span></label></div><div class="form-field span-2"><label class="form-label" for="parent-handoff-note">交接備註 <span class="required">*</span></label><textarea id="parent-handoff-note" data-input="parent-handoff-note" minlength="4" placeholder="例：今日無需個別溝通，已逐一完成交接；彥呈由阿嬤接回。">${esc(state.daily.parentHandoffNote || '')}</textarea><div class="field-hint">至少 4 字；只記錄必要的交接情況。</div></div></div></section>` : contacts.length ? `<div class="activity-list">${contacts.map(renderContactRow).join('')}</div>` : renderEmpty('message-circle-off', state.daily.parentStatus === 'recorded' ? '尚未新增重要事項' : '請選擇今天的親師狀態', state.daily.parentStatus === 'recorded' ? '有重要事項時，記錄溝通內容、共識與後續行動。' : '若沒有重要事項，仍需確認已親自在門口交接孩子。', '新增重要事項', 'open-contact')}
+          ${handoffMode ? `<section class="activity-form-section"><div class="activity-section-title"><span>${icon('hand-heart', 18)}</span><div><strong>今日門口交接</strong></div></div><div class="form-grid"><div class="form-field span-2"><label class="choice-chip"><input type="checkbox" data-change="parent-handoff-confirmed" ${state.daily.parentHandoffConfirmed ? 'checked' : ''}>${icon('circle-check', 15)}已親自在門口攜帶並交接孩子給家長 <span class="required">*</span></label></div><div class="form-field span-2"><label class="form-label" for="parent-handoff-note">特殊交接備註（選填）</label><textarea id="parent-handoff-note" data-input="parent-handoff-note" placeholder="只有代接、延後接送或其他特殊情況才需要填寫。">${esc(state.daily.parentHandoffNote || '')}</textarea></div></div></section>` : contacts.length ? `<div class="activity-list">${contacts.map(renderContactRow).join('')}</div>` : renderEmpty('message-circle-off', state.daily.parentStatus === 'recorded' ? '尚未新增重要事項' : '請選擇今天的親師狀態', state.daily.parentStatus === 'recorded' ? '有重要事項時，記錄溝通內容、共識與後續行動。' : '若沒有重要事項，仍需確認已親自在門口交接孩子。', '新增重要事項', 'open-contact')}
         </div>
       </section>
     </div>`;
@@ -2513,7 +2513,7 @@
     if (!dailyRequiredTracksReady()) blockers.push('新增一筆學科內或學科外紀錄');
     if (dailyRequiredTracksReady() && !status.activities) blockers.push('已新增的課程需選擇備課檔案並完成課後回饋；班級經營只需工作欄位及可判讀成果證據');
     if (!status.students) blockers.push('新增學生追蹤，或確認今日無需個別追蹤');
-    if (!status.parents) blockers.push('新增重要親師溝通，或完成門口交接確認與備註');
+    if (!status.parents) blockers.push('新增重要親師溝通，或確認已完成門口交接');
     if (!status.operations) blockers.push('今日值日班務尚未確認');
     return `<div class="content-grid wide-aside">
       <section class="panel">
@@ -2641,7 +2641,7 @@
       : '';
     if (loading) return `<div class="page">${pageHead('主管評核', '查看每月評分與主管建議', actions)}<section class="panel"><div class="panel-body"><div class="integration-empty-state">${icon('loader-circle', 24)}<div><strong>正在讀取</strong></div></div></div></section></div>`;
     if (!evaluation) return `<div class="page">${pageHead('主管評核', '查看每月評分與主管建議', actions)}<section class="panel"><div class="panel-body"><div class="empty-state"><div><div class="empty-icon">${icon('clipboard-list', 22)}</div><div class="empty-title">${esc(integrationRuntime.evaluationMessage || '這個月份尚未公布評核')}</div></div></div></div></section></div>`;
-    const granted = ![false, 'FALSE', 'false'].includes(evaluation.bonus_granted);
+    const granted = [true, 'TRUE', 'true'].includes(evaluation.bonus_granted);
     const scoreValues = ANQIN_KPI_STANDARDS.map((category, index) => Number(evaluation[`score_k${index + 1}`] || 0));
     const invalidScores = scoreValues.map((score, index) => !Number.isFinite(score) || score < 0 || score > ANQIN_KPI_STANDARDS[index].points);
     const hasInvalidScores = invalidScores.some(Boolean);
@@ -2766,7 +2766,7 @@
     const makeupPenalty = Number(evidence.summary?.makeup_count || 0) * 2;
     const total = Math.max(0, values.reduce((sum, score) => sum + score, 0) - makeupPenalty);
     const tier = evaluationTier(total);
-    const granted = ![false, 'FALSE', 'false'].includes(evaluation?.bonus_granted);
+    const granted = [true, 'TRUE', 'true'].includes(evaluation?.bonus_granted);
     const status = evaluation?.status === 'submitted' ? ['已完成', 'green'] : evaluation ? ['草稿', 'yellow'] : ['未建立', 'outline'];
     const scoreInputs = ANQIN_KPI_STANDARDS.map((category, index) => {
       const evidenceCount = (evidence.evidence_by_kpi?.[index + 1] || []).length;
@@ -2961,11 +2961,8 @@
       const missing = config.requiresPlan || type === 'lessonprep';
       return `<div class="plan-link-status ${missing ? 'is-missing' : ''}">${icon(missing ? 'circle-alert' : 'info', 16)}<div><strong>${config.requiresPlan ? '此類工作必須連結教學設計與教材' : optionalTitle}</strong><small>${config.requiresPlan ? '請先選擇內容完整的備課檔案。' : optionalCopy}</small></div></div>`;
     }
-    const readiness = planReadiness(plan);
-    const completionReady = type === 'lessonprep' ? readiness === 100 : !config.requiresPlan || readiness === 100;
     const materialCount = (plan.materials || []).length;
-    const statusCopy = completionReady ? '內容完整，可供授課選用' : '尚有歸檔必填內容未完成';
-    return `<div class="plan-link-status ${completionReady ? 'is-ready' : 'is-missing'}">${icon(completionReady ? 'badge-check' : 'circle-alert', 16)}<div><strong>教案內容與教材 · ${readiness}%</strong><small>${materialCount} 份教材 · ${statusCopy}</small></div></div>`;
+    return `<div class="plan-link-status is-ready">${icon('folder-check', 16)}<div><strong>已連結舊版教案資料</strong><small>${materialCount} 份教材附件；不需主管審核或完成度判定。</small></div></div>`;
   }
 
   function renderActivityPlanField(type, planId = '') {
@@ -3047,16 +3044,15 @@
     if (activityNeedsPrepSource(value.type)) {
       return `<section id="activity-result-section" class="activity-form-section result-section feedback-only-section">${renderActivityPrepFeedbackFields(value.type, value.prepFeedback || {})}</section>`;
     }
-    const guide = activityGuide(value.type);
-    const copy = activityFormCopy(value.type);
-    return `<section id="activity-result-section" class="activity-form-section result-section"><div class="activity-section-title"><span>${icon('scan-search', 18)}</span><div><strong id="activity-result-title">${esc(copy.resultTitle)}</strong></div></div><div class="form-grid">
-      <div class="form-field span-2"><label class="form-label" id="activity-objective-label" for="activity-objective">${esc(guide.objective[0])} <span class="required">*</span></label><textarea id="activity-objective" name="objective" placeholder="${esc(guide.objective[1])}" required>${esc(value.objective || '')}</textarea></div>
-      <div class="form-field span-2"><label class="form-label" id="activity-action-label" for="activity-action">${esc(guide.action[0])} <span class="required">*</span></label><textarea id="activity-action" name="action" placeholder="${esc(guide.action[1])}" required>${esc(value.action || '')}</textarea></div>
-      <div class="form-field span-2"><label class="form-label" id="activity-result-label" for="activity-result">${esc(guide.result[0])} <span class="required">*</span></label><textarea id="activity-result" name="result" placeholder="${esc(guide.result[1])}" required>${esc(value.result || '')}</textarea></div>
-      <div class="form-field span-2"><label class="form-label" id="activity-issue-label" for="activity-issue">${esc(guide.issue[0])}</label><textarea id="activity-issue" name="issue" placeholder="${esc(guide.issue[1])}">${esc(value.issue || '')}</textarea></div>
-      <div class="form-field span-2"><label class="form-label" id="activity-next-label" for="activity-next">${esc(guide.next[0])} <span class="required">*</span></label><textarea id="activity-next" name="nextAction" placeholder="${esc(guide.next[1])}" required>${esc(value.nextAction || '')}</textarea></div>
-      <div class="form-field"><label class="form-label" id="activity-owner-label" for="activity-owner">${esc(copy.ownerLabel)} <span class="required">*</span></label><input id="activity-owner" name="owner" value="${esc(value.owner || state.context.teacher)}" required></div>
-      <div class="form-field"><label class="form-label" id="activity-due-label" for="activity-due">${esc(copy.dueLabel)} <span class="required">*</span></label><input id="activity-due" type="date" name="dueDate" value="${esc(value.dueDate || '')}" min="${state.daily.date}" required></div>
+    const actionResult = value.action && value.result && value.action !== value.result
+      ? `${value.action}\n結果：${value.result}`
+      : value.result || value.action || '';
+    return `<section id="activity-result-section" class="activity-form-section result-section"><div class="activity-section-title"><span>${icon('scan-search', 18)}</span><div><strong id="activity-result-title">班級經營紀錄</strong><small>只留下事件、處理結果與必要的下一步</small></div></div><div class="form-grid">
+      <div class="form-field span-2"><label class="form-label" for="activity-objective">事件／目標 <span class="required">*</span></label><textarea id="activity-objective" name="objective" placeholder="例：點心後收拾時間過長，希望全班能在 5 分鐘內完成轉場。" required>${esc(value.objective || '')}</textarea></div>
+      <div class="form-field span-2"><label class="form-label" for="activity-action">處理與結果 <span class="required">*</span></label><textarea id="activity-action" name="action" placeholder="例：改成分區收拾並設區長；本次 5 分 20 秒完成，僅 2 人需提醒。" required>${esc(actionResult)}</textarea></div>
+      <div class="form-field span-2"><label class="form-label" for="activity-next">下一步（需要追蹤時再填）</label><textarea id="activity-next" name="nextAction" placeholder="例：下次調整水壺區動線並再次計時。">${esc(value.nextAction || '')}</textarea></div>
+      <input type="hidden" id="activity-owner" name="owner" value="${esc(value.owner || state.context.teacher)}">
+      <div class="form-field"><label class="form-label" for="activity-due">追蹤日期（有下一步時填）</label><input id="activity-due" type="date" name="dueDate" value="${esc(value.dueDate || '')}" min="${state.daily.date}"></div>
     </div></section>`;
   }
 
@@ -3139,14 +3135,15 @@
     };
     const copy = activityFormCopy(value.type);
     const formTrack = value.formTrack || activityTrack(value.type);
-    const canonicalTitle = value.title || (activityTrack(value.type) === 'enrichment' ? value.className : '') || '';
+    const linkedPrep = activityNeedsPrepSource(value.type) ? prepSourceById(value.prepSourceId || defaultPrepSourceId(value.type)) : null;
+    const canonicalTitle = linkedPrep?.title || value.title || (activityTrack(value.type) === 'enrichment' ? value.className : '') || '';
     return `<form id="activity-form" data-form="activity" data-activity-track="${esc(formTrack)}">
       <input type="hidden" name="id" value="${esc(value.id)}">
       <input type="hidden" name="type" value="${esc(value.type)}">
       <div id="activity-track-indicator">${renderActivityTrackIndicator(value.type)}</div>
       <div class="form-grid">
         <input type="hidden" name="className" value="${esc(value.className || '')}">
-        <div class="form-field span-2"><label class="form-label" id="activity-title-label" for="activity-title">${esc(copy.titleLabel)} <span class="required">*</span></label><input id="activity-title" name="title" value="${esc(canonicalTitle)}" placeholder="${esc(copy.titlePlaceholder)}" required></div>
+        ${activityNeedsPrepSource(value.type) ? `<input id="activity-title" type="hidden" name="title" value="${esc(canonicalTitle)}">` : `<div class="form-field span-2"><label class="form-label" id="activity-title-label" for="activity-title">${esc(copy.titleLabel)} <span class="required">*</span></label><input id="activity-title" name="title" value="${esc(canonicalTitle)}" placeholder="${esc(copy.titlePlaceholder)}" required></div>`}
         <div id="activity-students-field" class="form-field span-2" ${copy.hideStudents ? 'hidden' : ''}><div class="form-label">關聯學生（本班 ${assignedStudents(value.teacher || state.context.teacher).length} 人）</div><div class="chip-list">${renderStudentChoices(value.teacher || state.context.teacher, value.students || [])}</div></div>
       </div>
       ${renderActivityPreparationSection(value)}
@@ -3157,32 +3154,52 @@
 
   function renderStudentCaseForm(item) {
     const value = item || { id: '', student: '', category: 'learning', urgency: 'medium', observation: '', intervention: '', outcome: '', nextAction: '', dueDate: addDays(state.daily.date, 1), status: 'open', parentContacted: false };
+    const closed = value.status === 'closed';
+    const situation = value.observation && value.outcome && value.observation !== value.outcome
+      ? `${value.observation}\n變化：${value.outcome}`
+      : value.outcome || value.observation || '';
     return `<form id="student-case-form" data-form="student-case" data-draft-form><input type="hidden" name="id" value="${esc(value.id)}"><div class="form-grid">
       <div class="form-field"><label class="form-label" for="case-student">學生 <span class="required">*</span></label><select id="case-student" name="student" required><option value="">請選擇</option>${renderStudentOptions(item?.teacher || state.context.teacher, value.student)}</select></div>
       <div class="form-field"><label class="form-label" for="case-category">類型 <span class="required">*</span></label><select id="case-category" name="category" required><option value="learning" ${value.category === 'learning' ? 'selected' : ''}>學習</option><option value="behavior" ${value.category === 'behavior' ? 'selected' : ''}>行為／情緒</option><option value="peer" ${value.category === 'peer' ? 'selected' : ''}>同儕互動</option><option value="health" ${value.category === 'health' ? 'selected' : ''}>健康</option></select></div>
       <div class="form-field"><label class="form-label" for="case-urgency">追蹤層級</label><select id="case-urgency" name="urgency"><option value="low" ${value.urgency === 'low' ? 'selected' : ''}>一般</option><option value="medium" ${value.urgency === 'medium' ? 'selected' : ''}>持續追蹤</option><option value="high" ${value.urgency === 'high' ? 'selected' : ''}>高優先</option></select></div>
-      <div class="form-field"><label class="form-label" for="case-date">下次追蹤日</label><input id="case-date" type="date" name="dueDate" value="${esc(value.dueDate)}"></div>
-      <div class="form-field span-2"><label class="form-label" for="case-observation">具體觀察 <span class="required">*</span></label><textarea id="case-observation" name="observation" placeholder="描述可觀察行為與發生情境。" required>${esc(value.observation)}</textarea></div>
-      <div class="form-field span-2"><label class="form-label" for="case-intervention">已採取方法 <span class="required">*</span></label><textarea id="case-intervention" name="intervention" placeholder="老師實際做了什麼。" required>${esc(value.intervention)}</textarea></div>
-      <div class="form-field span-2"><label class="form-label" for="case-outcome">目前結果 <span class="required">*</span></label><textarea id="case-outcome" name="outcome" placeholder="學生反應、改善或仍未改善的地方。" required>${esc(value.outcome)}</textarea></div>
-      <div class="form-field span-2"><label class="form-label" for="case-next">下一步 <span class="required">*</span></label><textarea id="case-next" name="nextAction" required>${esc(value.nextAction)}</textarea></div>
+      <div class="form-field"><label class="form-label" for="case-status">狀態</label><select id="case-status" name="status" data-change="case-status"><option value="open" ${closed ? '' : 'selected'}>追蹤中</option><option value="closed" ${closed ? 'selected' : ''}>已結案</option></select></div>
+      <div class="form-field span-2"><label class="form-label" for="case-situation">狀況與變化 <span class="required">*</span></label><textarea id="case-situation" name="situation" placeholder="描述發生情境、可觀察行為，以及目前有沒有改善。" required>${esc(situation)}</textarea></div>
+      <div class="form-field span-2"><label class="form-label" for="case-intervention">已處理 <span class="required">*</span></label><textarea id="case-intervention" name="intervention" placeholder="老師已經做了什麼。" required>${esc(value.intervention)}</textarea></div>
+      <div class="form-field span-2" data-case-followup ${closed ? 'hidden' : ''}><label class="form-label" for="case-next">下一步 <span class="required">*</span></label><textarea id="case-next" name="nextAction" ${closed ? '' : 'required'}>${esc(value.nextAction)}</textarea></div>
+      <div class="form-field" data-case-followup ${closed ? 'hidden' : ''}><label class="form-label" for="case-date">下次追蹤日 <span class="required">*</span></label><input id="case-date" type="date" name="dueDate" value="${closed ? '' : esc(value.dueDate)}" ${closed ? '' : 'required'}></div>
       <div class="form-field"><label class="choice-chip"><input type="checkbox" name="parentContacted" ${value.parentContacted ? 'checked' : ''}>已同步家長</label></div>
-      <div class="form-field"><label class="form-label" for="case-status">狀態</label><select id="case-status" name="status"><option value="open" ${value.status === 'open' ? 'selected' : ''}>追蹤中</option><option value="closed" ${value.status === 'closed' ? 'selected' : ''}>已結案</option></select></div>
     </div></form>`;
   }
 
   function renderContactForm(item) {
     const value = item || { id: '', student: '', channel: 'LINE', topic: '學習狀況', summary: '', decision: '', nextAction: '', dueDate: addDays(state.daily.date, 1), status: 'open' };
+    const closed = value.status === 'closed';
     const agreementAction = [value.decision, value.nextAction].filter(Boolean).join('\n');
+    const communication = value.summary || value.topic || '';
     return `<form id="contact-form" data-form="contact" data-draft-form><input type="hidden" name="id" value="${esc(value.id)}"><div class="form-grid">
       <div class="form-field"><label class="form-label" for="contact-student">學生 <span class="required">*</span></label><select id="contact-student" name="student" required><option value="">請選擇</option>${renderStudentOptions(item?.teacher || state.context.teacher, value.student)}</select></div>
       <div class="form-field"><label class="form-label" for="contact-channel">管道</label><select id="contact-channel" name="channel"><option ${value.channel === 'LINE' ? 'selected' : ''}>LINE</option><option ${value.channel === '電話' ? 'selected' : ''}>電話</option><option ${value.channel === '面談' ? 'selected' : ''}>面談</option><option ${value.channel === '聯絡簿' ? 'selected' : ''}>聯絡簿</option></select></div>
-      <div class="form-field span-2"><label class="form-label" for="contact-topic">溝通主題 <span class="required">*</span></label><input id="contact-topic" name="topic" value="${esc(value.topic)}" placeholder="例：分數學習狀況" required></div>
-      <div class="form-field span-2"><label class="form-label" for="contact-summary">必要摘要 <span class="required">*</span></label><textarea id="contact-summary" name="summary" placeholder="只記錄與學生支持有關的客觀內容。" required>${esc(value.summary)}</textarea></div>
+      <div class="form-field"><label class="form-label" for="contact-status">狀態</label><select id="contact-status" name="status" data-change="contact-status"><option value="open" ${closed ? '' : 'selected'}>待追蹤</option><option value="closed" ${closed ? 'selected' : ''}>已結案</option></select></div>
+      <div class="form-field span-2"><label class="form-label" for="contact-summary">溝通重點 <span class="required">*</span></label><textarea id="contact-summary" name="summary" placeholder="只記錄與學生支持有關的客觀內容。" required>${esc(communication)}</textarea></div>
       <div class="form-field span-2"><label class="form-label" for="contact-decision">共識與後續行動 <span class="required">*</span></label><textarea id="contact-decision" name="decision" placeholder="例：家長今晚先讓孩子口述步驟；老師明日再確認是否能獨立完成。" required>${esc(agreementAction)}</textarea></div>
-      <div class="form-field"><label class="form-label" for="contact-date">下次追蹤日</label><input id="contact-date" type="date" name="dueDate" value="${esc(value.dueDate)}"></div>
-      <div class="form-field"><label class="form-label" for="contact-status">狀態</label><select id="contact-status" name="status"><option value="open" ${value.status === 'open' ? 'selected' : ''}>待追蹤</option><option value="closed" ${value.status === 'closed' ? 'selected' : ''}>已結案</option></select></div>
+      <div class="form-field" data-contact-followup ${closed ? 'hidden' : ''}><label class="form-label" for="contact-date">下次追蹤日 <span class="required">*</span></label><input id="contact-date" type="date" name="dueDate" value="${closed ? '' : esc(value.dueDate)}" ${closed ? '' : 'required'}></div>
     </div></form>`;
+  }
+
+  function updateTrackingFollowupFields(form, kind, clearHidden = false) {
+    if (!form) return;
+    const status = String(form.elements.status?.value || 'open');
+    const closed = status === 'closed';
+    const selector = kind === 'case' ? '[data-case-followup]' : '[data-contact-followup]';
+    $$(selector, form).forEach(node => { node.hidden = closed; });
+    const nextAction = kind === 'case' ? form.elements.nextAction : null;
+    const dueDate = form.elements.dueDate;
+    if (nextAction) nextAction.required = !closed;
+    if (dueDate) dueDate.required = !closed;
+    if (closed && clearHidden) {
+      if (nextAction) nextAction.value = '';
+      if (dueDate) dueDate.value = '';
+    }
   }
 
   function defaultEvidenceType(activity) {
@@ -3314,7 +3331,6 @@
     const attachments = evidenceAttachments(data);
     if (!attachments.length) return '<div class="evidence-attachment-empty">尚未加入成果照片或檔案。</div>';
     return `<div class="evidence-attachment-grid">${attachments.map((attachment, index) => {
-      const primary = attachment.id === data.primaryAttachmentId;
       const previewUrl = attachmentPreviewUrl(attachment, 240);
       const preview = previewUrl
         ? `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(attachment)} alt="${esc(attachment.fileName)}">`
@@ -3323,9 +3339,9 @@
       const fileName = cloudUrl
         ? `<a class="file-name-link" href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer"><strong>${esc(attachment.fileName)}</strong>${icon('external-link', 13)}</a>`
         : `<strong>${esc(attachment.fileName)}</strong>`;
-      return `<article class="evidence-attachment-item ${primary ? 'is-primary' : ''}" data-attachment-id="${esc(attachment.id)}">
-        <button type="button" class="evidence-attachment-preview" data-action="set-evidence-primary" data-attachment-id="${esc(attachment.id)}" ${editable ? '' : 'disabled'} aria-label="${primary ? '目前標註主圖' : `設為標註主圖：${esc(attachment.fileName)}`}">${preview}<span class="evidence-attachment-index">${index + 1}</span></button>
-        <div class="evidence-attachment-main"><div class="evidence-attachment-head">${fileName}<span class="badge ${primary ? 'blue' : 'outline'}">${primary ? '標註主圖' : esc(attachment.size || '已加入')}</span></div>
+      return `<article class="evidence-attachment-item" data-attachment-id="${esc(attachment.id)}">
+        <div class="evidence-attachment-preview">${preview}<span class="evidence-attachment-index">${index + 1}</span></div>
+        <div class="evidence-attachment-main"><div class="evidence-attachment-head">${fileName}<span class="badge outline">${esc(attachment.size || '已加入')}</span></div>
         ${attachment.note ? `<small>舊版補充說明：${esc(attachment.note)}</small>` : ''}</div>
         ${editable ? `<button type="button" class="icon-button evidence-attachment-remove" data-action="remove-evidence-attachment" data-attachment-id="${esc(attachment.id)}" aria-label="移除 ${esc(attachment.fileName)}" title="移除">${icon('x', 15)}</button>` : ''}
       </article>`;
@@ -3355,14 +3371,19 @@
     evidenceDraft.pins = clone(value.pins || []);
     syncEvidencePrimaryFields(evidenceDraft);
     const attachmentCount = evidenceDraft.attachments.length;
+    const automaticTitle = value.title || `${activity.title}｜${formatDate(activity.date || state.daily.date)}`;
+    evidenceDraft.title = automaticTitle;
     return `<form id="evidence-form" data-form="evidence">
       <input type="hidden" name="id" value="${esc(value.id)}">
       <input type="hidden" name="activityId" value="${esc(activity.id)}">
       <input type="hidden" name="observation" value="${esc(value.observation || '')}">
+      <input type="hidden" name="type" value="${esc(value.type || defaultEvidenceType(activity))}">
+      <input type="hidden" name="stage" value="${esc(value.stage || (isCrossDay ? 'during' : 'after'))}">
+      <input type="hidden" name="title" value="${esc(automaticTitle)}">
+      <input id="evidence-claim" type="hidden" name="claim" value="${esc(value.claim || linkedResult)}">
       <div class="notice-band info">${icon('link', 19)}<div><div class="notice-title">${isCrossDay ? '關聯備課檔案' : '關聯工作'}：${esc(activity.title)}</div><div class="notice-copy">${activityNeedsPrepSource(activity.type) ? '課後備課回饋' : isCrossDay ? '本次備課目標' : '目標'}：${esc(linkedResult || activity.objective || '尚未填寫')}</div></div></div>
       <div class="notice-band info mt-12">${icon('eye', 19)}<div><div class="notice-title">上傳清楚、可辨識的成果即可</div><div class="notice-copy">不需另外描述主管要看哪裡；主管將依內容的完整性、清楚度與可判讀性進行判斷與評分。</div></div></div>
-      <div class="detail-split">
-        <div>
+      <div class="mt-16">
           <div class="evidence-upload-zone ${attachmentCount ? 'has-file' : ''}" id="evidence-upload-zone">
             <span class="evidence-upload-icon">${icon(attachmentCount ? 'images' : 'camera', 24)}</span>
             <div class="evidence-upload-copy"><strong id="evidence-upload-title">${attachmentCount ? `已加入 ${attachmentCount} 份成果` : (isCrossDay ? '上傳今天完成的版本' : '成果照片／檔案')} <span class="required">*</span></strong><small>${isCrossDay ? `可一次選擇多份今日實際完成的教案、教材或版本檔案，最多 ${MAX_EVIDENCE_FILES} 份。` : `可一次選取多張照片，系統會自動壓縮並上傳；最多 ${MAX_EVIDENCE_FILES} 張。`}</small><span id="evidence-file-name">${attachmentCount ? esc(evidenceDraft.attachments.map(item => item.fileName).join('、')) : '尚未選擇檔案 · 單檔上限 25 MB'}</span></div>
@@ -3372,20 +3393,9 @@
             </div>
           </div>
           <div id="evidence-attachment-list">${renderEvidenceAttachmentList(evidenceDraft)}</div>
-          <div class="annotation-canvas ${evidenceDraft.dataUrl ? 'has-image' : ''}" id="evidence-canvas" data-action="place-evidence-pin" aria-label="標註主圖預覽與重點標記">
-            ${renderEvidenceCanvas(evidenceDraft)}
-          </div>
-          <div id="pin-list" class="pin-list">${renderPinList(value.pins)}</div>
-        </div>
-        <div class="stack">
-          <div class="form-field"><label class="form-label" for="evidence-type">證據類型 <span class="required">*</span></label><select id="evidence-type" name="type" data-input="evidence-quality" required><option value="">請選擇</option>${Object.entries(EVIDENCE_TYPES).map(([key, label]) => `<option value="${key}" ${value.type === key ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></div>
-          <div class="form-field"><div class="form-label">紀錄階段 <span class="required">*</span></div><div class="segmented"><label><input type="radio" name="stage" value="before" ${value.stage === 'before' ? 'checked' : ''} required>${isCrossDay ? '接續依據' : '課前'}</label><label><input type="radio" name="stage" value="during" ${value.stage === 'during' ? 'checked' : ''} required>${isCrossDay ? '本日製作' : '進行中'}</label><label><input type="radio" name="stage" value="after" ${value.stage === 'after' ? 'checked' : ''} required>${isCrossDay ? '本日完成' : '成果'}</label></div></div>
-        </div>
       </div>
       <div class="section-divider"></div>
       <div class="form-grid">
-        <div class="form-field span-2"><label class="form-label" for="evidence-title">${isCrossDay ? '本日產出標題' : '證據標題'} <span class="required">*</span></label><input id="evidence-title" name="title" value="${esc(value.title)}" placeholder="${isCrossDay ? '例：餐車課程教案與學習單 v1.2' : '例：三組菜單成本表與定價初稿'}" minlength="4" data-input="evidence-quality" required></div>
-        <div class="form-field span-2"><div class="form-label">${activityNeedsPrepSource(activity.type) ? '對應的課後備課回饋' : '對應的工作結果'}</div><div class="evidence-linked-result">${esc(value.claim || linkedResult)}</div><input id="evidence-claim" type="hidden" name="claim" value="${esc(value.claim || linkedResult)}"></div>
         ${tracksStudents ? `<div class="form-field span-2"><div class="form-label">關聯學生（本班 ${assignedStudents(activity.teacher || state.context.teacher).length} 人）</div><div class="chip-list">${renderStudentChoices(activity.teacher || state.context.teacher, value.students || [])}</div></div>` : ''}
         <div class="form-field span-2"><label class="choice-chip" for="evidence-privacy"><input id="evidence-privacy" type="checkbox" name="privacy" data-change="evidence-privacy" ${value.privacy ? 'checked' : ''} required>${icon('shield-check', 15)}已確認檔案不含無關姓名、聯絡資訊或不必要的正面影像 <span class="required">*</span></label></div>
       </div>
@@ -3492,7 +3502,7 @@
       <div class="content-grid wide-aside">
         <section class="panel">
           <div class="panel-head"><div><div class="panel-title">${icon('sparkles')}本週摘要</div></div><span class="badge ${state.weekly.status === 'submitted' ? 'green' : 'yellow'}">${state.weekly.status === 'submitted' ? '已送出' : '草稿'}</span></div>
-          <div class="panel-body"><form id="weekly-form" data-form="weekly"><div class="summary-list"><div class="summary-line"><span class="summary-index">1</span><div><div class="summary-title">本週成果</div><div class="summary-copy">${esc(summary.keyChange)}</div></div></div><div class="summary-line"><span class="summary-index">2</span><div><div class="summary-title">持續追蹤</div><div class="summary-copy">${esc(summary.priorityRisks)}</div></div></div><div class="summary-line"><span class="summary-index">3</span><div><div class="summary-title">最近待辦</div><div class="summary-copy">${esc(summary.nextWeek)}</div></div></div></div><div class="form-field mt-16"><label class="form-label" for="weekly-decision">需要主管決定／提供資源（選填）</label><textarea id="weekly-decision" name="decisionNeeded" placeholder="填寫需要主管協助的事項。">${esc(state.weekly.decisionNeeded)}</textarea></div><div class="flex gap-8 mt-16"><button type="button" class="btn btn-primary" data-action="submit-weekly">${icon('send', 16)}確認送出週整理</button></div></form></div>
+          <div class="panel-body"><form id="weekly-form" data-form="weekly"><div class="summary-list"><div class="summary-line"><span class="summary-index">1</span><div><div class="summary-title">本週成果</div><div class="summary-copy">${esc(summary.keyChange)}</div></div></div><div class="summary-line"><span class="summary-index">2</span><div><div class="summary-title">持續追蹤</div><div class="summary-copy">${esc(summary.priorityRisks)}</div></div></div><div class="summary-line"><span class="summary-index">3</span><div><div class="summary-title">最近待辦</div><div class="summary-copy">${esc(summary.nextWeek)}</div></div></div></div><div class="notice-band info mt-16">${icon('message-square-text', 18)}<div><div class="notice-title">需要主管協助時</div><div class="notice-copy">請回到今日紀錄填寫「給主管的補充」，避免同一件事重複撰寫。</div></div></div><div class="flex gap-8 mt-16"><button type="button" class="btn btn-primary" data-action="submit-weekly">${icon('send', 16)}確認送出週整理</button></div></form></div>
         </section>
         <aside class="stack">
           <section class="panel weekly-coverage-panel"><div class="panel-head"><div><div class="panel-title">${icon('calendar-check-2')}最近工作日</div></div>${coverageRows.length ? `<span class="badge ${completeCoverageDays === coverageRows.length ? 'green' : 'yellow'}">${completeCoverageDays}/${coverageRows.length} 日完整</span>` : ''}</div><div class="panel-body">${coverageRows.length ? `<div class="weekly-coverage-list">${coverageRows.map(renderWeeklyCoverageRow).join('')}</div>` : `<div class="weekly-coverage-empty">${icon('calendar-plus', 21)}<div><strong>尚無紀錄</strong></div></div>`}</div></section>
@@ -4695,29 +4705,25 @@
     }).join('');
   }
 
-  function renderPlanDetail(plan, managerMode) {
-    const criteria = planCriteria(plan);
-    const readiness = planReadiness(plan);
-    const status = planStatus(plan);
+  function renderPlanDetail(plan) {
     const totalMinutes = (plan.flow || []).reduce((sum, item) => sum + Number(item.minutes || 0), 0);
     const sourceActivity = prepActivityForPlan(plan);
     const threadKey = feedbackThreadKey('plan', plan.id);
-    const showThread = managerMode || feedbackThreadMessages(threadKey).length > 0;
+    const showThread = feedbackThreadMessages(threadKey).length > 0;
     const identityCopy = sourceActivity ? `${formatDate(sourceActivity.date)} 建立 · ${esc(sourceActivity.details?.targetCourse || plan.courseType)}` : esc(plan.version || '舊版教案');
     return `<div class="stack">
-      <div class="notice-band ${readiness === 100 ? 'success' : 'info'}">${icon(readiness === 100 ? 'badge-check' : 'circle-alert', 19)}<div><div class="notice-title">教案內容完整度 ${readiness}%${managerMode ? ` · ${status[0]}` : ''}</div><div class="notice-copy">流程 ${totalMinutes}/${plan.duration} 分鐘 · ${(plan.materials || []).length} 份教材附件 · ${identityCopy}</div></div></div>
+      <div class="notice-band info">${icon('archive', 19)}<div><div class="notice-title">舊版備課資料</div><div class="notice-copy">保留原內容供查閱，不需補齊、送審或核准 · 流程 ${totalMinutes}/${plan.duration} 分鐘 · ${(plan.materials || []).length} 份教材附件 · ${identityCopy}</div></div></div>
       <div class="detail-split">
         <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('target')}課程設計</div><div class="panel-subtitle">${esc(plan.courseType)}</div></div></div><div class="panel-body">
           <h3 class="section-title">學習者背景</h3><div class="text-small">${nl2br(plan.learnerContext || '尚未填寫')}</div>
           <div class="section-divider"></div><h3 class="section-title">學習目標</h3><div class="text-small">${nl2br(plan.objectives || '尚未填寫')}</div>
           <div class="section-divider"></div><h3 class="section-title">檢核與標準</h3><div class="text-small">${nl2br(plan.assessment || '尚未填寫')}</div>
         </div></section>
-        <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('list-checks')}歸檔條件</div></div></div><div class="panel-body"><div class="check-list">${criteria.map(item => `<div class="check-item ${item.done ? 'done' : 'pending'}"><span class="check-icon">${icon(item.done ? 'check' : 'minus', 12)}</span><span>${esc(item.label)}</span></div>`).join('')}</div></div></section>
+        <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('folder-open')}資料摘要</div></div></div><div class="panel-body"><div class="metadata-list"><div class="metadata-row"><div class="metadata-label">流程時間</div><div class="metadata-value">${totalMinutes}/${plan.duration} 分鐘</div></div><div class="metadata-row"><div class="metadata-label">教材附件</div><div class="metadata-value">${(plan.materials || []).length} 份</div></div><div class="metadata-row"><div class="metadata-label">資料狀態</div><div class="metadata-value">僅供查閱</div></div></div></div></section>
       </div>
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('route')}教學流程</div></div></div><div class="panel-body flush"><div class="table-wrap"><table class="data-table"><thead><tr><th>階段</th><th>時間</th><th>老師行動</th><th>學生行動</th><th>檢核點</th></tr></thead><tbody>${(plan.flow || []).map(flow => `<tr><td><div class="table-primary">${esc(flow.stage)}</div></td><td>${flow.minutes} 分</td><td>${esc(flow.teacher)}</td><td>${esc(flow.student)}</td><td>${esc(flow.checkpoint)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">尚無流程</td></tr>'}</tbody></table></div></div></section>
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('files')}正式教材附件</div><div class="panel-subtitle">共 ${(plan.materials || []).length} 份</div></div></div><div class="panel-body"><div class="material-list">${renderMaterials(plan.materials, false)}</div></div></section>
       ${showThread ? renderFeedbackThread(threadKey) : ''}
-      ${managerMode ? `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}本次審查結論</div></div></div><div class="panel-body"><div class="review-checks">${['目標可被觀察與檢核', '流程時間合理且總和一致', '師生活動能支持目標', '評量標準具體', '教材內容與流程一致'].map(label => `<label class="review-check"><input type="checkbox" data-review-check data-change="plan-review-check"><span>${label}</span></label>`).join('')}</div><div class="form-field mt-16"><label class="form-label" for="plan-review-feedback">核准說明或修改要求</label><textarea id="plan-review-feedback" placeholder="指出需修改的段落、附件或判準。"></textarea></div></div></section>` : ''}
     </div>`;
   }
 
@@ -4908,6 +4914,7 @@
       footer: `${item ? `<button type="button" class="btn btn-danger" style="margin-right:auto" data-action="delete-student-case" data-case-id="${item.id}">${icon('trash-2', 15)}刪除</button>` : ''}<button type="button" class="btn" data-action="close-drawer">稍後繼續</button><button type="submit" form="student-case-form" class="btn btn-primary">${icon('save', 16)}儲存追蹤</button>`,
     });
     applyRestoredFormDraft('#student-case-form', saved);
+    updateTrackingFollowupFields($('#student-case-form'), 'case');
   }
 
   function openContactEditor(contactId) {
@@ -4920,6 +4927,7 @@
       footer: `${item ? `<button type="button" class="btn btn-danger" style="margin-right:auto" data-action="delete-contact" data-contact-id="${item.id}">${icon('trash-2', 15)}刪除</button>` : ''}<button type="button" class="btn" data-action="close-drawer">稍後繼續</button><button type="submit" form="contact-form" class="btn btn-primary">${icon('save', 16)}儲存溝通</button>`,
     });
     applyRestoredFormDraft('#contact-form', saved);
+    updateTrackingFollowupFields($('#contact-form'), 'contact');
   }
 
   function renderCoursePrepEvidenceOverview(activity, plan, planLink) {
@@ -5033,12 +5041,10 @@
     const plan = state.lessonPlans.find(item => item.id === planId);
     if (!plan) return;
     if (!ensureManagerScope(plan.teacher)) return;
-    const readiness = planReadiness(plan);
     const sourceActivity = prepActivityForPlan(plan);
-    const canEdit = state.ui.role === 'teacher' && plan.teacher === state.context.teacher;
     openDrawer({
-      title: plan.title, subtitle: sourceActivity ? `${formatDate(sourceActivity.date)} 建立 · ${plan.teacher}` : `${plan.version} · ${plan.teacher}`, body: renderPlanDetail(plan, false), wide: true,
-      footer: canEdit ? `<button type="button" class="btn" data-action="close-drawer">關閉</button><button type="button" class="btn" data-action="edit-plan" data-plan-id="${plan.id}">${icon('pencil', 16)}編輯</button><button type="button" class="btn btn-primary" data-action="submit-plan-review" data-plan-id="${plan.id}" ${readiness < 100 || plan.status === 'review' ? 'disabled' : ''}>${icon('send', 16)}${plan.status === 'review' ? '已送主管檢視' : '送主管檢視（選填）'}</button>` : `<button type="button" class="btn" data-action="close-drawer">關閉</button>`,
+      title: plan.title, subtitle: sourceActivity ? `${formatDate(sourceActivity.date)} 建立 · ${plan.teacher}` : `${plan.version} · ${plan.teacher}`, body: renderPlanDetail(plan), wide: true,
+      footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button>`,
     });
   }
 
@@ -5047,8 +5053,8 @@
     if (!plan) return;
     if (!ensureManagerScope(plan.teacher)) return;
     openDrawer({
-      title: '教案審查', subtitle: `${plan.teacher} · ${plan.title}`, body: renderPlanDetail(plan, true), wide: true,
-      footer: `<button type="button" class="btn" data-action="close-drawer">稍後處理</button><button type="button" class="btn" data-action="request-plan-changes" data-plan-id="${plan.id}">${icon('undo-2', 16)}退回補件</button><button type="button" id="approve-plan-button" class="btn btn-primary" data-action="approve-plan" data-plan-id="${plan.id}" disabled>${icon('badge-check', 16)}核准教案</button>`,
+      title: '舊版備課資料', subtitle: `${plan.teacher} · ${plan.title}`, body: renderPlanDetail(plan), wide: true,
+      footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button>`,
     });
   }
 
@@ -5361,7 +5367,7 @@
     const data = new FormData(form);
     const type = String(data.get('type') || activityDraft.type || 'tutoring');
     const feedbackOnly = activityNeedsPrepSource(type);
-    const title = String(data.get('title') || '').trim();
+    const title = String(data.get('title') || prepSource?.title || '').trim();
     const className = activityTrack(type) === 'enrichment' ? title : String(data.get('className') || activityDraft.className || title).trim();
     const details = feedbackOnly ? {} : clone(activityDraft.detailCache?.[type] || activityDraft.details || {});
     Object.assign(activityDraft, {
@@ -5375,8 +5381,8 @@
       planId: String(data.get('planId') || prepSourceById(data.get('prepSourceId'))?.planId || ''),
       objective: feedbackOnly ? '' : String(data.get('objective') || '').trim(),
       action: feedbackOnly ? '' : String(data.get('action') || '').trim(),
-      result: feedbackOnly ? '' : String(data.get('result') || '').trim(),
-      issue: feedbackOnly ? '' : String(data.get('issue') || '').trim(),
+      result: feedbackOnly ? '' : String(data.get('action') || data.get('result') || '').trim(),
+      issue: '',
       nextAction: feedbackOnly ? '' : String(data.get('nextAction') || '').trim(),
       owner: feedbackOnly ? '' : String(data.get('owner') || state.context.teacher).trim(),
       dueDate: feedbackOnly ? '' : String(data.get('dueDate') || ''),
@@ -5492,9 +5498,10 @@
     const prepSource = prepSourceById(prepSourceId);
     const prepEvidence = [];
     const feedbackOnly = activityNeedsPrepSource(type);
-    const title = String(data.get('title') || '').trim();
+    const title = String(prepSource?.title || data.get('title') || '').trim();
     const className = activityTrack(type) === 'enrichment' ? title : String(data.get('className') || existing?.className || title).trim();
     const details = feedbackOnly ? {} : clone(activityDraft?.detailCache?.[type] || activityDraft?.details || {});
+    const action = feedbackOnly ? '' : String(data.get('action') || '').trim();
     const activity = {
       id,
       date: existing ? existing.date : state.daily.date,
@@ -5507,8 +5514,8 @@
       prepSourceId,
       planId: prepSource?.planId || '',
       objective: feedbackOnly ? '' : String(data.get('objective') || '').trim(),
-      action: feedbackOnly ? '' : String(data.get('action') || '').trim(),
-      result: feedbackOnly ? '' : String(data.get('result') || '').trim(),
+      action,
+      result: action,
       issue: feedbackOnly ? '' : String(data.get('issue') || '').trim(),
       nextAction: feedbackOnly ? '' : String(data.get('nextAction') || '').trim(),
       owner: feedbackOnly ? '' : String(data.get('owner') || state.context.teacher).trim(),
@@ -5542,8 +5549,8 @@
     activity.status = activityComplete(activity) ? 'complete' : 'evidence-needed';
     if (existing) Object.assign(existing, activity);
     else state.activities.unshift(activity);
-    if (feedbackOnly) state.tasks = state.tasks.filter(task => task.ref !== `activity:${id}`);
-    else upsertDerivedTask(`activity:${id}`, activity.nextAction, '工作紀錄', activity.owner, activity.dueDate, activity.issue ? 'high' : 'medium');
+    if (feedbackOnly || !activity.nextAction) state.tasks = state.tasks.filter(task => task.ref !== `activity:${id}`);
+    else upsertDerivedTask(`activity:${id}`, activity.nextAction, '工作紀錄', activity.owner, activity.dueDate || activity.date, 'medium');
     markDailyNeedsResubmit(activity.date, activity.teacher);
     clearCurrentDrawerDraft();
     closeDrawer();
@@ -5558,18 +5565,21 @@
     const data = new FormData(form);
     const id = data.get('id') || uid('case');
     const existing = state.studentCases.find(item => item.id === id);
+    const status = String(data.get('status') || 'open');
+    const situation = String(data.get('situation') || data.get('outcome') || data.get('observation') || '').trim();
     const item = {
       id, date: existing ? existing.date : state.daily.date, teacher: existing ? existing.teacher : state.context.teacher,
       student: data.get('student'), category: data.get('category'), urgency: data.get('urgency'),
-      observation: data.get('observation').trim(), intervention: data.get('intervention').trim(), outcome: data.get('outcome').trim(),
-      nextAction: data.get('nextAction').trim(), dueDate: data.get('dueDate'), status: data.get('status'),
+      observation: situation, intervention: String(data.get('intervention') || '').trim(), outcome: situation,
+      nextAction: status === 'closed' ? '' : String(data.get('nextAction') || '').trim(),
+      dueDate: status === 'closed' ? '' : String(data.get('dueDate') || ''), status,
       parentContacted: data.get('parentContacted') === 'on', updatedAt: new Date().toISOString(),
     };
     if (existing) Object.assign(existing, item);
     else state.studentCases.unshift(item);
     state.daily.noStudentFollowupConfirmed = false;
     markDailyNeedsResubmit(item.date, item.teacher);
-    upsertDerivedTask(`case:${id}`, `${item.student}｜${item.nextAction}`, '學生追蹤', item.teacher, item.dueDate, item.urgency === 'high' ? 'high' : 'medium', item.status === 'closed');
+    upsertDerivedTask(`case:${id}`, `${item.student}｜${item.status === 'closed' ? '追蹤完成' : item.nextAction}`, '學生追蹤', item.teacher, item.dueDate || item.date, item.urgency === 'high' ? 'high' : 'medium', item.status === 'closed');
     clearCurrentDrawerDraft();
     closeDrawer(); persist(); scheduleDailyCloudDraftSync(); renderApp(); toast('學生追蹤已儲存', 'success');
   }
@@ -5579,16 +5589,19 @@
     const data = new FormData(form);
     const id = data.get('id') || uid('contact');
     const existing = state.contacts.find(item => item.id === id);
+    const status = String(data.get('status') || 'open');
+    const summary = String(data.get('summary') || '').trim();
     const item = {
       id, date: existing ? existing.date : state.daily.date, teacher: existing ? existing.teacher : state.context.teacher,
-      student: data.get('student'), channel: data.get('channel'), topic: String(data.get('topic') || '').trim(), summary: String(data.get('summary') || '').trim(),
-      decision: String(data.get('decision') || '').trim(), nextAction: '', dueDate: data.get('dueDate'), status: data.get('status'), updatedAt: new Date().toISOString(),
+      student: data.get('student'), channel: data.get('channel'), topic: summary.split(/\n|[。；]/)[0].slice(0, 28) || '親師溝通', summary,
+      decision: String(data.get('decision') || '').trim(), nextAction: '',
+      dueDate: status === 'closed' ? '' : String(data.get('dueDate') || ''), status, updatedAt: new Date().toISOString(),
     };
     if (existing) Object.assign(existing, item);
     else state.contacts.unshift(item);
     state.daily.parentStatus = 'recorded';
     markDailyNeedsResubmit(item.date, item.teacher);
-    upsertDerivedTask(`contact:${id}`, `${item.student}｜${item.decision}`, '親師溝通', item.teacher, item.dueDate, 'medium', item.status === 'closed');
+    upsertDerivedTask(`contact:${id}`, `${item.student}｜${item.status === 'closed' ? '溝通完成' : item.decision}`, '親師溝通', item.teacher, item.dueDate || item.date, 'medium', item.status === 'closed');
     clearCurrentDrawerDraft();
     closeDrawer(); persist(); scheduleDailyCloudDraftSync(); renderApp(); toast('親師溝通已儲存', 'success');
   }
@@ -5605,7 +5618,7 @@
     Object.keys(OPERATION_CHECKS).forEach(key => {
       evidenceByCheck[key] = evidenceByCheck[key] || {};
       evidenceByCheck[key].status = String(data.get(`status_${key}`) || '');
-      evidenceByCheck[key].action = String(data.get(`action_${key}`) || '').trim();
+      evidenceByCheck[key].action = evidenceByCheck[key].status === 'exception' ? String(data.get(`action_${key}`) || '').trim() : '';
       checks[key] = evidenceByCheck[key].status === 'normal';
     });
     const missingProof = Object.entries(OPERATION_CHECKS).filter(([key]) => {
@@ -5664,7 +5677,7 @@
     state.weekly.keyChange = summary.keyChange;
     state.weekly.priorityRisks = summary.priorityRisks;
     state.weekly.nextWeek = summary.nextWeek;
-    state.weekly.decisionNeeded = String(data.get('decisionNeeded') || '').trim();
+    state.weekly.decisionNeeded = '';
     persist();
     if (notify) {
       renderApp();
@@ -5740,6 +5753,41 @@
     }
     if (options.syncCloud !== false) scheduleTaskCloudSync(task);
     return { changed, linkedRecord };
+  }
+
+  async function updateTaskStatusWithCloudFeedback(task, status) {
+    if (!task) return { ok: false, error: '找不到追蹤事項' };
+    const taskSnapshot = clone(task);
+    const linked = linkedTrackingRecord(task);
+    const linkedSnapshot = linked ? clone(linked.record) : null;
+    const result = setTaskStatus(task, status, { syncCloud: false });
+    persist();
+    renderApp();
+
+    if (state.integration.cloudSyncEnabled) {
+      toast('正在同步追蹤狀態…');
+      const cloudResult = await syncTaskToCloud(task);
+      if (!cloudResult?.ok) {
+        Object.keys(task).forEach(key => { if (!(key in taskSnapshot)) delete task[key]; });
+        Object.assign(task, taskSnapshot);
+        if (linked && linkedSnapshot) {
+          Object.keys(linked.record).forEach(key => { if (!(key in linkedSnapshot)) delete linked.record[key]; });
+          Object.assign(linked.record, linkedSnapshot);
+        }
+        persist();
+        renderApp();
+        toast(`事項未更新：${cloudResult?.error || '雲端連線失敗，請稍後再試'}`, 'danger');
+        return { ok: false, error: cloudResult?.error || '雲端連線失敗' };
+      }
+    }
+
+    persist();
+    renderApp();
+    const done = task.status === 'done';
+    toast(done
+      ? result?.linkedRecord ? '事項已完成，學生追蹤已同步結案' : '事項已完成'
+      : result?.linkedRecord ? '事項已恢復，學生追蹤已同步開啟' : '事項已恢復為進行中', 'success');
+    return { ok: true, ...result };
   }
 
   function upsertDerivedTask(ref, title, source, owner, dueDate, priority, done = false) {
@@ -7029,6 +7077,10 @@
     activityDraft.prepSourceCache[activityDraft.type] = sourceId;
     const source = prepSourceById(sourceId);
     activityDraft.planId = source?.planId || '';
+    activityDraft.title = source?.title || '';
+    activityDraft.className = activityTrack(activityDraft.type) === 'enrichment' ? activityDraft.title : activityDraft.className;
+    const title = $('#activity-title');
+    if (title) title.value = activityDraft.title;
     const node = $('#activity-prep-source-status');
     if (node) node.outerHTML = renderPrepSourceStatus(sourceId, activityDraft.type);
     hydrateIcons();
@@ -7133,6 +7185,10 @@
     const key = control.dataset.checkKey;
     state.operations.evidenceByCheck[key] = state.operations.evidenceByCheck[key] || {};
     state.operations.evidenceByCheck[key].status = isException ? 'exception' : 'normal';
+    if (!isException) {
+      state.operations.evidenceByCheck[key].action = '';
+      if (action) action.value = '';
+    }
     state.operations.confirmedAt = '';
     markDailyNeedsResubmit(state.operations.date, state.operations.dutyOwner);
     updateOperationProofSummary();
@@ -7510,6 +7566,10 @@
         toast('今天已有重要親師溝通紀錄，請保留「有重要事項」', 'danger');
       } else {
         state.daily.parentStatus = control.dataset.status;
+        if (control.dataset.status === 'recorded') {
+          state.daily.parentHandoffConfirmed = false;
+          state.daily.parentHandoffNote = '';
+        }
         markDailyNeedsResubmit();
         persist(); scheduleDailyCloudDraftSync(); renderApp();
       }
@@ -7673,11 +7733,9 @@
     else if (action === 'toggle-task-detail') {
       const task = state.tasks.find(item => item.id === control.dataset.taskId && item.owner === state.context.teacher);
       if (task) {
-        setTaskStatus(task, task.status === 'done' ? 'open' : 'done');
+        const nextStatus = task.status === 'done' ? 'open' : 'done';
         closeDialog();
-        persist();
-        renderApp();
-        toast(task.status === 'done' ? '事項已完成' : '事項已恢復為進行中', 'success');
+        await updateTaskStatusWithCloudFeedback(task, nextStatus);
       }
     }
     else if (action === 'open-task') openTaskEditor();
@@ -7904,6 +7962,8 @@
     if (change === 'prep-files') await handlePrepFiles(control);
     if (change === 'operation-photo') await handleOperationPhoto(control);
     if (change === 'operation-status') toggleOperationStatus(control);
+    if (change === 'case-status') updateTrackingFollowupFields(control.form, 'case', true);
+    if (change === 'contact-status') updateTrackingFollowupFields(control.form, 'contact', true);
     if (change === 'confirm-no-student') {
       if (control.checked && state.studentCases.some(item => item.date === state.daily.date && item.teacher === state.context.teacher)) {
         control.checked = false;
@@ -7923,13 +7983,7 @@
     }
     if (change === 'toggle-task') {
       const task = state.tasks.find(item => item.id === control.dataset.taskId);
-      if (task) {
-        const result = setTaskStatus(task, control.checked ? 'done' : 'open');
-        toast(control.checked
-          ? result?.linkedRecord ? '事項已完成，學生追蹤已同步結案' : '事項已完成'
-          : result?.linkedRecord ? '事項已恢復，學生追蹤已同步開啟' : '事項已恢復為進行中', 'success');
-      }
-      persist(); renderApp();
+      if (task) await updateTaskStatusWithCloudFeedback(task, control.checked ? 'done' : 'open');
     }
     if (change === 'evidence-file') await handleEvidenceFile(control);
     if (change === 'evidence-privacy') updateEvidenceQualityFromForm();

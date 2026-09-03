@@ -2,7 +2,7 @@
  * 布拉克星球 KPI 系統 - 合併版（All-in-One v9）
  * 觸發詞：kpi系統
  * 此檔由 apps-script 各模組機械式合併，請勿單獨修改。
- * 合併日期：2026-09-02
+ * 合併日期：2026-09-03
  */
 
 // ════════════════════════════════════════════════════════════
@@ -5613,9 +5613,21 @@ function saveTalentDraft(params) {
 }
 
 function validateTalentLessonRequiredFields_(lesson) {
-  ['courseType', 'courseName', 'siteType', 'site', 'prepId', 'issue', 'parentStatus'].forEach(function (key) {
-    if (!String(lesson[key] || '').trim()) throw new Error('本堂必填內容不完整：' + key);
+  const labels = {
+    courseType: '課程類型',
+    courseName: '課程名稱',
+    siteType: '上課場域',
+    site: '上課地點',
+    prepId: '本堂使用的備課檔案',
+    issue: '課程問題及下次優化',
+    parentStatus: '親師溝通狀態',
+  };
+  const missing = Object.keys(labels).filter(function (key) {
+    return !String(lesson[key] || '').trim();
   });
+  if (missing.length) {
+    throw new Error('請完成：' + missing.map(function (key) { return labels[key]; }).join('、'));
+  }
 }
 
 function saveTalentLesson(params) {
@@ -5700,11 +5712,17 @@ function saveTalentLesson(params) {
     }
     const selectedPrep = talentRecordObject_(prepRow);
     talentAttachments_(selectedPrep.materials, true);
+    lesson.courseType = String(selectedPrep.courseType || '').trim();
+    lesson.courseName = String(selectedPrep.courseName || selectedPrep.title || '').trim();
+    if (!lesson.courseType || !lesson.courseName) throw new Error('所選備課檔案缺少課程資料，請先更新備課檔案');
     lesson.attendanceFiles = talentAttachments_(lesson.attendanceFiles, true);
     lesson.learningFiles = talentAttachments_(lesson.learningFiles, true);
     lesson.roomFiles = talentAttachments_(lesson.roomFiles, true);
-    if (lesson.roomDone !== true) throw new Error('請確認教室與器材已完成復原');
+    lesson.roomDone = lesson.roomFiles.length > 0;
+    if (!lesson.roomDone) throw new Error('請上傳課後教室復原照片');
+    if (['complete', 'followup'].indexOf(lesson.parentStatus) < 0) throw new Error('請選擇親師溝通狀態');
     if (lesson.parentStatus === 'followup' && !String(lesson.parentFollowup || '').trim()) throw new Error('請填寫個別追蹤與下一步');
+    if (lesson.parentStatus !== 'followup') lesson.parentFollowup = '';
     lesson.newCount = lesson.siteType === 'self' && lesson.employment === 'fulltime' ? Math.max(0, Math.floor(Number(lesson.newCount || 0))) : 0;
     lesson.renewalCount = lesson.siteType === 'self' ? Math.max(0, Math.floor(Number(lesson.renewalCount || 0))) : 0;
     const pay = talentLessonPay_(lesson, user);
@@ -6333,7 +6351,7 @@ function adminMarketingAttachments_(items, required) {
 
 function adminMarketingTrialIdentity_(data) {
   const name = adminMarketingText_(data && data.studentName, 160).replace(/\s+/g, '').toLowerCase();
-  const contact = adminMarketingText_(data && (data.contactDisplay || data.contactRef), 160).replace(/[\s\-()]/g, '').toLowerCase();
+  const contact = adminMarketingText_(data && (data.contactDisplay || data.contactRef), 160).split('｜試上')[0].replace(/[\s\-()]/g, '').toLowerCase();
   const course = adminMarketingText_(data && data.course, 220).replace(/\s+/g, '').toLowerCase();
   const date = adminMarketingText_(data && data.date, 10);
   return name && contact && course && date ? name + '|' + contact + '|' + course + '|' + date : '';
@@ -6341,7 +6359,7 @@ function adminMarketingTrialIdentity_(data) {
 
 function adminMarketingStudentIdentity_(data) {
   const name = adminMarketingText_(data && data.studentName, 160).replace(/\s+/g, '').toLowerCase();
-  const contact = adminMarketingText_(data && (data.contactDisplay || data.contactRef), 160).replace(/[\s\-()]/g, '').toLowerCase();
+  const contact = adminMarketingText_(data && (data.contactDisplay || data.contactRef), 160).split('｜試上')[0].replace(/[\s\-()]/g, '').toLowerCase();
   return name && contact ? name + '|' + contact : '';
 }
 
@@ -6406,7 +6424,7 @@ function validateAdminMarketingDaily_(data) {
       actualDate: adminMarketingDate_(item.actualDate, false),
       evidence: adminMarketingAttachments_(item.evidence, evidenceRequired),
     };
-    if (!cleaned.category || !cleaned.title || !cleaned.completedToday) throw new Error('每項工作都要填寫類型、內容與今日完成進度');
+    if (!cleaned.category || !cleaned.title || !cleaned.completedToday) throw new Error('每項工作都要填寫工作類型、工作名稱與本次處理結果');
     if (cleaned.status !== 'completed' && (!cleaned.remaining || !cleaned.dueDate)) {
       throw new Error('未完成工作必須填寫剩餘工作與預計完成日期');
     }
@@ -6514,14 +6532,14 @@ function validateAdminMarketingTrial_(data) {
   data.studentName = adminMarketingText_(data.studentName, 160);
   data.course = adminMarketingText_(data.course, 220);
   data.teacher = adminMarketingText_(data.teacher, 160);
-  data.contactDisplay = adminMarketingText_(data.contactDisplay || data.contactRef, 160);
+  data.contactDisplay = adminMarketingText_(data.contactDisplay || data.contactRef, 160).split('｜試上')[0].trim();
   data.contactRef = data.contactDisplay;
   data.interest = ['high', 'medium', 'low', 'unknown'].indexOf(data.interest) >= 0 ? data.interest : 'unknown';
   data.owner = adminMarketingText_(data.owner || data.nickname, 160);
   data.note = adminMarketingText_(data.note, 1800);
   data.nextFollowupDate = adminMarketingDate_(data.nextFollowupDate, false);
-  data.status = ['waiting_contact', 'contacted', 'considering', 'followup_scheduled', 'converted', 'not_enrolled'].indexOf(data.status) >= 0
-    ? data.status : 'waiting_contact';
+  if (data.status === 'contacted' || data.status === 'followup_scheduled') data.status = 'considering';
+  data.status = ['waiting_contact', 'considering', 'converted', 'not_enrolled'].indexOf(data.status) >= 0 ? data.status : 'waiting_contact';
   if (!data.studentName || !data.course || !data.teacher || !data.contactRef || !data.owner) {
     throw new Error('學生姓名、試上課程、授課老師、家長識別資料與負責人皆為必填');
   }

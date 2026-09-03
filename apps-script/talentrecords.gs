@@ -313,9 +313,21 @@ function saveTalentDraft(params) {
 }
 
 function validateTalentLessonRequiredFields_(lesson) {
-  ['courseType', 'courseName', 'siteType', 'site', 'prepId', 'issue', 'parentStatus'].forEach(function (key) {
-    if (!String(lesson[key] || '').trim()) throw new Error('本堂必填內容不完整：' + key);
+  const labels = {
+    courseType: '課程類型',
+    courseName: '課程名稱',
+    siteType: '上課場域',
+    site: '上課地點',
+    prepId: '本堂使用的備課檔案',
+    issue: '課程問題及下次優化',
+    parentStatus: '親師溝通狀態',
+  };
+  const missing = Object.keys(labels).filter(function (key) {
+    return !String(lesson[key] || '').trim();
   });
+  if (missing.length) {
+    throw new Error('請完成：' + missing.map(function (key) { return labels[key]; }).join('、'));
+  }
 }
 
 function saveTalentLesson(params) {
@@ -400,11 +412,17 @@ function saveTalentLesson(params) {
     }
     const selectedPrep = talentRecordObject_(prepRow);
     talentAttachments_(selectedPrep.materials, true);
+    lesson.courseType = String(selectedPrep.courseType || '').trim();
+    lesson.courseName = String(selectedPrep.courseName || selectedPrep.title || '').trim();
+    if (!lesson.courseType || !lesson.courseName) throw new Error('所選備課檔案缺少課程資料，請先更新備課檔案');
     lesson.attendanceFiles = talentAttachments_(lesson.attendanceFiles, true);
     lesson.learningFiles = talentAttachments_(lesson.learningFiles, true);
     lesson.roomFiles = talentAttachments_(lesson.roomFiles, true);
-    if (lesson.roomDone !== true) throw new Error('請確認教室與器材已完成復原');
+    lesson.roomDone = lesson.roomFiles.length > 0;
+    if (!lesson.roomDone) throw new Error('請上傳課後教室復原照片');
+    if (['complete', 'followup'].indexOf(lesson.parentStatus) < 0) throw new Error('請選擇親師溝通狀態');
     if (lesson.parentStatus === 'followup' && !String(lesson.parentFollowup || '').trim()) throw new Error('請填寫個別追蹤與下一步');
+    if (lesson.parentStatus !== 'followup') lesson.parentFollowup = '';
     lesson.newCount = lesson.siteType === 'self' && lesson.employment === 'fulltime' ? Math.max(0, Math.floor(Number(lesson.newCount || 0))) : 0;
     lesson.renewalCount = lesson.siteType === 'self' ? Math.max(0, Math.floor(Number(lesson.renewalCount || 0))) : 0;
     const pay = talentLessonPay_(lesson, user);

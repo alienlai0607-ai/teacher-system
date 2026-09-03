@@ -69,7 +69,7 @@ assert.equal(context.talentAppEvidence_([{ fileName: 'app.png', mimeType: 'image
 assert.throws(() => context.talentAppEvidence_([{ fileName: 'app.pdf', mimeType: 'application/pdf', url: 'https://drive.google.com/file/d/app/view' }], true), /只接受圖片/);
 const simplifiedLesson = { courseType: '樂高小創客', courseName: '齒輪課', siteType: 'self', site: '布拉克自營教室', prepId: 'prep-1', issue: '齒輪容易鬆脫，下次先示範固定方式。', parentStatus: 'complete' };
 assert.doesNotThrow(() => context.validateTalentLessonRequiredFields_(simplifiedLesson), '省略 completed 與 response 後仍須能通過後端必填檢核');
-assert.throws(() => context.validateTalentLessonRequiredFields_({ ...simplifiedLesson, issue: '  ' }), /issue/, '唯一保留的課程問題及下次優化不得空白');
+assert.throws(() => context.validateTalentLessonRequiredFields_({ ...simplifiedLesson, issue: '  ' }), /課程問題及下次優化/, '唯一保留的課程問題及下次優化不得空白，且錯誤需顯示老師看得懂的欄位名稱');
 
 const archiveSource = fs.readFileSync(path.join(root, 'apps-script/archivefiles.gs'), 'utf8');
 const setupSource = fs.readFileSync(path.join(root, 'apps-script/setup.gs'), 'utf8');
@@ -83,6 +83,16 @@ const talentUiSource = fs.readFileSync(path.join(root, 'review/talent-v2/app.js'
 const talentStyleSource = fs.readFileSync(path.join(root, 'review/talent-v2/styles.css'), 'utf8');
 const talentIndexSource = fs.readFileSync(path.join(root, 'review/talent-v2/index.html'), 'utf8');
 const anqinUiSource = fs.readFileSync(path.join(root, 'review/anqin-v2/app.js'), 'utf8');
+const logCompleteSource = talentUiSource.slice(talentUiSource.indexOf('function logComplete('), talentUiSource.indexOf('function putLocalLesson('));
+const logCompleteContext = vm.createContext({ Boolean, String, Array });
+vm.runInContext(logCompleteSource, logCompleteContext);
+const completeLog = {
+  lessonStatus: 'held', prepId: 'prep-1', attendanceFiles: [{}], learningFiles: [{}], roomFiles: [{}], parentStatus: 'complete',
+};
+assert.equal(logCompleteContext.logComplete(completeLog), true, '親師溝通已完成時，本堂紀錄應判定完整');
+assert.equal(logCompleteContext.logComplete({ ...completeLog, parentStatus: 'followup' }), true, '親師溝通待追蹤時，本堂紀錄仍應判定完整');
+assert.equal(logCompleteContext.logComplete({ ...completeLog, parentStatus: 'pending' }), false, '尚未選擇親師狀態不得被誤判為完整');
+assert.equal(logCompleteContext.logComplete({ ...completeLog, parentStatus: '' }), false, '空白親師狀態不得被誤判為完整');
 assert.match(archiveSource, /function listTeacherReportFolders\(/);
 assert.match(archiveSource, /item\.removeViewer\(/, '應移除已失效的舊查看權限');
 assert.match(archiveSource, /item\.removeEditor\(/, '主管只能查看，不保留舊編輯權限');
@@ -221,7 +231,7 @@ assert.match(talentUiSource, /aria-label="編輯今日紀錄"/, '才藝老師需
 assert.match(talentUiSource, /textareaField\('課程問題及下次優化', 'issue', formValue\('issue'\), true,/, '才藝正職與 PT 只需填寫一個必填的課後文字欄位');
 assert.doesNotMatch(talentUiSource, /textareaField\('本堂實際完成內容'|textareaField\('孩子反應／學習證據'/, '才藝課堂表單不得再要求重複的完成內容與孩子反應文字');
 assert.match(backendSource, /function validateTalentLessonRequiredFields_\(lesson\)/, '才藝後端必填規則需可獨立驗證');
-assert.match(backendSource, /\['courseType', 'courseName', 'siteType', 'site', 'prepId', 'issue', 'parentStatus'\]/, '才藝後端只應要求課程問題及下次優化，不可再卡住已刪除欄位');
+assert.match(backendSource, /courseType: '課程類型'[\s\S]*issue: '課程問題及下次優化'[\s\S]*parentStatus: '親師溝通狀態'/, '才藝後端只應要求目前畫面可見欄位，錯誤不得顯示內部代號');
 assert.doesNotMatch(backendSource, /\['courseType'[^\]]*'completed'[^\]]*'response'/, '後端必填清單不得殘留已刪除欄位');
 assert.doesNotMatch(backendSource, /<h3>本堂實際完成內容<\/h3>|<h3>孩子反應／學習證據<\/h3>/, '才藝正式日報不得再輸出已刪除段落');
 assert.match(backendSource, /<h3>課程問題及下次優化<\/h3>/, '才藝正式日報需保留唯一的課後文字欄位');
@@ -230,7 +240,7 @@ assert.match(talentUiSource, /\.\.\.values,[\s\S]*id: editingId \|\| existingLog
 assert.match(talentUiSource, /state\.logs = \(Array\.isArray\(state\.logs\)[\s\S]*id: uid\('log'\)/, '舊本機課堂缺少編號時需自動修復');
 assert.match(talentUiSource, /class="record-actions"[\s\S]*data-action="edit-log"[\s\S]*data-action="view-log"/, '編輯與查看按鈕需放入獨立動作列，避免疊在同一座標');
 assert.match(talentStyleSource, /\.record-actions \{ display: flex;[\s\S]*gap: 6px;/, '編輯與查看按鈕需保留可點擊間距');
-assert.match(talentIndexSource, /app\.js\?v=20260902-talent-stability-10/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
+assert.match(talentIndexSource, /app\.js\?v=20260903-talent-stability-1/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
 assert.match(talentUiSource, /completed: String\(values\.issue \|\| ''\)\.trim\(\), response: String\(values\.issue \|\| ''\)\.trim\(\)/, '簡化後的才藝表單需相容尚未更新的舊後端驗證');
 assert.match(talentUiSource, /function talentSubmissionError\(/, '才藝送出錯誤不得直接顯示內部欄位名稱');
 const talentPaySource = talentUiSource.slice(talentUiSource.indexOf('function renderPay()'), talentUiSource.indexOf('function renderPayRow('));

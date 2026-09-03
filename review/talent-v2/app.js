@@ -400,7 +400,11 @@
   function isTeacher() { return ['fulltime', 'pt'].includes(modeRole()); }
   function isPt() { return modeRole() === 'pt'; }
   function isPayroll() { return modeRole() === 'payroll'; }
-  function navItems() { return NAV[modeRole()]; }
+  function navItems() {
+    const items = NAV[modeRole()] || [];
+    if (!isPt() || normalizeName(currentUser.nickname) === normalizeName('黑豹老師')) return items;
+    return items.filter(item => item.route !== 'pay');
+  }
   function routeTitle() { return navItems().find(item => item.route === state.ui.route)?.label || workspace.label; }
   function initials() { return String(currentUser.nickname || '才藝').replace(/(?:老師|主管)$/, '').slice(0, 2); }
   function ownLogs() { return state.logs.filter(item => !isTeacher() || normalizeName(item.teacher) === normalizeName(currentUser.nickname)); }
@@ -1067,7 +1071,9 @@
       attendance: draft.attendanceFiles || [], learning: draft.learningFiles || [], room: draft.roomFiles || [], app: draft.appFiles || [], prep: []
     };
     const prepOptions = usablePreps();
-    const selectedCourseType = formValue('courseType', COURSE_TYPES[3]);
+    const selectedPrep = prepOptions.find(prep => prep.id === formValue('prepId'));
+    const selectedCourseType = selectedPrep?.courseType || formValue('courseType', '');
+    const selectedCourseName = selectedPrep?.courseName || selectedPrep?.title || formValue('courseName', '');
     openDrawer({
       title: editing ? '編輯本堂紀錄' : state.draftLog ? '繼續本堂紀錄' : '新增本堂紀錄',
       subtitle: editing ? '今日內更新同一筆，不會重複計薪。' : '同一頁完成一堂課，系統會自動草稿保留。',
@@ -1083,22 +1089,22 @@
         <div data-held-only>
         <section class="form-section"><div class="section-title"><span class="section-number">${isPt() ? '2' : '1'}</span><div><h3>課程與點名</h3><p>${isPt() ? '場域與地點依固定排班帶入。' : '請確認今天的課程、地點與點名人數。'}</p></div></div><div class="form-grid three">
           ${isPt() ? '' : `<label class="form-field"><span>授課日期 <b>*</b></span><input type="date" name="date" value="${esc(formValue('date', todayIso()))}" max="${todayIso()}" readonly required><small>正常課程固定為今天</small></label>`}
-          ${selectField('課程類型', 'courseType', courseTypeOptions(selectedCourseType), selectedCourseType, true)}
-          ${field('課程名稱', 'courseName', 'text', formValue('courseName'), true, '例：齒輪轉速實驗')}
+          <label class="form-field span-all"><span>本堂使用的備課檔案 <b>*</b></span><select name="prepId" data-log-prep required><option value="">請選擇課程</option>${prepOptions.map(prep => `<option value="${prep.id}" ${formValue('prepId') === prep.id ? 'selected' : ''}>${esc(prep.courseName || prep.title || '未命名課程')} · ${esc(prep.courseType || '未分類')}</option>`).join('')}</select>${prepOptions.length ? '<small>課程類型與名稱會自動帶入。</small>' : '<small class="field-error">目前沒有可使用的備課檔案，請先建立課程並上傳至少一份教案或教材。</small>'}</label>
+          <label class="form-field"><span>課程類型</span><input name="courseType" value="${esc(selectedCourseType)}" readonly></label>
+          <label class="form-field"><span>課程名稱</span><input name="courseName" value="${esc(selectedCourseName)}" readonly></label>
           ${isPt() ? `<label class="form-field"><span>上課場域 <b>*</b></span><input data-schedule-site-type-display value="${schedule.siteType === 'partner' ? '合作校／外派' : '布拉克自營教室'}" readonly><input type="hidden" name="siteType" value="${esc(schedule.siteType || 'self')}"><small>依所選固定班次帶入</small></label>` : selectField('上課場域', 'siteType', ['self|布拉克自營教室', 'partner|合作校／外派'], formValue('siteType', schedule.siteType), true, true)}
           ${isPt() ? `<label class="form-field"><span>上課地點 <b>*</b></span><input name="site" data-schedule-site-display value="${esc(schedule.site || '')}" readonly required><small>如排班有異動，請先由管理員更新</small></label>` : field('上課地點', 'site', 'text', formValue('site', schedule.site), true)}
           ${selectField('授課時數', 'duration', ['1|1 小時', '1.5|1.5 小時'], String(formValue('duration', '1.5')), true, true)}
         </div><div class="count-grid">
-          ${numberField('應到正式', 'expected', formValue('expected', 0), true)}${numberField('正式實到', 'present', formValue('present', 0), true)}${numberField('請假', 'leave', formValue('leave', 0), true)}${numberField('未請假缺席', 'absent', formValue('absent', 0), true)}${numberField('補課實到', 'makeup', formValue('makeup', 0), true)}${numberField('體驗人數', 'trial', formValue('trial', 0), true)}
+          <label class="form-field count-field"><span>應到正式（自動）</span><input type="number" min="0" step="1" name="expected" value="${esc(formValue('expected', 0))}" readonly></label>${numberField('正式實到', 'present', formValue('present', 0), true)}${numberField('請假', 'leave', formValue('leave', 0), true)}${numberField('未請假缺席', 'absent', formValue('absent', 0), true)}${numberField('補課實到', 'makeup', formValue('makeup', 0), true)}${numberField('體驗人數', 'trial', formValue('trial', 0), true)}
         </div>${uploadField('點名簿照片', 'attendance', '要看得出日期、課程與圈記；可一次多選。', 'image/*', true)}</section>
         <section class="form-section"><div class="section-title"><span class="section-number">${isPt() ? '3' : '2'}</span><div><h3>備課檔案與教學日誌</h3><p>選擇這堂課使用的課程檔案，不需要主管審核。</p></div></div>
-          <label class="form-field span-all"><span>本堂使用的備課檔案 <b>*</b></span><select name="prepId" required><option value="">請選擇課程</option>${prepOptions.map(prep => `<option value="${prep.id}" ${formValue('prepId') === prep.id ? 'selected' : ''}>${esc(prep.courseName || prep.title || '未命名課程')} · ${esc(prep.courseType || '未分類')}</option>`).join('')}</select>${prepOptions.length ? '' : '<small class="field-error">目前沒有可使用的備課檔案，請先建立課程並上傳至少一份教案或教材。</small>'}</label>
           <div class="form-grid"><div class="span-all">${textareaField('課程問題及下次優化', 'issue', formValue('issue'), true, '寫本堂遇到的問題，以及下次要調整的講法、活動或材料。')}</div></div>
           ${uploadField('學習過程與成果', 'learning', '照片、影片可一次多選；須能對應本堂目標。', 'image/*,video/*', true)}
         </section>
         <section class="form-section"><div class="section-title"><span class="section-number">${isPt() ? '4' : '3'}</span><div><h3>溝通、復原與獎金事件</h3><p>新生與續報只在自營教室顯示，沿用同一張點名照片。</p></div></div>
-          <div class="form-grid">${selectField('親師溝通狀態', 'parentStatus', ['complete|全班回報完成', 'followup|有個別追蹤', 'pending|尚未完成'], formValue('parentStatus', 'complete'), true, true)}<label class="check-card"><input type="checkbox" name="roomDone" ${formValue('roomDone', false) ? 'checked' : ''} required><span>${icon('sparkles', 20)}<strong>教室與器材已復原 <b>*</b></strong><small>課後完成後勾選</small></span></label></div>
-          <label class="form-field span-all followup-field" ${formValue('parentStatus', 'complete') === 'followup' ? '' : 'hidden'}><span>個別追蹤與下一步 <b>*</b></span><textarea name="parentFollowup" placeholder="只記錄需要繼續處理的具體狀況。">${esc(formValue('parentFollowup'))}</textarea></label>
+          <div class="form-grid"><label class="form-field"><span>親師溝通狀態 <b>*</b></span><select name="parentStatus" required><option value="">請選擇</option><option value="complete" ${formValue('parentStatus') === 'complete' ? 'selected' : ''}>已完成全班回報</option><option value="followup" ${formValue('parentStatus') === 'followup' ? 'selected' : ''}>已回報，另有個別追蹤</option></select></label></div>
+          <label class="form-field span-all followup-field" ${formValue('parentStatus') === 'followup' ? '' : 'hidden'}><span>個別追蹤與下一步 <b>*</b></span><textarea name="parentFollowup" placeholder="只記錄需要繼續處理的具體狀況。">${esc(formValue('parentFollowup'))}</textarea></label>
           ${uploadField('課後教室復原照片', 'room', '不需要另寫照片判讀說明。', 'image/*', true)}
           <div class="app-publish-fields">${uploadField('家長 APP 發布完成截圖', 'app', '截圖需同時看得到發布日期與課程名稱；可一次選多張。若尚未發布，可先送出本堂紀錄，最晚週六前到「家長 APP」補上。', 'image/*', false)}</div>
           <div class="bonus-fields"><div class="form-grid">${isPt() ? '' : numberField('新生確定報名', 'newCount', formValue('newCount', 0), false, '藍筆圈選「新」')}${numberField('續報確定', 'renewalCount', formValue('renewalCount', 0), false, '紅筆圈選「續」')}</div></div>
@@ -1168,7 +1174,7 @@
     const data = new FormData(form);
     state.draftLog = {
       ...Object.fromEntries(data.entries()),
-      roomDone: Boolean(form.elements.roomDone?.checked),
+      roomDone: Boolean(pendingFiles.room?.length),
       attendanceFiles: pendingFiles.attendance,
       learningFiles: pendingFiles.learning,
       roomFiles: pendingFiles.room,
@@ -1449,6 +1455,18 @@
     }
     if (isPt()) updatePtScheduleSelect(form);
     data = new FormData(form);
+    const selectedPrep = usablePreps().find(prep => prep.id === String(data.get('prepId') || ''));
+    if (selectedPrep) {
+      form.elements.courseType.value = selectedPrep.courseType || '';
+      form.elements.courseName.value = selectedPrep.courseName || selectedPrep.title || '';
+    } else if (form.elements.prepId && !form.elements.prepId.value) {
+      form.elements.courseType.value = '';
+      form.elements.courseName.value = '';
+    }
+    if (form.elements.expected) {
+      form.elements.expected.value = String(Number(form.elements.present?.value || 0) + Number(form.elements.leave?.value || 0) + Number(form.elements.absent?.value || 0));
+    }
+    data = new FormData(form);
     const siteType = data.get('siteType');
     $$('.bonus-fields', form).forEach(node => { node.hidden = siteType !== 'self'; });
     $$('.app-publish-fields', form).forEach(node => {
@@ -1459,6 +1477,7 @@
     const needsFollowup = data.get('parentStatus') === 'followup';
     if (followup) followup.hidden = !needsFollowup;
     if (form.elements.parentFollowup) form.elements.parentFollowup.required = needsFollowup;
+    if (!needsFollowup && form.elements.parentFollowup) form.elements.parentFollowup.value = '';
     const preview = $('#pay-preview');
     if (preview) {
       const count = Number(data.get('present') || 0) + Number(data.get('makeup') || 0);
@@ -1499,7 +1518,8 @@
 
   function logComplete(item) {
     if (item.lessonStatus === 'cancelled') return Boolean(item.cancellationReason && item.courseName);
-    return Boolean(item.prepId && item.attendanceFiles?.length && item.learningFiles?.length && item.roomDone && item.roomFiles?.length && item.parentStatus !== 'pending');
+    const parentStatusReady = ['complete', 'followup'].includes(String(item.parentStatus || ''));
+    return Boolean(item.prepId && item.attendanceFiles?.length && item.learningFiles?.length && item.roomFiles?.length && parentStatusReady);
   }
 
   function putLocalLesson(item) {
@@ -1608,7 +1628,7 @@
       completed: String(values.issue || '').trim(), response: String(values.issue || '').trim(),
       expected, present, leave, absent, makeup: Number(values.makeup || 0), trial: Number(values.trial || 0), duration: Number(values.duration || 1.5),
       scheduleLabel: selectedSchedule?.label || '', scheduleTime: selectedSchedule?.time || '',
-      siteType, roomDone: Boolean(form.elements.roomDone.checked), attendanceFiles: [...pendingFiles.attendance], learningFiles: [...pendingFiles.learning], roomFiles: [...pendingFiles.room],
+      siteType, roomDone: Boolean(pendingFiles.room.length), attendanceFiles: [...pendingFiles.attendance], learningFiles: [...pendingFiles.learning], roomFiles: [...pendingFiles.room],
       appFiles, appStatus: siteType === 'partner' ? 'not_required' : appFiles.length ? 'published' : 'pending', appUpdatedAt: appEvidenceAt, appPublishedAt: appEvidenceAt,
       newCount: siteType === 'self' && !isPt() ? Number(values.newCount || 0) : 0,
       renewalCount: siteType === 'self' ? Number(values.renewalCount || 0) : 0,

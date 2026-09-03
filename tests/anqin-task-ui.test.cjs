@@ -33,7 +33,8 @@ assert.match(source, /count: \(\) => state\.tasks\.filter\(task => task\.owner =
 assert.match(source, /目前待辦（即時）/, '今日畫面需清楚標示目前待辦會即時更新');
 assert.match(source, /送出當時待辦（快照）/, '歷史日報不得再把送出當時快照誤標成即時待辦');
 assert.match(source, /pendingTaskSyncIds\.has\(id\)[\s\S]{0,160}\['pending', 'saving', 'error'\]/, '雲端舊資料不得覆蓋正在同步的本機完成狀態');
-assert.match(source, /setTaskStatus\(task, control\.checked \? 'done' : 'open'\)/, '待辦勾選必須經過統一狀態同步流程');
+assert.match(source, /await updateTaskStatusWithCloudFeedback\(task, control\.checked \? 'done' : 'open'\)/, '待辦勾選必須等雲端確認後才顯示完成');
+assert.match(source, /function updateTaskStatusWithCloudFeedback\([\s\S]*taskSnapshot[\s\S]*await syncTaskToCloud[\s\S]*Object\.assign\(task, taskSnapshot\)/, '待辦同步失敗時必須回復原狀，不得假裝完成');
 assert.match(qaHarness, /action === 'saveSelfTask'/, '隔離驗收環境需真實保存老師自行更新的待辦');
 
 const linkedTaskSource = source.slice(source.indexOf('function derivedTaskCloudId('), source.indexOf('function upsertDerivedTask('));
@@ -117,8 +118,8 @@ assert.match(source, /function applyPreviewReviewContext\(/, '安親審查模式
 assert.match(source, /if \(!applyPreviewReviewContext\(control\.dataset\.role\)\) state\.ui\.role = control\.dataset\.role/, '切換審查角色時必須同步身份範圍');
 assert.match(source, /applyPreviewReviewContext\(LOCAL_REVIEW_ROLE\)/, '網址指定主管視角時首次載入就必須套用正確身份');
 assert.match(source, /GLOBAL_MANAGER_NICKNAMES\.some\(name => sameReviewIdentity\(name, managerNickname\)\)/, '小魚在審查與正式登入都必須擁有全教室檢視範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260902-anqin-live-tasks-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260902-anqin-live-tasks-1/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260903-anqin-stability-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260903-anqin-stability-1/, '登入備援路徑也必須避開舊版快取');
 
 const startupSafetySource = source.slice(source.indexOf('function stripEmbeddedMediaJson('), source.indexOf('function loadState()'));
 const startupSafetyContext = vm.createContext({ JSON, Number, Set });
@@ -183,6 +184,11 @@ assert.match(source, /form\.dataset\.submitting === 'true'/, '備課儲存期間
 const prepManagerSource = source.slice(source.indexOf('function renderPlanReviews('), source.indexOf('function renderTeamRosterTable('));
 assert.match(prepManagerSource, /此頁只做客觀查閱/, '主管備課頁必須明確定位為只讀查閱');
 assert.doesNotMatch(prepManagerSource, /data-action="(?:approve-plan|request-plan-changes|review-plan)"|完整度 \$\{|待審查/, '主管備課頁不得再出現審核與完成度判定');
+const legacyPlanDetailSource = source.slice(source.indexOf('function renderPlanDetail('), source.indexOf('function resolveSubmissionItems('));
+assert.match(legacyPlanDetailSource, /舊版備課資料/, '舊版教案需明確標示為只供查閱的歷史資料');
+assert.doesNotMatch(legacyPlanDetailSource, /教案內容完整度|歸檔條件|本次審查結論|plan-review-check/, '舊版教案詳情不得再顯示百分比或審核清單');
+const legacyPlanDrawerSource = source.slice(source.indexOf('function openPlanDetail('), source.indexOf('function openSubmissionReview('));
+assert.doesNotMatch(legacyPlanDrawerSource, /送主管檢視|核准教案|退回補件|data-action="(?:submit-plan-review|approve-plan|request-plan-changes)"/, '任何舊版教案抽屜都不得再提供送審、核准或退回操作');
 assert.match(source, /function reconcileLegacyPlans\(/, '舊版教案必須自動整併為可選取的備課檔案');
 assert.match(source, /mergePlanMaterialsIntoPrep\(linkedPrep, plan\)/, '舊版正式教材必須保留在簡化後的備課附件中');
 assert.match(source, /linkedPrep\.details\.targetCourse = targetCourseForPlan\(plan\)/, '舊備課缺少課程類型時必須由既有教案自動補齊');
@@ -328,7 +334,9 @@ assert.match(source, /sort\(\(a, b\) => String\(a\.createdAt \|\| ''\)\.localeCo
 const parentFormSource = source.slice(source.indexOf('function renderTodayParents('), source.indexOf('function renderTodayOperations('));
 assert.match(parentFormSource, /無重要事項/, '親師溝通需提供無重要事項模式');
 assert.match(parentFormSource, /parent-handoff-confirmed/, '無重要事項仍須確認門口交接');
-assert.match(parentFormSource, /交接備註/, '無重要事項需留下必要備註');
+assert.match(parentFormSource, /特殊交接備註（選填）/, '無重要事項的交接備註只能是特殊情況選填');
+assert.doesNotMatch(source, /確認與備註/, '日結不得把選填交接備註誤列為必填');
+assert.match(source, /新增重要親師溝通，或確認已完成門口交接/, '日結只檢查重要溝通或門口交接確認');
 const contactEditorSource = source.slice(source.indexOf('function renderContactForm('), source.indexOf('function renderOperationsForm('));
 assert.match(contactEditorSource, /共識與後續行動/, '親師共識與後續行動需合併為一欄');
 assert.doesNotMatch(contactEditorSource, /name="nextAction"/, '親師表單不得要求重複填寫後續行動');

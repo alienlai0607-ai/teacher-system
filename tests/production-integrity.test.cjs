@@ -8,6 +8,7 @@ const tasks = fs.readFileSync(path.join(root, 'apps-script/tasks.gs'), 'utf8');
 const router = fs.readFileSync(path.join(root, 'apps-script/Code.gs'), 'utf8');
 const auth = fs.readFileSync(path.join(root, 'apps-script/auth.gs'), 'utf8');
 const api = fs.readFileSync(path.join(root, 'shared/api.js'), 'utf8');
+const push = fs.readFileSync(path.join(root, 'shared/push.js'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'review/anqin-v2/app.js'), 'utf8');
 
 assert.match(router, /'runProductionIntegrityCheck': \(\) => runProductionIntegrityCheck\(params\)/);
@@ -17,6 +18,7 @@ assert.match(app, /data-action="run-cloud-delivery-check"/);
 assert.match(app, /一般連線成功不等於資料能交付/);
 assert.match(api, /const API_URL = window\.APP_CONFIG\.API_URL/);
 assert.doesNotMatch(api, /const URL = window\.APP_CONFIG\.API_URL/, 'API 網址不得遮蔽瀏覽器原生 URL 建構式');
+assert.match(push, /s\.onerror = function \(\)[\s\S]*APP 通知服務載入失敗；不影響紀錄填寫與儲存/, '外部推播 SDK 失效時需降級，不得影響核心填寫與儲存');
 
 const source = tasks.slice(
   tasks.indexOf('function runProductionIntegrityCheck('),

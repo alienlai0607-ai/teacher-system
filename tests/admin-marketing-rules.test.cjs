@@ -212,6 +212,12 @@ assert.match(uiSource, /<strong>主管評語<\/strong>[\s\S]*score\.comment/, '�
 assert.match(uiSource, /今日無試上/, '需區分無試上與忘記填寫');
 assert.match(uiSource, /首次一期且完成繳費/, '使用規則需寫明首報獎金原則');
 assert.match(uiSource, /function handleDailyCheck/, '每日訊息確認需與工作項目分開儲存');
+assert.match(uiSource, /const communication = todayCommunication\(\)/, '每日工作頁需依獨立訊息確認紀錄判定，不得把新增工作誤當已檢查訊息');
+const dailyRecordSource = uiSource.slice(uiSource.indexOf('function renderDailyRecord('), uiSource.indexOf('function renderTuesdayPage('));
+assert.doesNotMatch(dailyRecordSource, /progress-label|item\.progress|%<\/strong>/, '行政工作紀錄不得用主觀百分比增加填寫與判讀負擔');
+assert.match(dailyRecordSource, /<strong>下一步：<\/strong>/, '未完成工作只需客觀顯示下一步');
+assert.match(uiSource, /請填寫工作類型、工作名稱與本次處理結果/, '前端缺件訊息需使用畫面上的欄位名稱');
+assert.match(backendSource, /每項工作都要填寫工作類型、工作名稱與本次處理結果/, '後端缺件訊息需與前端欄位一致');
 assert.match(uiSource, /function retainedFiles/, '已上傳附件需能個別移除');
 assert.match(uiSource, /remove-selected-file/, '新選附件在儲存前需能移除');
 assert.match(uiSource, /const selectedFilesByInput = new WeakMap\(\)/, '分次選檔需保留先前已選附件，不能被下一次選取取代');
@@ -237,6 +243,7 @@ assert.match(uiSource, /\['converted', 'not_enrolled'\]\.includes\(status\) \? '
 assert.match(uiCssSource, /\.dialog > form \{[^}]*min-height: 0;[^}]*display: flex;[^}]*overflow: hidden;/, '彈窗表單需形成可捲動的 flex 容器');
 assert.match(uiCssSource, /\.dialog-body \{[^}]*min-height: 0;[^}]*overflow-y: auto;/, '所有行政彈窗內容需可獨立向下捲動');
 assert.match(uiCssSource, /\.dialog-foot \{[^}]*flex: 0 0 auto;/, '行政彈窗底部操作需固定留在畫面內');
+assert.match(uiCssSource, /\.toast-region \{[^}]*pointer-events: none;/, '行政成功提示不得遮住下一個按鈕而誘發重複送出');
 assert.match(uiCssSource, /\.file-chip, \.selected-file \{[^}]*max-width: 100%;/, '長檔名不得撐破手機版面');
 assert.match(workspacesCssSource, /\.workspace-quick-switch \{[^}]*flex-wrap: wrap;/, '多工作身分列需依容器寬度換行');
 assert.match(workspacesCssSource, /\.workspace-quick-options \{[^}]*flex: 1 1 280px;[^}]*flex-wrap: wrap;/, '工作身分按鈕群不得撐破行政側欄');
@@ -245,8 +252,9 @@ assert.match(workspacesCssSource, /@media \(max-width: 820px\)[\s\S]*\.workspace
 assert.match(workspacesCssSource, /\.workspace-quick-title \{[^}]*width: 100%;[^}]*flex: 0 0 auto;/, '手機工作身分標題高度需依內容決定');
 assert.match(workspacesCssSource, /grid-template-columns: repeat\(auto-fit, minmax\(136px, 1fr\)\)/, '手機三身分按鈕需保留可讀寬度');
 assert.match(uiHtmlSource, /workspaces\.css\?v=20260901-workspace-wrap-1/, '行政頁需載入防溢出的工作身分樣式');
-assert.match(uiHtmlSource, /app\.js\?v=20260902-admin-stability-8/, '行政穩定版表單需使用獨立快取版本');
-assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=admin-marketing(?:-manager)?&v=20260902-admin-stability-8/g) || []).length, 2, '行政與主管入口都需避開舊版快取');
+assert.match(uiHtmlSource, /styles\.css\?v=20260903-admin-stability-1/, '行政提示穿透修正需使用新快取版本');
+assert.match(uiHtmlSource, /app\.js\?v=20260903-admin-stability-1/, '行政穩定版表單需使用獨立快取版本');
+assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=admin-marketing(?:-manager)?&v=20260903-admin-stability-1/g) || []).length, 2, '行政與主管入口都需避開舊版快取');
 assert.match(uiSource, /trialIdentity\(item\.studentName, trialContact\(item\), item\.course, item\.date\)/, '重複預約需依學生、課程與日期判定');
 assert.match(uiSource, /同一學生可登記不同課程/, '行政需清楚知道同一學生可登記多門試上課');
 assert.doesNotMatch(uiSource, /首報獎金至少要有一筆家長追蹤紀錄|新增一筆追蹤/, '首報不得強迫另建一筆重複的家長追蹤');

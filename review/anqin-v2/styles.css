@@ -754,6 +754,7 @@ input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; min-hei
 }
 .choice-chip:has(input:checked) { color: #743e0c; background: var(--brand-soft); border-color: #e1b17a; }
 .choice-chip input { position: absolute; opacity: 0; }
+.choice-chip.is-disabled { color: var(--muted); background: #f5f3ef; cursor: default; opacity: 0.78; }
 
 .table-wrap { width: 100%; overflow-x: auto; }
 .data-table { width: 100%; border-collapse: collapse; table-layout: auto; }

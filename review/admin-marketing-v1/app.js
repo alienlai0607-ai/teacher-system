@@ -123,8 +123,8 @@
     ['outside_zone', '外圍環境', ['outside']],
   ];
   const TRIAL_STATUSES = [
-    ['waiting_contact', '已預約／待試上'], ['contacted', '試上後已聯絡'], ['considering', '家長考慮中'],
-    ['followup_scheduled', '已約下次聯絡'], ['converted', '已報名一期'], ['not_enrolled', '未報名／暫不考慮'],
+    ['waiting_contact', '已預約／待試上'], ['considering', '待家長決定／追蹤'],
+    ['converted', '已報名一期'], ['not_enrolled', '未報名／暫不考慮'],
   ];
   const TRIAL_BONUS_AMOUNT = 50;
   const TRIAL_START_DATE = '2026-08-15';
@@ -304,7 +304,11 @@
   function currentEnvironment() { return workerRecords('environment').find(item => item.date === todayIso()) || null; }
   function trialRecords() { return workerRecords('trial').slice().sort((a, b) => String(b.updatedAt || b.date).localeCompare(String(a.updatedAt || a.date))); }
   function todayTrialMarker() { return workerRecords('trial_day').find(item => item.date === todayIso() && item.noTrial === true) || null; }
-  function trialStatusLabel(status) { return TRIAL_STATUSES.find(item => item[0] === status)?.[1] || '待追蹤'; }
+  function normalizeTrialStatus(status) {
+    if (['contacted', 'followup_scheduled'].includes(status)) return 'considering';
+    return TRIAL_STATUSES.some(item => item[0] === status) ? status : 'waiting_contact';
+  }
+  function trialStatusLabel(status) { return TRIAL_STATUSES.find(item => item[0] === normalizeTrialStatus(status))?.[1] || '待追蹤'; }
   function trialInterestLabel(value) { return ({ high: '意願高', medium: '考慮中', low: '意願低', unknown: '尚未確認' })[value] || '尚未確認'; }
   function maskContact(value) {
     const text = String(value || '').trim();
@@ -319,7 +323,7 @@
     return name && contact && normalizedCourse && normalizedDate ? `${name}|${contact}|${normalizedCourse}|${normalizedDate}` : '';
   }
   function trialContact(item) {
-    return String(item?.contactDisplay || item?.contactRef || '').trim();
+    return String(item?.contactDisplay || item?.contactRef || '').split('｜試上')[0].trim();
   }
   function legacyTrialContactRef(contactRef, course, date) {
     const raw = String(contactRef || '').trim();
@@ -339,8 +343,8 @@
     const trialItems = all.filter(item => String(item.date || '').slice(0, 7) === month);
     const approved = all.filter(item => item.bonusStatus === 'approved' && String(item.paymentDate || '').slice(0, 7) === month);
     const pending = all.filter(item => item.bonusStatus === 'pending_review' && String(item.paymentDate || '').slice(0, 7) === month);
-    const converted = trialItems.filter(item => item.status === 'converted');
-    const due = all.filter(item => !['converted', 'not_enrolled'].includes(item.status) && item.nextFollowupDate && item.nextFollowupDate <= todayIso());
+    const converted = trialItems.filter(item => normalizeTrialStatus(item.status) === 'converted');
+    const due = all.filter(item => !['converted', 'not_enrolled'].includes(normalizeTrialStatus(item.status)) && item.nextFollowupDate && item.nextFollowupDate <= todayIso());
     return {
       items: monthItems, trials: trialItems.length, converted: converted.length,
       conversionRate: trialItems.length ? Math.round(converted.length / trialItems.length * 100) : 0,
@@ -356,8 +360,8 @@
       waiting: ['待確認', 'warning'], pending: ['待處理', 'warning'], needs_action: ['待改善', 'danger'],
       needs_revision: ['需補充', 'danger'], paused: ['暫停', 'warning'], published: ['已公布', 'success'], draft: ['草稿', 'warning'],
       confirmed: ['已確認', 'success'], pending_review: ['待主管確認', 'warning'], rejected: ['不符合', 'danger'],
-      waiting_contact: ['已預約／待試上', 'warning'], contacted: ['試上後已聯絡', 'info'], considering: ['家長考慮中', 'info'],
-      followup_scheduled: ['已約下次聯絡', 'info'], converted: ['已報名一期', 'success'], not_enrolled: ['未報名', ''],
+      waiting_contact: ['已預約／待試上', 'warning'], contacted: ['待家長決定／追蹤', 'info'], considering: ['待家長決定／追蹤', 'info'],
+      followup_scheduled: ['待家長決定／追蹤', 'info'], converted: ['已報名一期', 'success'], not_enrolled: ['未報名', ''],
     };
     const item = map[status] || [status || '未設定', ''];
     return `<span class="badge ${item[1]}">${esc(item[0])}</span>`;
@@ -391,7 +395,7 @@
     const assignments = workerRecords('assignment').filter(item => String(item.date || item.dueDate || '').slice(0, 7) === month);
     const projects = workerRecords('project').filter(item => String(item.date || '').slice(0, 7) === month || String(item.dueDate || '').slice(0, 7) === month);
     const trials = trialRecords().filter(item => String(item.date || '').slice(0, 7) === month || String(item.paymentDate || '').slice(0, 7) === month);
-    const overdueTrials = trials.filter(item => !['converted', 'not_enrolled'].includes(item.status) && item.nextFollowupDate && item.nextFollowupDate < todayIso()).length;
+    const overdueTrials = trials.filter(item => !['converted', 'not_enrolled'].includes(normalizeTrialStatus(item.status)) && item.nextFollowupDate && item.nextFollowupDate < todayIso()).length;
     const overdueWork = assignments.filter(item => item.status !== 'completed' && item.dueDate && item.dueDate < todayIso()).length
       + workItems.filter(item => item.status !== 'completed' && item.dueDate && item.dueDate < todayIso()).length;
     const environments = workerRecords('environment').filter(within);
@@ -409,8 +413,8 @@
       videos,
       photos,
       overdueTrials,
-      converted: trials.filter(item => item.status === 'converted').length,
-      openTrials: trials.filter(item => !['converted', 'not_enrolled'].includes(item.status)).length,
+      converted: trials.filter(item => normalizeTrialStatus(item.status) === 'converted').length,
+      openTrials: trials.filter(item => !['converted', 'not_enrolled'].includes(normalizeTrialStatus(item.status))).length,
       assignmentCount: assignments.length,
       projectCount: projects.length,
       overdueWork,
@@ -589,7 +593,7 @@
     const summary = trialMonthSummary();
     const todayItems = trialRecords().filter(item => item.date === todayIso());
     const noTrial = todayTrialMarker();
-    const filtered = summary.items.filter(item => state.ui.trialStatus === 'all' || item.status === state.ui.trialStatus);
+    const filtered = summary.items.filter(item => state.ui.trialStatus === 'all' || normalizeTrialStatus(item.status) === state.ui.trialStatus);
     const controls = `<label class="field compact-control"><span class="visually-hidden">月份</span><input type="month" id="month-filter" value="${esc(state.ui.month)}"></label><label class="field compact-control"><span class="visually-hidden">追蹤狀態</span><select id="trial-status-filter"><option value="all">全部狀態</option>${TRIAL_STATUSES.map(([value,label]) => `<option value="${value}" ${state.ui.trialStatus === value ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></label>${isManager ? `<button class="button" data-action="print">${icon('printer')}列印月報</button>` : `<button class="button" data-action="mark-no-trial" ${todayItems.length || noTrial ? 'disabled' : ''}>${icon('calendar-x-2')}今日無試上</button><button class="button primary" data-action="open-trial">${icon('user-round-plus')}登錄試上</button>`}`;
     const todayState = isManager ? '' : `<div class="notice ${todayItems.length || noTrial ? '' : 'warning'}"><span>${icon(todayItems.length || noTrial ? 'circle-check' : 'circle-alert')}</span><div>${todayItems.length ? `今天已登錄 ${todayItems.length} 位試上學生。` : noTrial ? '今天已確認沒有試上學生。' : '今天尚未登錄試上學生，也尚未確認「今日無試上」。'}</div></div>`;
     return `<section class="page trial-page">${pageHead(isManager ? '試上名單與首報獎金' : '試上名單', isManager ? '查看預約進度與首報獎金，不重複輸入行政資料' : '每門試上課程各一筆；試上後只需更新目前結果', controls)}
@@ -608,12 +612,12 @@
   }
 
   function renderTrialCard(item) {
-    const overdue = !['converted', 'not_enrolled'].includes(item.status) && item.nextFollowupDate && item.nextFollowupDate < todayIso();
+    const overdue = !['converted', 'not_enrolled'].includes(normalizeTrialStatus(item.status)) && item.nextFollowupDate && item.nextFollowupDate < todayIso();
     const lastFollowup = (item.followups || []).slice(-1)[0];
     const action = isManager
       ? `<button class="button small" data-action="view-trial" data-id="${esc(item.id)}">${icon('eye')}查看</button>${['pending_review','rejected'].includes(item.bonusStatus) ? `<button class="button small teal" data-action="review-trial-bonus" data-id="${esc(item.id)}">${icon('badge-check')}${item.bonusStatus === 'rejected' ? '重新審核' : '確認獎金'}</button>` : ''}`
       : `<button class="button small" data-action="open-trial" data-id="${esc(item.id)}">${icon('pencil')}更新</button>`;
-    return `<article class="trial-row"><div class="trial-main"><div class="record-head"><div class="record-title"><strong>${esc(item.studentName)}</strong><small>${formatDate(item.date)} 試上 · ${esc(item.course)} · ${esc(item.teacher)}</small></div>${statusBadge(item.status)}</div><div class="trial-meta"><span>${icon('phone',14)}${esc(maskContact(trialContact(item)))}</span>${item.nextFollowupDate && !['converted','not_enrolled'].includes(item.status) ? `<span class="${overdue ? 'text-danger' : ''}">${icon('calendar-clock',14)}${overdue ? '已逾期 ' : '下次 '}${formatDate(item.nextFollowupDate)}</span>` : ''}</div>${lastFollowup ? `<p class="record-copy trial-last"><strong>最近追蹤：</strong>${esc(lastFollowup.note)}</p>` : ''}<div class="record-actions">${trialBonusBadge(item)}${action}</div></div></article>`;
+    return `<article class="trial-row"><div class="trial-main"><div class="record-head"><div class="record-title"><strong>${esc(item.studentName)}</strong><small>${formatDate(item.date)} 試上 · ${esc(item.course)} · ${esc(item.teacher)}</small></div>${statusBadge(normalizeTrialStatus(item.status))}</div><div class="trial-meta"><span>${icon('phone',14)}${esc(maskContact(trialContact(item)))}</span>${item.nextFollowupDate && !['converted','not_enrolled'].includes(normalizeTrialStatus(item.status)) ? `<span class="${overdue ? 'text-danger' : ''}">${icon('calendar-clock',14)}${overdue ? '已逾期 ' : '下次 '}${formatDate(item.nextFollowupDate)}</span>` : ''}</div>${lastFollowup ? `<p class="record-copy trial-last"><strong>最近追蹤：</strong>${esc(lastFollowup.note)}</p>` : ''}<div class="record-actions">${trialBonusBadge(item)}${action}</div></div></article>`;
   }
 
   function renderTrialBonusTable(summary) {
@@ -623,15 +627,15 @@
 
   function renderDailyPage() {
     const list = workerRecords('daily').slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
-    const today = todayDaily();
+    const communication = todayCommunication();
     return `<section class="page">${pageHead('每日工作日誌', '做了什麼、做到哪裡、何時完成，未完成就留下下一個期限', `<button class="button primary" data-action="open-work-item">${icon('plus')}新增工作</button>`)}
-      ${today ? `<div class="notice">${icon('message-circle-check')}<div>今天已確認家長訊息、官方 LINE 與班級群組。${today.messages?.unresolved ? `待主管確認：${esc(today.messages.unresolved)}` : '目前沒有未處理訊息。'}</div></div>` : `<div class="notice warning">${icon('circle-alert')}<div>今天尚未建立工作日誌。新增第一項工作時，會一起完成訊息確認；跨日未完成工作仍可從今日總覽更新。</div></div>`}
+      ${communication ? `<div class="notice">${icon('message-circle-check')}<div>今天已確認家長訊息、官方 LINE 與班級群組。${communication.note ? `待主管確認：${esc(communication.note)}` : '目前沒有未處理訊息。'}</div></div>` : `<div class="notice warning">${icon('circle-alert')}<div>今日訊息尚未確認；請回「今日工作」一次完成家長訊息、官方 LINE 與班級群組確認。</div></div>`}
       <div class="stack mt-16">${list.length ? list.map(renderDailyRecord).join('') : `<section class="panel">${emptyState('notebook-pen', '還沒有工作日誌', '新增工作後會依日期整合，不需要重複填同一句話。', `<button class="button primary" data-action="open-work-item">新增第一項工作</button>`)}</section>`}</div>
     </section>`;
   }
   function renderDailyRecord(record) {
     const items = record.items || [];
-    return `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('calendar-days')}${esc(record.date === todayIso() ? '今天' : formatDate(record.date))}</div><div class="panel-subtitle">${items.length} 項工作 · ${items.filter(item => item.status === 'completed').length} 項完成</div></div>${record.reviewStatus ? statusBadge(record.reviewStatus) : statusBadge(record.status)}</div><div class="panel-body"><div class="record-list">${items.map(item => `<article class="record-card"><div class="record-head"><div class="record-title"><strong>${esc(item.title)}</strong><small>${esc(categoryLabel(item.category))}${item.dueDate ? ` · 預計 ${formatDate(item.dueDate)}` : ''}${item.actualDate ? ` · 完成 ${formatDate(item.actualDate)}` : ''}</small></div>${statusBadge(item.status)}</div><p class="record-copy">${nl2br(item.completedToday)}</p><div class="progress"><span style="width:${Number(item.progress || 0)}%"></span></div><div class="progress-label"><span>${item.remaining ? `剩餘：${esc(item.remaining)}` : '已完成'}</span><strong>${Number(item.progress || 0)}%</strong></div><div class="record-actions"><span class="badge ${evidenceReady(item) ? 'success' : ''}">${icon('paperclip', 13)}${(item.evidence || []).length} 份證據</span>${record.date === todayIso() || item.status !== 'completed' ? `<button class="button small" data-action="open-work-item" data-id="${esc(item.id)}" data-record-id="${esc(record.id)}">${record.date === todayIso() ? '編輯' : '更新進度'}</button>` : ''}</div></article>`).join('')}</div>${record.reviewComment ? `<div class="notice ${record.reviewStatus === 'needs_revision' ? 'danger' : ''} mt-16">${icon('message-square-text')}<div><strong>主管回覆</strong><br>${nl2br(record.reviewComment)}</div></div>` : ''}</div></section>`;
+    return `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('calendar-days')}${esc(record.date === todayIso() ? '今天' : formatDate(record.date))}</div><div class="panel-subtitle">${items.length} 項工作 · ${items.filter(item => item.status === 'completed').length} 項完成</div></div>${record.reviewStatus ? statusBadge(record.reviewStatus) : statusBadge(record.status)}</div><div class="panel-body"><div class="record-list">${items.map(item => `<article class="record-card"><div class="record-head"><div class="record-title"><strong>${esc(item.title)}</strong><small>${esc(categoryLabel(item.category))}${item.dueDate ? ` · 預計 ${formatDate(item.dueDate)}` : ''}${item.actualDate ? ` · 完成 ${formatDate(item.actualDate)}` : ''}</small></div>${statusBadge(item.status)}</div><p class="record-copy">${nl2br(item.completedToday)}</p>${item.remaining ? `<div class="next-action">${icon('arrow-right', 15)}<span><strong>下一步：</strong>${esc(item.remaining)}</span></div>` : ''}<div class="record-actions"><span class="badge ${evidenceReady(item) ? 'success' : ''}">${icon('paperclip', 13)}${(item.evidence || []).length} 份證據</span>${record.date === todayIso() || item.status !== 'completed' ? `<button class="button small" data-action="open-work-item" data-id="${esc(item.id)}" data-record-id="${esc(record.id)}">${record.date === todayIso() ? '編輯' : '更新'}</button>` : ''}</div></article>`).join('')}</div>${record.reviewComment ? `<div class="notice ${record.reviewStatus === 'needs_revision' ? 'danger' : ''} mt-16">${icon('message-square-text')}<div><strong>主管回覆</strong><br>${nl2br(record.reviewComment)}</div></div>` : ''}</div></section>`;
   }
 
   function renderTuesdayPage() {
@@ -707,7 +711,7 @@
   function renderManagerAlerts() {
     const assignments = workerRecords('assignment').filter(item => item.status !== 'completed' && item.dueDate < todayIso()).map(item => ({ ...item, label: '交辦逾期' }));
     const bonuses = trialRecords().filter(item => item.bonusStatus === 'pending_review').map(item => ({ ...item, title: `${item.studentName} 首報獎金`, label: '50 元待確認' }));
-    const trials = trialRecords().filter(item => !['converted', 'not_enrolled'].includes(item.status) && item.nextFollowupDate && item.nextFollowupDate <= todayIso()).map(item => ({ ...item, title: `${item.studentName} 家長追蹤`, label: '今日到期／逾期' }));
+    const trials = trialRecords().filter(item => !['converted', 'not_enrolled'].includes(normalizeTrialStatus(item.status)) && item.nextFollowupDate && item.nextFollowupDate <= todayIso()).map(item => ({ ...item, title: `${item.studentName} 家長追蹤`, label: '今日到期／逾期' }));
     const environments = workerRecords('environment').filter(item => item.status === 'needs_action' && item.improvementDue && item.improvementDue <= todayIso()).map(item => ({ ...item, title: `${formatDate(item.date)} 環境改善`, label: '改善期限到期' }));
     const list = bonuses.concat(assignments, trials, environments).slice(0, 8);
     if (!list.length) return emptyState('circle-check-big', '目前沒有急件', '新的獎金確認、逾期或改善事項會排在這裡。');
@@ -843,7 +847,7 @@
   }
   function existingFileControls(files, fieldName = 'removeEvidence') {
     if (!Array.isArray(files) || !files.length) return '';
-    return `<div class="existing-files">${files.map(file => `<label class="file-chip"><span>${icon('paperclip', 13)}${esc(file.fileName || '附件')}</span><input type="checkbox" name="${esc(fieldName)}" value="${esc(file.id || file.fileId || file.url)}"><small>移除</small></label>`).join('')}</div>`;
+    return `<div class="existing-files">${files.map(file => `<span class="file-chip" data-existing-file><span>${icon('paperclip', 13)}${esc(file.fileName || '附件')}</span><button type="button" data-action="remove-existing-file" data-field-name="${esc(fieldName)}" data-file-value="${esc(file.id || file.fileId || file.url)}" aria-label="移除 ${esc(file.fileName || '附件')}">${icon('x', 13)}</button></span>`).join('')}</div>`;
   }
   function retainedFiles(files, formData, fieldName = 'removeEvidence') {
     const removed = new Set(formData.getAll(fieldName).map(String));
@@ -894,7 +898,14 @@
   function updateDailyCheckVisibility() {
     const status = $('#daily-check-form input[name="status"]:checked')?.value || 'clear';
     const block = $('[data-daily-issue]');
-    if (block) block.hidden = status !== 'needs_supervisor';
+    const needsSupervisor = status === 'needs_supervisor';
+    if (block) block.hidden = !needsSupervisor;
+    const form = $('#daily-check-form');
+    if (form?.elements.note) {
+      form.elements.note.required = needsSupervisor;
+      if (!needsSupervisor) form.elements.note.value = '';
+    }
+    if (!needsSupervisor && form?.elements.reported) form.elements.reported.checked = false;
   }
 
   function openWorkItem(itemId = '', recordId = '') {
@@ -906,13 +917,21 @@
   }
   function updateWorkFormVisibility() {
     const completed = $('#work-status')?.value === 'completed';
-    $$('[data-work-next]').forEach(node => { node.hidden = completed; });
+    $$('[data-work-next]').forEach(node => {
+      node.hidden = completed;
+      const control = $('input, textarea, select', node);
+      if (control) {
+        control.required = !completed;
+        if (completed) control.value = '';
+      }
+    });
   }
 
   function openTrial(id = '') {
     const item = trialRecords().find(entry => entry.id === id) || {};
     const isNew = !item.id;
     const approved = item.bonusStatus === 'approved';
+    const normalizedStatus = normalizeTrialStatus(item.status);
     const importPanel = isNew ? `<section class="trial-import"><label for="trial-message-import">貼上家長的試上訊息</label><textarea id="trial-message-import" placeholder="可直接貼上 LINE 訊息，例如：\n學生：王小明\n日期：9/1\n時間：19:00-20:30\n課程：機器人入門\n老師：皮皮老師\n電話：0912-345-678"></textarea><div class="trial-import-actions"><small id="trial-parse-status" class="trial-parse-status">系統只在目前頁面辨識，不會保存整段對話。</small><button type="button" class="button small teal" data-action="parse-trial-message">${icon('scan-text')}辨識並帶入</button></div></section>` : '';
     const body = `${importPanel}<input type="hidden" name="trialId" value="${esc(item.id || '')}"><div class="form-grid">
       <div class="field"><label for="trial-date">預約試上日期 <span class="required">*</span></label><input id="trial-date" name="date" type="date" min="${TRIAL_START_DATE}" value="${esc(item.date || todayIso())}" ${isNew ? '' : 'readonly'} required><div class="field-help">自 2026/08/15 起登記；家長預約後即可提前建立。</div></div>
@@ -921,10 +940,10 @@
       <div class="field"><label for="trial-time">試上時段</label><input id="trial-time" name="trialTime" value="${esc(item.trialTime || '')}" placeholder="例：19:00–20:30"></div>
       <div class="field"><label for="trial-teacher">授課老師 <span class="required">*</span></label><input id="trial-teacher" name="teacher" value="${esc(item.teacher || '')}" required></div>
       <div class="field"><label for="trial-contact">家長聯絡方式／識別資料 <span class="required">*</span></label><input id="trial-contact" name="contactRef" value="${esc(trialContact(item))}" placeholder="手機末碼、LINE 名稱或其他可辨識資料" ${approved ? 'readonly' : ''} required></div>
-      ${isNew ? '<input type="hidden" name="status" value="waiting_contact">' : `<div class="field"><label for="trial-status">目前結果 <span class="required">*</span></label><select id="trial-status" name="status" ${approved ? 'disabled' : ''}>${TRIAL_STATUSES.map(([value,label]) => `<option value="${value}" ${(item.status || 'waiting_contact') === value ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>${approved ? `<input type="hidden" name="status" value="${esc(item.status)}">` : ''}</div>`}
+      ${isNew ? '<input type="hidden" name="status" value="waiting_contact">' : `<div class="field"><label for="trial-status">目前結果 <span class="required">*</span></label><select id="trial-status" name="status" ${approved ? 'disabled' : ''}>${TRIAL_STATUSES.map(([value,label]) => `<option value="${value}" ${normalizedStatus === value ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>${approved ? `<input type="hidden" name="status" value="${esc(normalizedStatus)}">` : ''}</div>`}
       ${isNew ? '' : `<div class="field" data-trial-next><label for="trial-next">提醒日期 <span class="conditional">需要系統提醒時再填</span></label><input id="trial-next" name="nextFollowupDate" type="date" value="${esc(item.nextFollowupDate || '')}"></div>`}
     </div>${isNew ? '<div class="notice mt-16">新增後會先顯示「已預約／待試上」；試上結束後再按更新選擇結果。</div>' : ''}<details class="compact-details mt-16" ${item.note ? 'open' : ''}><summary>${icon('message-square-more')}家長回覆／特殊備註（選填）</summary><div class="compact-details-body"><div class="field full"><label for="trial-note">備註</label><textarea id="trial-note" name="note" placeholder="只有需要保留的家長回覆或特殊狀況才填">${esc(item.note || '')}</textarea></div></div></details>
-    <section class="subsection conversion-fields" data-conversion-fields><h3>首次一期報名與繳費</h3><div class="notice">${icon('badge-dollar-sign')}<div>只有「首次正式報名並完成繳費」才會產生 50 元待審獎金；續報不計。</div></div><div class="form-grid mt-16"><div class="field"><label for="enrollment-date">一期報名日期 <span class="required">*</span></label><input id="enrollment-date" name="enrollmentDate" type="date" value="${esc(item.enrollmentDate || '')}" ${approved ? 'readonly' : ''}></div><div class="field"><label for="payment-date">繳費確認日期 <span class="required">*</span></label><input id="payment-date" name="paymentDate" type="date" value="${esc(item.paymentDate || '')}" ${approved ? 'readonly' : ''}></div><div class="field full"><label for="enrollment-course">正式報名課程 <span class="required">*</span></label><input id="enrollment-course" name="enrollmentCourse" value="${esc(item.enrollmentCourse || '')}" ${approved ? 'readonly' : ''}></div><div class="field"><label for="first-enrollment">是否為第一次正式報名 <span class="required">*</span></label><select id="first-enrollment" name="firstEnrollment" ${approved ? 'disabled' : ''}><option value="">請確認</option><option value="yes" ${item.firstEnrollment === true ? 'selected' : ''}>是，第一次報名一期</option><option value="no" ${item.firstEnrollment === false && item.status === 'converted' ? 'selected' : ''}>不是，屬續報／轉班</option></select>${approved ? '<input type="hidden" name="firstEnrollment" value="yes">' : ''}</div><div class="field"><label for="payment-evidence">報名／繳費證明 <span class="required">*</span> <span class="conditional">首次報名時</span></label><input id="payment-evidence" name="paymentEvidence" type="file" multiple accept="image/*,.pdf" ${approved ? 'disabled' : ''}><div class="field-help">可一次選多張截圖，儲存前可移除點錯的檔案。</div><div class="selected-files" data-file-preview="payment-evidence"></div>${approved ? '' : existingFileControls(item.paymentEvidence || [], 'removePaymentEvidence')}</div></div>${trialBonusBadge(item)}</section>`;
+    <section class="subsection conversion-fields" data-conversion-fields><h3>首次一期報名與繳費</h3><div class="notice">${icon('badge-dollar-sign')}<div>只有「首次正式報名並完成繳費」才會產生 50 元待審獎金；續報不計。</div></div><div class="form-grid mt-16"><div class="field"><label for="enrollment-date">一期報名日期 <span class="required">*</span></label><input id="enrollment-date" name="enrollmentDate" type="date" value="${esc(item.enrollmentDate || '')}" ${approved ? 'readonly' : ''}></div><div class="field"><label for="payment-date">繳費確認日期 <span class="required">*</span></label><input id="payment-date" name="paymentDate" type="date" value="${esc(item.paymentDate || '')}" ${approved ? 'readonly' : ''}></div><div class="field full"><label for="enrollment-course">正式報名課程 <span class="required">*</span></label><input id="enrollment-course" name="enrollmentCourse" value="${esc(item.enrollmentCourse || item.course || '')}" ${approved ? 'readonly' : ''}><div class="field-help">預設帶入試上課程，需要時可直接修改。</div></div><div class="field"><label for="first-enrollment">是否為第一次正式報名 <span class="required">*</span></label><select id="first-enrollment" name="firstEnrollment" ${approved ? 'disabled' : ''}><option value="">請確認</option><option value="yes" ${item.firstEnrollment === true ? 'selected' : ''}>是，第一次報名一期</option><option value="no" ${item.firstEnrollment === false && normalizedStatus === 'converted' ? 'selected' : ''}>不是，屬續報／轉班</option></select>${approved ? '<input type="hidden" name="firstEnrollment" value="yes">' : ''}</div><div class="field"><label for="payment-evidence">報名／繳費證明 <span class="required">*</span> <span class="conditional">首次報名時</span></label><input id="payment-evidence" name="paymentEvidence" type="file" multiple accept="image/*,.pdf" ${approved ? 'disabled' : ''}><div class="field-help">可一次選多張截圖，儲存前可移除點錯的檔案。</div><div class="selected-files" data-file-preview="payment-evidence"></div>${approved ? '' : existingFileControls(item.paymentEvidence || [], 'removePaymentEvidence')}</div></div>${trialBonusBadge(item)}</section>`;
     showDialog(dialogShell(isNew ? '登錄試上預約' : `更新 ${item.studentName}`, isNew ? '可登記未來日期；同一學生的不同課程分開建立' : '只更新目前結果；不必另外新增追蹤紀錄', body, isNew ? '儲存預約' : '儲存更新', 'trial-form'), true);
     updateTrialFormVisibility();
   }
@@ -932,10 +951,48 @@
   function updateTrialFormVisibility() {
     const select = $('#trial-status');
     const section = $('[data-conversion-fields]');
-    const concluded = ['converted', 'not_enrolled'].includes(select?.value || '');
-    if (section) section.hidden = select?.value !== 'converted';
+    const status = normalizeTrialStatus(select?.value || 'waiting_contact');
+    const converted = status === 'converted';
+    const concluded = ['converted', 'not_enrolled'].includes(status);
+    const locked = Boolean(select?.disabled);
+    if (section) {
+      section.hidden = !converted;
+      $$('input, select, textarea, button', section).forEach(control => {
+        if (locked && control.disabled) control.dataset.permanentDisabled = 'true';
+        if (!converted) {
+          if (control.disabled && control.dataset.visibilityDisabled !== 'true') control.dataset.permanentDisabled = 'true';
+          control.dataset.visibilityDisabled = 'true';
+          control.disabled = true;
+        } else {
+          delete control.dataset.visibilityDisabled;
+          control.disabled = control.dataset.permanentDisabled === 'true';
+        }
+      });
+      ['enrollmentDate', 'paymentDate', 'enrollmentCourse', 'firstEnrollment'].forEach(name => {
+        const control = $('#trial-form')?.elements?.[name];
+        if (control) control.required = converted;
+      });
+      if (!converted) {
+        ['enrollmentDate', 'paymentDate', 'enrollmentCourse', 'firstEnrollment'].forEach(name => {
+          const control = $('#trial-form')?.elements?.[name];
+          if (control) control.value = '';
+        });
+        const paymentInput = $('#payment-evidence');
+        if (paymentInput) {
+          selectedFilesByInput.delete(paymentInput);
+          renderSelectedFiles(paymentInput);
+        }
+      }
+    }
     const next = $('[data-trial-next]');
-    if (next) next.hidden = concluded;
+    if (next) {
+      next.hidden = concluded;
+      const input = $('input', next);
+      if (input) {
+        input.disabled = concluded;
+        if (concluded) input.value = '';
+      }
+    }
   }
 
   function applyTrialMessageParsing(overwrite = false) {
@@ -1000,12 +1057,25 @@
         toast('請先完成本週行政確認，再新增個別追蹤', 'warning');
         return;
       }
-      const body = `<input type="hidden" name="mode" value="followup"><input type="hidden" name="followupId" value="${esc(followup.id || '')}"><div class="form-grid"><div class="field"><label for="followup-person">學生／家長 <span class="required">*</span></label><input id="followup-person" name="person" value="${esc(followup.person || '')}" required></div><div class="field"><label for="followup-status">狀態</label><select id="followup-status" name="followupStatus"><option value="open" ${followup.status !== 'closed' ? 'selected' : ''}>持續追蹤</option><option value="closed" ${followup.status === 'closed' ? 'selected' : ''}>已結案</option></select></div><div class="field full"><label for="followup-situation">目前狀況 <span class="required">*</span></label><textarea id="followup-situation" name="situation" required>${esc(followup.situation || '')}</textarea></div><div class="field full"><label for="followup-handled">這次已處理 <span class="required">*</span></label><textarea id="followup-handled" name="handled" required>${esc(followup.handled || '')}</textarea></div><div class="field"><label for="followup-next">下次追蹤日期 <span class="conditional">持續追蹤時必填</span></label><input id="followup-next" name="nextDate" type="date" value="${esc(followup.nextDate || '')}"></div></div>`;
+      const body = `<input type="hidden" name="mode" value="followup"><input type="hidden" name="followupId" value="${esc(followup.id || '')}"><div class="form-grid"><div class="field"><label for="followup-person">學生／家長 <span class="required">*</span></label><input id="followup-person" name="person" value="${esc(followup.person || '')}" required></div><div class="field"><label for="followup-status">狀態</label><select id="followup-status" name="followupStatus"><option value="open" ${followup.status !== 'closed' ? 'selected' : ''}>持續追蹤</option><option value="closed" ${followup.status === 'closed' ? 'selected' : ''}>已結案</option></select></div><div class="field full"><label for="followup-situation">目前狀況 <span class="required">*</span></label><textarea id="followup-situation" name="situation" required>${esc(followup.situation || '')}</textarea></div><div class="field full"><label for="followup-handled">這次已處理 <span class="required">*</span></label><textarea id="followup-handled" name="handled" required>${esc(followup.handled || '')}</textarea></div><div class="field" data-followup-next><label for="followup-next">下次追蹤日期 <span class="conditional">持續追蹤時必填</span></label><input id="followup-next" name="nextDate" type="date" value="${esc(followup.nextDate || '')}"></div></div>`;
       showDialog(dialogShell(followupId ? '更新家長事項' : '新增家長事項', '同一筆持續更新，直到結案', body, '儲存追蹤', 'tuesday-form'));
+      updateFollowupVisibility();
       return;
     }
     const body = `<input type="hidden" name="mode" value="check"><div class="notice">${icon('calendar-check-2')}<div>每週只確認一次；個別未結案家長請另外新增追蹤，不塞在同一張表單。</div></div><div class="grid cols-2 mt-16"><label class="check-row"><input type="checkbox" name="paymentList" ${checks.paymentList ? 'checked' : ''}><span>需繳費名單已核對</span></label><label class="check-row"><input type="checkbox" name="expiringStudents" ${checks.expiringStudents ? 'checked' : ''}><span>到期／續課名單已核對</span></label><label class="check-row"><input type="checkbox" name="unpaidParents" ${checks.unpaidParents ? 'checked' : ''}><span>未繳費家長已核對</span></label><label class="check-row"><input type="checkbox" name="remindersSent" ${checks.remindersSent ? 'checked' : ''}><span>需要提醒者已完成聯絡</span></label></div><div class="form-grid mt-16"><div class="field"><label for="tuesday-date">確認日期</label><input id="tuesday-date" name="date" type="date" value="${esc(item.date || todayIso())}" required></div><div class="field full"><label for="tuesday-note">例外或需主管協助 <span class="conditional">沒有可留白</span></label><textarea id="tuesday-note" name="note" placeholder="只寫異常、爭議或需要主管決定的事項">${esc(item.note || '')}</textarea></div></div>`;
     showDialog(dialogShell('本週行政確認', '四項名單一次核對', body, '儲存確認', 'tuesday-form'));
+  }
+
+  function updateFollowupVisibility() {
+    const form = $('#tuesday-form');
+    if (!form || String(form.elements.mode?.value || '') !== 'followup') return;
+    const closed = form.elements.followupStatus?.value === 'closed';
+    const block = $('[data-followup-next]', form);
+    if (block) block.hidden = closed;
+    if (form.elements.nextDate) {
+      form.elements.nextDate.required = !closed;
+      if (closed) form.elements.nextDate.value = '';
+    }
   }
 
   function openEnvironment() {
@@ -1019,7 +1089,16 @@
   function updateEnvironmentVisibility() {
     const status = $('#environment-form input[name="environmentStatus"]:checked')?.value || 'clear';
     const block = $('[data-environment-issue]');
-    if (block) block.hidden = status !== 'issue';
+    const hasIssue = status === 'issue';
+    if (block) block.hidden = !hasIssue;
+    const form = $('#environment-form');
+    if (form?.elements.issue) form.elements.issue.required = hasIssue;
+    if (form?.elements.improvementDue) form.elements.improvementDue.required = hasIssue;
+    if (!hasIssue && form) {
+      ENVIRONMENT_GROUPS.forEach(([key]) => { if (form.elements[`issue-${key}`]) form.elements[`issue-${key}`].checked = false; });
+      if (form.elements.issue) form.elements.issue.value = '';
+      if (form.elements.improvementDue) form.elements.improvementDue.value = '';
+    }
   }
 
   function openProject(id = '') {
@@ -1174,7 +1253,7 @@
     const data = new FormData(form);
     const id = String(data.get('trialId') || '') || uid('admin-marketing-trial');
     const existing = trialRecords().find(item => item.id === id) || {};
-    const status = String(data.get('status') || 'waiting_contact');
+    const status = normalizeTrialStatus(String(data.get('status') || 'waiting_contact'));
     let followups = Array.isArray(existing.followups) ? existing.followups.slice() : [];
     const studentName = String(data.get('studentName') || '').trim();
     const contactRef = String(data.get('contactRef') || '').trim();
@@ -1293,7 +1372,7 @@
       dueDate: status === 'completed' ? '' : String(data.get('dueDate') || ''),
       actualDate: status === 'completed' ? (existing.actualDate || todayIso()) : '',
     };
-    if (!item.category || !item.title || !item.completedToday) throw new Error('工作類型、內容與今日完成皆為必填');
+    if (!item.category || !item.title || !item.completedToday) throw new Error('請填寫工作類型、工作名稱與本次處理結果');
     if (status !== 'completed' && (!item.remaining || !item.dueDate)) throw new Error('未完成工作要填剩餘工作與預計完成日期');
     const newFiles = await uploadFiles(form.elements.evidence, item.category);
     item.evidence = retainedFiles(existing.evidence, data).concat(newFiles);
@@ -1538,6 +1617,16 @@
     else if (action === 'retry-cloud') loadCloudData(true);
     else if (action === 'refresh-drive') loadDriveFolders(true);
     else if (action === 'remove-selected-file') removeSelectedFile(actionNode.dataset.inputId || '', actionNode.dataset.index || '0');
+    else if (action === 'remove-existing-file') {
+      const form = actionNode.closest('form');
+      if (!form) return;
+      const marker = document.createElement('input');
+      marker.type = 'hidden';
+      marker.name = actionNode.dataset.fieldName || 'removeEvidence';
+      marker.value = actionNode.dataset.fileValue || '';
+      form.appendChild(marker);
+      actionNode.closest('[data-existing-file]')?.remove();
+    }
     else if (action === 'print') window.print();
   });
 
@@ -1564,6 +1653,7 @@
     }
     if (event.target.id === 'trial-status') updateTrialFormVisibility();
     if (event.target.id === 'work-status') updateWorkFormVisibility();
+    if (event.target.id === 'followup-status') updateFollowupVisibility();
     if (event.target.id === 'assignment-status') updateAssignmentVisibility();
     if (event.target.matches('#daily-check-form input[name="status"]')) updateDailyCheckVisibility();
     if (event.target.matches('#environment-form input[name="environmentStatus"]')) updateEnvironmentVisibility();

@@ -90,6 +90,9 @@
   var s = document.createElement('script');
   s.src = 'https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js';
   s.defer = true;
+  s.onerror = function () {
+    publishStatus(unavailableStatus('APP 通知服務載入失敗；不影響紀錄填寫與儲存'));
+  };
   document.head.appendChild(s);
 
   window.OneSignalDeferred = window.OneSignalDeferred || [];

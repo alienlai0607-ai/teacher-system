@@ -114,7 +114,7 @@ function adminMarketingAttachments_(items, required) {
 
 function adminMarketingTrialIdentity_(data) {
   const name = adminMarketingText_(data && data.studentName, 160).replace(/\s+/g, '').toLowerCase();
-  const contact = adminMarketingText_(data && (data.contactDisplay || data.contactRef), 160).replace(/[\s\-()]/g, '').toLowerCase();
+  const contact = adminMarketingText_(data && (data.contactDisplay || data.contactRef), 160).split('｜試上')[0].replace(/[\s\-()]/g, '').toLowerCase();
   const course = adminMarketingText_(data && data.course, 220).replace(/\s+/g, '').toLowerCase();
   const date = adminMarketingText_(data && data.date, 10);
   return name && contact && course && date ? name + '|' + contact + '|' + course + '|' + date : '';
@@ -122,7 +122,7 @@ function adminMarketingTrialIdentity_(data) {
 
 function adminMarketingStudentIdentity_(data) {
   const name = adminMarketingText_(data && data.studentName, 160).replace(/\s+/g, '').toLowerCase();
-  const contact = adminMarketingText_(data && (data.contactDisplay || data.contactRef), 160).replace(/[\s\-()]/g, '').toLowerCase();
+  const contact = adminMarketingText_(data && (data.contactDisplay || data.contactRef), 160).split('｜試上')[0].replace(/[\s\-()]/g, '').toLowerCase();
   return name && contact ? name + '|' + contact : '';
 }
 
@@ -187,7 +187,7 @@ function validateAdminMarketingDaily_(data) {
       actualDate: adminMarketingDate_(item.actualDate, false),
       evidence: adminMarketingAttachments_(item.evidence, evidenceRequired),
     };
-    if (!cleaned.category || !cleaned.title || !cleaned.completedToday) throw new Error('每項工作都要填寫類型、內容與今日完成進度');
+    if (!cleaned.category || !cleaned.title || !cleaned.completedToday) throw new Error('每項工作都要填寫工作類型、工作名稱與本次處理結果');
     if (cleaned.status !== 'completed' && (!cleaned.remaining || !cleaned.dueDate)) {
       throw new Error('未完成工作必須填寫剩餘工作與預計完成日期');
     }
@@ -295,14 +295,14 @@ function validateAdminMarketingTrial_(data) {
   data.studentName = adminMarketingText_(data.studentName, 160);
   data.course = adminMarketingText_(data.course, 220);
   data.teacher = adminMarketingText_(data.teacher, 160);
-  data.contactDisplay = adminMarketingText_(data.contactDisplay || data.contactRef, 160);
+  data.contactDisplay = adminMarketingText_(data.contactDisplay || data.contactRef, 160).split('｜試上')[0].trim();
   data.contactRef = data.contactDisplay;
   data.interest = ['high', 'medium', 'low', 'unknown'].indexOf(data.interest) >= 0 ? data.interest : 'unknown';
   data.owner = adminMarketingText_(data.owner || data.nickname, 160);
   data.note = adminMarketingText_(data.note, 1800);
   data.nextFollowupDate = adminMarketingDate_(data.nextFollowupDate, false);
-  data.status = ['waiting_contact', 'contacted', 'considering', 'followup_scheduled', 'converted', 'not_enrolled'].indexOf(data.status) >= 0
-    ? data.status : 'waiting_contact';
+  if (data.status === 'contacted' || data.status === 'followup_scheduled') data.status = 'considering';
+  data.status = ['waiting_contact', 'considering', 'converted', 'not_enrolled'].indexOf(data.status) >= 0 ? data.status : 'waiting_contact';
   if (!data.studentName || !data.course || !data.teacher || !data.contactRef || !data.owner) {
     throw new Error('學生姓名、試上課程、授課老師、家長識別資料與負責人皆為必填');
   }
