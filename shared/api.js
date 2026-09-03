@@ -2,6 +2,7 @@
 window.API = (function () {
   const API_URL = window.APP_CONFIG.API_URL;
   let authRedirectScheduled = false;
+  const READ_RETRY_DELAYS_MS = [700, 1400];
   const IMPERSONATION_READ_ACTIONS = new Set([
     'ping', 'whoami', 'getSessionIdentity', 'listUsers',
     'getLog', 'getTodayLog', 'listLogs', 'getEvidenceLog', 'getMakeupQuota', 'getAttachmentPreviews',
@@ -31,6 +32,34 @@ window.API = (function () {
     }, 500);
   }
 
+  function isRetryableRead(action) {
+    return action === 'ping'
+      || action === 'whoami'
+      || action.startsWith('get')
+      || action.startsWith('list');
+  }
+
+  function wait(ms) {
+    return new Promise(resolve => window.setTimeout(resolve, ms));
+  }
+
+  async function requestJson(payload) {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // 避免 CORS preflight
+      body: JSON.stringify(payload),
+    });
+    const responseText = await res.text();
+    try {
+      return JSON.parse(responseText.replace(/^\uFEFF/, ''));
+    } catch (error) {
+      const transportError = new Error('雲端服務暫時未正確回應');
+      transportError.code = 'NON_JSON_RESPONSE';
+      transportError.status = res.status;
+      throw transportError;
+    }
+  }
+
   async function call(action, params = {}) {
     if (window.AUTH?.isImpersonating?.() && !IMPERSONATION_READ_ACTIONS.has(action)) {
       return {
@@ -42,22 +71,32 @@ window.API = (function () {
     const payload = { action, ...params };
     const sessionToken = window.AUTH?.getSession?.()?.session_token || '';
     if (sessionToken && !payload.session_token) payload.session_token = sessionToken;
-    try {
-      const res = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // 避免 CORS preflight
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!data.ok) {
-        console.warn('[API]', action, 'failed:', data.error);
-        handleAuthFailure(action, data);
+    const retryable = isRetryableRead(action);
+    const maxAttempts = retryable ? READ_RETRY_DELAYS_MS.length + 1 : 1;
+    let lastError = null;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        const data = await requestJson(payload);
+        if (!data.ok) {
+          console.warn('[API]', action, 'failed:', data.error);
+          handleAuthFailure(action, data);
+        }
+        return data;
+      } catch (err) {
+        lastError = err;
+        const hasRetry = retryable && attempt < maxAttempts - 1;
+        console.warn('[API]', action, hasRetry ? 'retrying:' : 'error:', err.message);
+        if (hasRetry) await wait(READ_RETRY_DELAYS_MS[attempt]);
       }
-      return data;
-    } catch (err) {
-      console.error('[API]', action, 'error:', err);
-      return { ok: false, error: err.message };
     }
+    console.error('[API]', action, 'failed after transport handling:', lastError);
+    return {
+      ok: false,
+      code: lastError?.code || 'NETWORK_ERROR',
+      error: retryable
+        ? '雲端連線暫時不穩，系統已自動重試，請再試一次'
+        : '雲端回應未完成；請先到紀錄確認是否已儲存，再決定是否重送',
+    };
   }
 
   return {
