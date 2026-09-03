@@ -19,10 +19,44 @@ const tomorrow = (() => {
 fs.mkdirSync(artifactDir, { recursive: true });
 const imageA = path.join(artifactDir, 'qa-red.png');
 const imageB = path.join(artifactDir, 'qa-blue.png');
+const largeImage = path.join(artifactDir, 'qa-large.bmp');
 const pdfFile = path.join(artifactDir, 'qa-material.pdf');
+const largePdfFile = path.join(artifactDir, 'qa-material-16mb.pdf');
 fs.writeFileSync(imageA, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR42mP8z8Dwn4GBgYGJAQoAHgQCAcR3O98AAAAASUVORK5CYII=', 'base64'));
 fs.writeFileSync(imageB, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFUlEQVR42mNkYPj/n4GBgYGBiQEKAB4EAgFKhhF4AAAAAElFTkSuQmCC', 'base64'));
 fs.writeFileSync(pdfFile, '%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n');
+
+function writeBmp(filePath, width = 1800, height = 1800) {
+  const rowSize = (width * 3 + 3) & ~3;
+  const pixelBytes = rowSize * height;
+  const bitmap = Buffer.alloc(54 + pixelBytes);
+  bitmap.write('BM', 0, 2, 'ascii');
+  bitmap.writeUInt32LE(bitmap.length, 2);
+  bitmap.writeUInt32LE(54, 10);
+  bitmap.writeUInt32LE(40, 14);
+  bitmap.writeInt32LE(width, 18);
+  bitmap.writeInt32LE(height, 22);
+  bitmap.writeUInt16LE(1, 26);
+  bitmap.writeUInt16LE(24, 28);
+  bitmap.writeUInt32LE(pixelBytes, 34);
+  for (let y = 0; y < height; y += 1) {
+    const row = 54 + y * rowSize;
+    for (let x = 0; x < width; x += 1) {
+      const offset = row + x * 3;
+      bitmap[offset] = (x * 3 + y) & 255;
+      bitmap[offset + 1] = (x + y * 2) & 255;
+      bitmap[offset + 2] = (x * 2 + y * 3) & 255;
+    }
+  }
+  fs.writeFileSync(filePath, bitmap);
+}
+
+writeBmp(largeImage);
+fs.writeFileSync(largePdfFile, Buffer.concat([
+  Buffer.from('%PDF-1.4\n% 16 MB upload acceptance fixture\n'),
+  Buffer.alloc(16 * 1024 * 1024, 0x20),
+  Buffer.from('\n%%EOF\n'),
+]));
 
 const report = {
   startedAt: new Date().toISOString(),
@@ -38,14 +72,7 @@ function check(name, passed, detail = '') {
   if (!passed) report.failures.push({ name, detail });
 }
 
-async function createPage(browser, viewport, label) {
-  const context = await browser.newContext({
-    viewport,
-    locale: 'zh-TW',
-    timezoneId: 'Asia/Taipei',
-    serviceWorkers: 'block',
-  });
-  const page = await context.newPage();
+function trackPage(page, label) {
   page.on('pageerror', error => report.browserErrors.push({ label, type: 'pageerror', message: error.message }));
   page.on('console', message => {
     if (message.type() === 'error') report.browserErrors.push({ label, type: 'console', message: message.text() });
@@ -54,6 +81,17 @@ async function createPage(browser, viewport, label) {
     const url = request.url();
     if (url.startsWith(baseUrl)) report.browserErrors.push({ label, type: 'requestfailed', message: `${url}: ${request.failure()?.errorText || ''}` });
   });
+  return page;
+}
+
+async function createPage(browser, viewport, label) {
+  const context = await browser.newContext({
+    viewport,
+    locale: 'zh-TW',
+    timezoneId: 'Asia/Taipei',
+    serviceWorkers: 'block',
+  });
+  const page = trackPage(await context.newPage(), label);
   return { context, page };
 }
 
@@ -67,6 +105,12 @@ async function clickAction(page, action, options = {}) {
   const locator = page.locator(`[data-action="${action}"]`).filter({ visible: true }).first();
   await locator.waitFor({ state: 'visible', timeout: options.timeout || 8000 });
   await locator.click({ force: Boolean(options.force) });
+}
+
+async function closeDrawer(page) {
+  const button = page.locator('button[data-action="close-drawer"]').filter({ visible: true }).first();
+  await button.waitFor({ state: 'visible', timeout: 8000 });
+  await button.click();
 }
 
 async function clickRoute(page, route) {
@@ -152,7 +196,8 @@ async function adminWorkflow(browser) {
     await page.fill('#work-title', '端到端儲存驗收');
     await page.fill('#completed-today', '已完成資料核對並確認附件可以重新讀取');
     await page.selectOption('#work-status', 'completed');
-    await page.setInputFiles('#work-evidence', [imageA, imageB]);
+    await page.setInputFiles('#work-evidence', [imageA, largeImage, largePdfFile]);
+    check('行政附件可一次複選照片與 16 MB 文件', await page.locator('[data-file-preview="work-evidence"] .selected-file').count() === 3);
     await page.locator('#work-item-form button[type="submit"]').click();
     await page.waitForTimeout(250);
     check('行政可新增完成工作', (await page.locator('body').innerText()).includes('端到端儲存驗收'));
@@ -217,6 +262,64 @@ async function adminWorkflow(browser) {
     check('首報獎金重新整理後仍存在', (await page.locator('body').innerText()).includes('50 元待主管確認'));
     await pageHealth(page, label, 'reload');
     await page.screenshot({ path: path.join(artifactDir, 'admin-workflow.png'), fullPage: true });
+
+    const manager = trackPage(await context.newPage(), '行政主管完整流程');
+    await manager.goto(`${baseUrl}/review/admin-marketing-v1/index.html?workspace=admin-marketing-manager&reviewUser=%E5%B0%8F%E9%AD%9A%E4%B8%BB%E7%AE%A1`, { waitUntil: 'domcontentloaded' });
+    await waitForApp(manager);
+
+    await clickRoute(manager, 'reviews');
+    const reviewCard = manager.locator('.record-card', { hasText: '項工作' }).first();
+    check('行政主管可看到老師新增的工作紀錄', await reviewCard.count() === 1);
+    await reviewCard.locator('[data-action="review-record"]').click();
+    check('行政主管可開啟工作內容與附件', (await manager.locator('#review-form').innerText()).includes('端到端儲存驗收'));
+    await manager.fill('#review-note', '附件與完成結果已確認，主管回覆可正常保存。');
+    await manager.locator('#review-form button[type="submit"]').click();
+    await manager.waitForTimeout(250);
+    check('行政主管回覆可儲存', (await manager.locator('body').innerText()).includes('主管回覆已儲存'));
+
+    await clickRoute(manager, 'trials');
+    const bonusRow = manager.locator('.trial-row', { hasText: '樂高小創客' }).first();
+    await bonusRow.locator('[data-action="review-trial-bonus"]').click();
+    await manager.locator('#trial-bonus-form button[type="submit"]').click();
+    await manager.waitForTimeout(250);
+    check('行政主管可核准首報 50 元獎金', (await manager.locator('body').innerText()).includes('首報獎金 50 元已核准'));
+
+    await clickRoute(manager, 'assignments');
+    await clickAction(manager, 'open-assignment');
+    await manager.fill('#assignment-title', '主管端到端交辦');
+    await manager.fill('#assignment-detail', '確認行政能收到主管建立的工作與期限。');
+    await manager.fill('#assignment-due', tomorrow);
+    await manager.locator('#assignment-form button[type="submit"]').click();
+    await manager.waitForTimeout(250);
+    check('行政主管可建立有期限的交辦', (await manager.locator('body').innerText()).includes('主管端到端交辦'));
+
+    await clickRoute(manager, 'evaluation');
+    const adminScoreInputs = manager.locator('#score-form input[type="number"]');
+    for (let index = 0; index < await adminScoreInputs.count(); index += 1) {
+      const input = adminScoreInputs.nth(index);
+      await input.fill(await input.getAttribute('max') || '0');
+    }
+    await manager.fill('#score-comment', '本月紀錄與附件完整，下一月持續維持明確期限。');
+    await manager.check('#score-form input[name="published"]');
+    await manager.locator('#score-form button[type="submit"]').click();
+    await manager.waitForTimeout(300);
+    check('行政主管評核可儲存並公布', /評核已公布給皮皮|已公布/.test(await manager.locator('body').innerText()));
+
+    await manager.reload({ waitUntil: 'domcontentloaded' });
+    await waitForApp(manager);
+    await clickRoute(manager, 'evaluation');
+    check('行政主管評核重新整理後仍存在', (await manager.inputValue('#score-comment')).includes('本月紀錄與附件完整'));
+    await pageHealth(manager, '行政主管完整流程', 'reload');
+    await manager.screenshot({ path: path.join(artifactDir, 'admin-manager-workflow.png'), fullPage: true });
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForApp(page);
+    await clickRoute(page, 'performance');
+    const workerPerformance = await page.locator('body').innerText();
+    check('行政端可看到主管已公布評核與評語', workerPerformance.includes('本月紀錄與附件完整'));
+    await clickRoute(page, 'trials');
+    check('行政端可看到首報獎金已核准', (await page.locator('body').innerText()).includes('首報獎金 50 元已核准'));
+    await manager.close();
   } finally {
     await context.close();
   }
@@ -237,7 +340,9 @@ async function talentWorkflow(browser) {
     await page.selectOption('#prep-form select[name="courseType"]', '樂高小創客');
     await page.fill('#prep-form input[name="courseName"]', '端到端才藝教材');
     await page.fill('#prep-form textarea[name="notes"]', '本堂使用齒輪與簡易馬達材料');
-    await page.setInputFiles('#prep-form input[data-upload-category="prep"]', [pdfFile, imageA]);
+    await page.setInputFiles('#prep-form input[data-upload-category="prep"]', [largePdfFile, largeImage]);
+    await page.waitForFunction(() => document.querySelectorAll('[data-file-items="prep"] .selected-file').length === 2, null, { timeout: 12000 });
+    check('才藝備課可上傳 16 MB 文件並自動壓縮大型圖片', await page.locator('[data-file-items="prep"] .selected-file').count() === 2);
     await clickAction(page, 'save-prep');
     await page.waitForTimeout(250);
     check('才藝備課可一次加入多份教材', (await page.locator('body').innerText()).includes('端到端才藝教材'));
@@ -256,9 +361,15 @@ async function talentWorkflow(browser) {
     await page.fill('#log-form textarea[name="issue"]', '本堂齒輪安裝較慢，下次先依顏色分盒並示範卡榫方向。');
     await page.check('#log-form input[name="roomDone"]');
     await page.setInputFiles('#log-form input[data-upload-category="attendance"]', imageA);
-    await page.setInputFiles('#log-form input[data-upload-category="learning"]', [imageA, imageB]);
-    await page.setInputFiles('#log-form input[data-upload-category="room"]', imageB);
+    await page.setInputFiles('#log-form input[data-upload-category="learning"]', [imageA, largeImage]);
+    await page.waitForFunction(() => {
+      const input = document.querySelector('#log-form input[data-upload-category="learning"]');
+      return input && !input.disabled && document.querySelectorAll('[data-file-items="learning"] .selected-file').length === 2;
+    }, null, { timeout: 30000 });
     check('才藝成果照片可一次多選', await page.locator('[data-file-items="learning"] .selected-file').count() === 2);
+    await page.setInputFiles('#log-form input[data-upload-category="room"]', imageB);
+    const renewalInput = page.locator('#log-form input[name="renewalCount"]');
+    if (await renewalInput.count()) await renewalInput.fill('1');
     await clickAction(page, 'submit-log');
     await page.waitForTimeout(400);
     const pageText = await page.locator('body').innerText();
@@ -273,8 +384,138 @@ async function talentWorkflow(browser) {
     await pageHealth(page, label, 'reload');
     await page.screenshot({ path: path.join(artifactDir, 'talent-pt-workflow.png'), fullPage: true });
 
+    await page.evaluate(() => {
+      const key = 'bp_talent_kpi_v14_shared';
+      const shared = JSON.parse(localStorage.getItem(key) || 'null');
+      if (!shared) return;
+      const rita = (shared.pendingUsers || []).find(item => item.nickname === 'RITA老師');
+      if (rita && !(shared.users || []).some(item => item.nickname === rita.nickname)) {
+        rita.status = 'active';
+        shared.users = [...(shared.users || []), rita];
+        shared.pendingUsers = (shared.pendingUsers || []).filter(item => item.nickname !== rita.nickname);
+        localStorage.setItem(key, JSON.stringify(shared));
+      }
+    });
+
+    const fulltime = trackPage(await context.newPage(), '才藝正職完整流程');
+    await fulltime.goto(`${baseUrl}/review/talent-v2/index.html?workspace=talent-fulltime&reviewUser=RITA%E8%80%81%E5%B8%AB`, { waitUntil: 'domcontentloaded' });
+    await waitForApp(fulltime);
+    await clickRoute(fulltime, 'prep');
+    await clickAction(fulltime, 'new-prep');
+    await fulltime.selectOption('#prep-form select[name="courseType"]', '科學實驗');
+    await fulltime.fill('#prep-form input[name="courseName"]', '端到端正職教材');
+    await fulltime.setInputFiles('#prep-form input[data-upload-category="prep"]', [imageA, imageB]);
+    await fulltime.waitForFunction(() => document.querySelectorAll('[data-file-items="prep"] .selected-file').length === 2, null, { timeout: 12000 });
+    check('才藝正職備課可一次加入多份教材', await fulltime.locator('[data-file-items="prep"] .selected-file').count() === 2);
+    await clickAction(fulltime, 'save-prep');
+    await fulltime.waitForTimeout(250);
+    check('才藝正職備課可儲存', (await fulltime.locator('body').innerText()).includes('端到端正職教材'));
+
+    await clickRoute(fulltime, 'today');
+    const fulltimeBeforeCount = await fulltime.locator('.record-row').count();
+    await clickAction(fulltime, 'new-log');
+    await fulltime.selectOption('#log-form select[name="courseType"]', '科學實驗');
+    await fulltime.fill('#log-form input[name="courseName"]', '端到端正職課程');
+    await fulltime.selectOption('#log-form select[name="siteType"]', 'self');
+    await fulltime.fill('#log-form input[name="site"]', '北區教室');
+    await fulltime.fill('#log-form input[name="expected"]', '4');
+    await fulltime.fill('#log-form input[name="present"]', '4');
+    await fulltime.fill('#log-form input[name="leave"]', '0');
+    await fulltime.fill('#log-form input[name="absent"]', '0');
+    await fulltime.fill('#log-form input[name="makeup"]', '0');
+    await fulltime.fill('#log-form input[name="trial"]', '0');
+    await fulltime.selectOption('#log-form select[name="prepId"]', { label: '端到端正職教材 · 科學實驗' });
+    await fulltime.fill('#log-form textarea[name="issue"]', '本堂材料分發較慢，下次課前依組別完成分裝。');
+    await fulltime.check('#log-form input[name="roomDone"]');
+    await fulltime.setInputFiles('#log-form input[data-upload-category="attendance"]', imageA);
+    await fulltime.setInputFiles('#log-form input[data-upload-category="learning"]', [imageA, imageB]);
+    await fulltime.setInputFiles('#log-form input[data-upload-category="room"]', imageB);
+    await fulltime.setInputFiles('#log-form input[data-upload-category="app"]', [imageA, imageB]);
+    await fulltime.waitForFunction(() => (
+      document.querySelectorAll('[data-file-items="learning"] .selected-file').length === 2
+      && document.querySelectorAll('[data-file-items="app"] .selected-file').length === 2
+    ), null, { timeout: 12000 });
+    check('才藝正職成果與家長 APP 照片皆可複選', (
+      await fulltime.locator('[data-file-items="learning"] .selected-file').count() === 2
+      && await fulltime.locator('[data-file-items="app"] .selected-file').count() === 2
+    ));
+    await clickAction(fulltime, 'submit-log');
+    await fulltime.waitForTimeout(400);
+    check('才藝正職可正式送出且只新增一筆', (
+      (await fulltime.locator('body').innerText()).includes('端到端正職課程')
+      && await fulltime.locator('.record-row').count() === fulltimeBeforeCount + 1
+    ));
+
+    await fulltime.reload({ waitUntil: 'domcontentloaded' });
+    await waitForApp(fulltime);
+    await clickRoute(fulltime, 'today');
+    check('才藝正職紀錄重新整理後仍存在', (await fulltime.locator('body').innerText()).includes('端到端正職課程'));
+    await pageHealth(fulltime, '才藝正職完整流程', 'reload');
+    await fulltime.screenshot({ path: path.join(artifactDir, 'talent-fulltime-workflow.png'), fullPage: true });
+    await fulltime.close();
+
+    const manager = trackPage(await context.newPage(), '才藝主管完整流程');
+    await manager.goto(`${baseUrl}/review/talent-v2/index.html?workspace=talent-manager&reviewUser=%E6%9F%B3%E4%B8%81%E4%B8%BB%E7%AE%A1`, { waitUntil: 'domcontentloaded' });
+    await waitForApp(manager);
+
+    await clickRoute(manager, 'prep-review');
+    const prepTeacher = manager.locator('[data-action="select-prep-review-teacher"]', { hasText: '皮皮老師' }).first();
+    check('才藝主管可依老師選擇備課檔案', await prepTeacher.count() === 1);
+    await prepTeacher.click();
+    const prepRow = manager.locator('[data-action="view-prep-review"]', { hasText: '端到端才藝教材' }).first();
+    check('才藝主管可看到老師的課程與兩份教材', await prepRow.count() === 1 && (await prepRow.innerText()).includes('2 份附件'));
+    await prepRow.click();
+    const prepDetailText = await manager.locator('.drawer').innerText();
+    check('才藝主管可開啟大型文件與圖片教材', prepDetailText.includes('qa-material-16mb.pdf') && prepDetailText.includes('qa-large.jpg'));
+    check('才藝備課查閱不要求主管核准或退回', !/核准|退回/.test(prepDetailText));
+    await closeDrawer(manager);
+
+    await clickRoute(manager, 'log-review');
+    const talentLog = manager.locator('.record-row', { hasText: '端到端才藝課程' }).first();
+    check('才藝主管可看到老師已送出的工作紀錄', await talentLog.count() === 1);
+    await talentLog.locator('[data-action="view-log"]').click();
+    const logDetailText = await manager.locator('.drawer').innerText();
+    check('才藝主管可查看課程問題與成果附件', logDetailText.includes('本堂齒輪安裝較慢') && logDetailText.includes('學習證據'));
+    await closeDrawer(manager);
+
+    await clickRoute(manager, 'scoring');
+    const fulltimeScore = manager.locator('.score-person', { hasText: 'RITA老師' }).first();
+    await fulltimeScore.locator('[data-action="edit-score"]').click();
+    const talentScoreInputs = manager.locator('#score-form input[type="number"]');
+    for (let index = 0; index < await talentScoreInputs.count(); index += 1) {
+      const input = talentScoreInputs.nth(index);
+      await input.fill(await input.getAttribute('max') || '0');
+    }
+    await manager.fill('#score-form textarea[name="reason"]', '教學紀錄、成果附件與課程優化皆可清楚查閱。');
+    const publishScore = manager.locator('#score-form input[name="published"]');
+    if (await publishScore.isEnabled()) await publishScore.check();
+    await manager.locator('button[form="score-form"]').click();
+    await manager.waitForTimeout(300);
+    check('才藝主管可儲存並公布正職 KPI', (await manager.locator('body').innerText()).includes('月度 KPI 評分已儲存'));
+
+    await manager.reload({ waitUntil: 'domcontentloaded' });
+    await waitForApp(manager);
+    await clickRoute(manager, 'scoring');
+    check('才藝主管評分重新整理後仍存在', (await manager.locator('.score-person', { hasText: 'RITA老師' }).innerText()).includes('已公布'));
+    await pageHealth(manager, '才藝主管完整流程', 'reload');
+    await manager.screenshot({ path: path.join(artifactDir, 'talent-manager-workflow.png'), fullPage: true });
+
+    const payroll = trackPage(await context.newPage(), '才藝薪資核准流程');
+    await payroll.goto(`${baseUrl}/review/talent-v2/index.html?workspace=talent-payroll&reviewUser=%E6%9F%8F%E7%BF%B0`, { waitUntil: 'domcontentloaded' });
+    await waitForApp(payroll);
+    await clickRoute(payroll, 'bonus-approval');
+    const bonusButton = payroll.locator('[data-action="open-bonus-approval"]').first();
+    check('才藝薪資端可開啟新生／續報核准', await bonusButton.count() === 1);
+    await bonusButton.click();
+    await payroll.locator('button[form="bonus-approval-form"]').click();
+    await payroll.waitForTimeout(250);
+    check('才藝薪資端可完成獎金核准', (await payroll.locator('body').innerText()).includes('新生與續報人數已核准'));
+    await pageHealth(payroll, '才藝薪資核准流程', 'bonus-approval');
+    await payroll.close();
+    await manager.close();
+
     const blackPanther = await context.newPage();
-    blackPanther.on('pageerror', error => report.browserErrors.push({ label: '黑豹', type: 'pageerror', message: error.message }));
+    trackPage(blackPanther, '黑豹');
     await blackPanther.goto(`${baseUrl}/review/talent-v2/index.html?workspace=talent-pt&reviewUser=%E9%BB%91%E8%B1%B9%E8%80%81%E5%B8%AB`, { waitUntil: 'domcontentloaded' });
     await waitForApp(blackPanther);
     await clickRoute(blackPanther, 'pay');
@@ -303,7 +544,12 @@ async function anqinWorkflow(browser) {
     await page.selectOption('#course-prep-type', '安親課業指導');
     await page.fill('#course-prep-title', '端到端安親教材');
     await page.fill('#course-prep-note', '直式加減法練習單');
-    await page.setInputFiles('#activity-prep-files', [pdfFile, imageA]);
+    await page.setInputFiles('#activity-prep-files', [largePdfFile, largeImage]);
+    await page.waitForFunction(() => {
+      const input = document.querySelector('#activity-prep-files');
+      return input && !input.disabled && document.querySelectorAll('#prep-file-list .prep-file-row, #prep-file-list .simple-prep-file').length >= 2;
+    }, null, { timeout: 30000 });
+    check('安親備課可上傳 16 MB 文件並自動壓縮大型圖片', (await page.locator('#prep-file-list').innerText()).includes('qa-material-16mb.pdf'));
     await page.locator('button[form="course-prep-form"]').click();
     await page.waitForTimeout(450);
     await clickRoute(page, 'plans');
@@ -331,8 +577,8 @@ async function anqinWorkflow(browser) {
       await activityCard.locator('[data-action="view-activity"]').first().click();
       await clickAction(page, 'new-evidence');
     }
-    await page.setInputFiles('#evidence-file', [imageA, imageB]);
-    await page.waitForFunction(() => document.querySelectorAll('#evidence-attachment-list .evidence-attachment-item').length === 2, null, { timeout: 8000 }).catch(() => {});
+    await page.setInputFiles('#evidence-file', [imageA, largeImage]);
+    await page.waitForFunction(() => document.querySelectorAll('#evidence-attachment-list .evidence-attachment-item').length === 2, null, { timeout: 30000 }).catch(() => {});
     check('安親成果證據可一次上傳多張', await page.locator('#evidence-attachment-list .evidence-attachment-item').count() === 2);
     await page.fill('#evidence-title', '孩子課後練習成果');
     await page.locator('.drawer-body').evaluate((drawer, selector) => {
@@ -376,6 +622,68 @@ async function anqinWorkflow(browser) {
     check('安親老師可從我的紀錄查看過去紀錄', /我的紀錄|直式加減法/.test(await page.locator('body').innerText()));
     await pageHealth(page, label, 'reload');
     await page.screenshot({ path: path.join(artifactDir, 'anqin-workflow.png'), fullPage: true });
+
+    await page.goto(`${baseUrl}/review/anqin-v2/qa-harness.html?nickname=%E5%B0%8F%E9%AD%9A%E4%B8%BB%E7%AE%A1&role=manager&department=%E5%8C%97%E5%8D%80%E6%95%99%E5%AE%A4`, { waitUntil: 'domcontentloaded' });
+    await waitForApp(page);
+    await page.waitForTimeout(1800);
+
+    await clickRoute(page, 'reviews');
+    await page.waitForFunction(() => document.querySelectorAll('[data-action="open-review"]').length > 0, null, { timeout: 12000 });
+    const reviewButton = page.locator('[data-action="open-review"]').first();
+    check('安親主管可看到老師正式送出的日報', await reviewButton.count() === 1);
+    await reviewButton.click();
+    await clickAction(page, 'accept-submission');
+    await page.waitForTimeout(450);
+    check('安親主管可完成日報審查', (await page.locator('body').innerText()).includes('審查已完成'));
+
+    await clickRoute(page, 'evidence');
+    await page.waitForFunction(() => document.querySelectorAll('[data-action="inspect-evidence"]').length > 0, null, { timeout: 12000 });
+    await page.waitForFunction(() => {
+      const images = Array.from(document.querySelectorAll('.evidence-card img'));
+      return images.length > 0 && images.every(image => image.complete && image.naturalWidth > 0);
+    }, null, { timeout: 12000 });
+    check('安親雲端成果照片跨主管帳號讀回後不是空白', await page.locator('.evidence-card img').count() > 0);
+    await page.locator('[data-action="inspect-evidence"]').first().click();
+    const evidenceDrawerText = await page.locator('.drawer-panel').innerText();
+    check('安親主管可查看同筆多張成果照片', evidenceDrawerText.includes('qa-red.png') && evidenceDrawerText.includes('qa-large.bmp'));
+    await clickAction(page, 'accept-evidence');
+    await page.waitForTimeout(450);
+    check('安親主管可採認成果證據', (await page.locator('body').innerText()).includes('審查已完成'));
+
+    await clickRoute(page, 'operations-review');
+    const operationReview = page.locator('[data-action="review-operation"]:not([disabled])').first();
+    await operationReview.waitFor({ state: 'visible', timeout: 12000 });
+    await operationReview.click();
+    await clickAction(page, 'accept-operation');
+    await page.waitForTimeout(450);
+    check('安親主管可通過四項班務照片稽核', (await page.locator('body').innerText()).includes('審查已完成'));
+
+    await clickRoute(page, 'evaluations');
+    await page.waitForSelector('form[data-form="manager-evaluation-selection"]', { timeout: 12000 });
+    await page.selectOption('form[data-form="manager-evaluation-selection"] select[name="teacher"]', { label: '江江老師 · 北區教室' });
+    await page.locator('form[data-form="manager-evaluation-selection"] button[type="submit"]').click();
+    await page.waitForSelector('#manager-evaluation-form', { timeout: 12000 });
+    const managerScoreInputs = page.locator('#manager-evaluation-form input[data-input="manager-eval-score"]');
+    for (let index = 0; index < await managerScoreInputs.count(); index += 1) {
+      const input = managerScoreInputs.nth(index);
+      await input.fill(await input.getAttribute('max') || '0');
+    }
+    await page.fill('#manager-eval-comment', '本月工作紀錄、照片與後續調整皆可清楚查閱。');
+    await page.locator('[data-action="save-manager-evaluation"][data-status="submitted"]').click();
+    await page.waitForTimeout(650);
+    check('安親主管可完成月度評核', (await page.locator('body').innerText()).includes('月度評核已完成'));
+
+    await clickRoute(page, 'cloud-reports');
+    await page.waitForTimeout(900);
+    check('小魚可在雲端日報看到北區老師資料夾', (await page.locator('body').innerText()).includes('江江'));
+    await pageHealth(page, '安親主管完整流程', 'cloud-reports');
+    await page.screenshot({ path: path.join(artifactDir, 'anqin-manager-workflow.png'), fullPage: true });
+
+    await page.goto(`${baseUrl}/review/anqin-v2/qa-harness.html?nickname=%E6%B1%9F%E6%B1%9F%E8%80%81%E5%B8%AB&role=teacher&department=%E5%8C%97%E5%8D%80%E6%95%99%E5%AE%A4`, { waitUntil: 'domcontentloaded' });
+    await waitForApp(page);
+    await clickRoute(page, 'evaluation');
+    await page.waitForTimeout(700);
+    check('安親老師可直接看到主管最新已完成評核', (await page.locator('body').innerText()).includes('本月工作紀錄、照片與後續調整'));
   } finally {
     await context.close();
   }
