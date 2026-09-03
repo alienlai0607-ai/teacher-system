@@ -13,6 +13,7 @@ const app = fs.readFileSync(path.join(root, 'review/anqin-v2/app.js'), 'utf8');
 
 assert.match(router, /'runProductionIntegrityCheck': \(\) => runProductionIntegrityCheck\(params\)/);
 assert.match(auth, /adminOnly[\s\S]*'runProductionIntegrityCheck'/);
+assert.match(auth, /action === 'getSessionIdentity'\) return;/, '正式登入身分查詢必須通過後端安全允許清單');
 assert.match(api, /runProductionIntegrityCheck: \(\) => call\('runProductionIntegrityCheck'\)/);
 assert.match(app, /data-action="run-cloud-delivery-check"/);
 assert.match(app, /一般連線成功不等於資料能交付/);
