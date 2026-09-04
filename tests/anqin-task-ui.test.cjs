@@ -117,8 +117,8 @@ assert.match(source, /function applyPreviewReviewContext\(/, '安親審查模式
 assert.match(source, /if \(!applyPreviewReviewContext\(control\.dataset\.role\)\) state\.ui\.role = control\.dataset\.role/, '切換審查角色時必須同步身份範圍');
 assert.match(source, /applyPreviewReviewContext\(LOCAL_REVIEW_ROLE\)/, '網址指定主管視角時首次載入就必須套用正確身份');
 assert.match(source, /GLOBAL_MANAGER_NICKNAMES\.some\(name => sameReviewIdentity\(name, managerNickname\)\)/, '小魚在審查與正式登入都必須擁有全教室檢視範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260904-parent-communication-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260904-parent-communication-1/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260904-prep-library-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260904-prep-library-1/, '登入備援路徑也必須避開舊版快取');
 
 const startupSafetySource = source.slice(source.indexOf('function stripEmbeddedMediaJson('), source.indexOf('function loadState()'));
 const startupSafetyContext = vm.createContext({ JSON, Number, Set });
@@ -171,6 +171,12 @@ assert.doesNotMatch(prepSaveSource, /directPlanReady\(planId\)/, '儲存備課�
 assert.match(prepSaveSource, /some\(item => materialCloudUrl\(item\)\)/, '前端儲存前必須確認至少一份附件已歸檔');
 assert.match(prepSaveSource, /form\.elements\.id\.value = id/, '第一次按下儲存時必須立即固定檔案編號，避免連點新增多份');
 assert.match(prepSaveSource, /已有相同課程類型與名稱的備課檔案/, '前端需攔截相同老師的同名同類型重複建檔');
+const prepLibrarySource = source.slice(source.indexOf('function renderLessonPlans('), source.indexOf('function renderRecordTimelineEntry('));
+assert.match(prepLibrarySource, /prep-library-grid/, '老師備課檔案應使用緊湊且可掃讀的檔案格線');
+assert.doesNotMatch(prepLibrarySource, /plan-table|<table/, '老師備課檔案不得再以手機逐欄堆疊的表格呈現');
+assert.match(prepLibrarySource, /data-action="open-evidence"/, '老師應可隨時點選整份備課檔案查看內容');
+assert.match(prepLibrarySource, /calendar-clock[\s\S]*更新/, '備課清單只需集中顯示最近更新日期');
+assert.doesNotMatch(prepLibrarySource, /data-action="edit-activity"/, '清單點選應先安全查看，再由內容頁選擇是否編輯');
 assert.match(coursePrepBackend, /hasArchivedMaterial/, '後端也必須驗證教案或教材附件');
 assert.match(coursePrepBackend, /請至少上傳一份教案或教材資料/, '後端缺附件時需回傳清楚訊息');
 assert.match(coursePrepBackend, /LockService\.getScriptLock\(\)/, '雲端儲存需加鎖，避免連點請求同時建立重複檔案');

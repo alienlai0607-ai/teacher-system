@@ -32,7 +32,7 @@
     && (['127.0.0.1', 'localhost'].includes(window.location.hostname)
       || window.location.hostname.endsWith('.trycloudflare.com'))
     && Boolean(LOCAL_REVIEW_NICKNAME);
-  const APP_VERSION = 23;
+  const APP_VERSION = 24;
   const MAX_EVIDENCE_FILES = 8;
   const MAX_DOCUMENT_FILE_BYTES = 25 * 1024 * 1024;
   const MAX_IMAGE_SOURCE_BYTES = 25 * 1024 * 1024;
@@ -3483,9 +3483,9 @@
       .sort((a, b) => String(b.updatedAt || b.date).localeCompare(String(a.updatedAt || a.date)));
     return `<div class="page">
       ${pageHead('備課檔案', '記錄課程名稱，並至少上傳一份教案或教材', `<button type="button" class="btn btn-primary" data-action="open-activity" data-type="lessonprep">${icon('folder-plus', 17)}<span>新增備課檔案</span></button>`)}
-      <section class="panel">
-        <div class="panel-head"><div><div class="panel-title">${icon('notebook-tabs')}我的備課檔案</div><div class="panel-subtitle">${allPreps.length} 門課程</div></div></div>
-        <div class="panel-body flush"><div class="table-wrap"><table class="data-table plan-table"><thead><tr><th>課程名稱</th><th>課程類型</th><th>建立／更新</th><th>附件</th><th>使用次數</th><th></th></tr></thead><tbody>${allPreps.length ? allPreps.map(renderPrepRecordRow).join('') : '<tr><td colspan="6" class="muted">尚未建立備課檔案</td></tr>'}</tbody></table></div></div>
+      <section class="prep-library-section" aria-labelledby="prep-library-title">
+        <div class="prep-library-head"><div><h2 id="prep-library-title">${icon('notebook-tabs')}我的備課檔案</h2><p>${allPreps.length} 門課程 · 點選任一份即可隨時查看、下載或編輯</p></div></div>
+        ${allPreps.length ? `<div class="prep-library-grid">${allPreps.map(renderPrepRecordRow).join('')}</div>` : `<div class="prep-library-empty">${icon('folder-plus', 24)}<div><strong>尚未建立備課檔案</strong><span>新增後即可在這裡隨時查看與重複使用。</span></div></div>`}
       </section>
     </div>`;
   }
@@ -3494,7 +3494,22 @@
     const updatedDate = String(activity.updatedAt || '').slice(0, 10) || activity.date;
     const attachments = activity.prepEvidence || [];
     const usageCount = state.activities.filter(item => item.prepSourceId === activity.id).length;
-    return `<tr><td><div class="table-primary">${esc(activity.title)}</div>${activity.prep?.summary ? `<div class="table-secondary">${esc(truncate(activity.prep.summary, 48))}</div>` : ''}</td><td><div class="table-primary">${esc(activity.details?.targetCourse || '尚未分類')}</div></td><td><div class="table-primary">${formatShortDate(activity.date)} 建立</div><div class="table-secondary">${formatShortDate(updatedDate)} 更新</div></td><td>${attachments.length ? `${attachments.length} 份` : '<span class="muted">無附件</span>'}</td><td>${usageCount}</td><td class="text-right"><button type="button" class="btn btn-small" data-action="edit-activity" data-activity-id="${activity.id}">${icon('arrow-right', 14)}開啟</button></td></tr>`;
+    const uploadedCount = attachments.filter(item => materialCloudUrl(item)).length;
+    const attachmentCopy = attachments.length ? `${attachments.length} 份附件` : '待補附件';
+    const usageCopy = usageCount ? `已使用 ${usageCount} 次` : '尚未使用';
+    return `<button type="button" class="prep-library-item ${uploadedCount ? 'is-ready' : 'is-missing'}" data-action="open-evidence" data-activity-id="${esc(activity.id)}" aria-label="開啟備課檔案：${esc(activity.title)}">
+      <span class="prep-library-icon">${icon(uploadedCount ? 'folder-check' : 'folder-open', 20)}</span>
+      <span class="prep-library-main">
+        <span class="prep-library-title-row"><strong>${esc(activity.title)}</strong><span class="badge outline">${esc(activity.details?.targetCourse || '尚未分類')}</span></span>
+        ${activity.prep?.summary ? `<span class="prep-library-summary">${esc(truncate(activity.prep.summary, 76))}</span>` : ''}
+        <span class="prep-library-meta">
+          <span class="${attachments.length ? '' : 'is-alert'}">${icon('paperclip', 13)}${attachmentCopy}</span>
+          <span>${icon('history', 13)}${usageCopy}</span>
+          <span>${icon('calendar-clock', 13)}${formatShortDate(updatedDate)} 更新</span>
+        </span>
+      </span>
+      <span class="prep-library-open" aria-hidden="true">${icon('chevron-right', 18)}</span>
+    </button>`;
   }
 
   function renderRecordTimelineEntry(entry) {

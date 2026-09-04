@@ -668,6 +668,13 @@ async function anqinWorkflow(browser) {
     await page.waitForTimeout(450);
     await clickRoute(page, 'plans');
     check('安親備課可儲存且至少一份教材', (await page.locator('body').innerText()).includes('端到端安親教材'));
+    const prepLibraryItem = page.locator('.prep-library-item', { hasText: '端到端安親教材' }).first();
+    check('老師備課檔案以單一緊湊項目呈現', await prepLibraryItem.count() === 1 && (await prepLibraryItem.boundingBox())?.height < 180);
+    check('老師備課摘要集中顯示類型、附件、使用次數與更新日', /安親課業指導[\s\S]*2 份附件[\s\S]*尚未使用[\s\S]*更新/.test(await prepLibraryItem.innerText()));
+    await page.screenshot({ path: path.join(artifactDir, 'anqin-prep-library-mobile.png'), fullPage: true });
+    await prepLibraryItem.click();
+    check('老師可隨時開啟備課檔案查看與下載', (await page.locator('.drawer-panel').innerText()).includes('qa-material-16mb.pdf') && await page.locator('[data-action="edit-activity"]').count() === 1);
+    await closeDrawer(page);
 
     await clickRoute(page, 'today');
     const academicButton = page.locator('[data-action="open-activity"][data-track="academic"]').first();
