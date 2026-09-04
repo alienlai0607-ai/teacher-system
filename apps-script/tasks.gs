@@ -150,6 +150,101 @@ function runProductionIntegrityCheck(params) {
       return { sheet: SHEET_NAMES.SYSTEM_LOG, roundtrip: 'passed', cleanup: 'passed' };
     });
 
+    runCheck_('anqin_record_roundtrip', '安親紀錄新增、修改、讀回與清理', function () {
+      const logId = runId + '-ANQIN';
+      const student = '系統驗收學生';
+      const originalSummary = '孩子今天能主動說明卡住的步驟，老師已提供一次示範。';
+      const originalDecision = '家長了解今日狀況，同意回家只複習同類型一題。';
+      const updatedSummary = originalSummary + ' 修改後已能自行完成。';
+      const updatedDecision = originalDecision + ' 雙方確認明日再觀察。';
+      const contact = {
+        id: logId + '-CONTACT',
+        date: todayStr(),
+        teacher: actor.nickname,
+        student: student,
+        channel: '門口面談',
+        summary: originalSummary,
+        decision: originalDecision,
+        nextAction: '',
+        dueDate: '',
+        status: 'closed',
+      };
+      const snapshot = {
+        schema: 'anqin-v2',
+        version: 1,
+        submission: {
+          id: logId + '-SUBMISSION',
+          date: todayStr(),
+          teacher: actor.nickname,
+          contactIds: [contact.id],
+          contactSnapshots: [contact],
+          studentCaseIds: [],
+          studentCaseSnapshots: [],
+        },
+      };
+      const kpi5 = {
+        parent_contacted: true,
+        parent_summary: student + '（門口面談）：孩子狀況與老師處理：' + originalSummary + '；家長回應與共同決定：' + originalDecision,
+        parent_handoff_confirmed: false,
+        parent_handoff_note: '',
+        student_special: '',
+        special_students: [],
+      };
+      const rowNumber = appendRow(SHEET_NAMES.LOGS, {
+        log_id: logId,
+        date: todayStr(),
+        nickname: actor.nickname,
+        department: actor.department || '總部',
+        role: actor.role,
+        kpi1_data: {},
+        kpi2_data: {},
+        kpi3_data: {},
+        kpi4_data: {},
+        kpi5_data: kpi5,
+        kpi6_data: { v2_snapshot: snapshot },
+        attachments: [],
+        created_at: nowIso(),
+        updated_at: nowIso(),
+        locked: false,
+      });
+      try {
+        SpreadsheetApp.flush();
+        const inserted = findObject(SHEET_NAMES.LOGS, 'log_id', logId);
+        requireCheck_(inserted && inserted._row === rowNumber, '安親測試紀錄新增後無法讀回');
+        const insertedKpi5 = parseJsonField(inserted.kpi5_data);
+        const insertedKpi6 = parseJsonField(inserted.kpi6_data);
+        requireCheck_(insertedKpi5.parent_summary === kpi5.parent_summary, '親師溝通中文內容新增後不一致');
+        requireCheck_(insertedKpi5.student_special === '' && Array.isArray(insertedKpi5.special_students) && insertedKpi5.special_students.length === 0, '新紀錄仍混入舊版學生追蹤欄位');
+        requireCheck_(insertedKpi6.v2_snapshot.submission.contactSnapshots[0].decision === originalDecision, '親師溝通快照新增後不一致');
+        requireCheck_(insertedKpi6.v2_snapshot.submission.studentCaseSnapshots.length === 0, '新紀錄快照仍混入學生追蹤');
+
+        const updatedContact = Object.assign({}, contact, { summary: updatedSummary, decision: updatedDecision });
+        const updatedKpi5 = Object.assign({}, kpi5, {
+          parent_summary: student + '（門口面談）：孩子狀況與老師處理：' + updatedSummary + '；家長回應與共同決定：' + updatedDecision,
+        });
+        const updatedSnapshot = JSON.parse(JSON.stringify(snapshot));
+        updatedSnapshot.submission.contactSnapshots = [updatedContact];
+        updateRow(SHEET_NAMES.LOGS, rowNumber, {
+          kpi5_data: updatedKpi5,
+          kpi6_data: { v2_snapshot: updatedSnapshot },
+          updated_at: nowIso(),
+        });
+        SpreadsheetApp.flush();
+        const updated = findObject(SHEET_NAMES.LOGS, 'log_id', logId);
+        const restoredKpi5 = parseJsonField(updated.kpi5_data);
+        const restoredKpi6 = parseJsonField(updated.kpi6_data);
+        requireCheck_(restoredKpi5.parent_summary === updatedKpi5.parent_summary, '安親紀錄修改後未讀回新內容');
+        requireCheck_(restoredKpi6.v2_snapshot.submission.contactSnapshots[0].summary === updatedSummary, '親師溝通快照修改後不一致');
+        requireCheck_(restoredKpi6.v2_snapshot.submission.contactSnapshots[0].decision === updatedDecision, '家長回應修改後不一致');
+      } finally {
+        const row = findObject(SHEET_NAMES.LOGS, 'log_id', logId);
+        if (row && row._row > 1) deleteRow(SHEET_NAMES.LOGS, row._row);
+      }
+      SpreadsheetApp.flush();
+      requireCheck_(findRow(SHEET_NAMES.LOGS, 'log_id', logId) < 0, '安親測試紀錄清理失敗');
+      return { sheet: SHEET_NAMES.LOGS, create: 'passed', update: 'passed', readback: 'passed', cleanup: 'passed' };
+    });
+
     runCheck_('photo_roundtrip', '照片建立、讀回與私密預覽', function () {
       const root = getEvidenceRootFolder_();
       const qaFolder = getOrCreateChildFolder_(root, '_系統健康檢查');

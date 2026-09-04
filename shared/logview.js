@@ -101,8 +101,8 @@ window.LOGVIEW = (function () {
     if (k5.parent_contacted === true) pcInner += row('家長聯繫', '有');
     else if (k5.parent_contacted === false) pcInner += row('家長聯繫', '今日無');
     pcInner += row('溝通摘要', k5.parent_summary);
-    pcInner += row('相關學生', k5.special_students);
-    pcInner += row('學生特殊狀況', k5.student_special);
+    const legacyStudentTracking = [Array.isArray(k5.special_students) ? k5.special_students.join('、') : k5.special_students, k5.student_special].filter(Boolean).join('：');
+    if (legacyStudentTracking) pcInner += row('舊版學生追蹤（歷史）', legacyStudentTracking);
     html += block('🤝 親師溝通', pcInner);
 
     // 行政

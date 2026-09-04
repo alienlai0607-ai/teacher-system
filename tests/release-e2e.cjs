@@ -15,6 +15,14 @@ const tomorrow = (() => {
   value.setDate(value.getDate() + 1);
   return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(value);
 })();
+const talentPtTestDate = (() => {
+  const [year, month] = today.split('-').map(Number);
+  for (let day = 1; day <= 7; day += 1) {
+    const value = new Date(Date.UTC(year, month - 1, day, 4));
+    if (value.getUTCDay() === 4) return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+  throw new Error('無法建立才藝 PT 驗收日期');
+})();
 
 fs.mkdirSync(artifactDir, { recursive: true });
 const imageA = path.join(artifactDir, 'qa-red.png');
@@ -420,6 +428,7 @@ async function talentWorkflow(browser) {
   const label = '才藝 PT 完整流程';
   const { context, page } = await createPage(browser, { width: 390, height: 844 }, label);
   try {
+    await page.clock.install({ time: new Date(`${talentPtTestDate}T12:00:00+08:00`) });
     await page.goto(`${baseUrl}/review/talent-v2/index.html?workspace=talent-pt&reviewUser=%E7%9A%AE%E7%9A%AE%E8%80%81%E5%B8%AB`, { waitUntil: 'domcontentloaded' });
     await waitForApp(page);
     await page.evaluate(() => localStorage.clear());
@@ -702,27 +711,7 @@ async function anqinWorkflow(browser) {
     check('安親上傳成果後不再顯示缺成果證據', !savedActivityText.includes('缺成果證據') && !savedActivityText.includes('待補：成果證據'), savedActivityText);
 
     await clickRoute(page, 'today');
-    await page.locator('[data-action="today-tab"][data-tab="students"]').click();
-    await clickAction(page, 'open-student-case');
-    await page.selectOption('#case-student', { index: 1 });
-    await page.fill('#case-situation', '今天計算時會漏看進位，提醒後已能自行檢查。');
-    await page.fill('#case-intervention', '先示範圈出進位數字，再請孩子口述檢查步驟。');
-    await page.fill('#case-next', '明天確認能否在沒有提醒時完成檢查。');
-    await page.fill('#case-date', tomorrow);
-    await page.selectOption('#case-status', 'closed');
-    check('安親學生追蹤結案會清除隱藏的下一步與日期', await page.evaluate(() => {
-      const form = document.querySelector('#student-case-form');
-      return Array.from(form?.querySelectorAll('[data-case-followup]') || []).every(node => node.hidden)
-        && form?.elements.nextAction?.value === '' && !form?.elements.nextAction?.required
-        && form?.elements.dueDate?.value === '' && !form?.elements.dueDate?.required;
-    }));
-    await page.selectOption('#case-status', 'open');
-    await page.fill('#case-next', '明天確認能否在沒有提醒時完成檢查。');
-    await page.fill('#case-date', tomorrow);
-    await page.locator('button[form="student-case-form"]').click();
-    await page.waitForTimeout(350);
-    const noStudentControl = page.locator('input[data-change="confirm-no-student"]');
-    check('已有學生追蹤時無紀錄勾選會停用且不會同時成立', await noStudentControl.isDisabled() && !(await noStudentControl.isChecked()));
+    check('安親今日流程已移除學生追蹤入口', await page.locator('[data-action="today-tab"][data-tab="students"], [data-action="open-student-case"]').count() === 0);
     await page.locator('[data-action="today-tab"][data-tab="parents"]').click();
     await page.locator('[data-action="set-parent-status"][data-status="handoff"]').click();
     await page.locator('input[data-change="parent-handoff-confirmed"]').check();
@@ -732,6 +721,23 @@ async function anqinWorkflow(browser) {
     check('安親親師模式切換會清除隱藏的交接確認與備註', !(await page.locator('input[data-change="parent-handoff-confirmed"]').isChecked()) && await page.inputValue('#parent-handoff-note') === '');
     await page.locator('input[data-change="parent-handoff-confirmed"]').check();
     check('安親無重要事項只需確認門口交接', !(await page.locator('#parent-handoff-note').getAttribute('required')));
+    await page.locator('[data-action="set-parent-status"][data-status="recorded"]').click();
+    await clickAction(page, 'open-contact');
+    await page.selectOption('#contact-student', { index: 1 });
+    await page.selectOption('#contact-channel', '門口面談');
+    await page.fill('#contact-summary', '今天計算時漏看進位，老師示範圈出數字後已能自行檢查。');
+    await page.fill('#contact-decision', '家長了解並同意今晚練習一題，明天再由老師觀察。');
+    await page.locator('#toast-root').evaluate(root => root.replaceChildren());
+    await page.locator('.drawer-body').evaluate(drawer => { drawer.scrollTop = 0; });
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: path.join(artifactDir, 'anqin-parent-contact-390.png') });
+    check('安親親師溝通只保留兩段必要內容', await page.locator('#contact-form textarea').count() === 2
+      && await page.locator('#contact-status, #contact-date, [name="nextAction"]').count() === 0);
+    await page.locator('button[form="contact-form"]').click();
+    await page.waitForTimeout(350);
+    const parentSectionText = await page.locator('.panel', { hasText: '親師溝通' }).first().innerText();
+    check('安親親師溝通儲存後可立即讀回兩段內容', parentSectionText.includes('漏看進位') && parentSectionText.includes('今晚練習一題'));
+    check('親師溝通不會自動增加追蹤待辦', await page.evaluate(() => Object.keys(window.__KPI_QA_CLOUD__?.store?.tasks || {}).every(id => !/^v2_contact_/.test(id))));
 
     await page.locator('[data-action="today-tab"][data-tab="operations"]').click();
     await page.locator('label:has(input[name="status_classroom"][value="exception"])').click({ force: true });
@@ -748,8 +754,12 @@ async function anqinWorkflow(browser) {
     await page.waitForTimeout(600);
     check('安親班務四張照片可上傳並送出', (await page.locator('body').innerText()).includes('4/4'));
 
-    await page.waitForFunction(() => Object.keys(window.__KPI_QA_CLOUD__?.store?.tasks || {}).length > 0, null, { timeout: 12000 });
     await clickRoute(page, 'tasks');
+    await clickAction(page, 'open-task');
+    await page.fill('#task-title', '確認明日教材已備妥');
+    await page.fill('#task-due', tomorrow);
+    await page.locator('button[form="task-form"]').click();
+    await page.waitForFunction(() => Object.keys(window.__KPI_QA_CLOUD__?.store?.tasks || {}).length > 0, null, { timeout: 12000 });
     await page.evaluate(() => {
       const original = window.API.saveSelfTask;
       let shouldFail = true;
@@ -764,10 +774,10 @@ async function anqinWorkflow(browser) {
     const taskToggle = page.locator('.task-complete-control input[data-change="toggle-task"]').first();
     await taskToggle.click({ force: true });
     await page.waitForTimeout(450);
-    check('安親追蹤事項雲端失敗時會回復未完成，不會假裝成功', await page.locator('.task-complete-control input[data-change="toggle-task"]').first().isChecked() === false && (await page.locator('body').innerText()).includes('事項未更新'));
+    check('安親待辦事項雲端失敗時會回復未完成，不會假裝成功', await page.locator('.task-complete-control input[data-change="toggle-task"]').first().isChecked() === false && (await page.locator('body').innerText()).includes('事項未更新'));
     await page.locator('.task-complete-control input[data-change="toggle-task"]').first().click({ force: true });
     await page.waitForTimeout(450);
-    check('安親追蹤事項重試成功後才真正完成', (await page.locator('body').innerText()).includes('0 項待完成'));
+    check('安親待辦事項重試成功後才真正完成', (await page.locator('body').innerText()).includes('0 項待完成'));
     await clickRoute(page, 'today');
 
     await page.locator('[data-action="today-tab"][data-tab="submit"]').click();
@@ -776,6 +786,16 @@ async function anqinWorkflow(browser) {
     await submit.click();
     await page.waitForTimeout(900);
     check('安親送出後有明確成功提示', /已送出|送出完成|正式送出成功/.test(await page.locator('body').innerText()));
+    const submittedParentData = await page.evaluate(() => {
+      const log = Object.values(window.__KPI_QA_CLOUD__?.store?.logs || {})[0] || {};
+      return { kpi5: log.kpi5_data || {}, snapshot: log.kpi6_data?.v2_snapshot || {} };
+    });
+    check('安親親師溝通兩段內容已寫入雲端日報', String(submittedParentData.kpi5.parent_summary || '').includes('漏看進位')
+      && String(submittedParentData.kpi5.parent_summary || '').includes('今晚練習一題'));
+    check('安親新日報沒有寫入退役學生追蹤欄位', submittedParentData.kpi5.student_special === ''
+      && Array.isArray(submittedParentData.kpi5.special_students) && submittedParentData.kpi5.special_students.length === 0);
+    check('安親雲端快照保存親師內容且不產生學生追蹤', submittedParentData.snapshot.submission?.contactSnapshots?.length === 1
+      && submittedParentData.snapshot.submission?.studentCaseSnapshots?.length === 0);
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await waitForApp(page);

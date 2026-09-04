@@ -26,7 +26,7 @@ const source = tasks.slice(
   tasks.indexOf('/** 管理員一鍵補齊每日 PDF', tasks.indexOf('function runProductionIntegrityCheck(')),
 );
 
-let systemLog = null;
+const sheetRows = new Map();
 const files = new Map();
 let fileSequence = 0;
 
@@ -64,7 +64,7 @@ const context = vm.createContext({
   String,
   Boolean,
   Buffer,
-  SHEET_NAMES: { SYSTEM_LOG: 'Logs_System' },
+  SHEET_NAMES: { SYSTEM_LOG: 'Logs_System', LOGS: 'DailyLogs' },
   Utilities: {
     formatDate: () => '20260902-120000',
     getUuid: () => '12345678-aaaa-bbbb-cccc-123456789012',
@@ -77,10 +77,17 @@ const context = vm.createContext({
   SpreadsheetApp: { flush: () => {} },
   DriveApp: { getFileById: id => files.get(id) },
   findUserByNickname: nickname => ({ nickname, role: 'admin', status: 'active' }),
-  appendRow: (_sheet, row) => { systemLog = { ...row, _row: 2 }; return 2; },
-  findObject: (_sheet, key, value) => systemLog && String(systemLog[key]) === String(value) ? systemLog : null,
-  findRow: (_sheet, key, value) => systemLog && String(systemLog[key]) === String(value) ? 2 : -1,
-  deleteRow: () => { systemLog = null; },
+  appendRow: (sheet, row) => { sheetRows.set(sheet, { ...row, _row: 2 }); return 2; },
+  updateRow: (sheet, _rowNumber, row) => { sheetRows.set(sheet, { ...(sheetRows.get(sheet) || {}), ...row, _row: 2 }); },
+  findObject: (sheet, key, value) => {
+    const row = sheetRows.get(sheet);
+    return row && String(row[key]) === String(value) ? row : null;
+  },
+  findRow: (sheet, key, value) => {
+    const row = sheetRows.get(sheet);
+    return row && String(row[key]) === String(value) ? 2 : -1;
+  },
+  deleteRow: sheet => { sheetRows.delete(sheet); },
   parseJsonField: value => typeof value === 'string' ? JSON.parse(value) : value,
   getEvidenceRootFolder_: () => folder,
   getMaterialRootFolder_: () => folder,
@@ -93,6 +100,7 @@ const context = vm.createContext({
   }),
   pdfPhotoUri_: () => 'data:image/png;base64,AAAA',
   nowIso: () => '2026-09-02T12:00:00',
+  todayStr: () => '2026-09-02',
   systemMaintenanceUser_: () => null,
 });
 
@@ -102,12 +110,14 @@ const result = context.runProductionIntegrityCheck({
 });
 
 assert.equal(result.ok, true);
-assert.equal(result.summary.total, 4);
-assert.equal(result.summary.passed, 4);
+assert.equal(result.summary.total, 5);
+assert.equal(result.summary.passed, 5);
 assert.equal(result.summary.failed, 0);
-assert.equal(systemLog, null, '試算表 QA 資料必須清理');
+assert.equal(sheetRows.size, 0, '所有試算表 QA 資料必須清理');
 assert.equal(Array.from(files.values()).every(file => file.isTrashed()), true, 'Drive QA 檔案必須全部移到垃圾桶');
 assert.match(source, /const pdfPhoto = pdfPhotoUri_\(fileId\)/, '正式健康檢查必須實際驗證照片能嵌入 PDF');
 assert.match(source, /pdf_embed: 'passed'/, '健康檢查結果需回報 PDF 圖片已通過');
+assert.match(source, /anqin_record_roundtrip/, '正式健康檢查必須實測安親紀錄新增、修改、讀回與清理');
+assert.match(source, /studentCaseSnapshots: \[\]/, '正式安親紀錄驗收不得混入退役的學生追蹤');
 
 console.log('production-integrity.test.cjs passed');

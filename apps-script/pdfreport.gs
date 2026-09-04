@@ -140,7 +140,8 @@ function pdfLogCard_(l) {
   // 親師
   if (k5.parent_contacted === true) h += pdfRow_('🤝 親師溝通', k5.parent_summary || '有聯繫');
   else if (k5.parent_handoff_confirmed === true) h += pdfRow_('🚪 門口交接', k5.parent_handoff_note || '已親自完成交接');
-  h += pdfRow_('👀 特別關注學生', (Array.isArray(k5.special_students) && k5.special_students.length ? k5.special_students.join('、') + '：' : '') + (k5.student_special || ''));
+  const legacyStudentTracking = (Array.isArray(k5.special_students) && k5.special_students.length ? k5.special_students.join('、') + '：' : '') + (k5.student_special || '');
+  if (legacyStudentTracking) h += pdfRow_('📦 舊版學生追蹤（歷史）', legacyStudentTracking);
 
   // 工作紀錄
   h += pdfRow_('✔️ 今日完成', k6.today_done);

@@ -19,17 +19,17 @@ const coursePrepBackend = fs.readFileSync(path.join(root, 'apps-script/coursepre
 const qaHarness = fs.readFileSync(path.join(root, 'review/anqin-v2/qa-harness.js'), 'utf8');
 
 const taskRenderer = source.slice(source.indexOf('function taskPriorityMeta('), source.indexOf('function expectedBackendDepartment('));
-assert.match(taskRenderer, /function openTaskDetail\(/, '追蹤事項必須能開啟完整內容對話框');
+assert.match(taskRenderer, /function openTaskDetail\(/, '待辦事項必須能開啟完整內容對話框');
 assert.match(taskRenderer, /data-action="open-task-detail"/, '每一筆事項都要有明確的查看入口');
 assert.match(taskRenderer, /data-action="close-dialog">返回列表/, '對話框必須能直接返回列表');
 assert.match(taskRenderer, /task-detail-copy/, '長文字必須在詳情內完整換行顯示');
-assert.doesNotMatch(taskRenderer, /<table class="data-table"/, '追蹤事項不得再使用手機需橫向捲動的表格');
+assert.doesNotMatch(taskRenderer, /<table class="data-table"/, '待辦事項不得再使用手機需橫向捲動的表格');
 
 const cloudTaskSync = source.slice(source.indexOf('async function syncTasksFromCloud('), source.indexOf('async function refreshTaskCloudData('));
 assert.match(cloudTaskSync, /detail: knownSources\.includes\(remoteDetail\) \? '' : remoteDetail/, '主管說明不得再誤塞進來源標籤');
 assert.match(cloudTaskSync, /source = knownSources\.includes\(remoteDetail\)/, '雲端事項需要正確辨識來源');
 assert.match(source, /source: taskDetailText\(task\) \|\| task\.source/, '更新完成狀態時不得覆蓋主管原始說明');
-assert.match(source, /count: \(\) => state\.tasks\.filter\(task => task\.owner === state\.context\.teacher && task\.status !== 'done'\)\.length/, '老師選單的待辦數量只能計算自己的未完成事項');
+assert.match(source, /count: \(\) => activeTaskRecords\(\)\.filter\(task => task\.owner === state\.context\.teacher && task\.status !== 'done'\)\.length/, '老師選單的待辦數量只能計算自己的未完成事項');
 assert.match(source, /目前待辦（即時）/, '今日畫面需清楚標示目前待辦會即時更新');
 assert.match(source, /送出當時待辦（快照）/, '歷史日報不得再把送出當時快照誤標成即時待辦');
 assert.match(source, /pendingTaskSyncIds\.has\(id\)[\s\S]{0,160}\['pending', 'saving', 'error'\]/, '雲端舊資料不得覆蓋正在同步的本機完成狀態');
@@ -37,30 +37,29 @@ assert.match(source, /await updateTaskStatusWithCloudFeedback\(task, control\.ch
 assert.match(source, /function updateTaskStatusWithCloudFeedback\([\s\S]*taskSnapshot[\s\S]*await syncTaskToCloud[\s\S]*Object\.assign\(task, taskSnapshot\)/, '待辦同步失敗時必須回復原狀，不得假裝完成');
 assert.match(qaHarness, /action === 'saveSelfTask'/, '隔離驗收環境需真實保存老師自行更新的待辦');
 
-const linkedTaskSource = source.slice(source.indexOf('function derivedTaskCloudId('), source.indexOf('function upsertDerivedTask('));
-const linkedTaskContext = vm.createContext({ Date });
-vm.runInContext(linkedTaskSource, linkedTaskContext);
-const linkedTaskState = {
-  studentCases: [{ id: 'case_zhiche', student: '知澈', status: 'open' }],
-  contacts: [],
-  activities: [],
-};
-const linkedTask = { id: 'v2_case_case_zhiche', status: 'done' };
-assert.equal(linkedTaskContext.derivedTaskRef(linkedTask, linkedTaskState), 'case:case_zhiche', '重新載入後仍需由固定待辦編號找回學生追蹤');
-linkedTaskContext.applyTaskStatusToLinkedRecord(linkedTask, linkedTaskState, false);
-assert.equal(linkedTaskState.studentCases[0].status, 'closed', '完成待辦必須同步結案對應學生追蹤');
-linkedTask.status = 'open';
-linkedTaskContext.applyTaskStatusToLinkedRecord(linkedTask, linkedTaskState, true);
-assert.equal(linkedTaskState.studentCases[0].status, 'open', '恢復待辦必須同步重新開啟對應學生追蹤');
-const studentCaseRowSource = source.slice(source.indexOf('function renderStudentCaseRow('), source.indexOf('function renderOpenCaseSummary('));
-assert.match(studentCaseRowSource, /closed \? \['已結案', 'green'\]/, '學生追蹤卡片必須直接顯示已結案狀態');
-assert.match(studentCaseRowSource, /closed \? '結案結果' : '目前結果'/, '追蹤卡片必須顯示最新結果，不得永遠停留在最初觀察');
-assert.match(studentCaseRowSource, /closed \? '' : `<div class="activity-glance">/, '已結案案件不得繼續顯示下一步');
-assert.match(studentCaseRowSource, /closed \? `已完成追蹤/, '已結案案件不得繼續顯示下次追蹤日期');
+const activeTaskSource = source.slice(source.indexOf('function isRetiredTrackingTask('), source.indexOf('function openTasks('));
+const activeTaskContext = vm.createContext({
+  state: {
+    tasks: [
+      { id: 'manual', ref: '', title: '一般待辦' },
+      { id: 'v2_case_case_zhiche', ref: 'case:case_zhiche', title: '舊學生追蹤' },
+      { id: 'v2_contact_contact_1', ref: 'contact:contact_1', title: '舊親師追蹤' },
+    ],
+  },
+});
+vm.runInContext(activeTaskSource, activeTaskContext);
+assert.deepEqual(Array.from(activeTaskContext.activeTaskRecords()).map(item => item.id), ['manual'], '退役的學生與親師追蹤待辦不得出現在新待辦流程');
+const todayTabsSource = source.slice(source.indexOf('const TODAY_TABS'), source.indexOf('const ACTIVITY_TYPES'));
+const managerNavSource = source.slice(source.indexOf('const MANAGER_NAV'), source.indexOf('const TODAY_TABS'));
+assert.doesNotMatch(todayTabsSource, /key: 'students'/, '今日流程不得再顯示學生追蹤分頁');
+assert.doesNotMatch(managerNavSource, /route: 'students'/, '主管導覽不得再顯示學生追蹤入口');
+assert.doesNotMatch(source, /function renderStudentCaseForm\(|function openStudentCaseEditor\(|function saveStudentCaseForm\(/, '退役的學生追蹤不得保留可新增或編輯表單');
+assert.doesNotMatch(source, /function renderCaseDetail\(|function openCaseDetail\(/, '退役的學生追蹤不得保留可被重新接回的詳情入口');
+assert.match(source, /舊版學生追蹤紀錄[\s\S]*歷史資料唯讀，不再產生待辦或影響完成度/, '既有學生追蹤只能以唯讀歷史保留');
 
 assert.match(source, /class="evaluation-score-list"/, '老師查看主管評核時分數不可使用寬表格');
 assert.match(source, /class="manager-eval-score-input"/, '主管輸入分數需要靠近評核項目');
-assert.match(styles, /\.task-open-button[\s\S]*overflow-wrap: anywhere/, '追蹤事項摘要需要可換行');
+assert.match(styles, /\.task-open-button[\s\S]*overflow-wrap: anywhere/, '待辦事項摘要需要可換行');
 assert.match(styles, /\.evaluation-score-row[\s\S]*grid-template-columns: minmax\(0, 1fr\) auto/, '各項分數必須在目前畫面直接可見');
 assert.match(source, /loadTeacherEvaluation\('latest'\)/, '老師進入主管評核時必須直接載入最近一次已公布結果');
 assert.match(source, /data-form="evaluation-history"/, '老師查看歷史評核必須有獨立確認表單');
@@ -118,8 +117,8 @@ assert.match(source, /function applyPreviewReviewContext\(/, '安親審查模式
 assert.match(source, /if \(!applyPreviewReviewContext\(control\.dataset\.role\)\) state\.ui\.role = control\.dataset\.role/, '切換審查角色時必須同步身份範圍');
 assert.match(source, /applyPreviewReviewContext\(LOCAL_REVIEW_ROLE\)/, '網址指定主管視角時首次載入就必須套用正確身份');
 assert.match(source, /GLOBAL_MANAGER_NICKNAMES\.some\(name => sameReviewIdentity\(name, managerNickname\)\)/, '小魚在審查與正式登入都必須擁有全教室檢視範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260903-anqin-stability-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260903-anqin-stability-1/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260904-parent-communication-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260904-parent-communication-1/, '登入備援路徑也必須避開舊版快取');
 
 const startupSafetySource = source.slice(source.indexOf('function stripEmbeddedMediaJson('), source.indexOf('function loadState()'));
 const startupSafetyContext = vm.createContext({ JSON, Number, Set });
@@ -154,7 +153,7 @@ assert.match(prepFeedbackFormSource, /activity-student-resonance[\s\S]*activity-
 const prepFeedbackCompletionSource = source.slice(source.indexOf('function prepFeedbackComplete('), source.indexOf('function activityFeedbackSummary('));
 assert.match(prepFeedbackCompletionSource, /\['resonance', 'changes'\]/, '完成度只能檢查仍顯示的兩項課後回饋');
 assert.doesNotMatch(prepFeedbackCompletionSource, /strengths/, '已刪除的教案有效處不得在背景阻擋送出');
-assert.doesNotMatch(source, /<option value="attendance">出席<\/option>/, '學生追蹤不得再提供出席類型');
+assert.doesNotMatch(source, /function renderStudentCaseForm\(/, '學生追蹤表單必須完全退役');
 
 const prepFormSource = source.slice(source.indexOf('function renderCoursePrepForm('), source.indexOf('function renderActivityForm('));
 assert.match(prepFormSource, /課程類型 <span class="required">\*<\/span>/, '備課檔案只需先辨識課程類型');
@@ -257,7 +256,7 @@ assert.match(dailySubmitSource, /送出時間/, '送出收據需提供實際送�
 assert.match(dailySubmitSource, /data-action="close-dialog">我知道了/, '成功收據需由老師主動確認後才關閉');
 assert.match(dailySubmitSource, /data-action="view-daily-submission-status"/, '收據需提供可直接查看送出狀態的入口');
 assert.match(source, /action === 'view-daily-submission-status'[^]*closeDialog\(\); persist\(\); renderApp\(\);/, '查看送出狀態前需先關閉收據，避免畫面被遮住');
-assert.match(dailySubmitSource, /showDailySubmissionReceipt\(submission, '雲端紀錄、主管通知、追蹤事項與 PDF 都已完成。'\)/, '雲端正式送出完成時需顯示完整成功收據');
+assert.match(dailySubmitSource, /showDailySubmissionReceipt\(submission, '雲端紀錄、主管通知、待辦事項與 PDF 都已完成。'\)/, '雲端正式送出完成時需顯示完整成功收據');
 assert.match(source, /duplicate = Array\.from\(root\.children\)/, '相同提示不得在畫面上重複堆疊');
 const evidenceRemovalSource = source.slice(source.indexOf("else if (action === 'remove-evidence-attachment')"), source.indexOf("else if (action === 'remove-operation-photo')"));
 assert.match(evidenceRemovalSource, /if \(!evidenceDraft\.attachments\.length\)[\s\S]{0,500}evidenceDraft\.fileName = '';[\s\S]{0,500}evidenceDraft\.cloudFileId = '';/, '刪除最後一張成果照片時必須同步清除舊版欄位，避免幽靈附件復活');
@@ -336,10 +335,27 @@ assert.match(parentFormSource, /無重要事項/, '親師溝通需提供無重�
 assert.match(parentFormSource, /parent-handoff-confirmed/, '無重要事項仍須確認門口交接');
 assert.match(parentFormSource, /特殊交接備註（選填）/, '無重要事項的交接備註只能是特殊情況選填');
 assert.doesNotMatch(source, /確認與備註/, '日結不得把選填交接備註誤列為必填');
-assert.match(source, /新增重要親師溝通，或確認已完成門口交接/, '日結只檢查重要溝通或門口交接確認');
-const contactEditorSource = source.slice(source.indexOf('function renderContactForm('), source.indexOf('function renderOperationsForm('));
-assert.match(contactEditorSource, /共識與後續行動/, '親師共識與後續行動需合併為一欄');
+assert.match(source, /新增一筆親師溝通紀錄，或確認已完成門口交接/, '日結只檢查親師溝通或門口交接確認');
+const contactEditorSource = source.slice(source.indexOf('function renderContactForm('), source.indexOf('function defaultEvidenceType('));
+assert.match(contactEditorSource, /孩子狀況與老師處理/, '親師溝通只需客觀記錄孩子狀況與老師處理');
+assert.match(contactEditorSource, /家長回應與共同決定/, '親師溝通需保留家長回應與共同決定');
 assert.doesNotMatch(contactEditorSource, /name="nextAction"/, '親師表單不得要求重複填寫後續行動');
+assert.doesNotMatch(contactEditorSource, /name="dueDate"|name="status"|data-contact-followup/, '親師溝通不得再要求追蹤日期、狀態或結案流程');
+const normalizeContactSource = source.slice(source.indexOf('function normalizeContactRecord('), source.indexOf('function normalizeLoadedState('));
+const normalizeContactContext = vm.createContext({});
+vm.runInContext(normalizeContactSource, normalizeContactContext);
+const legacyContact = normalizeContactContext.normalizeContactRecord({ topic: '課堂情緒', summary: '老師已先陪同冷靜', decision: '家長今晚會再聊', nextAction: '明日持續留意', dueDate: '2026-09-05', status: 'open' });
+assert.equal(legacyContact.summary, '課堂情緒\n老師已先陪同冷靜', '舊版主題與摘要必須完整合併至孩子狀況欄');
+assert.equal(legacyContact.decision, '家長今晚會再聊\n明日持續留意', '舊版共識與下一步必須完整合併至共同決定欄');
+assert.equal(legacyContact.nextAction, '', '轉換後不得保留重複的下一步欄位');
+assert.equal(legacyContact.dueDate, '', '轉換後不得保留退役的追蹤日期');
+assert.equal(legacyContact.status, 'closed', '轉換後不得繼續產生追蹤流程');
+const currentContact = normalizeContactContext.normalizeContactRecord({ topic: '孩子今天願意開口', summary: '孩子今天願意開口並完成練習', decision: '家長同意在家鼓勵', nextAction: '' });
+assert.equal(currentContact.summary, '孩子今天願意開口並完成練習', '新版由摘要衍生的短主題不得重複顯示');
+const legacyPayloadSource = source.slice(source.indexOf('function buildLegacySubmissionPayload('), source.indexOf('async function syncDailyDraftToCloud('));
+assert.match(legacyPayloadSource, /孩子狀況與老師處理：\$\{item\.summary\}；家長回應與共同決定：\$\{item\.decision\}/, '兩段親師溝通內容需完整寫入正式資料');
+assert.match(legacyPayloadSource, /student_special: '',[\s\S]*special_students: \[\]/, '新的正式紀錄不得再寫入退役的學生追蹤欄位');
+assert.match(pdfReport, /if \(legacyStudentTracking\) h \+= pdfRow_\('📦 舊版學生追蹤（歷史）'/, 'PDF 只可在真的有舊資料時顯示唯讀歷史');
 
 assert.match(source, /route: 'weekly', label: '本週整理', icon: 'calendar-range', moreOnly: true/, '本週整理只放在更多功能');
 assert.match(source, /const primaryNav = nav\.filter\(item => !item\.moreOnly\)/, '主要導覽需排除更多功能項目');
