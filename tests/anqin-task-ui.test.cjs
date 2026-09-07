@@ -289,6 +289,7 @@ assert.equal(evidenceRuntime.attachmentAvailable(legacyEvidence.attachments[0]),
 assert.equal(evidenceRuntime.evidenceReady(legacyEvidence), false, '只有檔名但未確認為舊紀錄時，不得當成上傳完成');
 const repairedSnapshot = evidenceRuntime.hydrateCloudSnapshotAttachments({
   schema: 'anqin-v2',
+  savedAt: '2026-09-01T08:00:00.000Z',
   submission: { date: '2026-09-01', activitySnapshots: [{ id: 'activity_1', type: 'tutoring', evidence: [legacyEvidence] }] },
 }, [{
   url: 'https://drive.google.com/file/d/file-4297/view',
@@ -307,9 +308,13 @@ assert.equal(hydrateFiles([{ id: 'missing', fileName: 'other.jpg' }], [cloudPhot
 assert.equal(hydrateFiles([{ id: 'missing', fileName: 'other.jpg' }], [cloudPhoto])[0].legacyMissing, false, '日期不明時不得套用舊附件例外');
 const recentMissing = evidenceRuntime.hydrateCloudSnapshotAttachments({ submission: { date: '2026-09-07', activitySnapshots: [{ type: 'tutoring', evidence: [legacyEvidence] }] } });
 assert.equal(recentMissing.submission.activitySnapshots[0].evidence[0].attachments[0].legacyMissing, false, '新版建立的缺檔不可被歷史例外掩蓋');
-const oldOperation = evidenceRuntime.hydrateCloudSnapshotAttachments({ submission: { date: '2026-09-01' }, operation: { evidenceByCheck: { classroom: { fileName: 'old-room.jpg', status: 'normal' } } } });
+const oldOperation = evidenceRuntime.hydrateCloudSnapshotAttachments({ savedAt: '2026-09-01T08:00:00Z', submission: { date: '2026-09-01' }, operation: { evidenceByCheck: { classroom: { fileName: 'old-room.jpg', status: 'normal' } } } });
 assert.equal(evidenceRuntime.attachmentRecorded(oldOperation.operation.evidenceByCheck.classroom), true, '舊班務照片缺原檔不阻擋記錄');
 assert.equal(evidenceRuntime.attachmentAvailable(oldOperation.operation.evidenceByCheck.classroom), false, '舊班務照片不得假裝有原檔');
+const newBackdated = evidenceRuntime.hydrateCloudSnapshotAttachments({ savedAt: '2026-09-07T08:00:00Z', submission: { date: '2026-09-01' }, operation: { evidenceByCheck: { classroom: { fileName: 'new-room.jpg', status: 'normal' } } } });
+assert.equal(evidenceRuntime.attachmentRecorded(newBackdated.operation.evidenceByCheck.classroom), false, '新建的補登資料不可因日期較早而豁免附件上傳');
+oldOperation.savedAt = '2026-09-07T08:00:00Z';
+assert.equal(evidenceRuntime.attachmentRecorded(evidenceRuntime.hydrateCloudSnapshotAttachments(oldOperation).operation.evidenceByCheck.classroom), true, '已識別的舊缺檔在再次保存後仍不阻擋');
 assert.equal(evidenceRuntime.normalizeOperationPhotoRecord({ fileName: 'restored.jpg', dataUrl: 'data:image/jpeg;base64,YQ==', legacyMissing: true }).legacyMissing, false, '重新選擇照片應移除歷史缺檔標記');
 assert.equal(evidenceRuntime.attachmentRecorded({ fileName: 'new-room.jpg' }), false, '新班務照片沒有原檔時仍需重傳');
 assert.match(source.slice(source.indexOf('function saveOperationsForm('), source.indexOf('function saveOperationsForm(') + 1800), /!attachmentRecorded\(item\)/, '班務存檔與完成度使用同一附件判定');

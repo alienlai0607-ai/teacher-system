@@ -3921,9 +3921,11 @@
     const hydrated = clone(snapshot);
     // Only pre-release cloud records can receive the historical missing-file exemption.
     const legacyDate = String(hydrated?.submission?.date || '');
-    const historical = /^\d{4}-\d{2}-\d{2}$/.test(legacyDate) && legacyDate < '2026-09-07';
+    const savedAt = Date.parse(hydrated?.savedAt || hydrated?.submission?.submittedAt || '');
+    const historical = /^\d{4}-\d{2}-\d{2}$/.test(legacyDate) && legacyDate < '2026-09-07'
+      && Number.isFinite(savedAt) && savedAt < Date.parse('2026-09-07T00:00:00+08:00');
     const markLegacyMissing = item => {
-      item.legacyMissing = Boolean(historical && !attachmentAvailable(item) && String(item.fileName || '').trim());
+      item.legacyMissing = Boolean((historical || item.legacyMissing) && !attachmentAvailable(item) && String(item.fileName || '').trim());
     };
     const available = (Array.isArray(cloudAttachments) ? cloudAttachments : [])
       .filter(item => materialCloudUrl(item) || item?.fileId || item?.cloudFileId);
