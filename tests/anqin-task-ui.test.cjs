@@ -276,6 +276,7 @@ vm.runInContext(source.slice(source.indexOf('function normalizeEvidenceRecord(')
 vm.runInContext(source.slice(source.indexOf('function normalizeOperationPhotoRecord('), source.indexOf('function normalizePrepTitle(')), evidenceRuntime);
 vm.runInContext(source.slice(source.indexOf('function evidenceAttachments('), source.indexOf('function evidencePrimaryAttachment(')), evidenceRuntime);
 vm.runInContext(source.slice(source.indexOf('function hydrateCloudSnapshotAttachments('), source.indexOf('function importCloudSnapshot(')), evidenceRuntime);
+vm.runInContext(source.slice(source.indexOf('function preserveAttachmentMedia('), source.indexOf('function preserveActivityMedia(')), evidenceRuntime);
 const legacyEvidence = {
   id: 'evidence_old',
   attachments: [
@@ -313,6 +314,9 @@ assert.equal(evidenceRuntime.attachmentRecorded(oldOperation.operation.evidenceB
 assert.equal(evidenceRuntime.attachmentAvailable(oldOperation.operation.evidenceByCheck.classroom), false, '舊班務照片不得假裝有原檔');
 const newBackdated = evidenceRuntime.hydrateCloudSnapshotAttachments({ savedAt: '2026-09-07T08:00:00Z', submission: { date: '2026-09-01' }, operation: { evidenceByCheck: { classroom: { fileName: 'new-room.jpg', status: 'normal' } } } });
 assert.equal(evidenceRuntime.attachmentRecorded(newBackdated.operation.evidenceByCheck.classroom), false, '新建的補登資料不可因日期較早而豁免附件上傳');
+const marked = { id: 'old', fileName: 'old.jpg', size: '20 KB', legacyMissing: true };
+assert.equal(evidenceRuntime.preserveAttachmentMedia(marked, { ...marked, legacyMissing: false }).legacyMissing, true, '未更新的雲端版本仍需將舊缺檔識別同步至既有本機資料');
+assert.equal(evidenceRuntime.preserveAttachmentMedia(marked, { ...marked, id: 'new', legacyMissing: false }).legacyMissing, false, '同名的新附件不可繼承舊檔例外');
 oldOperation.savedAt = '2026-09-07T08:00:00Z';
 assert.equal(evidenceRuntime.attachmentRecorded(evidenceRuntime.hydrateCloudSnapshotAttachments(oldOperation).operation.evidenceByCheck.classroom), true, '已識別的舊缺檔在再次保存後仍不阻擋');
 assert.equal(evidenceRuntime.normalizeOperationPhotoRecord({ fileName: 'restored.jpg', dataUrl: 'data:image/jpeg;base64,YQ==', legacyMissing: true }).legacyMissing, false, '重新選擇照片應移除歷史缺檔標記');

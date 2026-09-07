@@ -3889,13 +3889,19 @@
   }
 
   function preserveAttachmentMedia(localAttachment, remoteAttachment) {
-    if (!localAttachment || !remoteAttachment || attachmentAvailable(remoteAttachment) || !attachmentAvailable(localAttachment)) return remoteAttachment;
+    if (!localAttachment || !remoteAttachment || attachmentAvailable(remoteAttachment)) return remoteAttachment;
+    if (localAttachment.legacyMissing && localAttachment.id === remoteAttachment.id
+      && localAttachment.fileName === remoteAttachment.fileName && localAttachment.size === remoteAttachment.size) {
+      remoteAttachment.legacyMissing = true;
+    }
+    if (!attachmentAvailable(localAttachment)) return remoteAttachment;
     remoteAttachment.dataUrl = localAttachment.dataUrl || '';
     remoteAttachment.cloudUrl = localAttachment.cloudUrl || localAttachment.url || '';
     remoteAttachment.cloudFileId = localAttachment.cloudFileId || localAttachment.fileId || '';
     remoteAttachment.fingerprint = remoteAttachment.fingerprint || localAttachment.fingerprint || localAttachment.fileFingerprint || '';
     remoteAttachment.uploadStatus = localAttachment.uploadStatus || (remoteAttachment.cloudUrl || remoteAttachment.cloudFileId ? 'uploaded' : 'local');
     remoteAttachment.placeholder = false;
+    remoteAttachment.legacyMissing = false;
     return remoteAttachment;
   }
 
