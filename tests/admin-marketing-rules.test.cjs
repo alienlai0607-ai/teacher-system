@@ -194,6 +194,21 @@ assert.match(uiSource, /影片每週至少 2 支/);
 assert.match(uiSource, /照片宣傳每週至少 3 則/);
 assert.match(uiSource, /週二完成繳費、到期、續課與未繳費追蹤/);
 assert.match(uiSource, /與主管對話/);
+assert.match(uiSource, /pageHead\('行政美宣主管總覽', `\$\{currentUser\.nickname\}/, '主管總覽應顯示目前登入者，不得寫死其他主管名字');
+const alertTrial = { id: 'trial-qa', type: 'trial', studentName: 'QA', status: 'waiting_contact', bonusStatus: 'not_eligible', nextFollowupDate: '2026-09-07' };
+const alertRuntime = vm.createContext({
+  workerRecords: () => [], trialRecords: () => [alertTrial], todayIso: () => '2026-09-07',
+  normalizeTrialStatus: value => value, esc: value => String(value || ''), formatDate: value => value,
+  emptyState: () => '',
+});
+vm.runInContext(uiSource.slice(uiSource.indexOf('function statusBadge('), uiSource.indexOf('function evidenceReady(')), alertRuntime);
+vm.runInContext(uiSource.slice(uiSource.indexOf('function renderManagerAlerts('), uiSource.indexOf('function renderReviewsPage(')), alertRuntime);
+assert.match(alertRuntime.renderManagerAlerts(), /已預約／待試上/);
+assert.doesNotMatch(alertRuntime.renderManagerAlerts(), /not_eligible|確認獎金/);
+alertTrial.status = 'converted';
+alertTrial.bonusStatus = 'pending_review';
+assert.match(alertRuntime.renderManagerAlerts(), /待主管確認/);
+assert.match(alertRuntime.renderManagerAlerts(), /確認獎金/);
 assert.match(uiSource, /route: 'cloud', label: '雲端資料'/);
 assert.match(uiSource, /皮皮老師的行政美宣素材與完成證據/);
 assert.match(uiSource, /completedOn: item\.actualDate \|\| record\.date/, '每週美宣成果應按實際完成日期歸週');
@@ -256,7 +271,7 @@ assert.match(workspacesCssSource, /\.workspace-quick-title \{[^}]*width: 100%;[^
 assert.match(workspacesCssSource, /grid-template-columns: repeat\(auto-fit, minmax\(136px, 1fr\)\)/, '手機三身分按鈕需保留可讀寬度');
 assert.match(uiHtmlSource, /workspaces\.css\?v=20260901-workspace-wrap-1/, '行政頁需載入防溢出的工作身分樣式');
 assert.match(uiHtmlSource, /styles\.css\?v=20260903-admin-stability-1/, '行政提示穿透修正需使用新快取版本');
-assert.match(uiHtmlSource, /app\.js\?v=20260906-reliability-1/, '行政穩定版表單需使用獨立快取版本');
+assert.match(uiHtmlSource, /app\.js\?v=20260907-admin-labels-1/, '行政穩定版表單需使用獨立快取版本');
 assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=admin-marketing(?:-manager)?&v=20260903-admin-stability-1/g) || []).length, 2, '行政與主管入口都需避開舊版快取');
 assert.match(uiSource, /trialIdentity\(item\.studentName, trialContact\(item\), item\.course, item\.date\)/, '重複預約需依學生、課程與日期判定');
 assert.match(uiSource, /同一學生可登記不同課程/, '行政需清楚知道同一學生可登記多門試上課');
