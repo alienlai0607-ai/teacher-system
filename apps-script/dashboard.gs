@@ -25,7 +25,7 @@ function getMyKpiPreview(params) {
     const weekCount = ev.posts_by_week[weekOf()] || 0;
     if (weekCount < 3) todos.push(`本週安親發文：${weekCount}/3 篇`);
   }
-  if (ev.summary.log_count < 20) todos.push(`本月已填日誌 ${ev.summary.log_count} 天，建議每日填寫`);
+  if (ev.summary.log_count < 20 && isDailyKpiRequired_(user, todayStr())) todos.push(`本月已填日誌 ${ev.summary.log_count} 天，${isAnqinUser(user) ? '週一至週五填寫，週末免填' : '建議每日填寫'}`);
 
   return {
     ok: true,
@@ -70,7 +70,8 @@ function getDashboard(params) {
       const log = todayLogs.find(l => l.nickname === t.nickname);
       return {
         nickname: t.nickname,
-        submitted: !!log,
+        submitted: !!(log && log.submitted_at),
+        required: isDailyKpiRequired_(t, today),
         checkin_at: log ? log.checkin_at : '',
         help_needed: log ? log.help_needed === true : false,
         log_id: log ? log.log_id : ''
@@ -92,6 +93,8 @@ function getDashboard(params) {
       department: globalScope ? '全教室' : normalizeDepartment_(user.department),
       date: today,
       teachers_count: deptMembers.length,
+      required_count: status.filter(s => s.required).length,
+      required_submitted_count: status.filter(s => s.required && s.submitted).length,
       submitted_count: submittedCount,
       help_count: helpCount,
       status,

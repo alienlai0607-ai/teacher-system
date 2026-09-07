@@ -200,7 +200,8 @@ function buildDailyKpiHtml_(dateStr) {
 
   const submittedNames = users.filter(u => logMap[u.nickname] && logMap[u.nickname].submitted_at).map(u => u.nickname);
   const draftNames = users.filter(u => logMap[u.nickname] && !logMap[u.nickname].submitted_at).map(u => u.nickname);
-  const missingNames = users.filter(u => !logMap[u.nickname]).map(u => u.nickname);
+  const requiredUsers = users.filter(u => isDailyKpiRequired_(u, dateStr));
+  const missingNames = requiredUsers.filter(u => !logMap[u.nickname]).map(u => u.nickname);
   const helpNames = logs.filter(l => l.help_needed === true).map(l => l.nickname);
 
   let h = '<html><head><meta charset="UTF-8"><style>body{font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif; font-size:12px; color:#3D2817; background:#FFF8E7; margin:0; padding:4px;}</style></head><body>';
@@ -306,12 +307,13 @@ function savePersonPdf_(folder, fileName, blob) {
   const matches = folder.getFilesByName(fileName);
   if (matches.hasNext()) {
     const existing = matches.next();
-    if (replacePdfContent_(existing.getId(), blob)) {
-      while (matches.hasNext()) matches.next().setTrashed(true);
-      return existing;
+    if (!replacePdfContent_(existing.getId(), blob)) {
+      const error = new Error('日報更新未完成，原檔與連結已保留，請稍後重試');
+      error.code = 'PDF_REPLACE_FAILED';
+      throw error;
     }
-    existing.setTrashed(true);
     while (matches.hasNext()) matches.next().setTrashed(true);
+    return existing;
   }
   return folder.createFile(blob);
 }
@@ -364,6 +366,20 @@ function repairTodayKpiPdfImages() {
  * 每位收件人同一版本只需任一管道成功一次；失敗者可單獨重試，不重複打擾已送達者。
  */
 function sendSubmitPdf(params) {
+  const key = 'DELIVERY_LEASE_' + String(params.date || '') + '_' + String(params.nickname || '');
+  const props = PropertiesService.getScriptProperties();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, code: 'WRITE_BUSY', error: '紀錄已保留，報表正在排隊處理' };
+  const lease = String(Date.now() + 420000);
+  try {
+    if (Number(props.getProperty(key) || 0) > Date.now()) return { ok: false, code: 'DELIVERY_IN_PROGRESS', error: 'PDF 與通知處理中，不必重送紀錄' };
+    props.setProperty(key, lease);
+  } finally { lock.releaseLock(); }
+  try { return sendSubmitPdfRequest_(params); }
+  finally { if (props.getProperty(key) === lease) props.deleteProperty(key); }
+}
+
+function sendSubmitPdfRequest_(params) {
   const nickname = params.nickname;
   const dateStr = String(params.date || '');
   if (!nickname || !dateStr) return { ok: false, error: 'missing nickname/date' };
@@ -372,16 +388,16 @@ function sendSubmitPdf(params) {
   const log = findObject(SHEET_NAMES.LOGS, 'log_id', log_id);
   if (!log) return { ok: false, error: 'log not found' };
   if (!log.submitted_at) return { ok: false, error: 'not submitted' };
-  const version = String(log.updated_at || log.submitted_at || nowIso());
+  const version = String(log.record_revision || log.updated_at || log.submitted_at || nowIso());
   const pdfVersionKey = 'PERSONPDF_VERSION_' + log_id;
   const pdfUrlKey = 'PERSONPDF_URL_' + log_id;
   const cachedPdfVersion = props.getProperty(pdfVersionKey) || '';
   const cachedPdfUrl = props.getProperty(pdfUrlKey) || '';
-  let r = cachedPdfVersion >= version && cachedPdfUrl
+  let r = cachedPdfVersion === version && cachedPdfUrl
     ? { url: cachedPdfUrl, log: log }
     : generatePersonKpiPdf_(nickname, dateStr);
   if (!r) return { ok: false, error: 'pdf generation failed' };
-  if (!(cachedPdfVersion >= version && cachedPdfUrl)) {
+  if (!(cachedPdfVersion === version && cachedPdfUrl)) {
     props.setProperty(pdfVersionKey, version);
     props.setProperty(pdfUrlKey, r.url);
   }
@@ -400,9 +416,9 @@ function sendSubmitPdf(params) {
     const appKey = 'SENTPDF_APP_' + log_id + '_' + recipient.nickname;
     const lineBound = Boolean(recipient.line_user_id);
     const appBound = Boolean(recipient.push_subscription_id);
-    const lineAlreadySent = lineBound && (props.getProperty(lineKey) || '') >= version;
-    const appAlreadySent = appBound && (props.getProperty(appKey) || '') >= version;
-    const previouslyReached = Boolean(lineAlreadySent || appAlreadySent || (props.getProperty(recipientKey) || '') >= version);
+    const lineAlreadySent = lineBound && (props.getProperty(lineKey) || '') === version;
+    const appAlreadySent = appBound && (props.getProperty(appKey) || '') === version;
+    const previouslyReached = Boolean(lineAlreadySent || appAlreadySent || (props.getProperty(recipientKey) || '') === version);
     const lineSent = lineBound && !lineAlreadySent && pushLine_(recipient.line_user_id, msg);
     const appSent = appBound && !appAlreadySent && pushOneSignal_(recipient.nickname, nickname + ' 已送出 KPI 日報', md + ' 的紀錄與成果證據已可查看');
     if (lineSent) props.setProperty(lineKey, version);
@@ -440,7 +456,41 @@ function sendSubmitPdf(params) {
     deliveries: deliveries,
   };
   logSystem('system', 'pdf_person', log_id, { sent: newlyReached, notification: notification });
+  withRecordWriteLock_(function () {
+    const current = findObject(SHEET_NAMES.LOGS, 'log_id', log_id);
+    if (current && String(current.record_revision || current.updated_at) === version) updateRow(SHEET_NAMES.LOGS, current._row, { delivery_state: allReached ? 'complete' : 'pending', delivery_error: pending.length ? '通知尚未送達' : '' });
+  });
   return { ok: true, url: r.url, sent: newlyReached, notification: notification };
+}
+
+function retryPendingKpiDeliveries() {
+  const pending = sheetToObjects(SHEET_NAMES.LOGS).filter(function (row) { return row.submitted_at && (row.delivery_state === 'pending' || row.evidence_state === 'pending'); }).sort(function (a, b) { return String(a.delivery_attempted_at || '').localeCompare(String(b.delivery_attempted_at || '')); }).slice(0, 3);
+  pending.forEach(function (row) {
+    try {
+      withRecordWriteLock_(function () { const current = findObject(SHEET_NAMES.LOGS, 'log_id', row.log_id); if (current) updateRow(SHEET_NAMES.LOGS, current._row, { delivery_attempted_at: nowIso() }); });
+      if (row.evidence_state === 'pending') withRecordWriteLock_(function () {
+        const current = findObject(SHEET_NAMES.LOGS, 'log_id', row.log_id);
+        replaceEvidenceForLog_(row.log_id, current.nickname, current.date, parseJsonField(current.attachments));
+        updateRow(SHEET_NAMES.LOGS, current._row, { evidence_state: 'ready' });
+      });
+      sendSubmitPdf({ nickname: row.nickname, date: String(row.date) });
+    } catch (error) {
+      logSystem('system', 'delivery_retry_failed', row.log_id, { code: error.code || 'DELIVERY_FAILED' });
+    }
+  });
+  return { ok: true, attempted: pending.length };
+}
+
+function setupKpiReliabilityTriggers() {
+  const names = ScriptApp.getProjectTriggers().map(function (trigger) { return trigger.getHandlerFunction(); });
+  if (names.indexOf('retryPendingKpiDeliveries') < 0) ScriptApp.newTrigger('retryPendingKpiDeliveries').timeBased().everyMinutes(10).create();
+  if (names.indexOf('backupKpiDatabaseAuto') < 0) ScriptApp.newTrigger('backupKpiDatabaseAuto').timeBased().everyDays(1).atHour(3).create();
+  if (names.indexOf('repairRecentTalentReportsAuto') < 0) ScriptApp.newTrigger('repairRecentTalentReportsAuto').timeBased().everyMinutes(10).create();
+  return { ok: true, deliveryRetryEnabled: true };
+}
+
+function repairRecentTalentReportsAuto() {
+  return repairMissingTalentLessonReportsAuto();
 }
 
 /** API：手動生成＋推播給所有 admin（?action=sendDailyKpiPdf&operator=柏翰&date=…） */
@@ -461,6 +511,7 @@ function sendDailyKpiPdf(params) {
 /** 觸發器用（每天 21:30 自動發當日報告給老闆） */
 function sendDailyKpiReportAuto() {
   const dateStr = todayStr();
+  if (isKpiWeekend_(dateStr)) return { ok: true, skipped: true, reason: 'weekend', sent: 0 };
   const r = generateDailyKpiPdf_(dateStr);
   const msg = kpiPdfMsg_(dateStr, r);
   bossUsers_().forEach(a => {

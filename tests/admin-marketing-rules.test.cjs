@@ -15,6 +15,9 @@ const context = vm.createContext({
   todayStr: () => '2026-08-26',
 });
 vm.runInContext(backendSource, context);
+context.LockService = { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+const helpers = fs.readFileSync(path.join(root, 'apps-script/utils.gs'), 'utf8');
+vm.runInContext(helpers.slice(helpers.indexOf('function withRecordWriteLock_'), helpers.indexOf('function reportClientMetrics')), context);
 
 const driveEvidence = [{ fileName: '完成截圖.png', url: 'https://drive.google.com/file/d/test/view', mimeType: 'image/png' }];
 const validDaily = () => ({
@@ -253,7 +256,7 @@ assert.match(workspacesCssSource, /\.workspace-quick-title \{[^}]*width: 100%;[^
 assert.match(workspacesCssSource, /grid-template-columns: repeat\(auto-fit, minmax\(136px, 1fr\)\)/, '手機三身分按鈕需保留可讀寬度');
 assert.match(uiHtmlSource, /workspaces\.css\?v=20260901-workspace-wrap-1/, '行政頁需載入防溢出的工作身分樣式');
 assert.match(uiHtmlSource, /styles\.css\?v=20260903-admin-stability-1/, '行政提示穿透修正需使用新快取版本');
-assert.match(uiHtmlSource, /app\.js\?v=20260903-admin-stability-1/, '行政穩定版表單需使用獨立快取版本');
+assert.match(uiHtmlSource, /app\.js\?v=20260906-reliability-1/, '行政穩定版表單需使用獨立快取版本');
 assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=admin-marketing(?:-manager)?&v=20260903-admin-stability-1/g) || []).length, 2, '行政與主管入口都需避開舊版快取');
 assert.match(uiSource, /trialIdentity\(item\.studentName, trialContact\(item\), item\.course, item\.date\)/, '重複預約需依學生、課程與日期判定');
 assert.match(uiSource, /同一學生可登記不同課程/, '行政需清楚知道同一學生可登記多門試上課');

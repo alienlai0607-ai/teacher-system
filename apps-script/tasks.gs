@@ -55,6 +55,7 @@ function getSystemReadiness(params) {
       coursePrepArchive: true,
       taskCloudSync: true,
       productionIntegrity: true,
+      verifiedLineIngress: props.getProperty('LINE_VERIFIED_INGRESS_ENABLED') === 'true' && Boolean(props.getProperty('LINE_CHANNEL_SECRET')),
     },
     triggers: {
       dailyKpiPdf: triggers.indexOf('sendDailyKpiReportAuto') >= 0,
@@ -62,7 +63,11 @@ function getSystemReadiness(params) {
       dailyTaskEvening: triggers.indexOf('sendEveningPreview') >= 0,
       dailyTaskReminder: triggers.indexOf('sendMorningReminders') >= 0 && triggers.indexOf('sendEveningPreview') >= 0,
       talentPdfRepair: triggers.indexOf('repairMissingTalentLessonReportsAuto') >= 0,
+      deliveryRetry: triggers.indexOf('retryPendingKpiDeliveries') >= 0,
+      databaseBackup: triggers.indexOf('backupKpiDatabaseAuto') >= 0,
     },
+    reliability: user.role === 'admin' ? getReliabilityMetrics_() : null,
+    databaseBackup: user.role === 'admin' ? parseJsonField(props.getProperty('KPI_LAST_DATABASE_BACKUP')) : null,
   };
 }
 
@@ -70,6 +75,20 @@ function getSystemReadiness(params) {
  * 管理員手動執行的正式環境實際交付驗收。
  * 每一項都會真的寫入後再讀回，並只清除本次建立的 QA 資料。
  */
+function verifyProductionDeliveryFromEditor() {
+  let result;
+  try {
+    // Fail explicitly when editor identity scope is missing; do not bypass the admin check.
+    Session.getActiveUser().getEmail();
+    result = runProductionIntegrityCheck();
+  } catch (error) {
+    const message = String(error && error.message || error);
+    result = { ok: false, code: message.indexOf('userinfo.email') >= 0 ? 'EDITOR_EMAIL_SCOPE_REQUIRED' : 'EDITOR_CHECK_FAILED', error: message };
+  }
+  console.log(JSON.stringify(result));
+  return result;
+}
+
 function runProductionIntegrityCheck(params) {
   const actor = params && params.__actor ? params.__actor : systemMaintenanceUser_(params);
   if (!actor || actor.role !== 'admin' || actor.status !== 'active') {
@@ -256,7 +275,8 @@ function runProductionIntegrityCheck(params) {
         const fileId = file.getId();
         const stored = DriveApp.getFileById(fileId);
         requireCheck_(stored.getName() === filename, '照片建立後檔名不一致');
-        requireCheck_(stored.getBlob().getBytes().length > 0, '照片建立後內容為空');
+        requireCheck_(Utilities.base64Encode(stored.getBlob().getBytes()) === pngBase64, '照片建立後內容與原檔不一致');
+        assertKpiFileReadable_(stored, actor, 'anqin');
         const preview = getAttachmentPreviews({ __actor: actor, file_ids: [fileId] });
         requireCheck_(preview && preview.ok, '私密照片預覽端點執行失敗');
         requireCheck_(Array.isArray(preview.previews) && preview.previews.length === 1, '私密照片預覽未回傳圖片');
@@ -282,6 +302,7 @@ function runProductionIntegrityCheck(params) {
         requireCheck_(stored.getName() === filename, '教材建立後檔名不一致');
         requireCheck_(stored.getBlob().getDataAsString('UTF-8') === content, '教材建立後內容與原始內容不一致');
         requireCheck_(stored.getSize() > 0, '教材建立後檔案大小為 0');
+        assertKpiFileReadable_(stored, actor, 'anqin');
       } finally {
         file.setTrashed(true);
       }
@@ -311,8 +332,37 @@ function setupSystemAutomation(params) {
   setupKpiReportTrigger();
   setupTaskReminderTrigger();
   setupTalentReportRepairTrigger();
+  setupKpiReliabilityTriggers();
   logSystem(user.nickname, 'setup_system_automation', '', {});
   return getSystemReadiness({ operator: user.nickname });
+}
+
+function handleVerifiedLineWebhook_(envelope) {
+  const secret = PropertiesService.getScriptProperties().getProperty('LINE_CHANNEL_SECRET');
+  const rawBody = envelope && envelope.rawBody;
+  const signature = String(envelope && envelope.signature || '');
+  if (!secret || typeof rawBody !== 'string' || rawBody.length > 1000000 || !signature) return { ok: false, code: 'LINE_SIGNATURE_REQUIRED' };
+  const expected = Utilities.base64Encode(Utilities.computeHmacSha256Signature(rawBody, secret, Utilities.Charset.UTF_8));
+  let mismatch = expected.length ^ signature.length;
+  for (let i = 0; i < expected.length; i++) mismatch |= expected.charCodeAt(i) ^ (signature.charCodeAt(i) || 0);
+  if (mismatch !== 0) return { ok: false, code: 'LINE_SIGNATURE_INVALID' };
+  let payload;
+  try { payload = JSON.parse(rawBody); } catch (error) { return { ok: false, code: 'LINE_BODY_INVALID' }; }
+  if (!payload || !Array.isArray(payload.events) || payload.events.length > 100 || payload.events.some(function (event) { return !event || typeof event !== 'object'; })) return { ok: false, code: 'LINE_BODY_INVALID' };
+  const cache = CacheService.getScriptCache();
+  for (let i = 0; i < payload.events.length; i++) {
+    const event = payload.events[i];
+    const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, event.webhookEventId || JSON.stringify(event), Utilities.Charset.UTF_8);
+    const key = 'line-event-' + Utilities.base64EncodeWebSafe(digest).replace(/=+$/, '');
+    const result = withResourceLease_(key, function () {
+      if (cache.get(key)) return { ok: true, duplicate: true };
+      handleLineWebhook_({ events: [event] });
+      cache.put(key, 'done', 21600);
+      return { ok: true };
+    });
+    if (!result.ok) return result;
+  }
+  return { ok: true };
 }
 
 /** 對目前帳號同時測試 LINE 與 APP 通知，不回傳任何服務密鑰。 */
@@ -629,9 +679,9 @@ function adminBroadcast(params) {
 }
 
 function addDaysStr_(dateStr, n) {
-  const d = new Date(dateStr + 'T00:00:00');
-  d.setDate(d.getDate() + n);
-  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const d = new Date(dateStr + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
 }
 
 // 共用：依模式推播。morning=當天(含逾期)、evening=隔天預告。依老師彙整成一則。
@@ -656,6 +706,7 @@ function sendTaskReminders_(mode) {
   Object.keys(byAssignee).forEach(nk => {
     const u = umap[nk];
     if (!u) return;
+    if (isAnqinUser(u) && (isKpiWeekend_(today) || (mode === 'evening' && isKpiWeekend_(tomorrow)))) return;
     const items = byAssignee[nk]
       .map((t, i) => (i + 1) + '. ' + t.title + '（' + t.due_date + (String(t.due_date) < today ? ' 逾期' : '') + '）')
       .join('\n');

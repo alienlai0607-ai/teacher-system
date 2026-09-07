@@ -13,7 +13,7 @@ function ensureTalentRecordsSheet_() {
   ensureHeaders(sheet, [
     'record_id', 'record_type', 'nickname', 'department', 'record_date',
     'year_month', 'status', 'data_json', 'created_by', 'updated_by',
-    'created_at', 'updated_at', 'submitted_at'
+    'created_at', 'updated_at', 'submitted_at', 'report_attempted_at'
   ]);
   return sheet;
 }
@@ -338,6 +338,7 @@ function saveTalentLesson(params) {
     return { ok: false, error: '無課堂紀錄權限' };
   }
   const lesson = talentPayload_(params.lesson);
+  const baseContentRevision = String(lesson.contentRevision || '');
   if (!lesson.id) return { ok: false, error: '課堂紀錄編號遺失' };
   lesson.teacher = nickname;
   lesson.employment = talentEmployment_(user);
@@ -457,16 +458,19 @@ function saveTalentLesson(params) {
     }
   }
   lesson.status = 'submitted';
-  lesson.contentRevision = nowIso();
+  lesson.contentRevision = nowIso() + '-' + Utilities.getUuid().slice(0, 8);
+  lesson.lastRequestId = String(params.request_id || '');
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: '系統正在儲存另一筆紀錄，請稍後再送出' };
   let saved;
   try {
     const existing = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lesson.id);
     if (existing && existing.record_type === 'lesson' && existing.nickname === nickname && existing.status === 'submitted') {
+      if (params.request_id && talentRecordObject_(existing).lastRequestId === params.request_id) return { ok: true, lesson: talentRecordObject_(existing), duplicate: true };
       if (!String(lesson.updatedAt || '').trim()) return { ok: true, lesson: talentRecordObject_(existing), duplicate: true };
-      if (String(lesson.updatedAt) !== String(existing.updated_at || '')) {
-        return { ok: false, error: '這筆紀錄已在其他裝置更新，請重新整理後再補充' };
+      const latestContentRevision = String(talentRecordObject_(existing).contentRevision || '');
+      if (baseContentRevision ? baseContentRevision !== latestContentRevision : String(lesson.updatedAt) !== String(existing.updated_at || '')) {
+        return { ok: false, code: 'RECORD_CONFLICT', error: '這筆紀錄已在其他裝置更新，您的草稿仍保留；請先查看最新紀錄再補充' };
       }
     }
     if (!existing && employment === 'pt') {
@@ -483,6 +487,7 @@ function saveTalentLesson(params) {
   } finally {
     lock.releaseLock();
   }
+  if (params.defer_report === true) return { ok: true, lesson: saved, reportStatus: 'pending', warning: '課堂紀錄已存入雲端；日報與通知將接續產生，不必重送。' };
   let pdf = null;
   let warning = '';
   try {
@@ -819,6 +824,10 @@ function generateTalentLessonPdf_(lesson, user) {
 }
 
 function regenerateTalentLessonReport(params) {
+  return withResourceLease_('talent-pdf-' + String(params.lesson_id || ''), function () { return regenerateTalentLessonReportRequest_(params); });
+}
+
+function regenerateTalentLessonReportRequest_(params) {
   const actor = params && params.__actor;
   const lessonId = String(params && params.lesson_id || '').trim();
   const row = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lessonId);
@@ -830,34 +839,34 @@ function regenerateTalentLessonReport(params) {
     return { ok: false, error: '無權重建此日報' };
   }
   const current = talentRecordObject_(row);
-  if (current.reportUrl && params.force !== true) {
+  const revision = current.contentRevision || current.updatedAt;
+  if (current.reportUrl && current.reportRevision === revision && params.force !== true) {
     return { ok: true, lesson: current, reportUrl: current.reportUrl, reused: true };
   }
+  withRecordWriteLock_(function () { const latest = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lessonId); if (latest) updateRow(SHEET_NAMES.TALENT_RECORDS, latest._row, { report_attempted_at: nowIso() }); });
 
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) return { ok: false, error: '系統正在處理其他日報，請稍後重試' };
-  try {
+  const pdf = generateTalentLessonPdf_(current, user);
+  const result = withRecordWriteLock_(function () {
     const latestRow = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lessonId);
     if (!latestRow || latestRow.record_type !== 'lesson' || latestRow.status !== 'submitted') {
       return { ok: false, error: '課堂紀錄已變更，請重新整理後再試' };
     }
     const latest = talentRecordObject_(latestRow);
-    if (latest.reportUrl && params.force !== true) {
-      return { ok: true, lesson: latest, reportUrl: latest.reportUrl, reused: true };
-    }
-    const pdf = generateTalentLessonPdf_(latest, user);
+    if ((latest.contentRevision || latest.updatedAt) !== revision) return { ok: false, code: 'RECORD_CONFLICT', error: '紀錄已更新，日報將接續重建為最新內容' };
     latest.reportUrl = pdf.url;
     latest.reportFileId = pdf.fileId;
     latest.reportFolderUrl = pdf.folderUrl || latest.reportFolderUrl || '';
     latest.reportGeneratedAt = nowIso();
     latest.reportRevision = latest.contentRevision || latest.updatedAt;
-    const saved = upsertTalentRecord_('lesson', row.nickname, latest, actor.nickname);
-    notifyTalentLesson_(saved, user, pdf.url);
-    logSystem(actor.nickname, 'regenerate_talent_lesson_pdf', lessonId, { teacher: row.nickname });
+    updateRow(SHEET_NAMES.TALENT_RECORDS, latestRow._row, { data_json: JSON.stringify(talentPayload_(latest)) });
+    const saved = talentRecordObject_(findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lessonId));
     return { ok: true, lesson: saved, reportUrl: pdf.url };
-  } finally {
-    lock.releaseLock();
+  });
+  if (result.ok) {
+    notifyTalentLesson_(result.lesson, user, pdf.url);
+    logSystem(actor.nickname, 'regenerate_talent_lesson_pdf', lessonId, { teacher: row.nickname });
   }
+  return result;
 }
 
 /** 每晚補齊因 Drive 短暫錯誤而缺少的才藝日報；每次限量避免超過 Apps Script 執行時間。 */
@@ -869,36 +878,14 @@ function repairMissingTalentLessonReportsAuto() {
     return !String(lesson.reportUrl || '').trim() ||
       !String(lesson.reportRevision || '').trim() ||
       String(lesson.reportRevision || '') !== String(lesson.contentRevision || lesson.updatedAt || '');
-  }).slice(0, 20);
+  }).sort(function (a, b) { return String(a.report_attempted_at || '').localeCompare(String(b.report_attempted_at || '')); }).slice(0, 3);
   let repaired = 0;
   const errors = [];
   rows.forEach(function (row) {
     try {
-      const user = findUserByNickname(row.nickname);
-      if (!user || ['active', 'suspended', 'deleted'].indexOf(user.status) < 0) throw new Error('找不到可稽核的老師資料');
-      const sourceRow = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', row.record_id);
-      if (!sourceRow || sourceRow.record_type !== 'lesson' || sourceRow.status !== 'submitted') throw new Error('課堂紀錄已變更');
-      const source = talentRecordObject_(sourceRow);
-      const sourceRevision = source.contentRevision || source.updatedAt;
-      const pdf = generateTalentLessonPdf_(source, user);
-      const lock = LockService.getScriptLock();
-      if (!lock.tryLock(10000)) throw new Error('系統正在處理其他紀錄');
-      try {
-        const latestRow = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', row.record_id);
-        if (!latestRow || latestRow.record_type !== 'lesson' || latestRow.status !== 'submitted') throw new Error('課堂紀錄已變更');
-        const lesson = talentRecordObject_(latestRow);
-        const hadReport = Boolean(lesson.reportUrl);
-        lesson.reportUrl = pdf.url;
-        lesson.reportFileId = pdf.fileId;
-        lesson.reportFolderUrl = pdf.folderUrl || lesson.reportFolderUrl || '';
-        lesson.reportGeneratedAt = nowIso();
-        lesson.reportRevision = sourceRevision;
-        const saved = upsertTalentRecord_('lesson', row.nickname, lesson, 'system');
-        if (!hadReport && user.status === 'active') notifyTalentLesson_(saved, user, pdf.url);
-        repaired += 1;
-      } finally {
-        lock.releaseLock();
-      }
+      const result = regenerateTalentLessonReport({ __actor: { nickname: 'system', role: 'admin', status: 'active' }, lesson_id: row.record_id });
+      if (!result.ok) throw new Error(result.error || '日報待重試');
+      repaired += 1;
     } catch (error) {
       errors.push({ id: row.record_id, error: String(error.message || error) });
     }

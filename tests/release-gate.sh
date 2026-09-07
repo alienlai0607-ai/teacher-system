@@ -21,6 +21,11 @@ cd "$ROOT"
 "$NODE_BIN" tests/talent-rules.test.cjs
 "$NODE_BIN" tests/admin-marketing-rules.test.cjs
 "$NODE_BIN" tests/production-integrity.test.cjs
+"$NODE_BIN" tests/reliability-regressions.test.cjs
+"$NODE_BIN" tests/reliability-secondary.test.cjs
+"$NODE_BIN" tests/weekend-policy.test.cjs
+"$NODE_BIN" tests/legacy-attachment-delivery.test.cjs
+"$NODE_BIN" scripts/bundle-apps-script.cjs --check
 
 python3 -m http.server "$PORT" --bind 127.0.0.1 >/tmp/kpi-release-gate-server.log 2>&1 &
 SERVER_PID=$!

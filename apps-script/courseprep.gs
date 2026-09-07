@@ -9,7 +9,7 @@ function ensureCoursePrepSheet_() {
   if (!sheet) sheet = ss.insertSheet(SHEET_NAMES.COURSE_PREP);
   ensureHeaders(sheet, [
     'prep_id', 'nickname', 'department', 'title', 'course_type',
-    'created_date', 'status', 'data_json', 'created_at', 'updated_at'
+    'created_date', 'status', 'data_json', 'created_at', 'updated_at', 'record_revision', 'last_request_id'
   ]);
   return sheet;
 }
@@ -61,13 +61,17 @@ function saveCoursePrep(params) {
     if (existing && existing.nickname !== nickname && user.role !== 'admin') {
       return { ok: false, error: '不可覆蓋其他老師的備課檔案' };
     }
+    if (existing && existing.status === 'deleted') return { ok: false, code: 'RECORD_DELETED', error: '這份備課檔案已被刪除；本機內容仍保留，請另建新檔' };
+    if (existing && params.request_id && existing.last_request_id === params.request_id) return { ok: true, prep_id: prep.id, updated_at: existing.updated_at, revision: existing.record_revision, duplicate: true };
+    if (existing && recordConflict_(prep.cloudRevision || prep.cloudUpdatedAt, existing.record_revision || existing.updated_at)) return recordConflictResult_();
     const duplicate = sheetToObjects(SHEET_NAMES.COURSE_PREP).some(function (row) {
-      return row.nickname === nickname
+      return row.status !== 'deleted' && row.nickname === nickname
         && String(row.prep_id || '') !== String(prep.id)
         && String(row.title || '').trim().replace(/\s+/g, ' ').toLowerCase() === normalizedTitle
         && String(row.course_type || '').trim().replace(/\s+/g, ' ').toLowerCase() === normalizedCourseType;
     });
     if (duplicate) return { ok: false, error: '已有相同課程類型與名稱的備課檔案，請直接編輯原檔案' };
+    const revision = Utilities.getUuid();
     upsertRow(SHEET_NAMES.COURSE_PREP, 'prep_id', {
       prep_id: prep.id,
       nickname: nickname,
@@ -79,12 +83,14 @@ function saveCoursePrep(params) {
       data_json: dataJson,
       created_at: existing ? existing.created_at : now,
       updated_at: now,
+      record_revision: revision,
+      last_request_id: String(params.request_id || ''),
     });
+    logSystem(nickname, 'save_course_prep', prep.id, { status: prep.status || 'draft' });
+    return { ok: true, prep_id: prep.id, updated_at: now, revision: revision };
   } finally {
     lock.releaseLock();
   }
-  logSystem(nickname, 'save_course_prep', prep.id, { status: prep.status || 'draft' });
-  return { ok: true, prep_id: prep.id, updated_at: now };
 }
 
 function listCoursePreps(params) {
@@ -100,21 +106,28 @@ function listCoursePreps(params) {
   }
   if (params.nickname) rows = rows.filter(row => row.nickname === String(params.nickname));
   rows.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
-  const records = rows.map(row => {
+  const deletedIds = rows.filter(row => row.status === 'deleted').map(row => row.prep_id);
+  const records = rows.filter(row => row.status !== 'deleted').map(row => {
     const data = parseJsonField(row.data_json) || {};
     return {
       prepId: row.prep_id,
       nickname: row.nickname,
       department: row.department,
       updatedAt: row.updated_at,
+      revision: row.record_revision || row.updated_at,
+      lastRequestId: row.last_request_id || '',
       prep: data.prep || null,
       plan: data.plan || null,
     };
   }).filter(record => record.prep && record.prep.id);
-  return { ok: true, records: records };
+  return { ok: true, records: records, deletedIds: deletedIds, complete: true };
 }
 
 function deleteCoursePrep(params) {
+  return withRecordWriteLock_(function () { return deleteCoursePrepRecord_(params); });
+}
+
+function deleteCoursePrepRecord_(params) {
   const operator = String(params.operator || '').trim();
   const user = operator ? findUserByNickname(operator) : null;
   if (!user || user.status !== 'active') return { ok: false, error: '無刪除權限' };
@@ -128,7 +141,7 @@ function deleteCoursePrep(params) {
   if (normalizeName(params.confirmation_name) !== normalizeName(existing.nickname)) {
     return { ok: false, error: '姓名確認不正確，未刪除備課檔案' };
   }
-  deleteRow(SHEET_NAMES.COURSE_PREP, existing._row);
+  upsertRow(SHEET_NAMES.COURSE_PREP, 'prep_id', Object.assign({}, existing, { status: 'deleted', updated_at: nowIso(), record_revision: Utilities.getUuid() }));
   logSystem(operator, 'delete_course_prep', params.prep_id, {});
   return { ok: true, removed: true };
 }

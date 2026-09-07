@@ -533,7 +533,7 @@
       ${isPt() ? `<div class="notice strict">${icon('lock', 19)}<div><strong>PT 正常課程只能當日送出</strong><span>任一堂正常課程漏填即取消當月續報獎金；只有停課可補選過去排課日。</span></div></div>` : ''}
       ${state.draftLog ? `<div class="notice warning">${icon('file-pen-line', 19)}<div><strong>有一筆今日未完成草稿</strong><span>上次輸入已保留，請在今日結束前送出。</span></div><button type="button" class="btn btn-small" data-action="new-log">繼續填寫</button><button type="button" class="icon-button" data-action="discard-log-draft" aria-label="刪除這筆草稿" title="刪除草稿">${icon('trash-2', 16)}</button></div>` : ''}
       <section class="panel">
-        <div class="panel-head"><div><h2>今日課程</h2><p>${primary ? `已帶入 ${primary.label} ${primary.time}` : '若有代課或補登，仍可手動新增。'}</p></div></div>
+        <div class="panel-head"><div><h2>今日課程</h2><p>${primary ? `已帶入 ${primary.label} ${primary.time}` : isPt() ? '今日沒有固定排課；臨時代課請先由主管確認班次。' : '上課後新增本堂紀錄。'}</p></div></div>
         <div class="panel-body">${logs.length ? logs.map(renderLogRow).join('') : renderEmpty('還沒有今日紀錄', '上課後用同一張表完成紀錄，不需要分散重寫。', 'clipboard-pen-line', '<button type="button" class="btn btn-primary" data-action="new-log">新增紀錄</button>')}</div>
       </section>`;
   }
@@ -1058,9 +1058,13 @@
   }
 
   function openLogEditor(existing = null) {
+    if (isPt() && !existing && !state.draftLog && !schedulesForDate(currentUser, todayIso()).length) {
+      openDialog({ title: '今天沒有已設定的班次', body: '<p>若今天臨時代課，請先請主管確認時間與地點，更新排課後再填寫。本日不會因沒有固定排課而產生漏填。</p>', footer: '<button type="button" class="btn" data-action="close-dialog">關閉</button><button type="button" class="btn" data-action="register-past-cancellation">登記過去停課</button><button type="button" class="btn btn-primary" data-action="refresh-schedule">重新讀取排課</button>' });
+      return;
+    }
     const draft = existing || state.draftLog || { id: uid('log') };
     if (!draft.id) draft.id = uid('log');
-    const editing = Boolean(existing || (draft.id && state.logs.some(item => item.id === draft.id)));
+    const editing = Boolean(draft.id && state.logs.some(item => item.id === draft.id));
     activeLogSource = draft;
     const availableSchedules = schedulesForDate(currentUser, draft.date || todayIso());
     const schedule = availableSchedules.find(item => item.scheduleKey === draft.scheduleKey)
@@ -1077,7 +1081,7 @@
     openDrawer({
       title: editing ? '編輯本堂紀錄' : state.draftLog ? '繼續本堂紀錄' : '新增本堂紀錄',
       subtitle: editing ? '今日內更新同一筆，不會重複計薪。' : '同一頁完成一堂課，系統會自動草稿保留。',
-      body: `<form id="log-form" novalidate><input type="hidden" name="id" value="${esc(draft.id || '')}"><input type="hidden" name="updatedAt" value="${esc(draft.updatedAt || '')}">
+      body: `<form id="log-form" novalidate><input type="hidden" name="id" value="${esc(draft.id || '')}"><input type="hidden" name="updatedAt" value="${esc(draft.updatedAt || '')}"><input type="hidden" name="contentRevision" value="${esc(draft.contentRevision || '')}">
         <div class="draft-sync-status" data-draft-sync-status>${icon('circle-check', 16)}<span>輸入內容會自動暫存</span></div>
         ${editing ? `<div class="notice info inline-rule">${icon('pencil', 18)}<div><strong>正在補充今天已送出的紀錄</strong><span>儲存後更新原日報；日期、班次與上課狀態不可更換。</span></div></div>` : ''}
         ${isPt() ? `<div class="notice strict inline-rule">${icon('lock', 18)}<div><strong>正常課程必須在今日送出</strong><span>只有停課可補選過去排課日，並會留下補登標記。</span></div></div>` : ''}
@@ -1570,7 +1574,7 @@
       }
       const values = Object.fromEntries(data.entries());
       const item = {
-        id: editingId || uid('log'), updatedAt: String(data.get('updatedAt') || ''), teacher: currentUser.nickname, employment: 'pt', lessonStatus: 'cancelled', scheduleKey: matchedSchedule.scheduleKey,
+        id: editingId || uid('log'), updatedAt: String(data.get('updatedAt') || ''), contentRevision: String(data.get('contentRevision') || ''), teacher: currentUser.nickname, employment: 'pt', lessonStatus: 'cancelled', scheduleKey: matchedSchedule.scheduleKey,
         scheduleLabel: matchedSchedule.label || '', scheduleTime: matchedSchedule.time || '',
         date: lessonDate, courseType: '停課', courseName: String(values.cancelledCourseName || '').trim(),
         siteType: matchedSchedule.siteType, site: matchedSchedule.site, duration: 0,
@@ -1623,7 +1627,7 @@
     const item = {
       ...(existingLog || {}),
       ...values,
-      id: editingId || existingLog?.id || uid('log'), updatedAt: String(values.updatedAt || existingLog?.updatedAt || ''), teacher: currentUser.nickname, employment: currentUser.employment === 'fulltime' ? 'fulltime' : 'pt', lessonStatus: 'held',
+      id: editingId || existingLog?.id || uid('log'), updatedAt: String(values.updatedAt || existingLog?.updatedAt || ''), contentRevision: String(values.contentRevision || ''), teacher: currentUser.nickname, employment: currentUser.employment === 'fulltime' ? 'fulltime' : 'pt', lessonStatus: 'held',
       // 舊版後端仍檢查這兩個欄位；保留相容值，正式畫面與新版日報只使用 issue。
       completed: String(values.issue || '').trim(), response: String(values.issue || '').trim(),
       expected, present, leave, absent, makeup: Number(values.makeup || 0), trial: Number(values.trial || 0), duration: Number(values.duration || 1.5),
@@ -1636,7 +1640,7 @@
     };
     item.pay = item.employment === 'pt' ? payFor(item) : 0;
     const submitButton = document.querySelector('[data-action="submit-log"]');
-    if (submitButton) { submitButton.disabled = true; submitButton.textContent = '正在儲存與產生日報…'; }
+    if (submitButton) { submitButton.disabled = true; submitButton.textContent = '正在儲存紀錄…'; }
     const result = PREVIEW_MODE ? { ok: true, lesson: item } : await API.saveTalentLesson(currentUser.nickname, item);
     if (!result?.ok) {
       if (submitButton) { submitButton.disabled = false; submitButton.innerHTML = `${icon(editingId ? 'save' : 'send', 16)}${editingId ? '更新紀錄' : '送出紀錄'}`; hydrateIcons(); }
@@ -1650,6 +1654,12 @@
     closeDrawer();
     renderApp();
     toast(result.warning || '本堂紀錄已送出並歸檔', result.warning ? 'warning' : 'success');
+    if (!PREVIEW_MODE && result.reportStatus === 'pending') {
+      API.regenerateTalentLessonReport(item.id).then(report => {
+        if (report?.ok && report.lesson && state.logs.find(log => log.id === item.id)?.contentRevision === report.lesson.contentRevision) { putLocalLesson(report.lesson); persist('日報已完成'); renderApp(); }
+        else toast('紀錄已送出；日報尚在處理，不必重送', 'warning');
+      }).catch(() => toast('紀錄已送出；日報由系統接續處理', 'warning'));
+    }
   }
 
   function openPrepEditor(existing = null) {
@@ -2008,6 +2018,8 @@
     }
     else if (action === 'close-dialog') closeDialog();
     else if (action === 'new-log') openLogEditor();
+    else if (action === 'register-past-cancellation') { closeDialog(); openLogEditor({ id: uid('log'), lessonStatus: 'cancelled', date: todayIso() }); }
+    else if (action === 'refresh-schedule') { closeDialog(); await loadCloudData(); renderApp(); }
     else if (action === 'edit-log') {
       const item = state.logs.find(log => log.id === control.dataset.id);
       if (item && item.date === todayIso() && normalizeName(item.teacher) === normalizeName(currentUser.nickname)) openLogEditor(item);

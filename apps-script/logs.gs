@@ -6,6 +6,10 @@
  * 儲存日誌（同日重複呼叫會覆蓋，過了 24h 鎖定後拒絕）
  */
 function saveLog(params) {
+  return withRecordWriteLock_(function () { return saveLogRecord_(params); });
+}
+
+function saveLogRecord_(params) {
   const { nickname, date } = params;
   if (!nickname || !date) return { ok: false, error: 'missing nickname or date' };
 
@@ -15,6 +19,14 @@ function saveLog(params) {
 
   const log_id = 'LOG-' + String(date).replace(/-/g, '') + '-' + nickname;
   const existing = findObject(SHEET_NAMES.LOGS, 'log_id', log_id);
+  if (existing && params.request_id && existing.last_request_id === params.request_id) {
+    return { ok: true, log_id: log_id, revision: existing.record_revision, duplicate: true };
+  }
+  if (existing && existing.submitted_at && params.submitted !== true) {
+    return { ok: false, code: 'ALREADY_SUBMITTED', error: '此日紀錄已正式送出，舊草稿未覆蓋；如需修改，請開啟已送出的紀錄' };
+  }
+  if (existing && recordConflict_(params.base_revision, existing.record_revision || existing.updated_at)) return recordConflictResult_();
+  ensureHeaders(getSheet(SHEET_NAMES.LOGS), ['record_revision', 'last_request_id', 'delivery_state', 'delivery_error', 'evidence_state', 'delivery_attempted_at']);
 
   // ===== 補繳判定 =====
   // 回填過去日期，且（該日沒有日誌 或 日誌已鎖定）→ 視為補繳：限當月、每月 3 次、評核時每次扣 2 分
@@ -46,7 +58,7 @@ function saveLog(params) {
     const existingScore = logContentScore_(existing);
     if (incomingScore < 20 && existingScore >= 100) {
       logSystem(nickname, 'skip_empty_autosave', log_id, { incoming: incomingScore, existing: existingScore });
-      return { ok: true, log_id, msg: '雲端已有內容，空白草稿未覆蓋', skipped: true };
+      return { ok: false, code: 'EMPTY_OVERWRITE_BLOCKED', log_id, revision: existing.record_revision || existing.updated_at, error: '雲端已有內容，空白草稿未覆蓋；請重新讀取並確認紀錄' };
     }
   }
 
@@ -68,6 +80,11 @@ function saveLog(params) {
     help_needed: params.help_needed ? true : false,
     help_content: params.help_content || '',
     attachments: params.attachments || '',
+    record_revision: Utilities.getUuid(),
+    last_request_id: String(params.request_id || ''),
+    delivery_state: params.submitted === true ? 'pending' : '',
+    delivery_error: '',
+    evidence_state: params.submitted === true ? 'pending' : '',
     updated_at: nowIso(),
     locked: false,
     is_makeup: isMakeup === true,
@@ -89,7 +106,13 @@ function saveLog(params) {
   // 附件 → Evidence：只在「正式提交」時寫入，且整份取代
   // （舊版每次草稿自動存都 append 一次，一天可灌出上百筆重複證據）
   if (params.submitted === true) {
-    replaceEvidenceForLog_(log_id, nickname, date, params.attachments);
+    try {
+      replaceEvidenceForLog_(log_id, nickname, date, params.attachments);
+      const savedRow = findObject(SHEET_NAMES.LOGS, 'log_id', log_id);
+      updateRow(SHEET_NAMES.LOGS, savedRow._row, { evidence_state: 'ready' });
+    } catch (error) {
+      console.error('Evidence index pending for ' + log_id);
+    }
   }
 
   // 處理發文（如果是主管）→ 寫入 Posts
@@ -99,7 +122,7 @@ function saveLog(params) {
 
   logSystem(nickname, 'save_log', log_id, { date });
 
-  return { ok: true, log_id, msg: '已儲存', is_makeup: isMakeup === true, makeup_remaining: makeupRemaining };
+  return { ok: true, log_id, revision: data.record_revision, msg: '已儲存', is_makeup: isMakeup === true, makeup_remaining: makeupRemaining };
 }
 
 /**
@@ -220,18 +243,20 @@ function listLogs(params) {
   if (to) logs = logs.filter(l => String(l.date) <= to);
 
   // 排序：新→舊
-  logs.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const orderKey = function (log) { return String(log.date) + '|' + String(log.log_id || ''); };
+  logs.sort((a, b) => orderKey(b).localeCompare(orderKey(a)));
 
-  // 解析 JSON 欄位
+  const total = logs.length;
+  if (params.cursor) logs = logs.filter(log => orderKey(log).localeCompare(String(params.cursor)) < 0);
+  const offset = Math.max(0, Number(params.offset) || 0);
+  const pageSize = limit ? Math.min(500, Math.max(1, Number(limit) || 100)) : 500;
+  const remaining = logs.length;
+  logs = logs.slice(offset, offset + pageSize);
   logs.forEach(l => {
-    ['kpi1_data','kpi2_data','kpi3_data','kpi4_data','kpi5_data','kpi6_data','attachments'].forEach(k => {
-      l[k] = parseJsonField(l[k]);
-    });
+    ['kpi1_data','kpi2_data','kpi3_data','kpi4_data','kpi5_data','kpi6_data','attachments'].forEach(k => { l[k] = parseJsonField(l[k]); });
   });
-
-  if (limit) logs = logs.slice(0, Number(limit));
-
-  return { ok: true, logs };
+  const hasMore = offset + logs.length < remaining;
+  return { ok: true, logs, total: total, next_offset: hasMore ? offset + logs.length : null, next_cursor: hasMore ? orderKey(logs[logs.length - 1]) : null };
 }
 
 /**
@@ -454,11 +479,12 @@ function uploadPhoto(params) {
   const ymF = getOrCreateChildFolder_(workF, ym);
 
   const bytes = Utilities.base64Decode(base64);
-  const filename = `K${kpi || 0}-${dateStr}-${Utilities.getUuid().slice(0, 8)}.${ext}`;
+  const filename = `K${kpi || 0}-${dateStr}.${ext}`;
   const blob = Utilities.newBlob(bytes, mt, filename);
-  const file = ymF.createFile(blob);
+  const file = createOrResumeKpiUpload_(ymF, blob, nickname, scopeKey, dateStr, base64);
   secureKpiReportPath_(root, deptF, userF, workF, ymF, user, scope, []);
   secureKpiDriveItem_(file, user, scope, []);
+  assertKpiFileReadable_(file, user, scope);
 
   const fileId = file.getId();
   const url = 'https://drive.google.com/file/d/' + fileId + '/view';
@@ -485,7 +511,7 @@ function uploadFile(params) {
     .replace(/[\\/:*?"<>|]/g, '-')
     .replace(/^\.+/, '')
     .slice(0, 120) || '教材檔案';
-  const uniqueName = Utilities.getUuid().slice(0, 8) + '-' + originalName;
+  const uniqueName = originalName;
   const bytes = Utilities.base64Decode(base64);
   const blob = Utilities.newBlob(bytes, mimeType || 'application/octet-stream', uniqueName);
 
@@ -499,9 +525,10 @@ function uploadFile(params) {
   const workLabel = scope === 'talent' ? '才藝' : scope === 'admin-marketing' ? '行政美宣' : '安親';
   const workF = getOrCreateChildFolder_(userF, workLabel);
   const ymF = getOrCreateChildFolder_(workF, ym);
-  const file = ymF.createFile(blob);
+  const file = createOrResumeKpiUpload_(ymF, blob, nickname, categoryKey, dateStr, base64);
   secureKpiReportPath_(root, deptF, userF, workF, ymF, user, scope, []);
   secureKpiDriveItem_(file, user, scope, []);
+  assertKpiFileReadable_(file, user, scope);
 
   const fileId = file.getId();
   const url = 'https://drive.google.com/file/d/' + fileId + '/view';

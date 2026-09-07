@@ -46,6 +46,111 @@ function getHeaders(sheet) {
   return sheet.getRange(1, 1, 1, lastCol).getValues()[0];
 }
 
+function withRecordWriteLock_(callback) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, code: 'WRITE_BUSY', error: '目前有其他資料正在儲存，內容仍保留，請稍後再試' };
+  try { return callback(); } finally { lock.releaseLock(); }
+}
+
+function recordConflict_(expected, current) {
+  return String(expected || '') !== String(current || '');
+}
+
+function recordConflictResult_() {
+  return { ok: false, code: 'RECORD_CONFLICT', error: '這筆資料已在其他裝置更新，您的內容仍保留；請先查看最新紀錄再決定修改，避免覆蓋' };
+}
+
+function withResourceLease_(resource, callback) {
+  const props = PropertiesService.getScriptProperties();
+  const key = 'RESOURCE_LEASE_' + resource;
+  const lease = String(Date.now() + 420000);
+  const acquired = withRecordWriteLock_(function () {
+    if (Number(props.getProperty(key) || 0) > Date.now()) return false;
+    props.setProperty(key, lease);
+    return true;
+  });
+  if (acquired !== true) return { ok: false, code: 'DELIVERY_IN_PROGRESS', error: '這份日報正在處理，不必重送紀錄' };
+  try { return callback(); }
+  finally { if (props.getProperty(key) === lease) props.deleteProperty(key); }
+}
+
+function reportClientMetrics(params) {
+  if (!params.__actor) return { ok: false, code: 'AUTH_REQUIRED' };
+  const events = (Array.isArray(params.events_batch) ? params.events_batch : []).slice(0, 50).map(function (item) {
+    return { action: String(item.action || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 70), ok: item.ok === true, code: String(item.code || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 70), ms: Math.max(0, Math.min(600000, Number(item.ms) || 0)) };
+  });
+  if (!events.length) return { ok: true };
+  const ss = getSS();
+  let sheet = ss.getSheetByName('ClientMetrics');
+  if (!sheet) {
+    const result = withRecordWriteLock_(function () {
+      const found = ss.getSheetByName('ClientMetrics') || ss.insertSheet('ClientMetrics');
+      ensureHeaders(found, ['at', 'role', 'events_json']);
+      return found;
+    });
+    if (result.ok === false) return result;
+    sheet = result;
+  }
+  sheet.appendRow([nowIso(), params.__actor.role, JSON.stringify(events)]);
+  return { ok: true, received: events.length };
+}
+
+function getReliabilityMetrics_() {
+  const sheet = getSS().getSheetByName('ClientMetrics');
+  if (!sheet || sheet.getLastRow() < 2) return { samples: 0, notice: '尚未收到正式操作統計' };
+  const from = Math.max(2, sheet.getLastRow() - 999);
+  const rows = sheet.getRange(from, 1, sheet.getLastRow() - from + 1, 3).getValues();
+  const actions = {};
+  rows.forEach(function (row) {
+    (parseJsonField(row[2]) || []).forEach(function (event) {
+      const group = actions[event.action] || (actions[event.action] = { samples: 0, failures: 0, uncertain: 0, times: [] });
+      group.samples += 1;
+      if (!event.ok) group.failures += 1;
+      if (event.code === 'REQUEST_TIMEOUT' || event.code === 'NETWORK_ERROR') group.uncertain += 1;
+      group.times.push(event.ms);
+    });
+  });
+  Object.keys(actions).forEach(function (key) {
+    const group = actions[key];
+    group.times.sort(function (a, b) { return a - b; });
+    group.p95ms = group.times[Math.ceil(group.times.length * 0.95) - 1];
+    delete group.times;
+  });
+  return { batches: rows.length, from: rows[0][0], to: rows[rows.length - 1][0], actions: actions, notice: '僅統計成功回傳至伺服器的操作回報，不包含尚未恢復連線的裝置' };
+}
+
+function backupSheetFingerprint_(sheet) {
+  const rows = sheet.getLastRow();
+  const columns = sheet.getLastColumn();
+  const chunks = [];
+  for (let start = 1; start <= rows && columns > 0; start += 500) {
+    const range = sheet.getRange(start, 1, Math.min(500, rows - start + 1), columns);
+    const values = range.getValues();
+    const formulas = range.getFormulas();
+    const cells = values.map(function (row, r) { return row.map(function (value, c) { return formulas[r][c] ? { formula: formulas[r][c] } : value; }); });
+    chunks.push(Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, JSON.stringify(cells), Utilities.Charset.UTF_8)));
+  }
+  return { name: sheet.getName(), rows: rows, columns: columns, chunks: chunks };
+}
+
+function backupKpiDatabaseAuto() {
+  const props = PropertiesService.getScriptProperties();
+  const source = getSS();
+  const folderId = props.getProperty('KPI_DATABASE_BACKUP_FOLDER');
+  const folder = folderId ? DriveApp.getFolderById(folderId) : DriveApp.createFolder('KPI資料庫備份');
+  if (!folderId) props.setProperty('KPI_DATABASE_BACKUP_FOLDER', folder.getId());
+  folder.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.VIEW);
+  const file = DriveApp.getFileById(source.getId()).makeCopy('KPI備份-' + todayStr() + '-' + Utilities.getUuid().slice(0, 8), folder);
+  file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.VIEW);
+  const restored = SpreadsheetApp.openById(file.getId());
+  const expected = source.getSheets().map(backupSheetFingerprint_);
+  const actual = restored.getSheets().map(backupSheetFingerprint_);
+  if (JSON.stringify(expected) !== JSON.stringify(actual)) throw new Error('備份內容與來源不同，可能備份期間仍有寫入；備份保留，但不標示驗證通過');
+  props.setProperty('KPI_LAST_DATABASE_BACKUP', JSON.stringify({ at: nowIso(), fileId: file.getId(), sheets: actual.length, verified: 'reopened-values-and-formulas-matched' }));
+  logSystem('system', 'database_backup', file.getId(), { sheets: actual.length });
+  return { ok: true, fileId: file.getId(), sheets: actual.length };
+}
+
 /**
  * date 欄正規化：Sheets 會把 yyyy-MM-dd 自動轉成 Date 物件，
  * 讀出來一律轉回字串，否則所有「按月/日比對」（String(l.date) >= from 等）全部失效

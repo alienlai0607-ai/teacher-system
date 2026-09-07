@@ -93,14 +93,17 @@
       throw new TypeError(`QA 模擬網路中斷：${action}`);
     }
 
-    let result = { ok: true };
+    let result = { ok: false, code: 'QA_UNIMPLEMENTED_ACTION', error: `測試介面尚未實作 ${action}，不可視為成功` };
+    if (action === 'reportClientMetrics') result = { ok: true };
     if (action === 'ping') result = { ok: true, time: new Date().toISOString() };
     else if (action === 'getSessionIdentity') result = { ok: true, user: { nickname, role, department, status: 'active' } };
     else if (action === 'listCoursePreps') {
       const target = normalizeNickname(payload.nickname);
       result = {
         ok: true,
-        records: Object.values(cloudStore.coursePreps).filter(record => !target || normalizeNickname(record.nickname) === target),
+        records: Object.values(cloudStore.coursePreps).filter(record => record.status !== 'deleted' && (!target || normalizeNickname(record.nickname) === target)),
+        deletedIds: Object.values(cloudStore.coursePreps).filter(record => record.status === 'deleted' && (!target || normalizeNickname(record.nickname) === target)).map(record => record.prepId),
+        complete: true,
       };
     }
     else if (action === 'listTasks') {
@@ -165,6 +168,9 @@
       result = { ok: true, feedback };
     }
     else if (action === 'listUsers') result = { ok: true, users: [] };
+    else if (action === 'listStudents') {
+      result = { ok: true, students: [{ student_id: 'qa-student-1', name: '驗收學生', teacher: nickname, department }] };
+    }
     else if (action === 'getSystemReadiness') result = { ok: true, services: { productionIntegrity: true } };
     else if (action === 'uploadFile' || action === 'uploadPhoto') {
       const fileCounter = Number(cloudStore.fileCounter || 0) + 1;
@@ -200,22 +206,43 @@
     } else if (action === 'saveCoursePrep') {
       const updatedAt = new Date().toISOString();
       const key = `${normalizeNickname(payload.nickname)}:${payload.prep?.id || updatedAt}`;
+      const existing = cloudStore.coursePreps[key];
+      if (existing?.status === 'deleted') return new Response(JSON.stringify({ ok: false, code: 'RECORD_DELETED' }));
+      if (existing && existing.revision !== (payload.prep.cloudRevision || payload.prep.cloudUpdatedAt)) return new Response(JSON.stringify({ ok: false, code: 'RECORD_CONFLICT' }));
+      const revision = crypto.randomUUID();
       cloudStore.coursePreps[key] = {
+        prepId: payload.prep.id, revision, lastRequestId: payload.request_id,
         nickname: payload.nickname,
         prep: cloneWithoutSession(payload.prep),
         plan: cloneWithoutSession(payload.plan),
         updatedAt,
       };
       persistCloudStore();
-      result = { ok: true, updated_at: updatedAt };
+      result = { ok: true, prep_id: payload.prep.id, revision, updated_at: updatedAt };
+    } else if (action === 'deleteCoursePrep') {
+      const record = Object.values(cloudStore.coursePreps).find(row => row.prepId === payload.prep_id);
+      if (record && normalizeNickname(payload.confirmation_name) === normalizeNickname(record.nickname)) {
+        record.status = 'deleted';
+        persistCloudStore();
+        result = { ok: true, removed: true };
+      } else result = { ok: false, error: '姓名確認不正確' };
     } else if (action === 'saveLog') {
       const savedAt = new Date().toISOString();
       const key = `${normalizeNickname(payload.nickname)}:${payload.date || savedAt.slice(0, 10)}`;
+      const existing = cloudStore.logs[key];
+      if (existing?.last_request_id && existing.last_request_id === payload.request_id) return new Response(JSON.stringify({ ok: true, log_id: existing.log_id, revision: existing.record_revision, duplicate: true }));
+      if (existing?.submitted_at && payload.submitted !== true) return new Response(JSON.stringify({ ok: false, code: 'ALREADY_SUBMITTED' }));
+      if (existing && String(existing.record_revision || '') !== String(payload.base_revision || '')) return new Response(JSON.stringify({ ok: false, code: 'RECORD_CONFLICT' }));
       const storedLog = cloneWithoutSession(payload);
+      storedLog.log_id = `LOG-${payload.date.replaceAll('-', '')}-${payload.nickname}`;
+      storedLog.record_revision = crypto.randomUUID();
+      storedLog.last_request_id = payload.request_id;
+      storedLog.updated_at = savedAt;
+      storedLog.submitted_at = payload.submitted === true ? savedAt : '';
       storedLog.saved_at = savedAt;
       cloudStore.logs[key] = storedLog;
       persistCloudStore();
-      result = { ok: true, log_id: payload.log_id || key, saved_at: savedAt };
+      result = { ok: true, log_id: storedLog.log_id, revision: storedLog.record_revision, saved_at: savedAt };
     } else if (action === 'sendSubmitPdf') {
       result = { ok: true, pdf_url: 'https://drive.google.com/file/d/QA-PDF/view', notification: { allReached: true, pending: [] } };
     } else if (action === 'addFeedback') {

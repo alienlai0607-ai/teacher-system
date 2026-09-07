@@ -310,7 +310,7 @@ function authorizeTaskResource_(actor, taskId, deleting) {
  * viewer / operator / evaluator，並對資料對象再次做部門範圍判斷。
  */
 function authorizeApiAction_(action, params, actor) {
-  if (action === 'getSessionIdentity') return;
+  if (action === 'getSessionIdentity' || action === 'reportClientMetrics') return;
 
   const adminOnly = [
     'addUser', 'updateUser', 'approveUser', 'deleteUser', 'setConfig', 'setupSystemAutomation',

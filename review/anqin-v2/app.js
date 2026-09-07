@@ -517,6 +517,7 @@
         cloudFileId,
         uploadStatus: attachment.uploadStatus || (hasCloudCopy ? 'uploaded' : dataUrl ? 'local' : 'incomplete'),
         uploadError: attachment.uploadError || '',
+        legacyMissing: Boolean(attachment.legacyMissing && !hasCloudCopy && !dataUrl),
         placeholder: Boolean(!hasCloudCopy && !dataUrl),
         recorded,
       };
@@ -545,6 +546,7 @@
     if (record.cloudUrl || record.cloudFileId) record.dataUrl = '';
     record.uploadStatus = record.uploadStatus || (record.cloudUrl || record.cloudFileId ? 'uploaded' : record.dataUrl ? 'local' : 'incomplete');
     record.placeholder = Boolean(record.fileName && !record.dataUrl && !record.cloudUrl && !record.cloudFileId);
+    record.legacyMissing = Boolean(record.legacyMissing && record.placeholder);
     return record;
   }
 
@@ -590,6 +592,7 @@
 
   function reconcileLegacyPlans(parsed) {
     parsed.lessonPlans.forEach(plan => {
+      if (plan.archived || (parsed.integration?.deletedPrepIds || []).includes(plan.sourceActivityId)) return;
       let linkedPrep = parsed.activities.find(activity => activity.type === 'lessonprep' && (activity.id === plan.sourceActivityId || activity.planId === plan.id));
       if (!linkedPrep) {
         const titleKey = normalizePrepTitle(plan.title);
@@ -648,6 +651,7 @@
     };
     contact.summary = mergeLegacyText(contact.topic, contact.summary);
     contact.decision = mergeLegacyText(contact.decision, contact.nextAction);
+    contact.communicationStatus = contact.communicationStatus === 'waiting_reply' ? 'waiting_reply' : 'completed';
     contact.nextAction = '';
     contact.dueDate = '';
     contact.status = 'closed';
@@ -892,6 +896,9 @@
   if (startupStateNeedsRewrite) startupRecoverySaved = rewriteRecoveredStartupState(state);
   let saveTimer = null;
   let cloudDraftTimer = null;
+  let cloudDraftInFlight = null;
+  let cloudDraftGeneration = 0;
+  let dailyCloudConflict = null;
   let taskSyncTimer = null;
   const pendingTaskSyncIds = new Set();
   let filterTimer = null;
@@ -1689,7 +1696,7 @@
 
     const contacts = state.contacts.filter(item => item.teacher === teacher && inMonth(item.date)).slice().sort(byDate);
     rows.push(['【親師溝通】'], ['日期', '學生', '聯繫方式', '孩子狀況與老師處理', '家長回應與共同決定']);
-    contacts.forEach(item => rows.push([item.date, item.student, item.channel, item.summary, item.decision]));
+    contacts.forEach(item => rows.push([item.date, item.student, item.channel, item.summary, contactDecisionText(item)]));
     rows.push([]);
 
     const operations = operationRecords().filter(item => item.dutyOwner === teacher && inMonth(item.date)).slice().sort(byDate);
@@ -2229,6 +2236,15 @@
     };
   }
 
+  function dailyKpiOptional(date = state.daily.date) {
+    const day = new Date(String(date).slice(0, 10) + 'T00:00:00Z').getUTCDay();
+    return day === 0 || day === 6;
+  }
+
+  function hasDailyRecords() {
+    return todayActivities().length > 0 || state.contacts.some(item => item.date === state.daily.date && item.teacher === state.context.teacher);
+  }
+
   function dailyCompletion() {
     const status = todaySectionStatus();
     const requiredSections = ['activities', 'parents', 'operations'];
@@ -2256,8 +2272,8 @@
       ${pageHead('今日工作紀錄', `${formatDate(state.daily.date)} · ${state.context.department} · ${state.context.teacher}`, actions)}
       ${renderGuideInvite()}
       <div class="status-strip">
-        <div class="status-cell"><div class="status-label">今日完成度</div><div class="status-value">${completion}%</div><div class="status-note">${state.daily.status === 'submitted' ? '已送出' : needsResubmit ? '待重新送出' : '草稿'}</div></div>
-        <div class="status-cell"><div class="status-label">今日課程</div><div class="status-value">${Number(tracks.academic.covered || tracks.enrichment.covered)}/1</div><div class="status-note">學科內／學科外擇一</div></div>
+        <div class="status-cell"><div class="status-label">${dailyKpiOptional() ? '今日填報' : '今日完成度'}</div><div class="status-value">${dailyKpiOptional() ? '免填' : `${completion}%`}</div><div class="status-note">${dailyKpiOptional() ? '週六、週日不需填 KPI' : state.daily.status === 'submitted' ? '已送出' : needsResubmit ? '待重新送出' : '草稿'}</div></div>
+        <div class="status-cell"><div class="status-label">今日課程</div><div class="status-value">${dailyKpiOptional() ? activities.length : `${Number(tracks.academic.covered || tracks.enrichment.covered)}/1`}</div><div class="status-note">${dailyKpiOptional() ? '自願記錄，不列缺交' : '學科內／學科外擇一'}</div></div>
         <div class="status-cell"><div class="status-label">備課／成果</div><div class="status-value">${prepReady}/${prepRequired.length}</div><div class="status-note">成果 ${evidenceReadyCount}/${evidenceRequired.length} 筆</div></div>
         <div class="status-cell"><div class="status-label">待辦事項</div><div class="status-value">${openTasks().length}</div><div class="status-note">${openTasks().filter(item => item.priority === 'high').length} 項優先</div></div>
       </div>
@@ -2283,7 +2299,7 @@
     const ready = activities.filter(activityComplete).length;
     return `<div class="content-grid">
       <section class="panel">
-        <div class="panel-head"><div><div class="panel-title">${icon('clipboard-list')}工作紀錄</div><div class="panel-subtitle">學科內或學科外每天至少記錄一筆 · 完整 ${ready}/${activities.length || 0}</div></div></div>
+        <div class="panel-head"><div><div class="panel-title">${icon('clipboard-list')}工作紀錄</div><div class="panel-subtitle">${dailyKpiOptional() ? '週末免填，可自願記錄' : '學科內或學科外每天至少記錄一筆'} · 完整 ${ready}/${activities.length || 0}</div></div></div>
         <div class="panel-body">
           <div class="daily-track-requirements">${['academic', 'enrichment'].map(track => {
             const meta = activityTrackMeta(track);
@@ -2291,6 +2307,7 @@
             const fullyComplete = status.covered && status.complete === status.count;
             const progress = status.count
               ? `${status.complete}/${status.count} 筆完整`
+              : dailyKpiOptional() ? '週末免填'
               : tracks.academic.covered || tracks.enrichment.covered
                 ? '今天沒有這類課程可留白'
                 : '尚未記錄；兩類至少選一類填寫';
@@ -2299,7 +2316,7 @@
             return `<article class="daily-track-row ${status.covered ? 'is-covered' : ''} ${fullyComplete ? 'is-complete' : ''}"><span class="daily-track-icon">${icon(meta.icon, 20)}</span><div><strong>${esc(meta.label)}</strong><div class="daily-track-progress">${esc(progress)}</div></div><button type="button" class="btn btn-small ${buttonClass}" data-action="open-activity" data-track="${track}">${icon(status.covered ? 'plus' : 'plus-circle', 14)}${buttonLabel}</button></article>`;
           }).join('')}</div>
           <div class="section-divider"></div>
-          ${activities.length ? `<div class="activity-list">${activities.map(renderActivityRow).join('')}</div>` : renderEmpty('clipboard-plus', '尚無工作紀錄', '請依今天實際內容，新增一筆學科內或學科外紀錄。', '', '')}
+          ${activities.length ? `<div class="activity-list">${activities.map(renderActivityRow).join('')}</div>` : renderEmpty('clipboard-plus', dailyKpiOptional() ? '週末免填 KPI' : '尚無工作紀錄', dailyKpiOptional() ? '不列缺交，備課檔案與歷史紀錄仍可開啟。' : '請依今天實際內容，新增一筆學科內或學科外紀錄。', '', '')}
         </div>
       </section>
       <aside class="stack">
@@ -2432,7 +2449,7 @@
       <div class="activity-main">
         <div class="activity-title-row"><span class="activity-title">${esc(item.student)}</span><span class="badge blue">${esc(item.channel)}</span></div>
         <div class="activity-outcome"><strong>孩子狀況與老師處理：</strong>${esc(item.summary)}</div>
-        <div class="activity-outcome"><strong>家長回應與共同決定：</strong>${esc(item.decision)}</div>
+        <div class="activity-outcome"><strong>家長回應與共同決定：</strong>${esc(contactDecisionText(item))}</div>
       </div>
       <div class="activity-actions"><button type="button" class="icon-button" data-action="edit-contact" data-contact-id="${item.id}" aria-label="編輯親師溝通" title="編輯親師溝通">${icon('pencil', 16)}</button></div>
     </article>`;
@@ -2441,7 +2458,7 @@
   function renderOperationPhoto(item, key, label) {
     const hasPhoto = Boolean(item.fileName);
     const previewUrl = attachmentPreviewUrl(item);
-    return `<div id="operation-preview-${key}" class="operation-photo-preview ${previewUrl ? 'has-image' : ''}">${previewUrl ? `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(item)} alt="${esc(label)}證據預覽">` : `<span>${icon('image-plus', 17)}</span>`}<div><strong id="operation-photo-name-${key}">${hasPhoto ? '更換照片' : '選擇照片'}</strong><small>${hasPhoto ? `${esc(item.fileName)} · ${esc(item.size || '已加入')}` : '每項一張'}</small></div></div>`;
+    return `<div id="operation-preview-${key}" class="operation-photo-preview ${previewUrl ? 'has-image' : ''}">${previewUrl ? `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(item)} alt="${esc(label)}證據預覽">` : `<span>${icon('image-plus', 17)}</span>`}<div><strong id="operation-photo-name-${key}">${hasPhoto ? '更換照片' : '選擇照片'}</strong><small>${item.legacyMissing ? '舊附件原檔遺失，不影響儲存或送出。' : hasPhoto ? `${esc(item.fileName)} · ${esc(item.size || '已加入')}` : '每項一張'}</small></div></div>`;
   }
 
   function renderTodayOperations() {
@@ -2478,6 +2495,9 @@
   }
 
   function renderTodaySubmit() {
+    if (dailyKpiOptional() && !hasDailyRecords()) {
+      return `<div class="notice-band success">${icon('calendar-check', 20)}<div><div class="notice-title">週末免填 KPI，不需送出</div><div class="notice-copy">備課檔案與歷史紀錄仍可隨時開啟。</div></div></div>`;
+    }
     const completion = dailyCompletion();
     const submitting = integrationRuntime.cloudStatus === 'submitting';
     const needsResubmit = dailyNeedsResubmit();
@@ -2485,13 +2505,14 @@
     const tracks = dailyTrackStatus();
     const summary = buildDailySummary();
     const blockers = [];
-    if (!dailyRequiredTracksReady()) blockers.push('新增一筆學科內或學科外紀錄');
-    if (dailyRequiredTracksReady() && !status.activities) blockers.push('已新增的課程需選擇備課檔案並完成課後回饋；班級經營只需工作欄位及可判讀成果證據');
-    if (!status.parents) blockers.push('新增一筆親師溝通紀錄，或確認已完成門口交接');
-    if (!status.operations) blockers.push('今日值日班務尚未確認');
+    if (!dailyKpiOptional() && !dailyRequiredTracksReady()) blockers.push('新增一筆學科內或學科外紀錄');
+    if (!dailyKpiOptional() && dailyRequiredTracksReady() && !status.activities) blockers.push('已新增的課程需選擇備課檔案並完成課後回饋；班級經營只需工作欄位及可判讀成果證據');
+    if (!dailyKpiOptional() && !status.parents) blockers.push('新增一筆親師溝通紀錄，或確認已完成門口交接');
+    if (!dailyKpiOptional() && !status.operations) blockers.push('今日值日班務尚未確認');
+    if (dailyKpiOptional() && !todayActivities().every(activityComplete)) blockers.push('已新增的工作紀錄尚未完整');
     return `<div class="content-grid wide-aside">
       <section class="panel">
-        <div class="panel-head"><div><div class="panel-title">${icon(needsResubmit ? 'refresh-cw' : 'send')}${needsResubmit ? '確認並重新送出' : '確認並送出'}</div></div><span class="badge ${completion === 100 ? 'green' : 'yellow'}">完成度 ${completion}%</span></div>
+        <div class="panel-head"><div><div class="panel-title">${icon(needsResubmit ? 'refresh-cw' : 'send')}${needsResubmit ? '確認並重新送出' : '確認並送出'}</div></div><span class="badge ${dailyKpiOptional() || completion === 100 ? 'green' : 'yellow'}">${dailyKpiOptional() ? '週末自願記錄' : `完成度 ${completion}%`}</span></div>
         <div class="panel-body">
           ${state.daily.submittedAt ? `<div class="notice-band success">${icon('circle-check', 19)}<div><div class="notice-title">已於 ${formatTime(state.daily.submittedAt)} 送出</div><div class="notice-copy">${state.integration.cloudSyncEnabled ? '修改後需重新送出，主管才會收到最新版本。' : '目前為審查紀錄，未通知真人主管。'}</div></div></div>` : ''}
           ${needsResubmit ? `<div class="notice-band warning">${icon('refresh-cw', 19)}<div><div class="notice-title">內容已修改，尚未重新送出</div><div class="notice-copy">主管目前看到的是前一版；按下重新送出後才會更新。</div></div></div>` : ''}
@@ -2508,8 +2529,8 @@
       </section>
       <aside class="stack">
         <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('list-checks')}送出檢查</div></div></div><div class="panel-body"><div class="check-list">
-          ${[['activities', '工作紀錄與證據'], ['parents', '親師溝通或門口交接'], ['operations', '值日班務']].map(([key, label]) => {
-            const done = status[key];
+          ${(dailyKpiOptional() ? [['activities', '自願新增的工作紀錄與證據']] : [['activities', '工作紀錄與證據'], ['parents', '親師溝通或門口交接'], ['operations', '值日班務']]).map(([key, label]) => {
+            const done = dailyKpiOptional() ? todayActivities().every(activityComplete) : status[key];
             return `<div class="check-item ${done ? 'done' : 'pending'}"><span class="check-icon">${icon(done ? 'check' : 'minus', 12)}</span><span>${label}</span></div>`;
           }).join('')}
         </div></div></section>
@@ -3133,9 +3154,24 @@
     return `<form id="contact-form" data-form="contact" data-draft-form><input type="hidden" name="id" value="${esc(value.id)}"><div class="form-grid">
       <div class="form-field"><label class="form-label" for="contact-student">學生 <span class="required">*</span></label><select id="contact-student" name="student" required><option value="">請選擇</option>${renderStudentOptions(item?.teacher || state.context.teacher, value.student)}</select></div>
       <div class="form-field"><label class="form-label" for="contact-channel">聯繫方式 <span class="required">*</span></label><select id="contact-channel" name="channel" required><option value="門口面談" ${['門口面談', '面談'].includes(value.channel) ? 'selected' : ''}>門口／面談</option><option value="LINE" ${value.channel === 'LINE' ? 'selected' : ''}>LINE</option><option value="電話" ${value.channel === '電話' ? 'selected' : ''}>電話</option><option value="聯絡簿" ${value.channel === '聯絡簿' ? 'selected' : ''}>聯絡簿</option><option value="其他" ${value.channel === '其他' ? 'selected' : ''}>其他</option></select></div>
-      <div class="form-field span-2"><label class="form-label" for="contact-summary">孩子狀況與老師處理 <span class="required">*</span></label><textarea id="contact-summary" name="summary" minlength="8" placeholder="客觀記錄今天發生什麼，以及老師已如何處理。" required>${esc(communication)}</textarea></div>
-      <div class="form-field span-2"><label class="form-label" for="contact-decision">家長回應與共同決定 <span class="required">*</span></label><textarea id="contact-decision" name="decision" minlength="8" placeholder="記錄家長的回應，以及雙方決定接下來怎麼做。" required>${esc(agreementAction)}</textarea></div>
+      <div class="form-field span-2"><label class="form-label" for="contact-summary">孩子狀況與老師處理 <span class="required">*</span></label><textarea id="contact-summary" name="summary" placeholder="客觀記錄今天發生什麼，以及老師已如何處理。" required>${esc(communication)}</textarea></div>
+      <div class="form-field span-2"><label class="form-label" for="contact-status">聯繫結果 <span class="required">*</span></label><select id="contact-status" name="communicationStatus" data-change="contact-status"><option value="completed" ${value.communicationStatus === 'completed' ? 'selected' : ''}>已完成溝通</option><option value="waiting_reply" ${value.communicationStatus === 'waiting_reply' ? 'selected' : ''}>已聯繫，待家長回覆</option></select></div>
+      <div class="form-field span-2" id="contact-decision-field" ${value.communicationStatus === 'waiting_reply' ? 'hidden' : ''}><label class="form-label" for="contact-decision">家長回應與共同決定 <span class="required">*</span></label><textarea id="contact-decision" name="decision" placeholder="記錄家長的回應，以及雙方決定接下來怎麼做。" ${value.communicationStatus === 'waiting_reply' ? 'disabled' : 'required'}>${esc(agreementAction)}</textarea></div>
     </div></form>`;
+  }
+
+  function contactDecisionText(item) {
+    return item.communicationStatus === 'waiting_reply' ? '已聯繫，待家長回覆' : String(item.decision || '');
+  }
+
+  function updateContactStatusField() {
+    const status = $('#contact-status');
+    const decision = $('#contact-decision');
+    if (!status || !decision) return;
+    const waiting = status.value === 'waiting_reply';
+    $('#contact-decision-field').hidden = waiting;
+    decision.disabled = waiting;
+    decision.required = !waiting;
   }
 
   function defaultEvidenceType(activity) {
@@ -3161,7 +3197,7 @@
 
   function attachmentRecorded(item) {
     if (!item) return false;
-    return attachmentAvailable(item) || (item.recorded !== false && Boolean(String(item.fileName || item.name || '').trim()));
+    return attachmentAvailable(item) || Boolean(item.legacyMissing && String(item.fileName || item.name || '').trim());
   }
 
   function evidenceReady(data) {
@@ -3194,6 +3230,12 @@
   function applyCloudPreview(fileId, dataUrl) {
     if (!fileId || !dataUrl) return;
     cloudPreviewCache.set(fileId, dataUrl);
+    let size = [...cloudPreviewCache.values()].reduce((sum, value) => sum + value.length, 0);
+    while (cloudPreviewCache.size > 24 || (size > 12 * 1024 * 1024 && cloudPreviewCache.size > 1)) {
+      const oldest = cloudPreviewCache.keys().next().value;
+      size -= cloudPreviewCache.get(oldest).length;
+      cloudPreviewCache.delete(oldest);
+    }
     $$('img[data-cloud-preview-id]').forEach(image => {
       if (image.dataset.cloudPreviewId !== fileId || image.src === dataUrl) return;
       image.src = dataUrl;
@@ -3210,7 +3252,7 @@
     });
     if (!window.API?.getAttachmentPreviews) return;
     const now = Date.now();
-    const fileIds = [...new Set(images.map(image => image.dataset.cloudPreviewId).filter(Boolean))]
+    const fileIds = [...new Set(images.filter(image => !String(image.src || '').startsWith('data:image/')).map(image => image.dataset.cloudPreviewId).filter(Boolean))]
       .filter(fileId => !cloudPreviewCache.has(fileId) && !cloudPreviewPending.has(fileId)
         && now - Number(cloudPreviewFailedAt.get(fileId) || 0) > 60000)
       .slice(0, 12);
@@ -3239,7 +3281,7 @@
       const retryAt = Date.now();
       const hasNextBatch = $$('img[data-cloud-preview-id]').some(image => {
         const fileId = image.dataset.cloudPreviewId;
-        return fileId && !cloudPreviewCache.has(fileId) && !cloudPreviewPending.has(fileId)
+        return fileId && !String(image.src || '').startsWith('data:image/') && !cloudPreviewCache.has(fileId) && !cloudPreviewPending.has(fileId)
           && retryAt - Number(cloudPreviewFailedAt.get(fileId) || 0) > 60000;
       });
       if (hasNextBatch) scheduleCloudPreviewHydration();
@@ -3278,7 +3320,7 @@
       return `<article class="evidence-attachment-item" data-attachment-id="${esc(attachment.id)}">
         <div class="evidence-attachment-preview">${preview}<span class="evidence-attachment-index">${index + 1}</span></div>
         <div class="evidence-attachment-main"><div class="evidence-attachment-head">${fileName}<span class="badge outline">${esc(attachment.size || '已加入')}</span></div>
-        ${attachment.note ? `<small>舊版補充說明：${esc(attachment.note)}</small>` : ''}</div>
+        ${attachment.legacyMissing ? '<small>舊附件原檔遺失，不影響儲存或送出。</small>' : ''}${attachment.note ? `<small>舊版補充說明：${esc(attachment.note)}</small>` : ''}</div>
         ${editable ? `<button type="button" class="icon-button evidence-attachment-remove" data-action="remove-evidence-attachment" data-attachment-id="${esc(attachment.id)}" aria-label="移除 ${esc(attachment.fileName)}" title="移除">${icon('x', 15)}</button>` : ''}
       </article>`;
     }).join('')}</div>`;
@@ -3289,7 +3331,7 @@
     if (!primary) return '<div><div class="empty-icon">' + icon('image-plus', 24) + '</div><div class="empty-title">尚未選擇檔案</div><div class="empty-copy">加入照片後即可預覽；重點位置標記為選用功能。</div></div>';
     const previewUrl = attachmentPreviewUrl(primary);
     if (previewUrl) return `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(primary)} alt="證據預覽">${renderPins(data.pins)}`;
-    return `<div><div class="empty-icon">${icon(primary.mimeType === 'application/pdf' ? 'file-text' : 'file-check-2', 24)}</div><div class="empty-title">${esc(primary.fileName)}</div><div class="empty-copy">檔案已加入；主管可直接開啟原檔查看內容。</div></div>`;
+    return `<div><div class="empty-icon">${icon(primary.mimeType === 'application/pdf' ? 'file-text' : 'file-check-2', 24)}</div><div class="empty-title">${esc(primary.fileName)}</div><div class="empty-copy">${primary.legacyMissing ? '舊附件原檔遺失，文字紀錄保留，不影響儲存或送出。' : materialCloudUrl(primary) ? '可開啟原檔查看內容。' : '附件尚未上傳，請重新選擇檔案。'}</div></div>`;
   }
 
   function renderEvidenceForm(activity, evidence) {
@@ -3361,7 +3403,7 @@
     const results = source.activities.map(item => [item, activityFeedbackSummary(item)]).filter(([, value]) => value).map(([item, value]) => `${item.title}：${value}`);
     return {
       keyChange: results.slice(0, 6).join('；') || '本週尚無可彙整的工作結果。',
-      priorityRisks: source.contacts.slice(0, 5).map(item => `${item.student}：${item.summary}；家長回應：${item.decision}`).join('；') || '本週沒有需要補充的親師溝通紀錄。',
+      priorityRisks: source.contacts.slice(0, 5).map(item => `${item.student}：${item.summary}；聯繫結果：${contactDecisionText(item)}`).join('；') || '本週沒有需要補充的親師溝通紀錄。',
       nextWeek: source.actions.slice(0, 5).map(item => `${formatShortDate(item.dueDate)} ${item.title}`).join('；') || '目前沒有未完成的待辦事項。',
     };
   }
@@ -3371,7 +3413,7 @@
   }
 
   function weeklyCoverageRows(source) {
-    const dates = [...new Set(source.activities.map(activity => activity.date).filter(Boolean))].sort((a, b) => String(b).localeCompare(String(a))).slice(0, 5);
+    const dates = [...new Set(source.activities.map(activity => activity.date).filter(date => date && !dailyKpiOptional(date)))].sort((a, b) => String(b).localeCompare(String(a))).slice(0, 5);
     return dates.map(date => {
       const activities = source.activities.filter(activity => activity.date === date);
       const tracks = dailyTrackStatus(activities);
@@ -3738,14 +3780,13 @@
     const readiness = integrationRuntime.readiness;
     const readinessKnown = integrationRuntime.readinessStatus === 'ok';
     const readinessChecks = [
-      ['LINE 通知服務', Boolean(readiness?.services?.line)],
-      ['APP 推播服務', Boolean(readiness?.services?.oneSignalApp && readiness?.services?.oneSignalKey)],
-      ['教材原檔上傳', Boolean(readiness?.services?.materialUpload)],
-      ['備課教案雲端建檔', Boolean(readiness?.services?.coursePrepArchive)],
-      ['待辦事項雲端同步', Boolean(readiness?.services?.taskCloudSync)],
+      ['LINE 通知憑證', Boolean(readiness?.services?.line)],
+      ['APP 推播憑證', Boolean(readiness?.services?.oneSignalApp && readiness?.services?.oneSignalKey)],
       ['每日 21:30 PDF 統整', Boolean(readiness?.triggers?.dailyKpiPdf)],
       ['早上 07:30 事項提醒', Boolean(readiness?.triggers?.dailyTaskMorning ?? readiness?.triggers?.dailyTaskReminder)],
       ['晚上 20:00 明日預告', Boolean(readiness?.triggers?.dailyTaskEvening ?? readiness?.triggers?.dailyTaskReminder)],
+      ['未完成交付重試排程', Boolean(readiness?.triggers?.deliveryRetry)],
+      ['資料庫備份排程', Boolean(readiness?.triggers?.databaseBackup)],
     ];
     const managerNickname = backendNickname(state.context.manager);
     const visibleManagerRows = rows.filter(row => row.person.role === 'manager');
@@ -3784,7 +3825,7 @@
             </div>
           </section>
 
-          ${state.ui.role === 'manager' ? `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('list-checks')}正式上線檢查</div><div class="panel-subtitle">${esc(integrationRuntime.readinessMessage || '按重新檢查取得目前設定')}</div></div><div class="panel-head-actions">${statusBadge(readinessKnown && readinessChecks.every(([, ready]) => ready) ? '全部完成' : readinessKnown ? '仍有待設定' : '待檢查', readinessKnown && readinessChecks.every(([, ready]) => ready) ? 'green' : readinessKnown ? 'red' : 'outline')}${session?.role === 'admin' ? `<button type="button" class="btn btn-small" data-action="setup-system-automation">${icon('calendar-clock', 14)}補齊排程</button>` : ''}</div></div><div class="panel-body"><div class="check-list">${readinessChecks.map(([label, ready]) => `<div class="check-item ${readinessKnown && ready ? 'done' : 'pending'}"><span class="check-icon">${icon(readinessKnown && ready ? 'check' : 'minus', 12)}</span><span>${esc(label)}</span><span class="badge ${readinessKnown ? (ready ? 'green' : 'red') : 'outline'}">${readinessKnown ? (ready ? '已完成' : '待設定') : '待檢查'}</span></div>`).join('')}</div></div></section>` : ''}
+          ${state.ui.role === 'manager' ? `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('list-checks')}通知與排程設定</div><div class="panel-subtitle">${esc(integrationRuntime.readinessMessage || '尚未讀取設定')}</div></div><div class="panel-head-actions">${statusBadge(readinessKnown && readinessChecks.every(([, ready]) => ready) ? '設定齊備' : readinessKnown ? '仍有待設定' : '待檢查', readinessKnown && readinessChecks.every(([, ready]) => ready) ? 'green' : readinessKnown ? 'red' : 'outline')}${session?.role === 'admin' ? `<button type="button" class="btn btn-small" data-action="setup-system-automation">${icon('calendar-clock', 14)}補齊排程</button>` : ''}</div></div><div class="panel-body"><div class="check-list">${readinessChecks.map(([label, ready]) => `<div class="check-item ${readinessKnown && ready ? 'done' : 'pending'}"><span class="check-icon">${icon(readinessKnown && ready ? 'check' : 'minus', 12)}</span><span>${esc(label)}</span><span class="badge ${readinessKnown ? (ready ? 'green' : 'red') : 'outline'}">${readinessKnown ? (ready ? '已設定' : '待設定') : '待檢查'}</span></div>`).join('')}</div></div></section>` : ''}
 
           <section class="panel">
             <div class="panel-head"><div><div class="panel-title">${icon('users-round')}帳號與新人綁定</div><div class="panel-subtitle">${integrationRuntime.checkedAt ? `上次檢查 ${formatTime(integrationRuntime.checkedAt)}` : '檢查後顯示綁定狀態'}</div></div>${sessionCanManageAccounts(session) ? `<button type="button" class="btn btn-small" data-action="open-account-admin">${icon('user-cog', 15)}人員管理</button>` : ''}</div>
@@ -3838,7 +3879,7 @@
       if (!result?.ok) integrationRuntime.apiMessage = `API 可連線；人員資料讀取失敗：${result?.error || '未知錯誤'}`;
       integrationRuntime.readinessStatus = readinessResult?.ok ? 'ok' : 'error';
       integrationRuntime.readiness = readinessResult?.ok ? readinessResult : null;
-      integrationRuntime.readinessMessage = readinessResult?.ok ? '已完成後端設定檢查' : (readinessResult?.error || '設定檢查失敗');
+      integrationRuntime.readinessMessage = readinessResult?.ok ? '已讀取設定；未驗證實際交付結果' : (readinessResult?.error || '設定讀取失敗');
     } else {
       integrationRuntime.userLoadStatus = 'restricted';
     }
@@ -3878,14 +3919,35 @@
 
   function hydrateCloudSnapshotAttachments(snapshot, cloudAttachments = []) {
     const hydrated = clone(snapshot);
+    // Only pre-release cloud records can receive the historical missing-file exemption.
+    const legacyDate = String(hydrated?.submission?.date || '');
+    const historical = /^\d{4}-\d{2}-\d{2}$/.test(legacyDate) && legacyDate < '2026-09-07';
+    const markLegacyMissing = item => {
+      item.legacyMissing = Boolean(historical && !attachmentAvailable(item) && String(item.fileName || '').trim());
+    };
     const available = (Array.isArray(cloudAttachments) ? cloudAttachments : [])
       .filter(item => materialCloudUrl(item) || item?.fileId || item?.cloudFileId);
     const used = new Set();
+    const cloudIdentity = item => item?.cloudFileId || item?.fileId || driveFileId(materialCloudUrl(item));
+    const reserve = target => {
+      const id = cloudIdentity(target);
+      if (id) available.forEach((item, index) => { if (cloudIdentity(item) === id) used.add(index); });
+    };
+    (hydrated?.submission?.activitySnapshots || []).forEach(activity => {
+      (activity.evidence || []).forEach(evidence => {
+        normalizeEvidenceRecord(evidence);
+        evidence.attachments.forEach(reserve);
+      });
+    });
+    Object.values(hydrated?.operation?.evidenceByCheck || {}).forEach(reserve);
     const claim = (predicate) => {
-      const index = available.findIndex((item, position) => !used.has(position) && predicate(item));
-      if (index < 0) return null;
-      used.add(index);
-      return available[index];
+      const matches = available.map((item, index) => ({ item, index }))
+        .filter(({ item, index }) => !used.has(index) && predicate(item));
+      const identities = new Set(matches.map(({ item }) => cloudIdentity(item) || materialCloudUrl(item)));
+      if (!matches.length || identities.size !== 1) return null;
+      matches.forEach(({ index }) => used.add(index));
+      reserve(matches[0].item);
+      return matches[0].item;
     };
     const applyCloudFile = (target, cloudFile) => {
       if (!target || !cloudFile) return;
@@ -3896,6 +3958,7 @@
       target.uploadStatus = 'uploaded';
       target.uploadError = '';
       target.placeholder = false;
+      target.legacyMissing = false;
       target.recorded = true;
       target.dataUrl = '';
     };
@@ -3906,12 +3969,15 @@
         evidence.attachments.forEach(attachment => {
           if (attachmentAvailable(attachment)) return;
           const expectedType = `v2-${activity.type}`;
+          const compatible = item => (!item.attachmentId || item.attachmentId === attachment.id)
+            && (!item.evidenceId || item.evidenceId === evidence.id)
+            && (!item.activityId || item.activityId === activity.id)
+            && (!item.forType || item.forType === expectedType)
+            && (!item.size || !attachment.size || String(item.size) === String(attachment.size));
           const cloudFile = claim(item => item.attachmentId && item.attachmentId === attachment.id)
-            || claim(item => item.evidenceId && item.evidenceId === evidence.id && item.fileName === attachment.fileName)
-            || claim(item => item.forType === expectedType && item.fileName === attachment.fileName)
-            || claim(item => item.fileName === attachment.fileName)
-            || claim(item => item.forType === expectedType);
+            || claim(item => compatible(item) && item.fileName && item.fileName === attachment.fileName);
           applyCloudFile(attachment, cloudFile);
+          markLegacyMissing(attachment);
         });
         normalizeEvidenceRecord(evidence);
       });
@@ -3921,16 +3987,26 @@
     Object.entries(operation?.evidenceByCheck || {}).forEach(([key, photo]) => {
       normalizeOperationPhotoRecord(photo);
       if (attachmentAvailable(photo)) return;
-      const cloudFile = claim(item => item.forType === `env_${key}`)
-        || claim(item => item.fileName && item.fileName === photo.fileName);
+      const cloudFile = claim(item => item.attachmentId && item.attachmentId === photo.id)
+        || claim(item => (!item.attachmentId || item.attachmentId === photo.id)
+          && (!item.forType || item.forType === `env_${key}`)
+          && item.fileName && item.fileName === photo.fileName);
       applyCloudFile(photo, cloudFile);
+      markLegacyMissing(photo);
       normalizeOperationPhotoRecord(photo);
     });
     return hydrated;
   }
 
-  function importCloudSnapshot(snapshot, cloudAttachments = []) {
+  function importCloudSnapshot(snapshot, cloudAttachments = [], revision = '', force = false) {
     if (!snapshot || snapshot.schema !== 'anqin-v2' || !snapshot.submission) return false;
+    const logId = cloudLogId(snapshot.submission.teacher, snapshot.submission.date);
+    const isCurrent = snapshot.submission.teacher === state.context.teacher && snapshot.submission.date === state.daily.date;
+    if (!force && isCurrent && (state.integration.dailyDraftSyncPending || dailyNeedsResubmit() || cloudDraftInFlight || dailySubmitInFlight)) {
+      if (revision && revision !== state.integration.logRevisions?.[logId]) dailyCloudConflict = { snapshot, cloudAttachments, revision };
+      return false;
+    }
+    if (revision) state.integration.logRevisions = { ...(state.integration.logRevisions || {}), [logId]: revision };
     const hydratedSnapshot = hydrateCloudSnapshotAttachments(snapshot, cloudAttachments);
     const remoteSubmission = clone(hydratedSnapshot.submission);
     remoteSubmission.cloudSavedAt = hydratedSnapshot.savedAt || remoteSubmission.cloudSavedAt || remoteSubmission.submittedAt || '';
@@ -3942,7 +4018,7 @@
     const existingSubmission = state.submissions.find(item => item.id === remoteSubmission.id || (item.date === remoteSubmission.date && item.teacher === remoteSubmission.teacher));
     const remoteStamp = String(remoteSubmission.cloudSavedAt || remoteSubmission.submittedAt || '');
     const localStamp = String(existingSubmission?.cloudSavedAt || existingSubmission?.submittedAt || '');
-    const remoteIsNewer = !existingSubmission || remoteStamp > localStamp;
+    const remoteIsNewer = force || !existingSubmission || remoteStamp > localStamp;
     if (!remoteIsNewer) {
       remoteSubmission.activitySnapshots.forEach(remoteActivity => {
         const localActivity = state.activities.find(item => item.id === remoteActivity.id);
@@ -3962,8 +4038,16 @@
     if (existingSubmission) Object.assign(existingSubmission, remoteSubmission);
     else state.submissions.unshift(remoteSubmission);
 
+    // A daily snapshot is authoritative for that teacher/date, including removals.
+    const belongsToDay = item => item.teacher === remoteSubmission.teacher && item.date === remoteSubmission.date;
+    const activityIds = new Set(remoteSubmission.activitySnapshots.map(item => item.id));
+    const contactIds = new Set(remoteSubmission.contactSnapshots.map(item => item.id));
+    state.activities = state.activities.filter(item => item.type === 'lessonprep' || !belongsToDay(item) || activityIds.has(item.id));
+    state.contacts = state.contacts.filter(item => !belongsToDay(item) || contactIds.has(item.id));
+
     const mergeCollection = (key, items) => {
       (items || []).forEach(item => {
+        if (key === 'activities' && item.type === 'lessonprep' && (state.integration.deletedPrepIds || []).includes(item.id)) return;
         const existing = state[key].find(current => current.id === item.id);
         const incoming = clone(item);
         if (key === 'activities' && existing) preserveActivityMedia(existing, incoming);
@@ -3994,7 +4078,7 @@
       state.daily.parentHandoffNote = hydratedSnapshot.daily.parentHandoffNote || '';
       state.daily.summary = { ...state.daily.summary, ...(hydratedSnapshot.daily.summary || {}) };
       state.daily.status = hydratedSnapshot.daily.status || state.daily.status;
-      state.daily.submittedAt = hydratedSnapshot.daily.submittedAt || state.daily.submittedAt;
+      state.daily.submittedAt = hydratedSnapshot.daily.submittedAt || '';
     }
     return true;
   }
@@ -4005,13 +4089,16 @@
     const remotePlan = record.plan ? clone(record.plan) : null;
     remotePrep.teacher = displayNameForBackend(record.nickname || backendNickname(remotePrep.teacher));
     remotePrep.cloudUpdatedAt = record.updatedAt || remotePrep.updatedAt || '';
+    remotePrep.cloudRevision = record.revision || remotePrep.cloudUpdatedAt;
     remotePrep.cloudSyncStatus = 'saved';
     if (remotePlan) remotePlan.teacher = remotePrep.teacher;
     if (remotePlan) mergePlanMaterialsIntoPrep(remotePrep, remotePlan);
     const existingPrep = state.activities.find(item => item.id === remotePrep.id && item.type === 'lessonprep');
-    const localStamp = Date.parse(existingPrep?.updatedAt || existingPrep?.cloudUpdatedAt || '') || 0;
-    const remoteStamp = Date.parse(record.updatedAt || remotePrep.updatedAt || '') || 0;
-    if (existingPrep?.cloudSyncStatus !== 'saved' && localStamp > remoteStamp) return false;
+    if (existingPrep && ['pending', 'saving', 'error'].includes(existingPrep.cloudSyncStatus)) {
+      if (existingPrep.cloudSyncStatus === 'saving' || (existingPrep.cloudRevision || existingPrep.cloudUpdatedAt || '') === remotePrep.cloudRevision) return false;
+      state.activities.push({ ...clone(existingPrep), id: uid('prep'), planId: '', cloudRevision: '', cloudUpdatedAt: '', cloudSyncStatus: 'pending', title: `${existingPrep.title}（本機未同步草稿）` });
+      toast('另一台裝置已更新備課檔案；您的修改已另存為本機草稿，未被覆蓋', 'warning');
+    }
     if (existingPrep) Object.assign(existingPrep, remotePrep);
     else state.activities.push(remotePrep);
     if (remotePlan?.id) {
@@ -4027,6 +4114,24 @@
     const result = await API.listCoursePreps({ viewer: session.nickname, nickname: session.role === 'teacher' ? session.nickname : '' });
     if (!result?.ok) return { ok: false, imported: 0, error: result?.error || '備課檔案讀取失敗' };
     let imported = 0;
+    const deletedIds = new Set(result.deletedIds || []);
+    const activeIds = new Set((result.records || []).map(record => record.prepId || record.prep?.id));
+    const deletedPlanIds = new Set();
+    const recoveredDrafts = [];
+    state.activities = state.activities.filter(item => {
+      if (item.type !== 'lessonprep') return true;
+      const inScope = session.role === 'admin' || (session.role === 'teacher' ? sameReviewIdentity(item.teacher, session.nickname) : managerScopeMatches(item.teacher));
+      const removed = deletedIds.has(item.id) || (result.complete && inScope && item.cloudSyncStatus === 'saved' && !activeIds.has(item.id));
+      if (!removed) return true;
+      deletedIds.add(item.id);
+      if (item.planId) deletedPlanIds.add(item.planId);
+      if (['pending', 'saving', 'error'].includes(item.cloudSyncStatus)) recoveredDrafts.push({ ...clone(item), id: uid('prep'), planId: '', cloudRevision: '', cloudUpdatedAt: '', cloudSyncStatus: 'pending', title: `${item.title}（本機未同步草稿）` });
+      return false;
+    });
+    state.integration.deletedPrepIds = [...new Set([...(state.integration.deletedPrepIds || []), ...deletedIds])];
+    (state.lessonPlans || []).forEach(plan => { if (deletedPlanIds.has(plan.id) || deletedIds.has(plan.sourceActivityId)) plan.archived = true; });
+    state.activities.push(...recoveredDrafts);
+    if (recoveredDrafts.length) toast('雲端檔案已刪除；本機尚未同步的修改已另存為草稿', 'warning');
     (result.records || []).filter(record => {
       const teacher = displayNameForBackend(record.nickname || record.prep?.teacher || '');
       return session.role === 'admin' || session.role === 'teacher' || managerScopeMatches(teacher, record.department);
@@ -4072,6 +4177,7 @@
     }
     activity.cloudSyncStatus = 'saved';
     activity.cloudUpdatedAt = result.updated_at || new Date().toISOString();
+    activity.cloudRevision = result.revision || activity.cloudUpdatedAt;
     persist('備課檔案已同步雲端');
     return result;
   }
@@ -4200,7 +4306,7 @@
     }
     let imported = 0;
     (result.logs || []).forEach(log => {
-      if (importCloudSnapshot(log?.kpi6_data?.v2_snapshot, log?.attachments || [])) imported += 1;
+      if (importCloudSnapshot(log?.kpi6_data?.v2_snapshot, log?.attachments || [], log.record_revision || log.updated_at || '')) imported += 1;
     });
     const prepSync = await syncCoursePrepsFromCloud(session);
     state.tasks
@@ -4220,6 +4326,7 @@
     persist('雲端紀錄已更新');
     renderApp();
     if (notify) toast(integrationRuntime.cloudMessage, 'success');
+    if (dailyCloudConflict) showDailyCloudConflict();
   }
 
   async function syncManagerCloudData(notify = true) {
@@ -4253,7 +4360,7 @@
     (result.logs || []).forEach(log => {
       const snapshot = log?.kpi6_data?.v2_snapshot;
       if (snapshot?.submission && !managerScopeMatches(snapshot.submission.teacher, snapshot.submission.department || log.department)) return;
-      if (importCloudSnapshot(snapshot, log?.attachments || [])) imported += 1;
+      if (importCloudSnapshot(snapshot, log?.attachments || [], log.record_revision || log.updated_at || '')) imported += 1;
     });
     const prepSync = await syncCoursePrepsFromCloud(session);
     const threads = await syncCloudFeedback(session);
@@ -4395,10 +4502,11 @@
       return typeMatch && statusMatch && kpiMatch && queryMatch;
     });
     const ready = allItems.filter(item => evidenceReady(item.evidence)).length;
+    const unlinked = allItems.reduce((count, item) => count + evidenceAttachments(item.evidence).filter(file => !attachmentAvailable(file)).length, 0);
     const accepted = allItems.filter(item => item.evidence.status === 'accepted').length;
     return `<div class="page">
       ${pageHead('證據中心', '依老師、課程與工作紀錄集中查看成果內容', '')}
-      <div class="status-strip"><div class="status-cell"><div class="status-label">備課參考資料</div><div class="status-value">${prepItems.length}</div><div class="status-note">集中保留在備課檔案</div></div><div class="status-cell"><div class="status-label">已上傳成果</div><div class="status-value">${ready}/${allItems.length}</div><div class="status-note">內容品質由主管判斷</div></div><div class="status-cell"><div class="status-label">主管已採認</div><div class="status-value">${accepted}</div><div class="status-note">依內容完成評分</div></div><div class="status-cell"><div class="status-label">待補充</div><div class="status-value">${allItems.filter(item => item.evidence.status === 'clarify').length}</div><div class="status-note">已回到老師待辦</div></div></div>
+      <div class="status-strip"><div class="status-cell"><div class="status-label">備課參考資料</div><div class="status-value">${prepItems.length}</div><div class="status-note">集中保留在備課檔案</div></div><div class="status-cell"><div class="status-label">成果紀錄</div><div class="status-value">${ready}/${allItems.length}</div><div class="status-note">${unlinked ? `${unlinked} 個附件無可用原檔` : '內容品質由主管判斷'}</div></div><div class="status-cell"><div class="status-label">主管已採認</div><div class="status-value">${accepted}</div><div class="status-note">依內容完成評分</div></div><div class="status-cell"><div class="status-label">待補充</div><div class="status-value">${allItems.filter(item => item.evidence.status === 'clarify').length}</div><div class="status-note">已回到老師待辦</div></div></div>
       <div class="filter-bar"><div class="filter-field"><label for="evidence-type-filter">證據類型</label><select id="evidence-type-filter" aria-label="證據類型篩選" data-change="view-filter" data-filter-group="evidence" data-filter-key="type"><option value="all">全部</option>${Object.entries(EVIDENCE_TYPES).map(([key, label]) => `<option value="${key}" ${filters.type === key ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></div><div class="filter-field"><label for="evidence-status-filter">主管狀態</label><select id="evidence-status-filter" aria-label="證據主管狀態" data-change="view-filter" data-filter-group="evidence" data-filter-key="status"><option value="open" ${filters.status === 'open' ? 'selected' : ''}>待處理</option><option value="all" ${filters.status === 'all' ? 'selected' : ''}>全部</option><option value="pending" ${filters.status === 'pending' ? 'selected' : ''}>待審查</option><option value="clarify" ${filters.status === 'clarify' ? 'selected' : ''}>待補充</option><option value="accepted" ${filters.status === 'accepted' ? 'selected' : ''}>已採認</option></select></div><div class="filter-field"><label for="evidence-kpi-filter">KPI 支持項目</label><select id="evidence-kpi-filter" aria-label="證據 KPI 支持項目" data-change="view-filter" data-filter-group="evidence" data-filter-key="kpi"><option value="all">全部</option>${['課業指導', '專案課程', '班級經營', '親師溝通', '個人態度與表現', '班級環境整潔'].map(label => `<option value="${label}" ${filters.kpi === label ? 'selected' : ''}>${label}</option>`).join('')}</select></div><div class="filter-field grow"><label for="evidence-query">搜尋</label><input id="evidence-query" value="${esc(filters.query)}" data-input="view-filter" data-filter-group="evidence" data-filter-key="query" placeholder="搜尋老師、課程、學生或工作結果"></div></div>
       <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('scan-search')}${filters.status === 'open' ? '待判讀證據' : '證據清單'}</div><div class="panel-subtitle">${evidenceItems.length} 份</div></div></div><div class="panel-body">${evidenceItems.length ? `<div class="evidence-grid">${evidenceItems.map(renderEvidenceCard).join('')}</div>` : renderEmpty(allItems.length ? 'search-x' : 'folder-search-2', allItems.length ? '沒有符合篩選的證據' : '目前沒有證據', allItems.length ? '調整主管狀態、證據類型、KPI 或搜尋條件後再試一次。' : '老師送出關聯證據後會顯示在這裡。')}</div></section>
     </div>`;
@@ -4440,7 +4548,7 @@
         const item = proof[key] || {};
         const isException = item.status === 'exception';
         const previewUrl = attachmentPreviewUrl(item);
-        return `<article class="operation-review-card ${isException ? 'is-exception' : ''}"><div class="operation-review-card-head"><span class="operation-proof-index">${index + 1}</span><div><strong>${esc(config.label)}</strong><small>${isException ? '異常面向' : '正常面向'}</small></div>${statusBadge(isException ? '異常' : '正常', isException ? 'red' : 'green')}</div><div class="operation-review-media">${previewUrl ? `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(item)} alt="${esc(config.label)}班務證據">` : `<span>${icon('image', 32)}</span><div><strong>${esc(item.fileName || '缺少照片')}</strong><small>${esc(item.size || '尚無可預覽原圖')}</small></div>`}</div>${isException ? `<div class="operation-review-copy danger"><span>異常狀況與處理安排</span><p>${esc(item.action || '尚未填寫')}</p></div>` : ''}</article>`;
+        return `<article class="operation-review-card ${isException ? 'is-exception' : ''}"><div class="operation-review-card-head"><span class="operation-proof-index">${index + 1}</span><div><strong>${esc(config.label)}</strong><small>${isException ? '異常面向' : '正常面向'}</small></div>${statusBadge(isException ? '異常' : '正常', isException ? 'red' : 'green')}</div><div class="operation-review-media">${previewUrl ? `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(item)} alt="${esc(config.label)}班務證據">` : `<span>${icon('image', 32)}</span><div><strong>${esc(item.fileName || '缺少照片')}</strong><small>${item.legacyMissing ? '舊附件原檔遺失，文字紀錄保留。' : esc(item.size || '尚無可預覽原圖')}</small></div>`}</div>${isException ? `<div class="operation-review-copy danger"><span>異常狀況與處理安排</span><p>${esc(item.action || '尚未填寫')}</p></div>` : ''}</article>`;
       }).join('')}</div>
       ${renderFeedbackThread(threadKey)}
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}本次稽核結論</div><div class="panel-subtitle">退回時請指出面向、照片或缺少的交接資訊</div></div></div><div class="panel-body"><div class="form-field"><label class="form-label" for="operation-review-feedback">通過說明或補充要求</label><textarea id="operation-review-feedback" placeholder="例：教具櫃照片看不到右側缺件標示；請補拍近照並填入行政接手人與預計補齊日。"></textarea></div></div></section>
@@ -4500,7 +4608,7 @@
       { label: '課業指導', value: rate(tutoring, activityComplete), source: tutoring.length ? activitySource(tutoring) : '尚無資料' },
       { label: '專案課程', value: rate(projects, activityComplete), source: projects.length || visiblePreps.length ? `${projects.length} 筆工作 · ${visiblePreps.length} 份備課檔案` : '尚無資料' },
       { label: '班級經營', value: classroomTotal ? Math.round(classroomComplete / classroomTotal * 100) : null, source: classroomTotal ? `${classroomActivities.length} 筆班級經營紀錄` : '尚無資料' },
-      { label: '親師溝通', value: rate(contacts, item => item.summary && item.decision), source: contacts.length ? `${contacts.length} 次孩子狀況與家長共識紀錄` : '尚無資料' },
+      { label: '親師溝通', value: rate(contacts, item => item.summary && contactDecisionText(item)), source: contacts.length ? `${contacts.length} 次孩子狀況與家長聯繫紀錄` : '尚無資料' },
       { label: '環境整潔', value: rate(operations, operation => operationsComplete(operation, false)), source: operations.length ? `${operations.length} 筆已送出班務` : '尚無資料' },
     ];
     const teamRows = teachers.map(person => {
@@ -4702,7 +4810,7 @@
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('sparkles')}主管摘要</div><div class="panel-subtitle">${esc(submission.teacher)} · ${formatDate(submission.date)} · ${formatTime(submission.submittedAt)} · 系統依原始紀錄彙整</div></div>${reviewStatusBadge(submission.status)}</div><div class="panel-body"><div class="summary-list"><div class="summary-line"><span class="summary-index">1</span><div><div class="summary-title">今日成果</div><div class="summary-copy">${esc(submission.keyResult)}</div></div></div><div class="summary-line"><span class="summary-index">2</span><div><div class="summary-title">孩子狀況與課程問題</div><div class="summary-copy">${esc(submission.followup)}</div></div></div><div class="summary-line"><span class="summary-index">3</span><div><div class="summary-title">送出當時待辦（快照）</div><div class="summary-copy">${esc(submission.tomorrowPriority)}</div><div class="text-tiny muted mt-4">保留 ${formatDate(submission.date)} 送出當時內容；之後完成待辦不會改寫歷史紀錄。</div></div></div>${submission.teacherNote ? `<div class="summary-line"><span class="summary-index">4</span><div><div class="summary-title">老師補充</div><div class="summary-copy">${esc(submission.teacherNote)}</div></div></div>` : ''}</div></div></section>
       <div class="status-strip"><div class="status-cell"><div class="status-label">學科內／學科外</div><div class="status-value">${tracks.academic.count}/${tracks.enrichment.count}</div><div class="status-note">每日兩類至少擇一</div></div><div class="status-cell"><div class="status-label">備課檔案／成果</div><div class="status-value">${prepReady}/${prepRequired.length} · ${evidence}</div></div><div class="status-cell"><div class="status-label">親師溝通</div><div class="status-value">${contacts.length}</div><div class="status-note">孩子狀況與家長共識</div></div>${cases.length ? `<div class="status-cell"><div class="status-label">舊版追蹤歷史</div><div class="status-value">${cases.length}</div><div class="status-note">唯讀，不列入完成度</div></div>` : ''}</div>
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-list')}工作與證據</div><div class="panel-subtitle">點選任一筆查看送出當下的完整內容</div></div></div><div class="panel-body">${activities.length ? `<div class="archived-activity-list">${activities.map(item => renderArchivedActivityRow(item, submission.id)).join('')}</div>` : `<div class="notice-band danger">${icon('file-question', 19)}<div><div class="notice-title">沒有可追溯的工作事件</div><div class="notice-copy">摘要無法連回班級、教學方法、學生結果與原始證據。</div></div></div>`}</div></section>
-      <div class="detail-split"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('messages-square')}親師溝通</div></div></div><div class="panel-body">${contacts.length ? `<div class="metadata-list">${contacts.map(item => `<div class="metadata-row"><div class="metadata-label">${esc(item.student)} · ${esc(item.channel)}</div><div class="metadata-value"><strong>孩子狀況與老師處理：</strong>${esc(item.summary)}<br><span class="muted"><strong>家長回應與共同決定：</strong>${esc(item.decision)}</span></div></div>`).join('')}</div>` : submission.parentHandoffConfirmed ? `<div class="notice-band success">${icon('hand-heart', 18)}<div><div class="notice-title">今日無重要事項，已親自完成門口交接</div><div class="notice-copy">${esc(submission.parentHandoffNote || '老師已確認完成交接')}</div></div></div>` : '<div class="text-small muted">當日沒有親師溝通或門口交接確認。</div>'}</div></section>${cases.length ? `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('archive')}舊版學生追蹤紀錄</div><div class="panel-subtitle">歷史資料唯讀，不再產生待辦或影響完成度</div></div></div><div class="panel-body"><div class="metadata-list">${cases.map(item => `<div class="metadata-row"><div class="metadata-label">${esc(item.student)}</div><div class="metadata-value">${esc(item.observation)}${item.nextAction ? `<br><span class="muted">當時下一步：${esc(item.nextAction)}</span>` : ''}</div></div>`).join('')}</div></div></section>` : ''}</div>
+      <div class="detail-split"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('messages-square')}親師溝通</div></div></div><div class="panel-body">${contacts.length ? `<div class="metadata-list">${contacts.map(item => `<div class="metadata-row"><div class="metadata-label">${esc(item.student)} · ${esc(item.channel)}</div><div class="metadata-value"><strong>孩子狀況與老師處理：</strong>${esc(item.summary)}<br><span class="muted"><strong>家長回應與共同決定：</strong>${esc(contactDecisionText(item))}</span></div></div>`).join('')}</div>` : submission.parentHandoffConfirmed ? `<div class="notice-band success">${icon('hand-heart', 18)}<div><div class="notice-title">今日無重要事項，已親自完成門口交接</div><div class="notice-copy">${esc(submission.parentHandoffNote || '老師已確認完成交接')}</div></div></div>` : '<div class="text-small muted">當日沒有親師溝通或門口交接確認。</div>'}</div></section>${cases.length ? `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('archive')}舊版學生追蹤紀錄</div><div class="panel-subtitle">歷史資料唯讀，不再產生待辦或影響完成度</div></div></div><div class="panel-body"><div class="metadata-list">${cases.map(item => `<div class="metadata-row"><div class="metadata-label">${esc(item.student)}</div><div class="metadata-value">${esc(item.observation)}${item.nextAction ? `<br><span class="muted">當時下一步：${esc(item.nextAction)}</span>` : ''}</div></div>`).join('')}</div></div></section>` : ''}</div>
       ${showThread ? renderFeedbackThread(threadKey) : ''}
       ${readOnly ? '' : `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}本次審查結論</div></div></div><div class="panel-body"><div class="form-field"><label class="form-label" for="submission-feedback">核准說明或補充要求</label><textarea id="submission-feedback" placeholder="指出哪一筆紀錄、哪個欄位或哪份證據需要調整。"></textarea></div></div></section>`}
     </div>`;
@@ -4714,9 +4822,11 @@
     const primary = evidencePrimaryAttachment(evidence);
     const primaryPreviewUrl = attachmentPreviewUrl(primary);
     const primaryCloudUrl = materialCloudUrl(primary);
-    const noPreviewCopy = primaryCloudUrl
-      ? '此裝置無法直接預覽，請從下方開啟雲端原檔。'
-      : '附件紀錄已保留；雲端原檔待修復，不影響送出，主管將依目前可讀內容判斷。';
+    const noPreviewCopy = primary?.legacyMissing
+      ? '舊附件原檔遺失，文字紀錄保留，不影響儲存或送出。'
+      : primaryCloudUrl
+        ? '此裝置無法直接預覽，請從下方開啟雲端原檔。'
+        : '附件尚未上傳，請重新選擇檔案。';
     const managerMode = state.ui.role === 'manager';
     const threadKey = feedbackThreadKey('evidence', activity.id, evidence.id);
     const showThread = managerMode || feedbackThreadMessages(threadKey).length > 0;
@@ -4728,7 +4838,7 @@
       ['隱私確認完成', Boolean(evidence.privacy)],
     ];
     return `<div class="stack"><div class="detail-split">
-      <div><div class="annotation-canvas ${primaryPreviewUrl ? 'has-image' : ''}">${primaryPreviewUrl ? `<img src="${esc(primaryPreviewUrl)}"${cloudPreviewImageAttrs(primary)} alt="${esc(evidence.title)}">${renderPins(evidence.pins)}` : `<div><div class="empty-icon">${icon(primary?.mimeType === 'application/pdf' ? 'file-text' : evidence.type === 'plan_asset' ? 'archive' : 'image', 28)}</div><div class="empty-title">${esc(primary?.fileName || evidence.fileName)}</div><div class="empty-copy">${esc(noPreviewCopy)}</div></div>`}</div><div class="pin-list">${(evidence.pins || []).length ? renderPinList(evidence.pins).replaceAll('data-action="remove-evidence-pin"', 'disabled') : ''}</div>${attachments.length ? `<div class="evidence-detail-files"><div class="text-small text-strong">全部成果（${attachments.length} 份）</div>${attachments.map((attachment, index) => { const previewUrl = attachmentPreviewUrl(attachment, 180); const cloudUrl = materialCloudUrl(attachment); const thumb = previewUrl ? `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(attachment)} alt="${esc(attachment.fileName)}">` : icon(attachment.mimeType === 'application/pdf' ? 'file-text' : 'file-check-2', 20); const legacyNote = attachment.note || (index === 0 ? evidence.observation : ''); return `<article class="evidence-detail-file"><span class="evidence-detail-thumb">${cloudUrl ? `<a href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer" aria-label="開啟 ${esc(attachment.fileName)}">${thumb}</a>` : thumb}</span><div><strong>${index + 1}. ${esc(attachment.fileName)}</strong>${legacyNote ? `<small>舊版補充說明：${esc(legacyNote)}</small>` : ''}</div>${cloudUrl ? `<a class="btn btn-small" href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer">${icon('external-link', 14)}開啟原檔</a>` : attachment.id === evidence.primaryAttachmentId ? '<span class="badge blue">標註主圖</span>' : ''}</article>`; }).join('')}</div>` : ''}</div>
+      <div><div class="annotation-canvas ${primaryPreviewUrl ? 'has-image' : ''}">${primaryPreviewUrl ? `<img src="${esc(primaryPreviewUrl)}"${cloudPreviewImageAttrs(primary)} alt="${esc(evidence.title)}">${renderPins(evidence.pins)}` : `<div><div class="empty-icon">${icon(primary?.mimeType === 'application/pdf' ? 'file-text' : evidence.type === 'plan_asset' ? 'archive' : 'image', 28)}</div><div class="empty-title">${esc(primary?.fileName || evidence.fileName)}</div><div class="empty-copy">${esc(noPreviewCopy)}</div></div>`}</div><div class="pin-list">${(evidence.pins || []).length ? renderPinList(evidence.pins).replaceAll('data-action="remove-evidence-pin"', 'disabled') : ''}</div>${attachments.length ? `<div class="evidence-detail-files"><div class="text-small text-strong">全部成果（${attachments.length} 份）</div>${attachments.map((attachment, index) => { const previewUrl = attachmentPreviewUrl(attachment, 180); const cloudUrl = materialCloudUrl(attachment); const thumb = previewUrl ? `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(attachment)} alt="${esc(attachment.fileName)}">` : icon(attachment.mimeType === 'application/pdf' ? 'file-text' : 'file-check-2', 20); const legacyNote = attachment.note || (index === 0 ? evidence.observation : ''); return `<article class="evidence-detail-file"><span class="evidence-detail-thumb">${cloudUrl ? `<a href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer" aria-label="開啟 ${esc(attachment.fileName)}">${thumb}</a>` : thumb}</span><div><strong>${index + 1}. ${esc(attachment.fileName)}</strong>${attachment.legacyMissing ? '<small>舊附件原檔遺失，不影響儲存或送出。</small>' : ''}${legacyNote ? `<small>舊版補充說明：${esc(legacyNote)}</small>` : ''}</div>${cloudUrl ? `<a class="btn btn-small" href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer">${icon('external-link', 14)}開啟原檔</a>` : attachment.id === evidence.primaryAttachmentId ? '<span class="badge blue">標註主圖</span>' : ''}</article>`; }).join('')}</div>` : ''}</div>
       <div class="stack">
         <div class="notice-band info">${icon('badge-check', 18)}<div><div class="notice-title">由主管直接判讀內容品質</div><div class="notice-copy">請依完整性、清楚度與可判讀性進行判斷與評分；系統不以老師撰寫的說明代替審查。</div></div></div>
         <div class="metadata-list"><div class="metadata-row"><div class="metadata-label">工作</div><div class="metadata-value">${esc(activity.title)}</div></div><div class="metadata-row"><div class="metadata-label">支持 KPI</div><div class="metadata-value">${esc(config.kpi)}</div></div><div class="metadata-row"><div class="metadata-label">類型</div><div class="metadata-value">${esc(EVIDENCE_TYPES[evidence.type] || evidence.type)}</div></div><div class="metadata-row"><div class="metadata-label">對應工作結果</div><div class="metadata-value">${esc(evidence.claim)}</div></div>${evidence.observation ? `<div class="metadata-row"><div class="metadata-label">舊版補充說明</div><div class="metadata-value">${esc(evidence.observation)}</div></div>` : ''}<div class="metadata-row"><div class="metadata-label">關聯學生</div><div class="metadata-value">${esc((evidence.students || []).join('、') || '全班／未指定')}</div></div></div>
@@ -4839,6 +4949,7 @@
       footer: `${item ? `<button type="button" class="btn btn-danger" style="margin-right:auto" data-action="delete-contact" data-contact-id="${item.id}">${icon('trash-2', 15)}刪除</button>` : ''}<button type="button" class="btn" data-action="close-drawer">稍後繼續</button><button type="submit" form="contact-form" class="btn btn-primary">${icon('save', 16)}儲存溝通</button>`,
     });
     applyRestoredFormDraft('#contact-form', saved);
+    updateContactStatusField();
   }
 
   function renderCoursePrepEvidenceOverview(activity, plan, planLink) {
@@ -5473,7 +5584,8 @@
     const item = {
       id, date: existing ? existing.date : state.daily.date, teacher: existing ? existing.teacher : state.context.teacher,
       student: data.get('student'), channel: data.get('channel'), topic: summary.split(/\n|[。；]/)[0].slice(0, 28) || '親師溝通', summary,
-      decision: String(data.get('decision') || '').trim(), nextAction: '',
+      decision: data.get('communicationStatus') === 'waiting_reply' ? '' : String(data.get('decision') || '').trim(), nextAction: '',
+      communicationStatus: data.get('communicationStatus') === 'waiting_reply' ? 'waiting_reply' : 'completed',
       dueDate: '', status: 'closed', updatedAt: new Date().toISOString(),
     };
     if (existing) Object.assign(existing, item);
@@ -5502,7 +5614,7 @@
     });
     const missingProof = Object.entries(OPERATION_CHECKS).filter(([key]) => {
       const item = evidenceByCheck[key] || {};
-      return !item.fileName || !attachmentAvailable(item) || !['normal', 'exception'].includes(item.status);
+      return !item.fileName || !attachmentRecorded(item) || !['normal', 'exception'].includes(item.status);
     });
     if (missingProof.length) {
       toast(`尚缺 ${missingProof.map(([, config]) => config.label).join('、')} 的照片或判定`, 'danger');
@@ -6133,7 +6245,10 @@
         return;
       }
       const payload = dataUrlPayload(item.dataUrl);
-      if (!payload) return;
+      if (!payload) {
+        if (item.legacyMissing) return;
+        throw new Error(`${item.fileName || '附件'}尚未上傳，請重新選擇檔案；文字草稿仍保留`);
+      }
       integrationRuntime.cloudMessage = `正在上傳 ${item.fileName || '照片'}`;
       updateSaveIndicator('saving', integrationRuntime.cloudMessage);
       const result = isImage
@@ -6184,10 +6299,11 @@
     const contacts = submission.contactSnapshots || [];
     const operation = state.operations?.date === submission.date && state.operations?.dutyOwner === submission.teacher ? state.operations : null;
     const proof = operation?.evidenceByCheck || {};
-    const contactSummary = contacts.map(item => `${item.student}（${item.channel}）：孩子狀況與老師處理：${item.summary}；家長回應與共同決定：${item.decision}`).join('；');
+    const contactSummary = contacts.map(item => `${item.student}（${item.channel}）：孩子狀況與老師處理：${item.summary}；家長回應與共同決定：${contactDecisionText(item)}`).join('；');
     return {
       nickname: cloudTeacherNickname(submission.teacher),
       date: submission.date,
+      base_revision: state.integration.logRevisions?.[cloudLogId(submission.teacher, submission.date)] || '',
       submitted: true,
       kpi1_data: {
         prep_strengths: joinActivityFeedback(tutoring, 'strengths'),
@@ -6247,6 +6363,13 @@
   }
 
   async function syncDailyDraftToCloud() {
+    if (cloudDraftInFlight) return cloudDraftInFlight;
+    if (dailySubmitInFlight) return { ok: true, skipped: true };
+    cloudDraftInFlight = syncDailyDraftRequest();
+    try { return await cloudDraftInFlight; } finally { cloudDraftInFlight = null; }
+  }
+
+  async function syncDailyDraftRequest() {
     if (dailyNeedsResubmit()) {
       state.integration.dailyDraftSyncPending = false;
       persist('修改內容已保留，重新送出後更新主管版本');
@@ -6262,6 +6385,7 @@
     submission.status = 'draft';
     const payload = buildLegacySubmissionPayload(submission, []);
     payload.submitted = false;
+    const generation = cloudDraftGeneration;
     integrationRuntime.draftSyncStatus = 'saving';
     const result = await API.saveLog(payload);
     if (!result?.ok) {
@@ -6274,15 +6398,21 @@
       return result;
     }
     integrationRuntime.draftSyncStatus = 'saved';
+    state.integration.logRevisions = { ...(state.integration.logRevisions || {}), [cloudLogId(submission.teacher, submission.date)]: result.revision || '' };
     integrationRuntime.draftSyncAt = new Date().toISOString();
     state.integration.lastCloudDraftAt = integrationRuntime.draftSyncAt;
-    state.integration.dailyDraftSyncPending = false;
+    state.integration.dailyDraftSyncPending = generation !== cloudDraftGeneration;
+    if (state.integration.dailyDraftSyncPending) {
+      window.clearTimeout(cloudDraftTimer);
+      cloudDraftTimer = window.setTimeout(() => syncDailyDraftToCloud(), 900);
+    }
     persist('本機與雲端草稿已儲存');
     refreshSystemStatusNotice();
     return result;
   }
 
   function scheduleDailyCloudDraftSync() {
+    cloudDraftGeneration += 1;
     if (!state.integration.cloudSyncEnabled || state.daily.submittedAt || dailyNeedsResubmit() || !cloudIdentityReady()) return;
     state.integration.dailyDraftSyncPending = true;
     persist('本機已儲存，等待雲端同步');
@@ -6324,11 +6454,40 @@
     });
   }
 
+  function showDailyCloudConflict() {
+    if (!dailyCloudConflict) return;
+    const remote = dailyCloudConflict.snapshot.submission;
+    const describe = source => [...(source.activitySnapshots || []).map(item => item.title), ...(source.contactSnapshots || []).map(item => `${item.student}：${item.summary}`)].filter(Boolean).join('\n') || '沒有工作或親師溝通紀錄';
+    openDialog({
+      title: '另一台裝置已更新這天的紀錄',
+      body: `<p>請比較後選擇版本。使用雲端內容會取代本機這天的未同步修改；保留本機內容則需再次確認送出。</p><h3>本機內容</h3><p class="pre-wrap">${esc(describe(createDailySubmissionRecord()))}</p><h3>雲端內容</h3><p class="pre-wrap">${esc(describe(remote))}</p>`,
+      footer: '<button type="button" class="btn" data-action="close-dialog">稍後決定</button><button type="button" class="btn" data-action="use-cloud-daily">使用雲端內容</button><button type="button" class="btn btn-primary" data-action="keep-local-daily">使用本機內容</button>',
+    });
+  }
+
+  async function finishDailyDelivery(submission, payload, taskSync) {
+    let pdfResult;
+    try { pdfResult = await API.sendSubmitPdf(payload.nickname, payload.date); }
+    catch (error) { pdfResult = { ok: false, error: error.message }; }
+    const complete = pdfResult?.ok && (!pdfResult.notification || pdfResult.notification.allReached);
+    integrationRuntime.cloudMessage = complete ? '紀錄、PDF 與主管通知已完成' : '紀錄已送出；PDF 或通知待補，不必重送紀錄';
+    if (!taskSync.ok) integrationRuntime.cloudMessage += `；${taskSync.failed} 項待辦待同步`;
+    state.integration.lastDelivery = { logId: cloudLogId(submission.teacher, submission.date), complete: Boolean(complete), at: new Date().toISOString(), error: pdfResult?.error || '' };
+    persist('紀錄已送出');
+    refreshSystemStatusNotice();
+    toast(integrationRuntime.cloudMessage, complete && taskSync.ok ? 'success' : 'warning');
+  }
+
   async function submitDailyRequest() {
+    if (dailyKpiOptional() && !hasDailyRecords()) {
+      toast('週末免填 KPI，不需送出', 'success');
+      return;
+    }
     window.clearTimeout(cloudDraftTimer);
+    if (cloudDraftInFlight) await cloudDraftInFlight;
     const form = $('#daily-summary-form');
     if (form) saveDailySummaryForm(form, false);
-    if (dailyCompletion() < 100) {
+    if (dailyKpiOptional() ? !todayActivities().every(activityComplete) : dailyCompletion() < 100) {
       toast('尚有必要資料未完成', 'danger');
       renderApp();
       return;
@@ -6358,16 +6517,17 @@
         const cloudPayload = buildLegacySubmissionPayload(submission, attachments);
         updateSaveIndicator('saving', '正在送出主管審查');
         const result = await API.saveLog(cloudPayload);
-        if (!result?.ok) throw new Error(result?.error || '雲端送出失敗');
-        let pdfResult = null;
-        pdfResult = await API.sendSubmitPdf(cloudPayload.nickname, cloudPayload.date);
-        const notificationComplete = !pdfResult?.notification || pdfResult.notification.allReached;
-        const pendingNotifications = pdfResult?.notification?.pending || [];
+        if (!result?.ok) {
+          if (result?.code === 'RECORD_CONFLICT' || result?.code === 'ALREADY_SUBMITTED') {
+            const latest = await API.getLog({ nickname: cloudPayload.nickname, date: cloudPayload.date });
+            if (latest?.ok && latest.log?.kpi6_data?.v2_snapshot) dailyCloudConflict = { snapshot: latest.log.kpi6_data.v2_snapshot, cloudAttachments: latest.log.attachments || [], revision: latest.log.record_revision || latest.log.updated_at || '' };
+          }
+          throw new Error(result?.error || '雲端送出失敗');
+        }
         integrationRuntime.cloudStatus = 'saved';
         integrationRuntime.cloudErrorContext = '';
-        integrationRuntime.cloudMessage = pdfResult?.ok
-          ? (notificationComplete ? '雲端、主管通知與 PDF 已完成' : `雲端與 PDF 已完成；${pendingNotifications.join('、') || '主管'}通知待補`)
-          : '雲端已完成；PDF 尚未完成';
+        integrationRuntime.cloudMessage = '紀錄已成功送出，PDF 與主管通知處理中';
+        state.integration.logRevisions = { ...(state.integration.logRevisions || {}), [result.log_id]: result.revision || '' };
         state.integration.lastCloudSaveAt = new Date().toISOString();
         state.integration.dailyDraftSyncPending = false;
         if (existing) Object.assign(existing, submission);
@@ -6376,23 +6536,11 @@
         state.daily.submittedAt = submission.submittedAt;
         persist('已同步雲端');
         renderApp();
-        if (pdfResult?.ok && notificationComplete && taskSync.ok) {
-          toast('已正式送出，主管通知、待辦事項與 PDF 已完成', 'success');
-          showDailySubmissionReceipt(submission, '雲端紀錄、主管通知、待辦事項與 PDF 都已完成。');
-        } else if (pdfResult?.ok && !notificationComplete) {
-          const taskWarning = taskSync.ok ? '' : `；另有 ${taskSync.failed} 項待辦事項尚未同步`;
-          const message = `已建立 PDF；${pendingNotifications.join('、') || '主管'}通知尚未送達，請到「帳號與通知」檢查綁定${taskWarning}`;
-          toast(`已正式送出並${message}`, 'warning');
-          showDailySubmissionReceipt(submission, message, 'warning');
-        } else if (pdfResult?.ok) {
-          const message = `${taskSync.failed} 項待辦事項尚未同步，請稍後到「待辦事項」確認。`;
-          toast(`已正式送出；${message}`, 'warning');
-          showDailySubmissionReceipt(submission, message, 'warning');
-        } else {
-          const message = `PDF 未完成：${pdfResult?.error || '請稍後重試'}。今日紀錄已正式送出。`;
-          toast(`已正式送出；${message}`, 'warning');
-          showDailySubmissionReceipt(submission, message, 'warning');
-        }
+        showDailySubmissionReceipt(submission, '紀錄已存入雲端，主管可查看。PDF 與通知接續處理，不必重複送出。');
+        finishDailyDelivery(submission, cloudPayload, taskSync).catch(error => {
+          integrationRuntime.cloudMessage = '紀錄已送出；後續通知待確認，不必重送';
+          refreshSystemStatusNotice();
+        });
       } catch (error) {
         integrationRuntime.cloudStatus = 'error';
         integrationRuntime.cloudErrorContext = 'submit';
@@ -6401,6 +6549,7 @@
         persist('本機草稿已保留');
         renderApp();
         toast(`送出失敗：${integrationRuntime.cloudMessage}。本機草稿仍保留`, 'danger');
+        if (dailyCloudConflict) showDailyCloudConflict();
       }
       return;
     }
@@ -7341,6 +7490,21 @@
     const control = event.target.closest('[data-action]');
     if (!control || control.disabled) return;
     const action = control.dataset.action;
+    if ((action === 'use-cloud-daily' || action === 'keep-local-daily') && dailyCloudConflict) {
+      const conflict = dailyCloudConflict;
+      if (action === 'use-cloud-daily') {
+        state.integration.dailyDraftSyncPending = false;
+        importCloudSnapshot(conflict.snapshot, conflict.cloudAttachments, conflict.revision, true);
+      } else {
+        state.integration.logRevisions = { ...(state.integration.logRevisions || {}), [cloudLogId(state.context.teacher, state.daily.date)]: conflict.revision };
+      }
+      dailyCloudConflict = null;
+      closeDialog();
+      persist('已選擇紀錄版本');
+      renderApp();
+      toast(action === 'use-cloud-daily' ? '已載入雲端版本' : '本機版本已保留，請再次確認送出', 'success');
+      return;
+    }
     if ((action === 'backdrop-close-drawer' || action === 'backdrop-close-dialog') && event.target !== control) return;
     if (TEST_VIEW_MODE && TEST_VIEW_WRITE_ACTIONS.has(action)) {
       toast('測試模式：已走到正式寫入步驟，本次不會儲存、送出、核准或通知', 'warning');
@@ -7822,6 +7986,10 @@
       renderApp();
     }
     if (change === 'activity-plan') refreshActivityPlanStatus(control.value);
+    if (change === 'contact-status') {
+      updateContactStatusField();
+      scheduleCurrentDrawerDraft();
+    }
     if (change === 'activity-prep-source') refreshActivityPrepSource(control.value);
     if (change === 'cloud-sync-enabled') {
       state.integration.cloudSyncEnabled = control.checked;

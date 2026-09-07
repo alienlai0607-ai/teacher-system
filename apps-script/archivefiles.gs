@@ -179,6 +179,47 @@ function secureKpiReportPath_(root, departmentFolder, teacherFolder, workFolder,
   if (monthFolder) secureKpiDriveItem_(monthFolder, ownerUser, scope, extraUsers || []);
 }
 
+function assertKpiFileReadable_(file, ownerUser, scope) {
+  try {
+    if (file.isTrashed() || file.getSize() <= 0) throw new Error('empty file');
+    if (file.getSharingAccess() !== DriveApp.Access.PRIVATE) throw new Error('unexpected sharing');
+    const ownerEmail = String(file.getOwner().getEmail() || '').toLowerCase();
+    const viewers = kpiDriveViewerUsers_(ownerUser, scope, []);
+    if (!viewers.some(function (user) { return user.nickname === ownerUser.nickname; })) throw new Error('owner has no email');
+    viewers.forEach(function (user) {
+      if (String(user.email).toLowerCase() === ownerEmail) return;
+      const access = file.getAccess(user.email);
+      if (access !== DriveApp.Permission.VIEW && access !== DriveApp.Permission.EDIT && access !== DriveApp.Permission.OWNER) throw new Error('viewer not granted');
+    });
+  } catch (cause) {
+    const error = new Error('原檔已保留，但雲端檢視權限尚未完成；請再試一次，系統會接續原檔，不會重複建立');
+    error.code = 'FILE_ACCESS_PENDING';
+    throw error;
+  }
+}
+
+function createOrResumeKpiUpload_(folder, blob, nickname, scope, date, base64) {
+  const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, JSON.stringify([nickname, scope, date, blob.getContentType(), base64]), Utilities.Charset.UTF_8);
+  const key = Utilities.base64EncodeWebSafe(digest).replace(/=+$/, '');
+  const name = 'KPI-' + key + '-' + blob.getName();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) {
+    const error = new Error('另一份檔案正在建立，請稍後再試；本機檔案仍保留');
+    error.code = 'WRITE_BUSY';
+    throw error;
+  }
+  try {
+    // Stable content identity survives response loss without keeping image data in Properties.
+    const files = folder.getFilesByName(name);
+    while (files.hasNext()) {
+      const file = files.next();
+      if (!file.isTrashed()) return file;
+    }
+    blob.setName(name);
+    return folder.createFile(blob);
+  } finally { lock.releaseLock(); }
+}
+
 function listArchivedKpiFiles(params) {
   const viewer = params && params.viewer ? findUserByNickname(params.viewer) : null;
   if (!viewer || viewer.status !== 'active') return { ok: false, error: '找不到可用帳號' };

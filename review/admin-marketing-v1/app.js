@@ -38,9 +38,10 @@
     return match[1].split(/[｜|；;]/)[0].replace(/\s+(?=(?:日期|時間|時段|課程|老師|電話|手機|LINE|家長)\s*[：:])/i, '').trim();
   }
   function trialDateFromMessage(text) {
-    const source = String(text || '');
+    const original = String(text || '');
+    const labeled = original.match(/(?:預約|試上|體驗)(?:日期)?(?:\s*[&＆與及]\s*時段)?\s*[：:]\s*([^\n]+)/);
+    const source = labeled ? labeled[1] : original;
     const today = todayIso();
-    if (/(?:今天|今日)/.test(source)) return today;
     let year;
     let month;
     let day;
@@ -49,7 +50,7 @@
       year = Number(full[1]); month = Number(full[2]); day = Number(full[3]);
     } else {
       const short = source.match(/(?:^|[^\d:])(\d{1,2})\s*[月\/.\-]\s*(\d{1,2})\s*日?/);
-      if (!short) return '';
+      if (!short) return (labeled && /^(?:今天|今日)/.test(source)) || /(?:預約|試上|體驗)(?:日期|時間)?\s*[：:]?\s*(?:今天|今日)/.test(source) ? today : '';
       year = Number(today.slice(0, 4)); month = Number(short[1]); day = Number(short[2]);
     }
     const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -1225,6 +1226,9 @@
   async function saveRecord(type, record) {
     record.nickname = workerName;
     record.type = type;
+    const original = state.records.find(item => item.id === record.id);
+    record.recordRevision = record.recordRevision || original?.recordRevision || '';
+    record.baseRevision = original?.updatedAt || record.updatedAt || '';
     record.updatedAt = new Date().toISOString();
     if (PREVIEW_MODE) {
       upsertLocal(record);
@@ -1272,7 +1276,6 @@
     if (status === 'converted') {
       if (!enrollmentDate || !paymentDate || !enrollmentCourse || !firstEnrollmentChoice) throw new Error('請完整填寫報名、繳費、正式課程與是否首次報名');
       if (enrollmentDate > todayIso() || paymentDate > todayIso()) throw new Error('報名與繳費日期不可晚於今天');
-      if (enrollmentDate < date || paymentDate < date) throw new Error('報名與繳費日期不可早於試上日期');
       if (firstEnrollmentChoice === 'yes' && !followups.length) {
         followups = [{ id: uid('trial-followup'), date: paymentDate, method: 'other', note: '系統依首次正式報名與完成繳費自動建立', nextDate: '', author: currentUser.nickname, at: new Date().toISOString() }];
       }

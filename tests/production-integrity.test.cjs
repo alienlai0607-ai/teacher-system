@@ -10,10 +10,16 @@ const auth = fs.readFileSync(path.join(root, 'apps-script/auth.gs'), 'utf8');
 const api = fs.readFileSync(path.join(root, 'shared/api.js'), 'utf8');
 const push = fs.readFileSync(path.join(root, 'shared/push.js'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'review/anqin-v2/app.js'), 'utf8');
+const manifest = JSON.parse(fs.readFileSync(path.join(root, 'apps-script/appsscript.json'), 'utf8'));
+
+assert.ok(manifest.oauthScopes.includes('https://www.googleapis.com/auth/userinfo.email'), 'editor delivery check requires declared identity scope');
+assert.ok(!manifest.oauthScopes.some(scope => scope.includes('/gmail')), 'identity check must not add Gmail access');
+assert.equal(manifest.timeZone, 'Asia/Taipei');
+assert.equal(manifest.webapp.executeAs, 'USER_DEPLOYING');
 
 assert.match(router, /'runProductionIntegrityCheck': \(\) => runProductionIntegrityCheck\(params\)/);
 assert.match(auth, /adminOnly[\s\S]*'runProductionIntegrityCheck'/);
-assert.match(auth, /action === 'getSessionIdentity'\) return;/, '正式登入身分查詢必須通過後端安全允許清單');
+assert.match(auth, /action === 'getSessionIdentity' \|\| action === 'reportClientMetrics'\) return;/, '正式登入身分查詢必須通過後端安全允許清單');
 assert.match(api, /runProductionIntegrityCheck: \(\) => call\('runProductionIntegrityCheck'\)/);
 assert.match(app, /data-action="run-cloud-delivery-check"/);
 assert.match(app, /一般連線成功不等於資料能交付/);
@@ -29,6 +35,7 @@ const source = tasks.slice(
 const sheetRows = new Map();
 const files = new Map();
 let fileSequence = 0;
+let accessChecks = 0;
 
 function makeBlob(value, mimeType, name) {
   const bytes = Buffer.isBuffer(value) ? value : Buffer.from(String(value));
@@ -69,6 +76,7 @@ const context = vm.createContext({
     formatDate: () => '20260902-120000',
     getUuid: () => '12345678-aaaa-bbbb-cccc-123456789012',
     base64Decode: value => Buffer.from(value, 'base64'),
+    base64Encode: value => Buffer.from(value).toString('base64'),
     newBlob: (value, mimeType, name) => makeBlob(value, mimeType, name),
   },
   LockService: {
@@ -93,6 +101,7 @@ const context = vm.createContext({
   getMaterialRootFolder_: () => folder,
   getOrCreateChildFolder_: parent => parent,
   secureKpiDriveItem_: () => {},
+  assertKpiFileReadable_: file => { assert.ok(file.getSize() > 0); accessChecks++; },
   getAttachmentPreviews: params => ({
     ok: true,
     previews: [{ fileId: params.file_ids[0], dataUrl: 'data:image/png;base64,AAAA' }],
@@ -113,6 +122,7 @@ assert.equal(result.ok, true);
 assert.equal(result.summary.total, 5);
 assert.equal(result.summary.passed, 5);
 assert.equal(result.summary.failed, 0);
+assert.equal(accessChecks, 2, 'both photo and material must undergo strict access verification');
 assert.equal(sheetRows.size, 0, '所有試算表 QA 資料必須清理');
 assert.equal(Array.from(files.values()).every(file => file.isTrashed()), true, 'Drive QA 檔案必須全部移到垃圾桶');
 assert.match(source, /const pdfPhoto = pdfPhotoUri_\(fileId\)/, '正式健康檢查必須實際驗證照片能嵌入 PDF');

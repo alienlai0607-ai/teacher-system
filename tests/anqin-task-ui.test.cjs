@@ -235,7 +235,7 @@ assert.match(source, /function attachmentRecorded\(item\)/, '成果需區分已�
 assert.match(source, /function evidenceReady\(data\)[\s\S]{0,120}evidenceAttachments\(data\)\.some\(attachmentRecorded\)/, '既有附件紀錄不得因裝置無法預覽而被誤判缺成果');
 assert.doesNotMatch(evidenceSaveSource, /份檔案尚未完成上傳，請重新選擇後再儲存/, '既有檔名附件不得阻擋老師儲存成果紀錄');
 assert.match(source, /function hydrateCloudSnapshotAttachments\(/, '讀取舊日報時需從雲端附件清單修復快照連結');
-assert.match(source, /importCloudSnapshot\(log\?\.kpi6_data\?\.v2_snapshot, log\?\.attachments \|\| \[\]\)/, '老師讀取日報時需一併回填雲端附件');
+assert.match(source, /importCloudSnapshot\(log\?\.kpi6_data\?\.v2_snapshot, log\?\.attachments \|\| \[\], log.record_revision/, '老師讀取日報時需一併回填雲端附件與版本');
 assert.match(source, /activityId, evidenceId, attachmentId/, '新上傳附件需保存活動、證據與附件識別碼');
 assert.match(source, /function hydrateCloudPreviews\(\)[\s\S]{0,1800}API\.getAttachmentPreviews\(fileIds\)/, '私密雲端照片需透過已登入 API 讀取，不可只依賴 Drive 第三方 Cookie');
 assert.match(source, /data-cloud-preview-id/, '所有雲端成果圖片都需標示檔案編號供預覽回填');
@@ -262,7 +262,7 @@ assert.match(dailySubmitSource, /送出時間/, '送出收據需提供實際送�
 assert.match(dailySubmitSource, /data-action="close-dialog">我知道了/, '成功收據需由老師主動確認後才關閉');
 assert.match(dailySubmitSource, /data-action="view-daily-submission-status"/, '收據需提供可直接查看送出狀態的入口');
 assert.match(source, /action === 'view-daily-submission-status'[^]*closeDialog\(\); persist\(\); renderApp\(\);/, '查看送出狀態前需先關閉收據，避免畫面被遮住');
-assert.match(dailySubmitSource, /showDailySubmissionReceipt\(submission, '雲端紀錄、主管通知、待辦事項與 PDF 都已完成。'\)/, '雲端正式送出完成時需顯示完整成功收據');
+assert.match(dailySubmitSource, /showDailySubmissionReceipt\(submission, '紀錄已存入雲端，主管可查看。PDF 與通知接續處理，不必重複送出。'\)/, '紀錄儲存成功後應立即顯示收據，不應等待 PDF');
 assert.match(source, /duplicate = Array\.from\(root\.children\)/, '相同提示不得在畫面上重複堆疊');
 const evidenceRemovalSource = source.slice(source.indexOf("else if (action === 'remove-evidence-attachment')"), source.indexOf("else if (action === 'remove-operation-photo')"));
 assert.match(evidenceRemovalSource, /if \(!evidenceDraft\.attachments\.length\)[\s\S]{0,500}evidenceDraft\.fileName = '';[\s\S]{0,500}evidenceDraft\.cloudFileId = '';/, '刪除最後一張成果照片時必須同步清除舊版欄位，避免幽靈附件復活');
@@ -273,6 +273,7 @@ const evidenceRuntime = vm.createContext({
   clone: value => JSON.parse(JSON.stringify(value)),
 });
 vm.runInContext(source.slice(source.indexOf('function normalizeEvidenceRecord('), source.indexOf('function normalizeOperationPhotoRecord(')), evidenceRuntime);
+vm.runInContext(source.slice(source.indexOf('function normalizeOperationPhotoRecord('), source.indexOf('function normalizePrepTitle(')), evidenceRuntime);
 vm.runInContext(source.slice(source.indexOf('function evidenceAttachments('), source.indexOf('function evidencePrimaryAttachment(')), evidenceRuntime);
 vm.runInContext(source.slice(source.indexOf('function hydrateCloudSnapshotAttachments('), source.indexOf('function importCloudSnapshot(')), evidenceRuntime);
 const legacyEvidence = {
@@ -285,10 +286,10 @@ const legacyEvidence = {
   ],
 };
 assert.equal(evidenceRuntime.attachmentAvailable(legacyEvidence.attachments[0]), false, '舊附件目前不可預覽時需保留真實狀態');
-assert.equal(evidenceRuntime.evidenceReady(legacyEvidence), true, '四張既有附件不得再被誤判為缺成果');
+assert.equal(evidenceRuntime.evidenceReady(legacyEvidence), false, '只有檔名但未確認為舊紀錄時，不得當成上傳完成');
 const repairedSnapshot = evidenceRuntime.hydrateCloudSnapshotAttachments({
   schema: 'anqin-v2',
-  submission: { activitySnapshots: [{ id: 'activity_1', type: 'tutoring', evidence: [legacyEvidence] }] },
+  submission: { date: '2026-09-01', activitySnapshots: [{ id: 'activity_1', type: 'tutoring', evidence: [legacyEvidence] }] },
 }, [{
   url: 'https://drive.google.com/file/d/file-4297/view',
   fileId: 'file-4297',
@@ -297,6 +298,26 @@ const repairedSnapshot = evidenceRuntime.hydrateCloudSnapshotAttachments({
 }]);
 assert.equal(repairedSnapshot.submission.activitySnapshots[0].evidence[0].attachments[0].cloudFileId, 'file-4297', '舊快照需恢復雲端檔案編號');
 assert.equal(repairedSnapshot.submission.activitySnapshots[0].evidence[0].attachments[0].placeholder, false, '成功回填後不得繼續顯示為待修復附件');
+assert.equal(repairedSnapshot.submission.activitySnapshots[0].evidence[0].attachments[1].legacyMissing, true, '舊雲端紀錄缺原檔時，明確標示歷史例外');
+assert.equal(evidenceRuntime.evidenceReady(repairedSnapshot.submission.activitySnapshots[0].evidence[0]), true, '舊紀錄缺原檔不得阻擋後續儲存');
+const attachmentFixture = attachments => ({ submission: { activitySnapshots: [{ id: 'activity_1', type: 'tutoring', evidence: [{ id: 'ev_1', attachments }] }] } });
+const hydrateFiles = (files, cloud) => evidenceRuntime.hydrateCloudSnapshotAttachments(attachmentFixture(files), cloud).submission.activitySnapshots[0].evidence[0].attachments;
+const cloudPhoto = { fileId: 'file-photo-12345', url: 'https://drive.google.com/file/d/file-photo-12345/view', fileName: 'photo.jpg', forType: 'v2-tutoring' };
+assert.equal(hydrateFiles([{ id: 'missing', fileName: 'other.jpg' }], [cloudPhoto])[0].cloudFileId || '', '', '同課程類型不可拿不同照片補洞');
+assert.equal(hydrateFiles([{ id: 'missing', fileName: 'other.jpg' }], [cloudPhoto])[0].legacyMissing, false, '日期不明時不得套用舊附件例外');
+const recentMissing = evidenceRuntime.hydrateCloudSnapshotAttachments({ submission: { date: '2026-09-07', activitySnapshots: [{ type: 'tutoring', evidence: [legacyEvidence] }] } });
+assert.equal(recentMissing.submission.activitySnapshots[0].evidence[0].attachments[0].legacyMissing, false, '新版建立的缺檔不可被歷史例外掩蓋');
+const oldOperation = evidenceRuntime.hydrateCloudSnapshotAttachments({ submission: { date: '2026-09-01' }, operation: { evidenceByCheck: { classroom: { fileName: 'old-room.jpg', status: 'normal' } } } });
+assert.equal(evidenceRuntime.attachmentRecorded(oldOperation.operation.evidenceByCheck.classroom), true, '舊班務照片缺原檔不阻擋記錄');
+assert.equal(evidenceRuntime.attachmentAvailable(oldOperation.operation.evidenceByCheck.classroom), false, '舊班務照片不得假裝有原檔');
+assert.equal(evidenceRuntime.normalizeOperationPhotoRecord({ fileName: 'restored.jpg', dataUrl: 'data:image/jpeg;base64,YQ==', legacyMissing: true }).legacyMissing, false, '重新選擇照片應移除歷史缺檔標記');
+assert.equal(evidenceRuntime.attachmentRecorded({ fileName: 'new-room.jpg' }), false, '新班務照片沒有原檔時仍需重傳');
+assert.match(source.slice(source.indexOf('function saveOperationsForm('), source.indexOf('function saveOperationsForm(') + 1800), /!attachmentRecorded\(item\)/, '班務存檔與完成度使用同一附件判定');
+assert.equal(hydrateFiles([{ id: 'missing', fileName: 'photo.jpg' }], [cloudPhoto, { ...cloudPhoto, fileId: 'another-photo-123' }])[0].cloudFileId || '', '', '同名多個原檔不得任意配對');
+assert.equal(hydrateFiles([{ id: 'missing', fileName: 'photo.jpg' }], [{ ...cloudPhoto, activityId: 'other-course' }])[0].cloudFileId || '', '', '不得拿另一堂課附件填入');
+assert.equal(hydrateFiles([{ id: 'missing', fileName: 'photo.jpg' }], [{ ...cloudPhoto, attachmentId: 'another-attachment' }])[0].cloudFileId || '', '', '已有附件歸屬不可被同名附件挪用');
+assert.equal(hydrateFiles([{ id: 'missing', fileName: 'photo.jpg' }, { id: 'existing', fileName: 'photo.jpg', cloudFileId: cloudPhoto.fileId }], [cloudPhoto])[0].cloudFileId || '', '', '已連結的原檔必須先保留，不能被前面的缺失附件搶用');
+assert.equal(hydrateFiles([{ id: 'missing', fileName: 'renamed.jpg' }], [{ ...cloudPhoto, attachmentId: 'missing' }])[0].cloudFileId, cloudPhoto.fileId, '明確附件編號仍可修復改過名稱的檔案');
 assert.match(source, /submittedAt, status: 'pending'/, '重新送出後必須回到主管待審，不得停留在草稿或舊狀態');
 const resubmitSource = source.slice(source.indexOf('function markDailyNeedsResubmit('), source.indexOf('function todaySectionStatus('));
 const resubmitContext = vm.createContext({
@@ -359,7 +380,7 @@ assert.equal(legacyContact.status, 'closed', '轉換後不得繼續產生追蹤�
 const currentContact = normalizeContactContext.normalizeContactRecord({ topic: '孩子今天願意開口', summary: '孩子今天願意開口並完成練習', decision: '家長同意在家鼓勵', nextAction: '' });
 assert.equal(currentContact.summary, '孩子今天願意開口並完成練習', '新版由摘要衍生的短主題不得重複顯示');
 const legacyPayloadSource = source.slice(source.indexOf('function buildLegacySubmissionPayload('), source.indexOf('async function syncDailyDraftToCloud('));
-assert.match(legacyPayloadSource, /孩子狀況與老師處理：\$\{item\.summary\}；家長回應與共同決定：\$\{item\.decision\}/, '兩段親師溝通內容需完整寫入正式資料');
+assert.match(legacyPayloadSource, /孩子狀況與老師處理：\$\{item\.summary\}；家長回應與共同決定：\$\{contactDecisionText\(item\)\}/, '狀況與聯繫結果需完整寫入正式資料');
 assert.match(legacyPayloadSource, /student_special: '',[\s\S]*special_students: \[\]/, '新的正式紀錄不得再寫入退役的學生追蹤欄位');
 assert.match(pdfReport, /if \(legacyStudentTracking\) h \+= pdfRow_\('📦 舊版學生追蹤（歷史）'/, 'PDF 只可在真的有舊資料時顯示唯讀歷史');
 

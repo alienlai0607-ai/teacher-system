@@ -2,7 +2,7 @@
  * 布拉克星球 KPI 系統 - 合併版（All-in-One v9）
  * 觸發詞：kpi系統
  * 此檔由 apps-script 各模組機械式合併，請勿單獨修改。
- * 合併日期：2026-09-03
+ * 合併日期：2026-09-06
  */
 
 // ════════════════════════════════════════════════════════════
@@ -36,8 +36,11 @@ function handleRequest(e, method) {
       ? JSON.parse(e.postData.contents || '{}')
       : (e.parameter || {});
 
-    // LINE webhook（老師加好友/傳訊息）— 與一般 API 共用同一個 URL
+    if (params.lineWebhook) return jsonOut(handleVerifiedLineWebhook_(params.lineWebhook));
+
+    // Disable the legacy ingress only after the verified relay has passed its live check.
     if (params.events && Array.isArray(params.events)) {
+      if (PropertiesService.getScriptProperties().getProperty('LINE_VERIFIED_INGRESS_ENABLED') === 'true') return jsonOut({ ok: false, code: 'LINE_SIGNATURE_REQUIRED', error: 'LINE 事件必須由驗證入口傳入' });
       handleLineWebhook_(params);
       return jsonOut({ ok: true });
     }
@@ -55,9 +58,10 @@ function handleRequest(e, method) {
 
     const ROUTES = {
       // 認證
-      'ping': () => ({ ok: true, time: new Date().toISOString() }),
+      'ping': () => ({ ok: true, time: new Date().toISOString(), release: '20260906-reliability-1' }),
       'whoami': () => whoami(params),
       'getSessionIdentity': () => getSessionIdentity(params),
+      'reportClientMetrics': () => reportClientMetrics(params),
 
       // 使用者管理（admin）
       'listUsers': () => listUsers(params),
@@ -183,7 +187,7 @@ function handleRequest(e, method) {
     return jsonOut(result);
   } catch (err) {
     try { console.error(err && err.stack ? err.stack : err); } catch (ignore) {}
-    return jsonOut({ ok: false, error: err && err.message ? err.message : '系統處理失敗' });
+    return jsonOut({ ok: false, code: err && err.code || 'SERVER_ERROR', error: err && err.message ? err.message : '系統處理失敗' });
   }
 }
 
@@ -277,6 +281,17 @@ const BONUS_ANQIN = [
 function isAnqinUser(user) {
   return !!user && user.role === 'teacher'
     && ANQIN_DEPARTMENTS.indexOf(normalizeDepartment_(user.department)) >= 0;
+}
+
+function isKpiWeekend_(date) {
+  const value = String(date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const day = new Date(value + 'T00:00:00Z').getUTCDay();
+  return day === 0 || day === 6;
+}
+
+function isDailyKpiRequired_(user, date) {
+  return !(isAnqinUser(user) && isKpiWeekend_(date));
 }
 
 /** 舊資料的「永康教室」等同目前正式名稱「東橋教室」。 */
@@ -959,6 +974,111 @@ function getHeaders(sheet) {
   return sheet.getRange(1, 1, 1, lastCol).getValues()[0];
 }
 
+function withRecordWriteLock_(callback) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, code: 'WRITE_BUSY', error: '目前有其他資料正在儲存，內容仍保留，請稍後再試' };
+  try { return callback(); } finally { lock.releaseLock(); }
+}
+
+function recordConflict_(expected, current) {
+  return String(expected || '') !== String(current || '');
+}
+
+function recordConflictResult_() {
+  return { ok: false, code: 'RECORD_CONFLICT', error: '這筆資料已在其他裝置更新，您的內容仍保留；請先查看最新紀錄再決定修改，避免覆蓋' };
+}
+
+function withResourceLease_(resource, callback) {
+  const props = PropertiesService.getScriptProperties();
+  const key = 'RESOURCE_LEASE_' + resource;
+  const lease = String(Date.now() + 420000);
+  const acquired = withRecordWriteLock_(function () {
+    if (Number(props.getProperty(key) || 0) > Date.now()) return false;
+    props.setProperty(key, lease);
+    return true;
+  });
+  if (acquired !== true) return { ok: false, code: 'DELIVERY_IN_PROGRESS', error: '這份日報正在處理，不必重送紀錄' };
+  try { return callback(); }
+  finally { if (props.getProperty(key) === lease) props.deleteProperty(key); }
+}
+
+function reportClientMetrics(params) {
+  if (!params.__actor) return { ok: false, code: 'AUTH_REQUIRED' };
+  const events = (Array.isArray(params.events_batch) ? params.events_batch : []).slice(0, 50).map(function (item) {
+    return { action: String(item.action || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 70), ok: item.ok === true, code: String(item.code || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 70), ms: Math.max(0, Math.min(600000, Number(item.ms) || 0)) };
+  });
+  if (!events.length) return { ok: true };
+  const ss = getSS();
+  let sheet = ss.getSheetByName('ClientMetrics');
+  if (!sheet) {
+    const result = withRecordWriteLock_(function () {
+      const found = ss.getSheetByName('ClientMetrics') || ss.insertSheet('ClientMetrics');
+      ensureHeaders(found, ['at', 'role', 'events_json']);
+      return found;
+    });
+    if (result.ok === false) return result;
+    sheet = result;
+  }
+  sheet.appendRow([nowIso(), params.__actor.role, JSON.stringify(events)]);
+  return { ok: true, received: events.length };
+}
+
+function getReliabilityMetrics_() {
+  const sheet = getSS().getSheetByName('ClientMetrics');
+  if (!sheet || sheet.getLastRow() < 2) return { samples: 0, notice: '尚未收到正式操作統計' };
+  const from = Math.max(2, sheet.getLastRow() - 999);
+  const rows = sheet.getRange(from, 1, sheet.getLastRow() - from + 1, 3).getValues();
+  const actions = {};
+  rows.forEach(function (row) {
+    (parseJsonField(row[2]) || []).forEach(function (event) {
+      const group = actions[event.action] || (actions[event.action] = { samples: 0, failures: 0, uncertain: 0, times: [] });
+      group.samples += 1;
+      if (!event.ok) group.failures += 1;
+      if (event.code === 'REQUEST_TIMEOUT' || event.code === 'NETWORK_ERROR') group.uncertain += 1;
+      group.times.push(event.ms);
+    });
+  });
+  Object.keys(actions).forEach(function (key) {
+    const group = actions[key];
+    group.times.sort(function (a, b) { return a - b; });
+    group.p95ms = group.times[Math.ceil(group.times.length * 0.95) - 1];
+    delete group.times;
+  });
+  return { batches: rows.length, from: rows[0][0], to: rows[rows.length - 1][0], actions: actions, notice: '僅統計成功回傳至伺服器的操作回報，不包含尚未恢復連線的裝置' };
+}
+
+function backupSheetFingerprint_(sheet) {
+  const rows = sheet.getLastRow();
+  const columns = sheet.getLastColumn();
+  const chunks = [];
+  for (let start = 1; start <= rows && columns > 0; start += 500) {
+    const range = sheet.getRange(start, 1, Math.min(500, rows - start + 1), columns);
+    const values = range.getValues();
+    const formulas = range.getFormulas();
+    const cells = values.map(function (row, r) { return row.map(function (value, c) { return formulas[r][c] ? { formula: formulas[r][c] } : value; }); });
+    chunks.push(Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, JSON.stringify(cells), Utilities.Charset.UTF_8)));
+  }
+  return { name: sheet.getName(), rows: rows, columns: columns, chunks: chunks };
+}
+
+function backupKpiDatabaseAuto() {
+  const props = PropertiesService.getScriptProperties();
+  const source = getSS();
+  const folderId = props.getProperty('KPI_DATABASE_BACKUP_FOLDER');
+  const folder = folderId ? DriveApp.getFolderById(folderId) : DriveApp.createFolder('KPI資料庫備份');
+  if (!folderId) props.setProperty('KPI_DATABASE_BACKUP_FOLDER', folder.getId());
+  folder.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.VIEW);
+  const file = DriveApp.getFileById(source.getId()).makeCopy('KPI備份-' + todayStr() + '-' + Utilities.getUuid().slice(0, 8), folder);
+  file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.VIEW);
+  const restored = SpreadsheetApp.openById(file.getId());
+  const expected = source.getSheets().map(backupSheetFingerprint_);
+  const actual = restored.getSheets().map(backupSheetFingerprint_);
+  if (JSON.stringify(expected) !== JSON.stringify(actual)) throw new Error('備份內容與來源不同，可能備份期間仍有寫入；備份保留，但不標示驗證通過');
+  props.setProperty('KPI_LAST_DATABASE_BACKUP', JSON.stringify({ at: nowIso(), fileId: file.getId(), sheets: actual.length, verified: 'reopened-values-and-formulas-matched' }));
+  logSystem('system', 'database_backup', file.getId(), { sheets: actual.length });
+  return { ok: true, fileId: file.getId(), sheets: actual.length };
+}
+
 /**
  * date 欄正規化：Sheets 會把 yyyy-MM-dd 自動轉成 Date 物件，
  * 讀出來一律轉回字串，否則所有「按月/日比對」（String(l.date) >= from 等）全部失效
@@ -1413,7 +1533,7 @@ function authorizeTaskResource_(actor, taskId, deleting) {
  * viewer / operator / evaluator，並對資料對象再次做部門範圍判斷。
  */
 function authorizeApiAction_(action, params, actor) {
-  if (action === 'getSessionIdentity') return;
+  if (action === 'getSessionIdentity' || action === 'reportClientMetrics') return;
 
   const adminOnly = [
     'addUser', 'updateUser', 'approveUser', 'deleteUser', 'setConfig', 'setupSystemAutomation',
@@ -1979,6 +2099,10 @@ function canViewDepartment_(user, department) {
  * 儲存日誌（同日重複呼叫會覆蓋，過了 24h 鎖定後拒絕）
  */
 function saveLog(params) {
+  return withRecordWriteLock_(function () { return saveLogRecord_(params); });
+}
+
+function saveLogRecord_(params) {
   const { nickname, date } = params;
   if (!nickname || !date) return { ok: false, error: 'missing nickname or date' };
 
@@ -1988,6 +2112,14 @@ function saveLog(params) {
 
   const log_id = 'LOG-' + String(date).replace(/-/g, '') + '-' + nickname;
   const existing = findObject(SHEET_NAMES.LOGS, 'log_id', log_id);
+  if (existing && params.request_id && existing.last_request_id === params.request_id) {
+    return { ok: true, log_id: log_id, revision: existing.record_revision, duplicate: true };
+  }
+  if (existing && existing.submitted_at && params.submitted !== true) {
+    return { ok: false, code: 'ALREADY_SUBMITTED', error: '此日紀錄已正式送出，舊草稿未覆蓋；如需修改，請開啟已送出的紀錄' };
+  }
+  if (existing && recordConflict_(params.base_revision, existing.record_revision || existing.updated_at)) return recordConflictResult_();
+  ensureHeaders(getSheet(SHEET_NAMES.LOGS), ['record_revision', 'last_request_id', 'delivery_state', 'delivery_error', 'evidence_state', 'delivery_attempted_at']);
 
   // ===== 補繳判定 =====
   // 回填過去日期，且（該日沒有日誌 或 日誌已鎖定）→ 視為補繳：限當月、每月 3 次、評核時每次扣 2 分
@@ -2019,7 +2151,7 @@ function saveLog(params) {
     const existingScore = logContentScore_(existing);
     if (incomingScore < 20 && existingScore >= 100) {
       logSystem(nickname, 'skip_empty_autosave', log_id, { incoming: incomingScore, existing: existingScore });
-      return { ok: true, log_id, msg: '雲端已有內容，空白草稿未覆蓋', skipped: true };
+      return { ok: false, code: 'EMPTY_OVERWRITE_BLOCKED', log_id, revision: existing.record_revision || existing.updated_at, error: '雲端已有內容，空白草稿未覆蓋；請重新讀取並確認紀錄' };
     }
   }
 
@@ -2041,6 +2173,11 @@ function saveLog(params) {
     help_needed: params.help_needed ? true : false,
     help_content: params.help_content || '',
     attachments: params.attachments || '',
+    record_revision: Utilities.getUuid(),
+    last_request_id: String(params.request_id || ''),
+    delivery_state: params.submitted === true ? 'pending' : '',
+    delivery_error: '',
+    evidence_state: params.submitted === true ? 'pending' : '',
     updated_at: nowIso(),
     locked: false,
     is_makeup: isMakeup === true,
@@ -2062,7 +2199,13 @@ function saveLog(params) {
   // 附件 → Evidence：只在「正式提交」時寫入，且整份取代
   // （舊版每次草稿自動存都 append 一次，一天可灌出上百筆重複證據）
   if (params.submitted === true) {
-    replaceEvidenceForLog_(log_id, nickname, date, params.attachments);
+    try {
+      replaceEvidenceForLog_(log_id, nickname, date, params.attachments);
+      const savedRow = findObject(SHEET_NAMES.LOGS, 'log_id', log_id);
+      updateRow(SHEET_NAMES.LOGS, savedRow._row, { evidence_state: 'ready' });
+    } catch (error) {
+      console.error('Evidence index pending for ' + log_id);
+    }
   }
 
   // 處理發文（如果是主管）→ 寫入 Posts
@@ -2072,7 +2215,7 @@ function saveLog(params) {
 
   logSystem(nickname, 'save_log', log_id, { date });
 
-  return { ok: true, log_id, msg: '已儲存', is_makeup: isMakeup === true, makeup_remaining: makeupRemaining };
+  return { ok: true, log_id, revision: data.record_revision, msg: '已儲存', is_makeup: isMakeup === true, makeup_remaining: makeupRemaining };
 }
 
 /**
@@ -2193,18 +2336,20 @@ function listLogs(params) {
   if (to) logs = logs.filter(l => String(l.date) <= to);
 
   // 排序：新→舊
-  logs.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const orderKey = function (log) { return String(log.date) + '|' + String(log.log_id || ''); };
+  logs.sort((a, b) => orderKey(b).localeCompare(orderKey(a)));
 
-  // 解析 JSON 欄位
+  const total = logs.length;
+  if (params.cursor) logs = logs.filter(log => orderKey(log).localeCompare(String(params.cursor)) < 0);
+  const offset = Math.max(0, Number(params.offset) || 0);
+  const pageSize = limit ? Math.min(500, Math.max(1, Number(limit) || 100)) : 500;
+  const remaining = logs.length;
+  logs = logs.slice(offset, offset + pageSize);
   logs.forEach(l => {
-    ['kpi1_data','kpi2_data','kpi3_data','kpi4_data','kpi5_data','kpi6_data','attachments'].forEach(k => {
-      l[k] = parseJsonField(l[k]);
-    });
+    ['kpi1_data','kpi2_data','kpi3_data','kpi4_data','kpi5_data','kpi6_data','attachments'].forEach(k => { l[k] = parseJsonField(l[k]); });
   });
-
-  if (limit) logs = logs.slice(0, Number(limit));
-
-  return { ok: true, logs };
+  const hasMore = offset + logs.length < remaining;
+  return { ok: true, logs, total: total, next_offset: hasMore ? offset + logs.length : null, next_cursor: hasMore ? orderKey(logs[logs.length - 1]) : null };
 }
 
 /**
@@ -2427,11 +2572,12 @@ function uploadPhoto(params) {
   const ymF = getOrCreateChildFolder_(workF, ym);
 
   const bytes = Utilities.base64Decode(base64);
-  const filename = `K${kpi || 0}-${dateStr}-${Utilities.getUuid().slice(0, 8)}.${ext}`;
+  const filename = `K${kpi || 0}-${dateStr}.${ext}`;
   const blob = Utilities.newBlob(bytes, mt, filename);
-  const file = ymF.createFile(blob);
+  const file = createOrResumeKpiUpload_(ymF, blob, nickname, scopeKey, dateStr, base64);
   secureKpiReportPath_(root, deptF, userF, workF, ymF, user, scope, []);
   secureKpiDriveItem_(file, user, scope, []);
+  assertKpiFileReadable_(file, user, scope);
 
   const fileId = file.getId();
   const url = 'https://drive.google.com/file/d/' + fileId + '/view';
@@ -2458,7 +2604,7 @@ function uploadFile(params) {
     .replace(/[\\/:*?"<>|]/g, '-')
     .replace(/^\.+/, '')
     .slice(0, 120) || '教材檔案';
-  const uniqueName = Utilities.getUuid().slice(0, 8) + '-' + originalName;
+  const uniqueName = originalName;
   const bytes = Utilities.base64Decode(base64);
   const blob = Utilities.newBlob(bytes, mimeType || 'application/octet-stream', uniqueName);
 
@@ -2472,9 +2618,10 @@ function uploadFile(params) {
   const workLabel = scope === 'talent' ? '才藝' : scope === 'admin-marketing' ? '行政美宣' : '安親';
   const workF = getOrCreateChildFolder_(userF, workLabel);
   const ymF = getOrCreateChildFolder_(workF, ym);
-  const file = ymF.createFile(blob);
+  const file = createOrResumeKpiUpload_(ymF, blob, nickname, categoryKey, dateStr, base64);
   secureKpiReportPath_(root, deptF, userF, workF, ymF, user, scope, []);
   secureKpiDriveItem_(file, user, scope, []);
+  assertKpiFileReadable_(file, user, scope);
 
   const fileId = file.getId();
   const url = 'https://drive.google.com/file/d/' + fileId + '/view';
@@ -3310,7 +3457,7 @@ function getMyKpiPreview(params) {
     const weekCount = ev.posts_by_week[weekOf()] || 0;
     if (weekCount < 3) todos.push(`本週安親發文：${weekCount}/3 篇`);
   }
-  if (ev.summary.log_count < 20) todos.push(`本月已填日誌 ${ev.summary.log_count} 天，建議每日填寫`);
+  if (ev.summary.log_count < 20 && isDailyKpiRequired_(user, todayStr())) todos.push(`本月已填日誌 ${ev.summary.log_count} 天，${isAnqinUser(user) ? '週一至週五填寫，週末免填' : '建議每日填寫'}`);
 
   return {
     ok: true,
@@ -3355,7 +3502,8 @@ function getDashboard(params) {
       const log = todayLogs.find(l => l.nickname === t.nickname);
       return {
         nickname: t.nickname,
-        submitted: !!log,
+        submitted: !!(log && log.submitted_at),
+        required: isDailyKpiRequired_(t, today),
         checkin_at: log ? log.checkin_at : '',
         help_needed: log ? log.help_needed === true : false,
         log_id: log ? log.log_id : ''
@@ -3377,6 +3525,8 @@ function getDashboard(params) {
       department: globalScope ? '全教室' : normalizeDepartment_(user.department),
       date: today,
       teachers_count: deptMembers.length,
+      required_count: status.filter(s => s.required).length,
+      required_submitted_count: status.filter(s => s.required && s.submitted).length,
       submitted_count: submittedCount,
       help_count: helpCount,
       status,
@@ -3553,6 +3703,7 @@ function getSystemReadiness(params) {
       coursePrepArchive: true,
       taskCloudSync: true,
       productionIntegrity: true,
+      verifiedLineIngress: props.getProperty('LINE_VERIFIED_INGRESS_ENABLED') === 'true' && Boolean(props.getProperty('LINE_CHANNEL_SECRET')),
     },
     triggers: {
       dailyKpiPdf: triggers.indexOf('sendDailyKpiReportAuto') >= 0,
@@ -3560,7 +3711,11 @@ function getSystemReadiness(params) {
       dailyTaskEvening: triggers.indexOf('sendEveningPreview') >= 0,
       dailyTaskReminder: triggers.indexOf('sendMorningReminders') >= 0 && triggers.indexOf('sendEveningPreview') >= 0,
       talentPdfRepair: triggers.indexOf('repairMissingTalentLessonReportsAuto') >= 0,
+      deliveryRetry: triggers.indexOf('retryPendingKpiDeliveries') >= 0,
+      databaseBackup: triggers.indexOf('backupKpiDatabaseAuto') >= 0,
     },
+    reliability: user.role === 'admin' ? getReliabilityMetrics_() : null,
+    databaseBackup: user.role === 'admin' ? parseJsonField(props.getProperty('KPI_LAST_DATABASE_BACKUP')) : null,
   };
 }
 
@@ -3568,6 +3723,20 @@ function getSystemReadiness(params) {
  * 管理員手動執行的正式環境實際交付驗收。
  * 每一項都會真的寫入後再讀回，並只清除本次建立的 QA 資料。
  */
+function verifyProductionDeliveryFromEditor() {
+  let result;
+  try {
+    // Fail explicitly when editor identity scope is missing; do not bypass the admin check.
+    Session.getActiveUser().getEmail();
+    result = runProductionIntegrityCheck();
+  } catch (error) {
+    const message = String(error && error.message || error);
+    result = { ok: false, code: message.indexOf('userinfo.email') >= 0 ? 'EDITOR_EMAIL_SCOPE_REQUIRED' : 'EDITOR_CHECK_FAILED', error: message };
+  }
+  console.log(JSON.stringify(result));
+  return result;
+}
+
 function runProductionIntegrityCheck(params) {
   const actor = params && params.__actor ? params.__actor : systemMaintenanceUser_(params);
   if (!actor || actor.role !== 'admin' || actor.status !== 'active') {
@@ -3754,7 +3923,8 @@ function runProductionIntegrityCheck(params) {
         const fileId = file.getId();
         const stored = DriveApp.getFileById(fileId);
         requireCheck_(stored.getName() === filename, '照片建立後檔名不一致');
-        requireCheck_(stored.getBlob().getBytes().length > 0, '照片建立後內容為空');
+        requireCheck_(Utilities.base64Encode(stored.getBlob().getBytes()) === pngBase64, '照片建立後內容與原檔不一致');
+        assertKpiFileReadable_(stored, actor, 'anqin');
         const preview = getAttachmentPreviews({ __actor: actor, file_ids: [fileId] });
         requireCheck_(preview && preview.ok, '私密照片預覽端點執行失敗');
         requireCheck_(Array.isArray(preview.previews) && preview.previews.length === 1, '私密照片預覽未回傳圖片');
@@ -3780,6 +3950,7 @@ function runProductionIntegrityCheck(params) {
         requireCheck_(stored.getName() === filename, '教材建立後檔名不一致');
         requireCheck_(stored.getBlob().getDataAsString('UTF-8') === content, '教材建立後內容與原始內容不一致');
         requireCheck_(stored.getSize() > 0, '教材建立後檔案大小為 0');
+        assertKpiFileReadable_(stored, actor, 'anqin');
       } finally {
         file.setTrashed(true);
       }
@@ -3809,8 +3980,37 @@ function setupSystemAutomation(params) {
   setupKpiReportTrigger();
   setupTaskReminderTrigger();
   setupTalentReportRepairTrigger();
+  setupKpiReliabilityTriggers();
   logSystem(user.nickname, 'setup_system_automation', '', {});
   return getSystemReadiness({ operator: user.nickname });
+}
+
+function handleVerifiedLineWebhook_(envelope) {
+  const secret = PropertiesService.getScriptProperties().getProperty('LINE_CHANNEL_SECRET');
+  const rawBody = envelope && envelope.rawBody;
+  const signature = String(envelope && envelope.signature || '');
+  if (!secret || typeof rawBody !== 'string' || rawBody.length > 1000000 || !signature) return { ok: false, code: 'LINE_SIGNATURE_REQUIRED' };
+  const expected = Utilities.base64Encode(Utilities.computeHmacSha256Signature(rawBody, secret, Utilities.Charset.UTF_8));
+  let mismatch = expected.length ^ signature.length;
+  for (let i = 0; i < expected.length; i++) mismatch |= expected.charCodeAt(i) ^ (signature.charCodeAt(i) || 0);
+  if (mismatch !== 0) return { ok: false, code: 'LINE_SIGNATURE_INVALID' };
+  let payload;
+  try { payload = JSON.parse(rawBody); } catch (error) { return { ok: false, code: 'LINE_BODY_INVALID' }; }
+  if (!payload || !Array.isArray(payload.events) || payload.events.length > 100 || payload.events.some(function (event) { return !event || typeof event !== 'object'; })) return { ok: false, code: 'LINE_BODY_INVALID' };
+  const cache = CacheService.getScriptCache();
+  for (let i = 0; i < payload.events.length; i++) {
+    const event = payload.events[i];
+    const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, event.webhookEventId || JSON.stringify(event), Utilities.Charset.UTF_8);
+    const key = 'line-event-' + Utilities.base64EncodeWebSafe(digest).replace(/=+$/, '');
+    const result = withResourceLease_(key, function () {
+      if (cache.get(key)) return { ok: true, duplicate: true };
+      handleLineWebhook_({ events: [event] });
+      cache.put(key, 'done', 21600);
+      return { ok: true };
+    });
+    if (!result.ok) return result;
+  }
+  return { ok: true };
 }
 
 /** 對目前帳號同時測試 LINE 與 APP 通知，不回傳任何服務密鑰。 */
@@ -4127,9 +4327,9 @@ function adminBroadcast(params) {
 }
 
 function addDaysStr_(dateStr, n) {
-  const d = new Date(dateStr + 'T00:00:00');
-  d.setDate(d.getDate() + n);
-  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const d = new Date(dateStr + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
 }
 
 // 共用：依模式推播。morning=當天(含逾期)、evening=隔天預告。依老師彙整成一則。
@@ -4154,6 +4354,7 @@ function sendTaskReminders_(mode) {
   Object.keys(byAssignee).forEach(nk => {
     const u = umap[nk];
     if (!u) return;
+    if (isAnqinUser(u) && (isKpiWeekend_(today) || (mode === 'evening' && isKpiWeekend_(tomorrow)))) return;
     const items = byAssignee[nk]
       .map((t, i) => (i + 1) + '. ' + t.title + '（' + t.due_date + (String(t.due_date) < today ? ' 逾期' : '') + '）')
       .join('\n');
@@ -4421,6 +4622,47 @@ function secureKpiReportPath_(root, departmentFolder, teacherFolder, workFolder,
   secureKpiDriveItem_(teacherFolder, ownerUser, 'owner', []);
   secureKpiDriveItem_(workFolder, ownerUser, scope, extraUsers || []);
   if (monthFolder) secureKpiDriveItem_(monthFolder, ownerUser, scope, extraUsers || []);
+}
+
+function assertKpiFileReadable_(file, ownerUser, scope) {
+  try {
+    if (file.isTrashed() || file.getSize() <= 0) throw new Error('empty file');
+    if (file.getSharingAccess() !== DriveApp.Access.PRIVATE) throw new Error('unexpected sharing');
+    const ownerEmail = String(file.getOwner().getEmail() || '').toLowerCase();
+    const viewers = kpiDriveViewerUsers_(ownerUser, scope, []);
+    if (!viewers.some(function (user) { return user.nickname === ownerUser.nickname; })) throw new Error('owner has no email');
+    viewers.forEach(function (user) {
+      if (String(user.email).toLowerCase() === ownerEmail) return;
+      const access = file.getAccess(user.email);
+      if (access !== DriveApp.Permission.VIEW && access !== DriveApp.Permission.EDIT && access !== DriveApp.Permission.OWNER) throw new Error('viewer not granted');
+    });
+  } catch (cause) {
+    const error = new Error('原檔已保留，但雲端檢視權限尚未完成；請再試一次，系統會接續原檔，不會重複建立');
+    error.code = 'FILE_ACCESS_PENDING';
+    throw error;
+  }
+}
+
+function createOrResumeKpiUpload_(folder, blob, nickname, scope, date, base64) {
+  const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, JSON.stringify([nickname, scope, date, blob.getContentType(), base64]), Utilities.Charset.UTF_8);
+  const key = Utilities.base64EncodeWebSafe(digest).replace(/=+$/, '');
+  const name = 'KPI-' + key + '-' + blob.getName();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) {
+    const error = new Error('另一份檔案正在建立，請稍後再試；本機檔案仍保留');
+    error.code = 'WRITE_BUSY';
+    throw error;
+  }
+  try {
+    // Stable content identity survives response loss without keeping image data in Properties.
+    const files = folder.getFilesByName(name);
+    while (files.hasNext()) {
+      const file = files.next();
+      if (!file.isTrashed()) return file;
+    }
+    blob.setName(name);
+    return folder.createFile(blob);
+  } finally { lock.releaseLock(); }
 }
 
 function listArchivedKpiFiles(params) {
@@ -4961,7 +5203,8 @@ function buildDailyKpiHtml_(dateStr) {
 
   const submittedNames = users.filter(u => logMap[u.nickname] && logMap[u.nickname].submitted_at).map(u => u.nickname);
   const draftNames = users.filter(u => logMap[u.nickname] && !logMap[u.nickname].submitted_at).map(u => u.nickname);
-  const missingNames = users.filter(u => !logMap[u.nickname]).map(u => u.nickname);
+  const requiredUsers = users.filter(u => isDailyKpiRequired_(u, dateStr));
+  const missingNames = requiredUsers.filter(u => !logMap[u.nickname]).map(u => u.nickname);
   const helpNames = logs.filter(l => l.help_needed === true).map(l => l.nickname);
 
   let h = '<html><head><meta charset="UTF-8"><style>body{font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif; font-size:12px; color:#3D2817; background:#FFF8E7; margin:0; padding:4px;}</style></head><body>';
@@ -5067,12 +5310,13 @@ function savePersonPdf_(folder, fileName, blob) {
   const matches = folder.getFilesByName(fileName);
   if (matches.hasNext()) {
     const existing = matches.next();
-    if (replacePdfContent_(existing.getId(), blob)) {
-      while (matches.hasNext()) matches.next().setTrashed(true);
-      return existing;
+    if (!replacePdfContent_(existing.getId(), blob)) {
+      const error = new Error('日報更新未完成，原檔與連結已保留，請稍後重試');
+      error.code = 'PDF_REPLACE_FAILED';
+      throw error;
     }
-    existing.setTrashed(true);
     while (matches.hasNext()) matches.next().setTrashed(true);
+    return existing;
   }
   return folder.createFile(blob);
 }
@@ -5125,6 +5369,20 @@ function repairTodayKpiPdfImages() {
  * 每位收件人同一版本只需任一管道成功一次；失敗者可單獨重試，不重複打擾已送達者。
  */
 function sendSubmitPdf(params) {
+  const key = 'DELIVERY_LEASE_' + String(params.date || '') + '_' + String(params.nickname || '');
+  const props = PropertiesService.getScriptProperties();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, code: 'WRITE_BUSY', error: '紀錄已保留，報表正在排隊處理' };
+  const lease = String(Date.now() + 420000);
+  try {
+    if (Number(props.getProperty(key) || 0) > Date.now()) return { ok: false, code: 'DELIVERY_IN_PROGRESS', error: 'PDF 與通知處理中，不必重送紀錄' };
+    props.setProperty(key, lease);
+  } finally { lock.releaseLock(); }
+  try { return sendSubmitPdfRequest_(params); }
+  finally { if (props.getProperty(key) === lease) props.deleteProperty(key); }
+}
+
+function sendSubmitPdfRequest_(params) {
   const nickname = params.nickname;
   const dateStr = String(params.date || '');
   if (!nickname || !dateStr) return { ok: false, error: 'missing nickname/date' };
@@ -5133,16 +5391,16 @@ function sendSubmitPdf(params) {
   const log = findObject(SHEET_NAMES.LOGS, 'log_id', log_id);
   if (!log) return { ok: false, error: 'log not found' };
   if (!log.submitted_at) return { ok: false, error: 'not submitted' };
-  const version = String(log.updated_at || log.submitted_at || nowIso());
+  const version = String(log.record_revision || log.updated_at || log.submitted_at || nowIso());
   const pdfVersionKey = 'PERSONPDF_VERSION_' + log_id;
   const pdfUrlKey = 'PERSONPDF_URL_' + log_id;
   const cachedPdfVersion = props.getProperty(pdfVersionKey) || '';
   const cachedPdfUrl = props.getProperty(pdfUrlKey) || '';
-  let r = cachedPdfVersion >= version && cachedPdfUrl
+  let r = cachedPdfVersion === version && cachedPdfUrl
     ? { url: cachedPdfUrl, log: log }
     : generatePersonKpiPdf_(nickname, dateStr);
   if (!r) return { ok: false, error: 'pdf generation failed' };
-  if (!(cachedPdfVersion >= version && cachedPdfUrl)) {
+  if (!(cachedPdfVersion === version && cachedPdfUrl)) {
     props.setProperty(pdfVersionKey, version);
     props.setProperty(pdfUrlKey, r.url);
   }
@@ -5161,9 +5419,9 @@ function sendSubmitPdf(params) {
     const appKey = 'SENTPDF_APP_' + log_id + '_' + recipient.nickname;
     const lineBound = Boolean(recipient.line_user_id);
     const appBound = Boolean(recipient.push_subscription_id);
-    const lineAlreadySent = lineBound && (props.getProperty(lineKey) || '') >= version;
-    const appAlreadySent = appBound && (props.getProperty(appKey) || '') >= version;
-    const previouslyReached = Boolean(lineAlreadySent || appAlreadySent || (props.getProperty(recipientKey) || '') >= version);
+    const lineAlreadySent = lineBound && (props.getProperty(lineKey) || '') === version;
+    const appAlreadySent = appBound && (props.getProperty(appKey) || '') === version;
+    const previouslyReached = Boolean(lineAlreadySent || appAlreadySent || (props.getProperty(recipientKey) || '') === version);
     const lineSent = lineBound && !lineAlreadySent && pushLine_(recipient.line_user_id, msg);
     const appSent = appBound && !appAlreadySent && pushOneSignal_(recipient.nickname, nickname + ' 已送出 KPI 日報', md + ' 的紀錄與成果證據已可查看');
     if (lineSent) props.setProperty(lineKey, version);
@@ -5201,7 +5459,41 @@ function sendSubmitPdf(params) {
     deliveries: deliveries,
   };
   logSystem('system', 'pdf_person', log_id, { sent: newlyReached, notification: notification });
+  withRecordWriteLock_(function () {
+    const current = findObject(SHEET_NAMES.LOGS, 'log_id', log_id);
+    if (current && String(current.record_revision || current.updated_at) === version) updateRow(SHEET_NAMES.LOGS, current._row, { delivery_state: allReached ? 'complete' : 'pending', delivery_error: pending.length ? '通知尚未送達' : '' });
+  });
   return { ok: true, url: r.url, sent: newlyReached, notification: notification };
+}
+
+function retryPendingKpiDeliveries() {
+  const pending = sheetToObjects(SHEET_NAMES.LOGS).filter(function (row) { return row.submitted_at && (row.delivery_state === 'pending' || row.evidence_state === 'pending'); }).sort(function (a, b) { return String(a.delivery_attempted_at || '').localeCompare(String(b.delivery_attempted_at || '')); }).slice(0, 3);
+  pending.forEach(function (row) {
+    try {
+      withRecordWriteLock_(function () { const current = findObject(SHEET_NAMES.LOGS, 'log_id', row.log_id); if (current) updateRow(SHEET_NAMES.LOGS, current._row, { delivery_attempted_at: nowIso() }); });
+      if (row.evidence_state === 'pending') withRecordWriteLock_(function () {
+        const current = findObject(SHEET_NAMES.LOGS, 'log_id', row.log_id);
+        replaceEvidenceForLog_(row.log_id, current.nickname, current.date, parseJsonField(current.attachments));
+        updateRow(SHEET_NAMES.LOGS, current._row, { evidence_state: 'ready' });
+      });
+      sendSubmitPdf({ nickname: row.nickname, date: String(row.date) });
+    } catch (error) {
+      logSystem('system', 'delivery_retry_failed', row.log_id, { code: error.code || 'DELIVERY_FAILED' });
+    }
+  });
+  return { ok: true, attempted: pending.length };
+}
+
+function setupKpiReliabilityTriggers() {
+  const names = ScriptApp.getProjectTriggers().map(function (trigger) { return trigger.getHandlerFunction(); });
+  if (names.indexOf('retryPendingKpiDeliveries') < 0) ScriptApp.newTrigger('retryPendingKpiDeliveries').timeBased().everyMinutes(10).create();
+  if (names.indexOf('backupKpiDatabaseAuto') < 0) ScriptApp.newTrigger('backupKpiDatabaseAuto').timeBased().everyDays(1).atHour(3).create();
+  if (names.indexOf('repairRecentTalentReportsAuto') < 0) ScriptApp.newTrigger('repairRecentTalentReportsAuto').timeBased().everyMinutes(10).create();
+  return { ok: true, deliveryRetryEnabled: true };
+}
+
+function repairRecentTalentReportsAuto() {
+  return repairMissingTalentLessonReportsAuto();
 }
 
 /** API：手動生成＋推播給所有 admin（?action=sendDailyKpiPdf&operator=柏翰&date=…） */
@@ -5222,6 +5514,7 @@ function sendDailyKpiPdf(params) {
 /** 觸發器用（每天 21:30 自動發當日報告給老闆） */
 function sendDailyKpiReportAuto() {
   const dateStr = todayStr();
+  if (isKpiWeekend_(dateStr)) return { ok: true, skipped: true, reason: 'weekend', sent: 0 };
   const r = generateDailyKpiPdf_(dateStr);
   const msg = kpiPdfMsg_(dateStr, r);
   bossUsers_().forEach(a => {
@@ -5268,7 +5561,7 @@ function ensureCoursePrepSheet_() {
   if (!sheet) sheet = ss.insertSheet(SHEET_NAMES.COURSE_PREP);
   ensureHeaders(sheet, [
     'prep_id', 'nickname', 'department', 'title', 'course_type',
-    'created_date', 'status', 'data_json', 'created_at', 'updated_at'
+    'created_date', 'status', 'data_json', 'created_at', 'updated_at', 'record_revision', 'last_request_id'
   ]);
   return sheet;
 }
@@ -5320,13 +5613,17 @@ function saveCoursePrep(params) {
     if (existing && existing.nickname !== nickname && user.role !== 'admin') {
       return { ok: false, error: '不可覆蓋其他老師的備課檔案' };
     }
+    if (existing && existing.status === 'deleted') return { ok: false, code: 'RECORD_DELETED', error: '這份備課檔案已被刪除；本機內容仍保留，請另建新檔' };
+    if (existing && params.request_id && existing.last_request_id === params.request_id) return { ok: true, prep_id: prep.id, updated_at: existing.updated_at, revision: existing.record_revision, duplicate: true };
+    if (existing && recordConflict_(prep.cloudRevision || prep.cloudUpdatedAt, existing.record_revision || existing.updated_at)) return recordConflictResult_();
     const duplicate = sheetToObjects(SHEET_NAMES.COURSE_PREP).some(function (row) {
-      return row.nickname === nickname
+      return row.status !== 'deleted' && row.nickname === nickname
         && String(row.prep_id || '') !== String(prep.id)
         && String(row.title || '').trim().replace(/\s+/g, ' ').toLowerCase() === normalizedTitle
         && String(row.course_type || '').trim().replace(/\s+/g, ' ').toLowerCase() === normalizedCourseType;
     });
     if (duplicate) return { ok: false, error: '已有相同課程類型與名稱的備課檔案，請直接編輯原檔案' };
+    const revision = Utilities.getUuid();
     upsertRow(SHEET_NAMES.COURSE_PREP, 'prep_id', {
       prep_id: prep.id,
       nickname: nickname,
@@ -5338,12 +5635,14 @@ function saveCoursePrep(params) {
       data_json: dataJson,
       created_at: existing ? existing.created_at : now,
       updated_at: now,
+      record_revision: revision,
+      last_request_id: String(params.request_id || ''),
     });
+    logSystem(nickname, 'save_course_prep', prep.id, { status: prep.status || 'draft' });
+    return { ok: true, prep_id: prep.id, updated_at: now, revision: revision };
   } finally {
     lock.releaseLock();
   }
-  logSystem(nickname, 'save_course_prep', prep.id, { status: prep.status || 'draft' });
-  return { ok: true, prep_id: prep.id, updated_at: now };
 }
 
 function listCoursePreps(params) {
@@ -5359,21 +5658,28 @@ function listCoursePreps(params) {
   }
   if (params.nickname) rows = rows.filter(row => row.nickname === String(params.nickname));
   rows.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
-  const records = rows.map(row => {
+  const deletedIds = rows.filter(row => row.status === 'deleted').map(row => row.prep_id);
+  const records = rows.filter(row => row.status !== 'deleted').map(row => {
     const data = parseJsonField(row.data_json) || {};
     return {
       prepId: row.prep_id,
       nickname: row.nickname,
       department: row.department,
       updatedAt: row.updated_at,
+      revision: row.record_revision || row.updated_at,
+      lastRequestId: row.last_request_id || '',
       prep: data.prep || null,
       plan: data.plan || null,
     };
   }).filter(record => record.prep && record.prep.id);
-  return { ok: true, records: records };
+  return { ok: true, records: records, deletedIds: deletedIds, complete: true };
 }
 
 function deleteCoursePrep(params) {
+  return withRecordWriteLock_(function () { return deleteCoursePrepRecord_(params); });
+}
+
+function deleteCoursePrepRecord_(params) {
   const operator = String(params.operator || '').trim();
   const user = operator ? findUserByNickname(operator) : null;
   if (!user || user.status !== 'active') return { ok: false, error: '無刪除權限' };
@@ -5387,7 +5693,7 @@ function deleteCoursePrep(params) {
   if (normalizeName(params.confirmation_name) !== normalizeName(existing.nickname)) {
     return { ok: false, error: '姓名確認不正確，未刪除備課檔案' };
   }
-  deleteRow(SHEET_NAMES.COURSE_PREP, existing._row);
+  upsertRow(SHEET_NAMES.COURSE_PREP, 'prep_id', Object.assign({}, existing, { status: 'deleted', updated_at: nowIso(), record_revision: Utilities.getUuid() }));
   logSystem(operator, 'delete_course_prep', params.prep_id, {});
   return { ok: true, removed: true };
 }
@@ -5411,7 +5717,7 @@ function ensureTalentRecordsSheet_() {
   ensureHeaders(sheet, [
     'record_id', 'record_type', 'nickname', 'department', 'record_date',
     'year_month', 'status', 'data_json', 'created_by', 'updated_by',
-    'created_at', 'updated_at', 'submitted_at'
+    'created_at', 'updated_at', 'submitted_at', 'report_attempted_at'
   ]);
   return sheet;
 }
@@ -5736,6 +6042,7 @@ function saveTalentLesson(params) {
     return { ok: false, error: '無課堂紀錄權限' };
   }
   const lesson = talentPayload_(params.lesson);
+  const baseContentRevision = String(lesson.contentRevision || '');
   if (!lesson.id) return { ok: false, error: '課堂紀錄編號遺失' };
   lesson.teacher = nickname;
   lesson.employment = talentEmployment_(user);
@@ -5855,16 +6162,19 @@ function saveTalentLesson(params) {
     }
   }
   lesson.status = 'submitted';
-  lesson.contentRevision = nowIso();
+  lesson.contentRevision = nowIso() + '-' + Utilities.getUuid().slice(0, 8);
+  lesson.lastRequestId = String(params.request_id || '');
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: '系統正在儲存另一筆紀錄，請稍後再送出' };
   let saved;
   try {
     const existing = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lesson.id);
     if (existing && existing.record_type === 'lesson' && existing.nickname === nickname && existing.status === 'submitted') {
+      if (params.request_id && talentRecordObject_(existing).lastRequestId === params.request_id) return { ok: true, lesson: talentRecordObject_(existing), duplicate: true };
       if (!String(lesson.updatedAt || '').trim()) return { ok: true, lesson: talentRecordObject_(existing), duplicate: true };
-      if (String(lesson.updatedAt) !== String(existing.updated_at || '')) {
-        return { ok: false, error: '這筆紀錄已在其他裝置更新，請重新整理後再補充' };
+      const latestContentRevision = String(talentRecordObject_(existing).contentRevision || '');
+      if (baseContentRevision ? baseContentRevision !== latestContentRevision : String(lesson.updatedAt) !== String(existing.updated_at || '')) {
+        return { ok: false, code: 'RECORD_CONFLICT', error: '這筆紀錄已在其他裝置更新，您的草稿仍保留；請先查看最新紀錄再補充' };
       }
     }
     if (!existing && employment === 'pt') {
@@ -5881,6 +6191,7 @@ function saveTalentLesson(params) {
   } finally {
     lock.releaseLock();
   }
+  if (params.defer_report === true) return { ok: true, lesson: saved, reportStatus: 'pending', warning: '課堂紀錄已存入雲端；日報與通知將接續產生，不必重送。' };
   let pdf = null;
   let warning = '';
   try {
@@ -6217,6 +6528,10 @@ function generateTalentLessonPdf_(lesson, user) {
 }
 
 function regenerateTalentLessonReport(params) {
+  return withResourceLease_('talent-pdf-' + String(params.lesson_id || ''), function () { return regenerateTalentLessonReportRequest_(params); });
+}
+
+function regenerateTalentLessonReportRequest_(params) {
   const actor = params && params.__actor;
   const lessonId = String(params && params.lesson_id || '').trim();
   const row = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lessonId);
@@ -6228,34 +6543,34 @@ function regenerateTalentLessonReport(params) {
     return { ok: false, error: '無權重建此日報' };
   }
   const current = talentRecordObject_(row);
-  if (current.reportUrl && params.force !== true) {
+  const revision = current.contentRevision || current.updatedAt;
+  if (current.reportUrl && current.reportRevision === revision && params.force !== true) {
     return { ok: true, lesson: current, reportUrl: current.reportUrl, reused: true };
   }
+  withRecordWriteLock_(function () { const latest = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lessonId); if (latest) updateRow(SHEET_NAMES.TALENT_RECORDS, latest._row, { report_attempted_at: nowIso() }); });
 
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) return { ok: false, error: '系統正在處理其他日報，請稍後重試' };
-  try {
+  const pdf = generateTalentLessonPdf_(current, user);
+  const result = withRecordWriteLock_(function () {
     const latestRow = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lessonId);
     if (!latestRow || latestRow.record_type !== 'lesson' || latestRow.status !== 'submitted') {
       return { ok: false, error: '課堂紀錄已變更，請重新整理後再試' };
     }
     const latest = talentRecordObject_(latestRow);
-    if (latest.reportUrl && params.force !== true) {
-      return { ok: true, lesson: latest, reportUrl: latest.reportUrl, reused: true };
-    }
-    const pdf = generateTalentLessonPdf_(latest, user);
+    if ((latest.contentRevision || latest.updatedAt) !== revision) return { ok: false, code: 'RECORD_CONFLICT', error: '紀錄已更新，日報將接續重建為最新內容' };
     latest.reportUrl = pdf.url;
     latest.reportFileId = pdf.fileId;
     latest.reportFolderUrl = pdf.folderUrl || latest.reportFolderUrl || '';
     latest.reportGeneratedAt = nowIso();
     latest.reportRevision = latest.contentRevision || latest.updatedAt;
-    const saved = upsertTalentRecord_('lesson', row.nickname, latest, actor.nickname);
-    notifyTalentLesson_(saved, user, pdf.url);
-    logSystem(actor.nickname, 'regenerate_talent_lesson_pdf', lessonId, { teacher: row.nickname });
+    updateRow(SHEET_NAMES.TALENT_RECORDS, latestRow._row, { data_json: JSON.stringify(talentPayload_(latest)) });
+    const saved = talentRecordObject_(findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lessonId));
     return { ok: true, lesson: saved, reportUrl: pdf.url };
-  } finally {
-    lock.releaseLock();
+  });
+  if (result.ok) {
+    notifyTalentLesson_(result.lesson, user, pdf.url);
+    logSystem(actor.nickname, 'regenerate_talent_lesson_pdf', lessonId, { teacher: row.nickname });
   }
+  return result;
 }
 
 /** 每晚補齊因 Drive 短暫錯誤而缺少的才藝日報；每次限量避免超過 Apps Script 執行時間。 */
@@ -6267,36 +6582,14 @@ function repairMissingTalentLessonReportsAuto() {
     return !String(lesson.reportUrl || '').trim() ||
       !String(lesson.reportRevision || '').trim() ||
       String(lesson.reportRevision || '') !== String(lesson.contentRevision || lesson.updatedAt || '');
-  }).slice(0, 20);
+  }).sort(function (a, b) { return String(a.report_attempted_at || '').localeCompare(String(b.report_attempted_at || '')); }).slice(0, 3);
   let repaired = 0;
   const errors = [];
   rows.forEach(function (row) {
     try {
-      const user = findUserByNickname(row.nickname);
-      if (!user || ['active', 'suspended', 'deleted'].indexOf(user.status) < 0) throw new Error('找不到可稽核的老師資料');
-      const sourceRow = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', row.record_id);
-      if (!sourceRow || sourceRow.record_type !== 'lesson' || sourceRow.status !== 'submitted') throw new Error('課堂紀錄已變更');
-      const source = talentRecordObject_(sourceRow);
-      const sourceRevision = source.contentRevision || source.updatedAt;
-      const pdf = generateTalentLessonPdf_(source, user);
-      const lock = LockService.getScriptLock();
-      if (!lock.tryLock(10000)) throw new Error('系統正在處理其他紀錄');
-      try {
-        const latestRow = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', row.record_id);
-        if (!latestRow || latestRow.record_type !== 'lesson' || latestRow.status !== 'submitted') throw new Error('課堂紀錄已變更');
-        const lesson = talentRecordObject_(latestRow);
-        const hadReport = Boolean(lesson.reportUrl);
-        lesson.reportUrl = pdf.url;
-        lesson.reportFileId = pdf.fileId;
-        lesson.reportFolderUrl = pdf.folderUrl || lesson.reportFolderUrl || '';
-        lesson.reportGeneratedAt = nowIso();
-        lesson.reportRevision = sourceRevision;
-        const saved = upsertTalentRecord_('lesson', row.nickname, lesson, 'system');
-        if (!hadReport && user.status === 'active') notifyTalentLesson_(saved, user, pdf.url);
-        repaired += 1;
-      } finally {
-        lock.releaseLock();
-      }
+      const result = regenerateTalentLessonReport({ __actor: { nickname: 'system', role: 'admin', status: 'active' }, lesson_id: row.record_id });
+      if (!result.ok) throw new Error(result.error || '日報待重試');
+      repaired += 1;
     } catch (error) {
       errors.push({ id: row.record_id, error: String(error.message || error) });
     }
@@ -6663,9 +6956,6 @@ function validateAdminMarketingTrial_(data) {
   data.paymentEvidence = adminMarketingAttachments_(data.paymentEvidence, data.status === 'converted' && data.firstEnrollment);
   data.lateReason = adminMarketingText_(data.lateReason, 1000);
   if (data.enrollmentDate > todayStr() || data.paymentDate > todayStr()) throw new Error('報名與繳費日期不可晚於今天');
-  if ((data.enrollmentDate && data.enrollmentDate < data.date) || (data.paymentDate && data.paymentDate < data.date)) {
-    throw new Error('報名與繳費日期不可早於試上日期');
-  }
   if (data.status === 'converted') {
     if (!data.enrollmentDate || !data.paymentDate || !data.enrollmentCourse) {
       throw new Error('已報名一期必須填寫報名日期、繳費日期與正式課程');
@@ -6708,6 +6998,7 @@ function upsertAdminMarketingRecord_(type, nickname, data, actorNickname) {
   const user = findUserByNickname(nickname);
   const now = nowIso();
   const date = adminMarketingDate_(data.date || todayStr(), true);
+  data.recordRevision = Utilities.getUuid();
   const json = JSON.stringify(adminMarketingPayload_(data));
   if (json.length > 45000) throw new Error('資料內容過大，請確認附件已上傳至雲端');
   upsertRow(SHEET_NAMES.ADMIN_MARKETING_RECORDS, 'record_id', {
@@ -6825,6 +7116,10 @@ function adminMarketingAppendTrialHistory_(data, original, actor, summary) {
 }
 
 function saveAdminMarketingRecord(params) {
+  return withRecordWriteLock_(function () { return saveAdminMarketingRecordLocked_(params); });
+}
+
+function saveAdminMarketingRecordLocked_(params) {
   const actor = params.__actor;
   const nickname = String(params.nickname || actor && actor.nickname || '').trim();
   const target = findUserByNickname(nickname);
@@ -6840,6 +7135,9 @@ function saveAdminMarketingRecord(params) {
   let data = validateAdminMarketingRecord_(type, params.record);
   const existingRow = findObject(SHEET_NAMES.ADMIN_MARKETING_RECORDS, 'record_id', data.id);
   const original = existingRow ? adminMarketingRecordObject_(existingRow) : null;
+  if (original && params.request_id && original.lastRequestId === params.request_id) return { ok: true, record: original, duplicate: true };
+  if (original && recordConflict_(params.record.recordRevision || params.record.baseRevision || params.record.updatedAt, original.recordRevision || original.updatedAt)) return recordConflictResult_();
+  data.lastRequestId = String(params.request_id || '');
   if (type === 'trial') {
     if (!original && data.date < ADMIN_MARKETING_TRIAL_START_DATE_) {
       return { ok: false, error: '試上追蹤自 2026/08/15 起實施，不可建立更早日期的紀錄' };

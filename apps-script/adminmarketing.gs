@@ -328,9 +328,6 @@ function validateAdminMarketingTrial_(data) {
   data.paymentEvidence = adminMarketingAttachments_(data.paymentEvidence, data.status === 'converted' && data.firstEnrollment);
   data.lateReason = adminMarketingText_(data.lateReason, 1000);
   if (data.enrollmentDate > todayStr() || data.paymentDate > todayStr()) throw new Error('報名與繳費日期不可晚於今天');
-  if ((data.enrollmentDate && data.enrollmentDate < data.date) || (data.paymentDate && data.paymentDate < data.date)) {
-    throw new Error('報名與繳費日期不可早於試上日期');
-  }
   if (data.status === 'converted') {
     if (!data.enrollmentDate || !data.paymentDate || !data.enrollmentCourse) {
       throw new Error('已報名一期必須填寫報名日期、繳費日期與正式課程');
@@ -373,6 +370,7 @@ function upsertAdminMarketingRecord_(type, nickname, data, actorNickname) {
   const user = findUserByNickname(nickname);
   const now = nowIso();
   const date = adminMarketingDate_(data.date || todayStr(), true);
+  data.recordRevision = Utilities.getUuid();
   const json = JSON.stringify(adminMarketingPayload_(data));
   if (json.length > 45000) throw new Error('資料內容過大，請確認附件已上傳至雲端');
   upsertRow(SHEET_NAMES.ADMIN_MARKETING_RECORDS, 'record_id', {
@@ -490,6 +488,10 @@ function adminMarketingAppendTrialHistory_(data, original, actor, summary) {
 }
 
 function saveAdminMarketingRecord(params) {
+  return withRecordWriteLock_(function () { return saveAdminMarketingRecordLocked_(params); });
+}
+
+function saveAdminMarketingRecordLocked_(params) {
   const actor = params.__actor;
   const nickname = String(params.nickname || actor && actor.nickname || '').trim();
   const target = findUserByNickname(nickname);
@@ -505,6 +507,9 @@ function saveAdminMarketingRecord(params) {
   let data = validateAdminMarketingRecord_(type, params.record);
   const existingRow = findObject(SHEET_NAMES.ADMIN_MARKETING_RECORDS, 'record_id', data.id);
   const original = existingRow ? adminMarketingRecordObject_(existingRow) : null;
+  if (original && params.request_id && original.lastRequestId === params.request_id) return { ok: true, record: original, duplicate: true };
+  if (original && recordConflict_(params.record.recordRevision || params.record.baseRevision || params.record.updatedAt, original.recordRevision || original.updatedAt)) return recordConflictResult_();
+  data.lastRequestId = String(params.request_id || '');
   if (type === 'trial') {
     if (!original && data.date < ADMIN_MARKETING_TRIAL_START_DATE_) {
       return { ok: false, error: '試上追蹤自 2026/08/15 起實施，不可建立更早日期的紀錄' };

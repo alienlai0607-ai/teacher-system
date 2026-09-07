@@ -25,8 +25,11 @@ function handleRequest(e, method) {
       ? JSON.parse(e.postData.contents || '{}')
       : (e.parameter || {});
 
-    // LINE webhook（老師加好友/傳訊息）— 與一般 API 共用同一個 URL
+    if (params.lineWebhook) return jsonOut(handleVerifiedLineWebhook_(params.lineWebhook));
+
+    // Disable the legacy ingress only after the verified relay has passed its live check.
     if (params.events && Array.isArray(params.events)) {
+      if (PropertiesService.getScriptProperties().getProperty('LINE_VERIFIED_INGRESS_ENABLED') === 'true') return jsonOut({ ok: false, code: 'LINE_SIGNATURE_REQUIRED', error: 'LINE 事件必須由驗證入口傳入' });
       handleLineWebhook_(params);
       return jsonOut({ ok: true });
     }
@@ -44,9 +47,10 @@ function handleRequest(e, method) {
 
     const ROUTES = {
       // 認證
-      'ping': () => ({ ok: true, time: new Date().toISOString() }),
+      'ping': () => ({ ok: true, time: new Date().toISOString(), release: '20260906-reliability-1' }),
       'whoami': () => whoami(params),
       'getSessionIdentity': () => getSessionIdentity(params),
+      'reportClientMetrics': () => reportClientMetrics(params),
 
       // 使用者管理（admin）
       'listUsers': () => listUsers(params),
@@ -172,7 +176,7 @@ function handleRequest(e, method) {
     return jsonOut(result);
   } catch (err) {
     try { console.error(err && err.stack ? err.stack : err); } catch (ignore) {}
-    return jsonOut({ ok: false, error: err && err.message ? err.message : '系統處理失敗' });
+    return jsonOut({ ok: false, code: err && err.code || 'SERVER_ERROR', error: err && err.message ? err.message : '系統處理失敗' });
   }
 }
 
@@ -266,6 +270,17 @@ const BONUS_ANQIN = [
 function isAnqinUser(user) {
   return !!user && user.role === 'teacher'
     && ANQIN_DEPARTMENTS.indexOf(normalizeDepartment_(user.department)) >= 0;
+}
+
+function isKpiWeekend_(date) {
+  const value = String(date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const day = new Date(value + 'T00:00:00Z').getUTCDay();
+  return day === 0 || day === 6;
+}
+
+function isDailyKpiRequired_(user, date) {
+  return !(isAnqinUser(user) && isKpiWeekend_(date));
 }
 
 /** 舊資料的「永康教室」等同目前正式名稱「東橋教室」。 */

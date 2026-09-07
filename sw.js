@@ -1,6 +1,6 @@
 // 布拉克星球 KPI 系統 — Service Worker
 // 策略：網路優先（避免舊快取問題），離線時才用快取備援
-const CACHE = 'bp-kpi-20260902-system-stability-8';
+const CACHE = 'bp-kpi-20260906-reliability-1';
 const SHELL = ['/index.html', '/shared/style.css', '/shared/icons/icon-192.png'];
 
 self.addEventListener('install', e => {
@@ -21,7 +21,8 @@ self.addEventListener('fetch', e => {
   if (!req.url.startsWith(self.location.origin)) return;  // 不攔外部(Apps Script/Drive)
   // 網路優先：拿到就更新快取；失敗才回快取（離線備援）
   e.respondWith(
-    fetch(req).then(res => {
+    fetch(req, req.mode === 'navigate' ? { cache: 'no-cache' } : {}).then(res => {
+      if (!res.ok) return res;
       const copy = res.clone();
       caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {});
       return res;

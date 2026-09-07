@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="../shared/style.css?v=20260624k">
 <script src="../shared/config.js?v=20260825-production-audit-2"></script>
 <script src="../shared/auth.js?v=20260825-production-audit-2"></script>
-<script src="../shared/api.js?v=20260903-api-transport-1"></script>
+<script src="../shared/api.js?v=20260906-reliability-1"></script>
 <script src="../shared/ui.js?v=20260825-production-audit-2"></script>
 <script src="../shared/pwa.js?v=20260825-production-audit-2"></script>
 <script src="../shared/push.js?v=20260903-push-resilience-1"></script>
@@ -122,7 +122,7 @@ async function loadDashboard() {
     return;
   }
   document.getElementById('stat-teachers').textContent = res.teachers_count;
-  document.getElementById('stat-submitted').textContent = `${res.submitted_count}/${res.teachers_count}`;
+  document.getElementById('stat-submitted').textContent = res.required_count === 0 ? '今日免填' : `${res.required_submitted_count ?? res.submitted_count}/${res.required_count ?? res.teachers_count}`;
   document.getElementById('stat-help').textContent = res.help_count;
   document.getElementById('stat-avg').textContent = res.month_avg !== null ? res.month_avg : '—';
 
@@ -132,8 +132,8 @@ async function loadDashboard() {
     return;
   }
   wrap.innerHTML = res.status.map(s => {
-    const dotClass = s.help_needed ? 'status-danger' : (s.submitted ? 'status-ok' : 'status-warn');
-    const statusText = s.help_needed ? '🚨 求助' : (s.submitted ? '✅ 已交' : '⏰ 未填');
+    const dotClass = s.help_needed ? 'status-danger' : (s.submitted || s.required === false ? 'status-ok' : 'status-warn');
+    const statusText = s.help_needed ? '🚨 求助' : (s.submitted ? '✅ 已交' : s.required === false ? '週末免填' : '⏰ 未填');
     return `<div class="teacher-row">
       <div>
         <span class="status-dot ${dotClass}"></span>
@@ -149,7 +149,7 @@ async function loadDashboard() {
   // todos
   const todos = [];
   res.status.forEach(s => {
-    if (!s.submitted) todos.push(`${s.nickname} 今日尚未填寫日誌`);
+    if (!s.submitted && s.required !== false) todos.push(`${s.nickname} 今日尚未填寫日誌`);
     if (s.help_needed) todos.push(`🚨 ${s.nickname} 標記求助，請優先處理`);
   });
   const today = new Date();

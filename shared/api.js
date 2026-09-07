@@ -3,6 +3,30 @@ window.API = (function () {
   const API_URL = window.APP_CONFIG.API_URL;
   let authRedirectScheduled = false;
   const READ_RETRY_DELAYS_MS = [700, 1400];
+  const activeRequests = new Map();
+  const connectionMetrics = [];
+  const logRevisions = new Map();
+  const pendingMetrics = [];
+  let metricTimer = null;
+  function queueMetric(metric) {
+    pendingMetrics.push(metric);
+    if (pendingMetrics.length > 100) pendingMetrics.shift();
+    if (!metricTimer) metricTimer = window.setTimeout(flushMetrics, 15000);
+  }
+  async function flushMetrics() {
+    metricTimer = null;
+    const token = window.AUTH?.getSession?.()?.session_token;
+    if (!token || !pendingMetrics.length || window.AUTH?.isImpersonating?.()) return;
+    const batch = pendingMetrics.splice(0, 50);
+    try {
+      const result = await requestJson({ action: 'reportClientMetrics', events_batch: batch, session_token: token });
+      if (!result.ok) pendingMetrics.unshift(...batch);
+    } catch (error) { pendingMetrics.unshift(...batch); }
+    if (pendingMetrics.length > 100) pendingMetrics.splice(0, pendingMetrics.length - 100);
+  }
+  window.addEventListener?.('error', () => queueMetric({ action: 'runtime-error', ok: false, code: 'UNCAUGHT_ERROR', ms: 0 }));
+  window.addEventListener?.('unhandledrejection', () => queueMetric({ action: 'runtime-error', ok: false, code: 'UNHANDLED_REJECTION', ms: 0 }));
+  window.addEventListener?.('online', () => { if (pendingMetrics.length && !metricTimer) metricTimer = window.setTimeout(flushMetrics, 1000); });
   const IMPERSONATION_READ_ACTIONS = new Set([
     'ping', 'whoami', 'getSessionIdentity', 'listUsers',
     'getLog', 'getTodayLog', 'listLogs', 'getEvidenceLog', 'getMakeupQuota', 'getAttachmentPreviews',
@@ -17,7 +41,7 @@ window.API = (function () {
   ]);
 
   function handleAuthFailure(action, data) {
-    if (action === 'whoami' || !/^AUTH_/.test(String(data?.code || '')) || authRedirectScheduled) return;
+    if (action === 'whoami' || !['AUTH_REQUIRED', 'AUTH_INVALID', 'AUTH_EXPIRED'].includes(String(data?.code || '')) || authRedirectScheduled) return;
     authRedirectScheduled = true;
     window.AUTH?.clearSession?.();
     window.setTimeout(() => {
@@ -44,23 +68,68 @@ window.API = (function () {
   }
 
   async function requestJson(payload) {
-    const res = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // 避免 CORS preflight
-      body: JSON.stringify(payload),
+    const controller = new AbortController();
+    const slowAction = /^(upload|saveTalentLesson|sendSubmitPdf|regenerate|runProduction)/.test(payload.action);
+    const timeoutMs = slowAction ? 90000 : 25000;
+    let timer;
+    const deadline = new Promise((_, reject) => {
+      timer = window.setTimeout(() => {
+        controller.abort();
+        const error = new Error('雲端回應逾時');
+        error.code = 'REQUEST_TIMEOUT';
+        reject(error);
+      }, timeoutMs);
     });
-    const responseText = await res.text();
     try {
-      return JSON.parse(responseText.replace(/^\uFEFF/, ''));
-    } catch (error) {
-      const transportError = new Error('雲端服務暫時未正確回應');
-      transportError.code = 'NON_JSON_RESPONSE';
-      transportError.status = res.status;
-      throw transportError;
+      return await Promise.race([deadline, (async () => {
+        const res = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // 避免 CORS preflight
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+        const responseText = await res.text();
+        if (res.status >= 400) {
+          const error = new Error('雲端服務暫時未正確回應');
+          error.code = 'HTTP_ERROR';
+          error.status = res.status;
+          throw error;
+        }
+        try {
+          const data = JSON.parse(responseText.replace(/^\uFEFF/, ''));
+          if (!data || typeof data.ok !== 'boolean') throw new Error('Invalid response');
+          return data;
+        } catch (error) {
+          const transportError = new Error('雲端服務暫時未正確回應');
+          transportError.code = 'NON_JSON_RESPONSE';
+          transportError.status = res.status;
+          throw transportError;
+        }
+      })()]);
+    } finally {
+      window.clearTimeout(timer);
     }
   }
 
-  async function call(action, params = {}) {
+  function call(action, params = {}) {
+    const key = JSON.stringify([window.AUTH?.getSession?.()?.nickname || '', action, params]);
+    if (activeRequests.has(key)) return activeRequests.get(key);
+    const start = Date.now();
+    const request = performCall(action, params).then(result => {
+      if (result?.ok) {
+        (result.logs || (result.log ? [result.log] : [])).forEach(log => logRevisions.set(log.log_id, log.record_revision || log.updated_at || ''));
+        if (action === 'saveLog' && result.log_id && result.revision) logRevisions.set(result.log_id, result.revision);
+      }
+      connectionMetrics.push({ action, ok: Boolean(result?.ok), code: result?.code || '', ms: Date.now() - start, at: new Date().toISOString() });
+      if (connectionMetrics.length > 100) connectionMetrics.shift();
+      queueMetric(connectionMetrics[connectionMetrics.length - 1]);
+      return result;
+    }).finally(() => activeRequests.delete(key));
+    activeRequests.set(key, request);
+    return request;
+  }
+
+  async function performCall(action, params = {}) {
     if (window.AUTH?.isImpersonating?.() && !IMPERSONATION_READ_ACTIONS.has(action)) {
       return {
         ok: false,
@@ -69,6 +138,10 @@ window.API = (function () {
       };
     }
     const payload = { action, ...params };
+    if (action === 'saveLog' && !Object.prototype.hasOwnProperty.call(payload, 'base_revision')) {
+      payload.base_revision = logRevisions.get(`LOG-${String(payload.date || '').replace(/-/g, '')}-${payload.nickname}`) || '';
+    }
+    if (!isRetryableRead(action) && !payload.request_id) payload.request_id = window.crypto?.randomUUID?.() || `req-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const sessionToken = window.AUTH?.getSession?.()?.session_token || '';
     if (sessionToken && !payload.session_token) payload.session_token = sessionToken;
     const retryable = isRetryableRead(action);
@@ -90,8 +163,34 @@ window.API = (function () {
       }
     }
     console.error('[API]', action, 'failed after transport handling:', lastError);
+    if (action === 'saveLog' && payload.nickname && payload.date) {
+      try {
+        const check = await requestJson({ action: 'getLog', nickname: payload.nickname, date: payload.date, session_token: sessionToken });
+        if (check.ok && check.log?.last_request_id === payload.request_id) {
+          return { ok: true, log_id: check.log.log_id, revision: check.log.record_revision, recovered: true };
+        }
+      } catch (error) { /* The original request may still complete; do not resend. */ }
+    }
+    const receiptRead = action === 'saveCoursePrep' ? 'listCoursePreps'
+      : action === 'saveTalentLesson' ? 'getTalentWorkspaceData'
+      : action === 'saveAdminMarketingRecord' ? 'getAdminMarketingWorkspaceData' : '';
+    if (receiptRead) {
+      try {
+        const check = await requestJson({ action: receiptRead, viewer: payload.nickname, nickname: payload.nickname, session_token: sessionToken });
+        if (check.ok) {
+          const rows = action === 'saveTalentLesson' ? check.lessons : check.records;
+          const id = payload.prep?.id || payload.lesson?.id || payload.record?.id;
+          const saved = (rows || []).find(row => (row.id || row.prepId) === id && row.lastRequestId === payload.request_id);
+          if (saved && action === 'saveCoursePrep') return { ok: true, prep_id: id, revision: saved.revision, updated_at: saved.updatedAt, recovered: true };
+          if (saved && action === 'saveTalentLesson') return { ok: true, lesson: saved, reportStatus: 'pending', recovered: true };
+          if (saved) return { ok: true, record: saved, recovered: true };
+        }
+      } catch (error) { /* Keep the original failure and the user's local draft. */ }
+    }
     return {
       ok: false,
+      request_id: payload.request_id || '',
+      uncertain: !retryable,
       code: lastError?.code || 'NETWORK_ERROR',
       error: retryable
         ? '雲端連線暫時不穩，系統已自動重試，請再試一次'
@@ -100,6 +199,7 @@ window.API = (function () {
   }
 
   return {
+    getConnectionDiagnostics: () => connectionMetrics.map(item => ({ ...item })),
     ping: () => call('ping'),
     whoami: (email, credential = '') => call('whoami', { email, credential }),
     getSessionIdentity: () => call('getSessionIdentity'),
@@ -113,7 +213,19 @@ window.API = (function () {
     saveLog: (data) => call('saveLog', data),
     getLog: (params) => call('getLog', params),
     getTodayLog: (nickname) => call('getTodayLog', { nickname }),
-    listLogs: (params) => call('listLogs', params),
+    listLogs: async (params = {}) => {
+      const logs = new Map();
+      let cursor = '';
+      for (let page = 0; page < 100; page += 1) {
+        const result = await call('listLogs', { ...params, cursor });
+        if (!result.ok) return result;
+        (result.logs || []).forEach(log => logs.set(log.log_id, log));
+        if (!result.next_cursor) return { ...result, logs: Array.from(logs.values()), complete: true };
+        if (result.next_cursor === cursor) break;
+        cursor = result.next_cursor;
+      }
+      return { ok: false, code: 'INCOMPLETE_HISTORY', error: '紀錄尚未全部讀取，請縮小日期範圍後再試；原有內容仍保留' };
+    },
     uploadPhoto: (data) => call('uploadPhoto', data),
     uploadFile: (data) => call('uploadFile', data),
     getAttachmentPreviews: (fileIds) => call('getAttachmentPreviews', { file_ids: fileIds }),
@@ -196,7 +308,7 @@ window.API = (function () {
       ...params,
       viewer: params.viewer || window.AUTH?.getSession?.()?.nickname || '',
     }),
-    saveTalentLesson: (nickname, lesson) => call('saveTalentLesson', { nickname, lesson }),
+    saveTalentLesson: (nickname, lesson) => call('saveTalentLesson', { nickname, lesson, defer_report: true }),
     regenerateTalentLessonReport: (lessonId) => call('regenerateTalentLessonReport', { lesson_id: lessonId }),
     saveTalentDraft: (nickname, draft) => call('saveTalentDraft', { nickname, draft }),
     saveTalentPrep: (nickname, prep) => call('saveTalentPrep', { nickname, prep }),
