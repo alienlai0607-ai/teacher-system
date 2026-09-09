@@ -1227,12 +1227,12 @@ function logSystem(nickname, action, target, detail) {
  * 流程：
  * 1. 前端用 Google Identity Services 取得 ID token
  * 2. 後端向 Google 驗證 ID token，再依 email 查使用者
- * 3. 後端簽發 24 小時工作階段；其餘 API 每次都驗簽與重新核對帳號狀態
+ * 3. 後端簽發 30 天工作階段；其餘 API 每次都驗簽與重新核對帳號狀態
  * 4. 新人由管理員預先建立 email 綁定，避免未綁定暱稱被陌生帳號認領
  */
 
 const GOOGLE_OAUTH_CLIENT_ID_ = '110974418283-75a7ifti599cauhptkcd0jsqshfrupbf.apps.googleusercontent.com';
-const API_SESSION_TTL_MS_ = 24 * 60 * 60 * 1000;
+const API_SESSION_TTL_MS_ = 30 * 24 * 60 * 60 * 1000;
 
 function whoami(params) {
   const identity = verifyLoginIdentity_(params || {});

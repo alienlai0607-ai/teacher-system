@@ -8,9 +8,39 @@ const authSource = fs.readFileSync(path.join(root, 'shared/auth.js'), 'utf8');
 const backendAuth = fs.readFileSync(path.join(root, 'apps-script/auth.gs'), 'utf8');
 const anqinApp = fs.readFileSync(path.join(root, 'review/anqin-v2/app.js'), 'utf8');
 
-assert.match(authSource, /24 \* 3600 \* 1000/, '前端仍應維持 24 小時登入期限');
-assert.match(backendAuth, /API_SESSION_TTL_MS_ = 24 \* 60 \* 60 \* 1000/,
-  '後端仍應維持 24 小時登入期限');
+function loadAuthWithSessionAge(ageDays) {
+  const values = new Map();
+  values.set('kpi_session', JSON.stringify({
+    nickname: '測試老師', role: 'teacher', status: 'active', session_token: 'signed-token',
+    t: Date.now() - ageDays * 24 * 60 * 60 * 1000,
+  }));
+  const context = vm.createContext({
+    URL, Date, Array, JSON,
+    localStorage: {
+      getItem: key => values.get(key) || null,
+      setItem: (key, value) => values.set(key, String(value)),
+      removeItem: key => values.delete(key),
+    },
+    window: {
+      location: { href: 'https://teacher.blockplanetcamp.com/review/anqin-v2/index.html' },
+      setTimeout,
+    },
+    document: { currentScript: null, scripts: [] },
+  });
+  vm.runInContext(authSource, context);
+  return { auth: context.window.AUTH, values };
+}
+
+const day29 = loadAuthWithSessionAge(29);
+assert.equal(day29.auth.getSession()?.nickname, '測試老師', '29 天內應維持登入');
+assert.equal(day29.values.has('kpi_session'), true);
+
+const day31 = loadAuthWithSessionAge(31);
+assert.equal(day31.auth.getSession(), null, '超過 30 天應要求重新登入');
+assert.equal(day31.values.has('kpi_session'), false);
+
+assert.match(backendAuth, /API_SESSION_TTL_MS_ = 30 \* 24 \* 60 \* 60 \* 1000/,
+  '前後端登入期限必須一致為 30 天');
 assert.match(anqinApp, /persistCurrentDrawerDraft\(true\)[\s\S]*persist\('未送出內容已保留'\)[\s\S]*location\.replace\(loginReturnPath\(\)\)/,
   '登入逾期必須先保留草稿，再導向登入頁');
 assert.match(anqinApp, /redirecting: true[\s\S]*登入已逾時，正在重新登入/,

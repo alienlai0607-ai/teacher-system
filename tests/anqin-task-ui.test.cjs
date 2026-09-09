@@ -428,7 +428,7 @@ assert.match(source, /const MAX_DOCUMENT_FILE_BYTES = 25 \* 1024 \* 1024/, '文�
 assert.match(source, /function sameReviewIdentity\(/, '登入暱稱需忽略老師或主管尾綴後再核對');
 assert.match(source, /sameReviewIdentity\(session\.nickname, state\.context\.teacher\)/, '正式送出權限不得因顯示名稱尾綴誤判未登入');
 assert.match(source, /function preserveActivityMedia\(/, '雲端草稿不得用只有檔名的附件覆蓋本機可用媒體');
-assert.match(sharedAuth, /24 \* 3600 \* 1000/, '正式登入應維持完整工作日並降低填寫途中過期風險');
+assert.match(sharedAuth, /SESSION_TTL_MS = 30 \* 24 \* 60 \* 60 \* 1000/, '正式登入應維持 30 天並降低反覆登入干擾');
 assert.match(pdfReport, /教案／教材有效處/, '正式 PDF 需使用新的課後備課回饋欄位');
 assert.match(pdfReport, /parent_handoff_confirmed/, '正式 PDF 需保留無重要事項時的門口交接證據');
 const pdfPhotoSource = pdfReport.slice(pdfReport.indexOf('function pdfImageDataUri_('), pdfReport.indexOf('function pdfRow_('));

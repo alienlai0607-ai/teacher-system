@@ -2,6 +2,7 @@
 window.AUTH = (function () {
   const SESSION_KEY = 'kpi_session';
   const REAL_SESSION_KEY = 'kpi_real_session'; // 切換身份時保留真實 admin session
+  const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
   const ROOT_URL = (() => {
     try {
       const scriptUrl = document.currentScript?.src
@@ -24,15 +25,15 @@ window.AUTH = (function () {
           return null;
         }
         const real = JSON.parse(realRaw);
-        if (Date.now() - Number(real.t || 0) > 24 * 3600 * 1000) {
+        if (Date.now() - Number(real.t || 0) > SESSION_TTL_MS) {
           localStorage.removeItem(SESSION_KEY);
           return null;
         }
         localStorage.setItem(SESSION_KEY, JSON.stringify(real));
         return real;
       }
-      // 覆蓋完整工作日，避免老師上午登入、晚間送出前被迫重新登入。
-      if (!s.impersonate && Date.now() - s.t > 24 * 3600 * 1000) {
+      // 老師多以個人手機使用；後端每次請求仍會重新核對帳號狀態與權限。
+      if (!s.impersonate && Date.now() - Number(s.t || 0) > SESSION_TTL_MS) {
         localStorage.removeItem(SESSION_KEY);
         return null;
       }
