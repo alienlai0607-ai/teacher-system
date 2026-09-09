@@ -738,8 +738,10 @@ async function anqinWorkflow(browser) {
     await page.locator('.drawer-body').evaluate(drawer => { drawer.scrollTop = 0; });
     await page.waitForTimeout(250);
     await page.screenshot({ path: path.join(artifactDir, 'anqin-parent-contact-390.png') });
-    check('安親親師溝通只保留兩段必要內容', await page.locator('#contact-form textarea').count() === 2
-      && await page.locator('#contact-status, #contact-date, [name="nextAction"]').count() === 0);
+    check('安親親師溝通保留必要內容與回覆狀態，不含追蹤欄位', await page.locator('#contact-form textarea').count() === 2
+      && await page.locator('#contact-status').count() === 1
+      && await page.locator('#contact-status option').count() === 2
+      && await page.locator('#contact-date, [name="nextAction"]').count() === 0);
     await page.locator('button[form="contact-form"]').click();
     await page.waitForTimeout(350);
     const parentSectionText = await page.locator('.panel', { hasText: '親師溝通' }).first().innerText();

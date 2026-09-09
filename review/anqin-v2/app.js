@@ -1032,14 +1032,33 @@
     return session.role === 'manager' || session.role === 'admin';
   }
 
+  let formalLoginRedirectScheduled = false;
+
+  function scheduleFormalLoginRecovery(message = '登入已逾時') {
+    if (formalLoginRedirectScheduled || IS_QA_HARNESS || IS_PREVIEW_REVIEW_SESSION) return;
+    formalLoginRedirectScheduled = true;
+    window.clearTimeout(cloudDraftTimer);
+    persistCurrentDrawerDraft(true);
+    state.integration.dailyDraftSyncPending = true;
+    persist('未送出內容已保留');
+    toast(`${message}；未送出內容已保留，正在重新登入`, 'warning');
+    window.setTimeout(() => window.location.replace(loginReturnPath()), 900);
+  }
+
   async function ensureCloudTeacherIdentity() {
     const current = legacySession();
     if (cloudIdentityReady()) return { ok: true, user: current };
-    if (!current) return { ok: false, error: '尚未登入正式帳號' };
+    if (!current) {
+      scheduleFormalLoginRecovery();
+      return { ok: false, code: 'AUTH_REQUIRED', redirecting: true, error: '登入已逾時，正在重新登入' };
+    }
     if (current.impersonate === true) {
       return { ok: false, error: '目前為主管互動測試，正式寫入已停用' };
     }
-    if (!current.session_token) return { ok: false, error: '登入資料不完整，請重新登入' };
+    if (!current.session_token) {
+      scheduleFormalLoginRecovery('登入資料需要更新');
+      return { ok: false, code: 'AUTH_REQUIRED', redirecting: true, error: '登入資料需要更新，正在重新登入' };
+    }
     if (!window.API?.getSessionIdentity) return { ok: false, error: '帳號驗證服務尚未載入，請重新整理' };
 
     const result = await API.getSessionIdentity();
@@ -6507,7 +6526,7 @@
     if (state.integration.cloudSyncEnabled) {
       const identity = await ensureCloudTeacherIdentity();
       if (!identity.ok) {
-        toast(`無法正式送出：${identity.error || '請重新登入目前老師的帳號'}`, 'danger');
+        if (!identity.redirecting) toast(`無法正式送出：${identity.error || '請重新登入目前老師的帳號'}`, 'danger');
         return;
       }
       if (!window.API?.saveLog || !window.API?.uploadPhoto || !window.API?.uploadFile) {
@@ -6585,7 +6604,7 @@
     if (state.integration.cloudSyncEnabled) {
       const identity = await ensureCloudTeacherIdentity();
       if (!identity.ok) {
-        toast(`無法正式送出：${identity.error || '請重新登入目前老師的帳號'}`, 'danger');
+        if (!identity.redirecting) toast(`無法正式送出：${identity.error || '請重新登入目前老師的帳號'}`, 'danger');
         return;
       }
       const result = await API.saveWeekly({
