@@ -300,6 +300,17 @@ async function adminWorkflow(browser) {
     await createTrial('樂高簡易積木', tomorrow);
     check('行政可提前登記未來試上', (await page.locator('body').innerText()).includes('樂高簡易積木'));
 
+    const halfYearTrialEdit = page.locator('.trial-row', { hasText: 'FLL challenge戰隊培訓班' }).locator('[data-action="open-trial"]');
+    await halfYearTrialEdit.click();
+    await page.selectOption('#trial-status', 'converted_half_year');
+    await page.fill('#enrollment-date', today);
+    await page.fill('#payment-date', today);
+    await page.fill('#enrollment-course', 'FLL challenge戰隊半年班');
+    await page.selectOption('#first-enrollment', 'no');
+    await page.locator('#trial-form button[type="submit"]').click();
+    await page.waitForTimeout(250);
+    check('行政可將試上更新為已報名半年並直接結案', (await page.locator('.trial-row', { hasText: 'FLL challenge戰隊培訓班' }).innerText()).includes('已報名半年'));
+
     await clickAction(page, 'open-trial');
     await page.fill('#trial-student', '測試學生');
     await page.fill('#trial-course', '樂高小創客');

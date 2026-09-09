@@ -125,7 +125,8 @@
   ];
   const TRIAL_STATUSES = [
     ['waiting_contact', '已預約／待試上'], ['considering', '待家長決定／追蹤'],
-    ['converted', '已報名一期'], ['not_enrolled', '未報名／暫不考慮'],
+    ['converted', '已報名一期'], ['converted_half_year', '已報名半年'],
+    ['not_enrolled', '未報名／暫不考慮'],
   ];
   const TRIAL_BONUS_AMOUNT = 50;
   const TRIAL_START_DATE = '2026-08-15';
@@ -309,6 +310,12 @@
     if (['contacted', 'followup_scheduled'].includes(status)) return 'considering';
     return TRIAL_STATUSES.some(item => item[0] === status) ? status : 'waiting_contact';
   }
+  function isConvertedTrialStatus(status) {
+    return ['converted', 'converted_half_year'].includes(normalizeTrialStatus(status));
+  }
+  function isConcludedTrialStatus(status) {
+    return isConvertedTrialStatus(status) || normalizeTrialStatus(status) === 'not_enrolled';
+  }
   function trialStatusLabel(status) { return TRIAL_STATUSES.find(item => item[0] === normalizeTrialStatus(status))?.[1] || '待追蹤'; }
   function trialInterestLabel(value) { return ({ high: '意願高', medium: '考慮中', low: '意願低', unknown: '尚未確認' })[value] || '尚未確認'; }
   function maskContact(value) {
@@ -335,7 +342,7 @@
     if (item.bonusStatus === 'approved') return '<span class="badge success">首報獎金 50 元已核准</span>';
     if (item.bonusStatus === 'pending_review') return '<span class="badge warning">50 元待主管確認</span>';
     if (item.bonusStatus === 'rejected') return '<span class="badge danger">獎金不符合</span>';
-    if (item.status === 'converted' && item.firstEnrollment !== true) return '<span class="badge">非首次報名</span>';
+    if (isConvertedTrialStatus(item.status) && item.firstEnrollment !== true) return '<span class="badge">非首次報名</span>';
     return '';
   }
   function trialMonthSummary(month = state.ui.month) {
@@ -344,8 +351,8 @@
     const trialItems = all.filter(item => String(item.date || '').slice(0, 7) === month);
     const approved = all.filter(item => item.bonusStatus === 'approved' && String(item.paymentDate || '').slice(0, 7) === month);
     const pending = all.filter(item => item.bonusStatus === 'pending_review' && String(item.paymentDate || '').slice(0, 7) === month);
-    const converted = trialItems.filter(item => normalizeTrialStatus(item.status) === 'converted');
-    const due = all.filter(item => !['converted', 'not_enrolled'].includes(normalizeTrialStatus(item.status)) && item.nextFollowupDate && item.nextFollowupDate <= todayIso());
+    const converted = trialItems.filter(item => isConvertedTrialStatus(item.status));
+    const due = all.filter(item => !isConcludedTrialStatus(item.status) && item.nextFollowupDate && item.nextFollowupDate <= todayIso());
     return {
       items: monthItems, trials: trialItems.length, converted: converted.length,
       conversionRate: trialItems.length ? Math.round(converted.length / trialItems.length * 100) : 0,
@@ -362,7 +369,8 @@
       needs_revision: ['需補充', 'danger'], paused: ['暫停', 'warning'], published: ['已公布', 'success'], draft: ['草稿', 'warning'],
       confirmed: ['已確認', 'success'], pending_review: ['待主管確認', 'warning'], rejected: ['不符合', 'danger'],
       waiting_contact: ['已預約／待試上', 'warning'], contacted: ['待家長決定／追蹤', 'info'], considering: ['待家長決定／追蹤', 'info'],
-      followup_scheduled: ['待家長決定／追蹤', 'info'], converted: ['已報名一期', 'success'], not_enrolled: ['未報名', ''],
+      followup_scheduled: ['待家長決定／追蹤', 'info'], converted: ['已報名一期', 'success'],
+      converted_half_year: ['已報名半年', 'success'], not_enrolled: ['未報名', ''],
     };
     const item = map[status] || [status || '未設定', ''];
     return `<span class="badge ${item[1]}">${esc(item[0])}</span>`;
@@ -396,7 +404,7 @@
     const assignments = workerRecords('assignment').filter(item => String(item.date || item.dueDate || '').slice(0, 7) === month);
     const projects = workerRecords('project').filter(item => String(item.date || '').slice(0, 7) === month || String(item.dueDate || '').slice(0, 7) === month);
     const trials = trialRecords().filter(item => String(item.date || '').slice(0, 7) === month || String(item.paymentDate || '').slice(0, 7) === month);
-    const overdueTrials = trials.filter(item => !['converted', 'not_enrolled'].includes(normalizeTrialStatus(item.status)) && item.nextFollowupDate && item.nextFollowupDate < todayIso()).length;
+    const overdueTrials = trials.filter(item => !isConcludedTrialStatus(item.status) && item.nextFollowupDate && item.nextFollowupDate < todayIso()).length;
     const overdueWork = assignments.filter(item => item.status !== 'completed' && item.dueDate && item.dueDate < todayIso()).length
       + workItems.filter(item => item.status !== 'completed' && item.dueDate && item.dueDate < todayIso()).length;
     const environments = workerRecords('environment').filter(within);
@@ -414,8 +422,8 @@
       videos,
       photos,
       overdueTrials,
-      converted: trials.filter(item => normalizeTrialStatus(item.status) === 'converted').length,
-      openTrials: trials.filter(item => !['converted', 'not_enrolled'].includes(normalizeTrialStatus(item.status))).length,
+      converted: trials.filter(item => isConvertedTrialStatus(item.status)).length,
+      openTrials: trials.filter(item => !isConcludedTrialStatus(item.status)).length,
       assignmentCount: assignments.length,
       projectCount: projects.length,
       overdueWork,
@@ -429,7 +437,7 @@
     const map = {
       daily: `工作紀錄 ${facts.dailyDays} 天、共 ${facts.workCount} 項；訊息確認 ${facts.communicationDays} 天`,
       promotion: `可判讀完成證據：影片 ${facts.videos} 支、照片宣傳 ${facts.photos} 則`,
-      followup: `追蹤中 ${facts.openTrials} 人、已轉一期 ${facts.converted} 人、逾期 ${facts.overdueTrials} 人`,
+      followup: `追蹤中 ${facts.openTrials} 人、已正式報名 ${facts.converted} 人、逾期 ${facts.overdueTrials} 人`,
       deadline: `交辦 ${facts.assignmentCount} 項、專案 ${facts.projectCount} 項、目前逾期 ${facts.overdueWork} 項`,
       environment: `環境檢核 ${facts.environmentDays} 天，其中 ${facts.environmentIssues} 天有改善事項`,
       supervisor: `需主管協助 ${facts.escalations} 次，其中 ${facts.reported} 次已標記主動回報`,
@@ -602,28 +610,28 @@
       <div class="mt-16">${renderWeeklyParentCheck()}</div>
       <div class="grid cols-4 mt-16">
         ${metric('本月試上', summary.trials, '依試上日期統計', 'user-round-search')}
-        ${metric('轉一期', summary.converted, `轉換率 ${summary.conversionRate}%`, 'user-round-check')}
+        ${metric('正式報名', summary.converted, `轉換率 ${summary.conversionRate}%`, 'user-round-check')}
         ${metric('待追蹤', summary.due.length, summary.due.length ? '含今日到期與逾期' : '目前沒有到期項目', 'calendar-clock')}
         ${metric('已核准獎金', `$${summary.bonus}`, `${summary.approved.length} 人；另 ${summary.pending.length} 人待審`, 'badge-dollar-sign')}
       </div>
-      ${isManager && summary.pending.length ? `<div class="notice warning mt-16">${icon('badge-dollar-sign')}<div><strong>${summary.pending.length} 筆首報獎金待確認</strong><br>確認首次一期、繳費證明與未曾領取後再核准。</div></div>` : ''}
+      ${isManager && summary.pending.length ? `<div class="notice warning mt-16">${icon('badge-dollar-sign')}<div><strong>${summary.pending.length} 筆首報獎金待確認</strong><br>確認首次正式報名、繳費證明與未曾領取後再核准。</div></div>` : ''}
       <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('users-round')}${esc(state.ui.month)} 試上名單</div><div class="panel-subtitle">每次試上課程各一筆；同一學生可登記不同課程</div></div><span class="badge">${filtered.length} 筆</span></div><div class="panel-body flush">${filtered.length ? `<div class="trial-list">${filtered.map(renderTrialCard).join('')}</div>` : emptyState('user-round-search', '這個月份沒有符合的紀錄', isManager ? '行政登錄試上後會出現在這裡。' : '可提前登記未來試上；沒有試上仍需於當日確認。')}</div></section>
       ${isManager ? renderTrialBonusTable(summary) : ''}
     </section>`;
   }
 
   function renderTrialCard(item) {
-    const overdue = !['converted', 'not_enrolled'].includes(normalizeTrialStatus(item.status)) && item.nextFollowupDate && item.nextFollowupDate < todayIso();
+    const overdue = !isConcludedTrialStatus(item.status) && item.nextFollowupDate && item.nextFollowupDate < todayIso();
     const lastFollowup = (item.followups || []).slice(-1)[0];
     const action = isManager
       ? `<button class="button small" data-action="view-trial" data-id="${esc(item.id)}">${icon('eye')}查看</button>${['pending_review','rejected'].includes(item.bonusStatus) ? `<button class="button small teal" data-action="review-trial-bonus" data-id="${esc(item.id)}">${icon('badge-check')}${item.bonusStatus === 'rejected' ? '重新審核' : '確認獎金'}</button>` : ''}`
       : `<button class="button small" data-action="open-trial" data-id="${esc(item.id)}">${icon('pencil')}更新</button>`;
-    return `<article class="trial-row"><div class="trial-main"><div class="record-head"><div class="record-title"><strong>${esc(item.studentName)}</strong><small>${formatDate(item.date)} 試上 · ${esc(item.course)} · ${esc(item.teacher)}</small></div>${statusBadge(normalizeTrialStatus(item.status))}</div><div class="trial-meta"><span>${icon('phone',14)}${esc(maskContact(trialContact(item)))}</span>${item.nextFollowupDate && !['converted','not_enrolled'].includes(normalizeTrialStatus(item.status)) ? `<span class="${overdue ? 'text-danger' : ''}">${icon('calendar-clock',14)}${overdue ? '已逾期 ' : '下次 '}${formatDate(item.nextFollowupDate)}</span>` : ''}</div>${lastFollowup ? `<p class="record-copy trial-last"><strong>最近追蹤：</strong>${esc(lastFollowup.note)}</p>` : ''}<div class="record-actions">${trialBonusBadge(item)}${action}</div></div></article>`;
+    return `<article class="trial-row"><div class="trial-main"><div class="record-head"><div class="record-title"><strong>${esc(item.studentName)}</strong><small>${formatDate(item.date)} 試上 · ${esc(item.course)} · ${esc(item.teacher)}</small></div>${statusBadge(normalizeTrialStatus(item.status))}</div><div class="trial-meta"><span>${icon('phone',14)}${esc(maskContact(trialContact(item)))}</span>${item.nextFollowupDate && !isConcludedTrialStatus(item.status) ? `<span class="${overdue ? 'text-danger' : ''}">${icon('calendar-clock',14)}${overdue ? '已逾期 ' : '下次 '}${formatDate(item.nextFollowupDate)}</span>` : ''}</div>${lastFollowup ? `<p class="record-copy trial-last"><strong>最近追蹤：</strong>${esc(lastFollowup.note)}</p>` : ''}<div class="record-actions">${trialBonusBadge(item)}${action}</div></div></article>`;
   }
 
   function renderTrialBonusTable(summary) {
     const rows = summary.approved.concat(summary.pending).sort((a,b) => String(a.paymentDate).localeCompare(String(b.paymentDate)));
-    return `<section class="panel mt-16 bonus-report"><div class="panel-head"><div><div class="panel-title">${icon('receipt-text')}首報獎金月報</div><div class="panel-subtitle">只列首次試上轉一期；續報不計</div></div><strong class="bonus-total">$${summary.bonus}</strong></div><div class="panel-body flush">${rows.length ? `<div class="table-scroll"><table class="data-table"><thead><tr><th>學生</th><th>試上</th><th>繳費</th><th>正式課程</th><th>審核</th><th>金額</th></tr></thead><tbody>${rows.map(item => `<tr><td>${esc(item.studentName)}</td><td>${formatDate(item.date)}</td><td>${formatDate(item.paymentDate)}</td><td>${esc(item.enrollmentCourse)}</td><td>${item.bonusStatus === 'approved' ? '已核准' : '待確認'}</td><td>${item.bonusStatus === 'approved' ? '$50' : '—'}</td></tr>`).join('')}</tbody></table></div>` : emptyState('receipt-text','本月尚無獎金明細','符合條件並經主管核准後，會自動列入本月總額。')}</div></section>`;
+    return `<section class="panel mt-16 bonus-report"><div class="panel-head"><div><div class="panel-title">${icon('receipt-text')}首報獎金月報</div><div class="panel-subtitle">只列首次正式報名；續報不計</div></div><strong class="bonus-total">$${summary.bonus}</strong></div><div class="panel-body flush">${rows.length ? `<div class="table-scroll"><table class="data-table"><thead><tr><th>學生</th><th>試上</th><th>繳費</th><th>正式課程</th><th>審核</th><th>金額</th></tr></thead><tbody>${rows.map(item => `<tr><td>${esc(item.studentName)}</td><td>${formatDate(item.date)}</td><td>${formatDate(item.paymentDate)}</td><td>${esc(item.enrollmentCourse)}</td><td>${item.bonusStatus === 'approved' ? '已核准' : '待確認'}</td><td>${item.bonusStatus === 'approved' ? '$50' : '—'}</td></tr>`).join('')}</tbody></table></div>` : emptyState('receipt-text','本月尚無獎金明細','符合條件並經主管核准後，會自動列入本月總額。')}</div></section>`;
   }
 
   function renderDailyPage() {
@@ -712,7 +720,7 @@
   function renderManagerAlerts() {
     const assignments = workerRecords('assignment').filter(item => item.status !== 'completed' && item.dueDate < todayIso()).map(item => ({ ...item, label: '交辦逾期' }));
     const bonuses = trialRecords().filter(item => item.bonusStatus === 'pending_review').map(item => ({ ...item, title: `${item.studentName} 首報獎金`, label: '50 元待確認' }));
-    const trials = trialRecords().filter(item => !['converted', 'not_enrolled'].includes(normalizeTrialStatus(item.status)) && item.nextFollowupDate && item.nextFollowupDate <= todayIso()).map(item => ({ ...item, title: `${item.studentName} 家長追蹤`, label: '今日到期／逾期' }));
+    const trials = trialRecords().filter(item => !isConcludedTrialStatus(item.status) && item.nextFollowupDate && item.nextFollowupDate <= todayIso()).map(item => ({ ...item, title: `${item.studentName} 家長追蹤`, label: '今日到期／逾期' }));
     const environments = workerRecords('environment').filter(item => item.status === 'needs_action' && item.improvementDue && item.improvementDue <= todayIso()).map(item => ({ ...item, title: `${formatDate(item.date)} 環境改善`, label: '改善期限到期' }));
     const list = bonuses.concat(assignments, trials, environments).slice(0, 8);
     if (!list.length) return emptyState('circle-check-big', '目前沒有急件', '新的獎金確認、逾期或改善事項會排在這裡。');
@@ -792,8 +800,8 @@
 
   function renderGuidePage() {
     return `<section class="page">${pageHead(isManager ? '行政美宣評分標準' : '行政美宣使用說明', '規則集中在這裡，正式填寫頁只保留當下需要的欄位')}
-      <div class="grid cols-2"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('mouse-pointer-click')}最短填寫方式</div></div></div><div class="panel-body"><ol class="simple-steps"><li><strong>一天一次</strong><span>確認訊息與 LINE、環境、今日是否有試上。</span></li><li><strong>一件工作一筆</strong><span>只寫本次結果；未完成再寫下一步與期限。</span></li><li><strong>同一件持續更新</strong><span>試上、家長追蹤、交辦與專案都不重複建立。</span></li><li><strong>系統自動彙整</strong><span>每週產出、逾期、獎金與月度事實不需另做表格。</span></li></ol></div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('paperclip')}什麼時候要附件</div></div></div><div class="panel-body"><div class="check-list"><div class="check-row"><span><strong>美宣完成</strong><br>附可發布成品、發布畫面或排程截圖。</span></div><div class="check-row"><span><strong>首次一期獎金</strong><br>附報名或完成繳費證明。</span></div><div class="check-row"><span><strong>一般行政</strong><br>只有主管需要核對結果時才附，不為拍照而拍照。</span></div></div></div></section></div>
-      <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('target')}固定目標與獎金</div></div></div><div class="panel-body"><div class="rule-grid"><div><span>每週影片</span><strong>2 支</strong><small>完成至可發布狀態</small></div><div><span>照片宣傳</span><strong>3 則</strong><small>單張、多張或圖卡皆可</small></div><div><span>首報獎金</span><strong>50 元／人</strong><small>首次一期且完成繳費</small></div></div></div></section>
+      <div class="grid cols-2"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('mouse-pointer-click')}最短填寫方式</div></div></div><div class="panel-body"><ol class="simple-steps"><li><strong>一天一次</strong><span>確認訊息與 LINE、環境、今日是否有試上。</span></li><li><strong>一件工作一筆</strong><span>只寫本次結果；未完成再寫下一步與期限。</span></li><li><strong>同一件持續更新</strong><span>試上、家長追蹤、交辦與專案都不重複建立。</span></li><li><strong>系統自動彙整</strong><span>每週產出、逾期、獎金與月度事實不需另做表格。</span></li></ol></div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('paperclip')}什麼時候要附件</div></div></div><div class="panel-body"><div class="check-list"><div class="check-row"><span><strong>美宣完成</strong><br>附可發布成品、發布畫面或排程截圖。</span></div><div class="check-row"><span><strong>首次正式報名獎金</strong><br>一期或半年皆附報名或完成繳費證明。</span></div><div class="check-row"><span><strong>一般行政</strong><br>只有主管需要核對結果時才附，不為拍照而拍照。</span></div></div></div></section></div>
+      <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('target')}固定目標與獎金</div></div></div><div class="panel-body"><div class="rule-grid"><div><span>每週影片</span><strong>2 支</strong><small>完成至可發布狀態</small></div><div><span>照片宣傳</span><strong>3 則</strong><small>單張、多張或圖卡皆可</small></div><div><span>首報獎金</span><strong>50 元／人</strong><small>首次正式報名且完成繳費</small></div></div></div></section>
       <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('gauge')}100 分評核</div><div class="panel-subtitle">主管必須依系統事實與下列尺度評分</div></div></div><div class="panel-body"><div class="rubric-list">${KPI.map(item => `<details><summary><span>${esc(item.label)}</span><strong>${item.max} 分</strong></summary><p>${esc(item.rubric)}</p></details>`).join('')}</div></div></section>
       <section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">${icon('siren')}必須主動回報</div></div></div><div class="panel-body"><div class="tag-list">${['家長客訴','繳費異常','家長長時間未回覆','宣傳延遲','活動資料不足','設備異常','環境無法改善','工作可能逾期'].map(item => `<span class="badge warning">${esc(item)}</span>`).join('')}</div></div></section>
     </section>`;
@@ -944,7 +952,7 @@
       ${isNew ? '<input type="hidden" name="status" value="waiting_contact">' : `<div class="field"><label for="trial-status">目前結果 <span class="required">*</span></label><select id="trial-status" name="status" ${approved ? 'disabled' : ''}>${TRIAL_STATUSES.map(([value,label]) => `<option value="${value}" ${normalizedStatus === value ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>${approved ? `<input type="hidden" name="status" value="${esc(normalizedStatus)}">` : ''}</div>`}
       ${isNew ? '' : `<div class="field" data-trial-next><label for="trial-next">提醒日期 <span class="conditional">需要系統提醒時再填</span></label><input id="trial-next" name="nextFollowupDate" type="date" value="${esc(item.nextFollowupDate || '')}"></div>`}
     </div>${isNew ? '<div class="notice mt-16">新增後會先顯示「已預約／待試上」；試上結束後再按更新選擇結果。</div>' : ''}<details class="compact-details mt-16" ${item.note ? 'open' : ''}><summary>${icon('message-square-more')}家長回覆／特殊備註（選填）</summary><div class="compact-details-body"><div class="field full"><label for="trial-note">備註</label><textarea id="trial-note" name="note" placeholder="只有需要保留的家長回覆或特殊狀況才填">${esc(item.note || '')}</textarea></div></div></details>
-    <section class="subsection conversion-fields" data-conversion-fields><h3>首次一期報名與繳費</h3><div class="notice">${icon('badge-dollar-sign')}<div>只有「首次正式報名並完成繳費」才會產生 50 元待審獎金；續報不計。</div></div><div class="form-grid mt-16"><div class="field"><label for="enrollment-date">一期報名日期 <span class="required">*</span></label><input id="enrollment-date" name="enrollmentDate" type="date" value="${esc(item.enrollmentDate || '')}" ${approved ? 'readonly' : ''}></div><div class="field"><label for="payment-date">繳費確認日期 <span class="required">*</span></label><input id="payment-date" name="paymentDate" type="date" value="${esc(item.paymentDate || '')}" ${approved ? 'readonly' : ''}></div><div class="field full"><label for="enrollment-course">正式報名課程 <span class="required">*</span></label><input id="enrollment-course" name="enrollmentCourse" value="${esc(item.enrollmentCourse || item.course || '')}" ${approved ? 'readonly' : ''}><div class="field-help">預設帶入試上課程，需要時可直接修改。</div></div><div class="field"><label for="first-enrollment">是否為第一次正式報名 <span class="required">*</span></label><select id="first-enrollment" name="firstEnrollment" ${approved ? 'disabled' : ''}><option value="">請確認</option><option value="yes" ${item.firstEnrollment === true ? 'selected' : ''}>是，第一次報名一期</option><option value="no" ${item.firstEnrollment === false && normalizedStatus === 'converted' ? 'selected' : ''}>不是，屬續報／轉班</option></select>${approved ? '<input type="hidden" name="firstEnrollment" value="yes">' : ''}</div><div class="field"><label for="payment-evidence">報名／繳費證明 <span class="required">*</span> <span class="conditional">首次報名時</span></label><input id="payment-evidence" name="paymentEvidence" type="file" multiple accept="image/*,.pdf" ${approved ? 'disabled' : ''}><div class="field-help">可一次選多張截圖，儲存前可移除點錯的檔案。</div><div class="selected-files" data-file-preview="payment-evidence"></div>${approved ? '' : existingFileControls(item.paymentEvidence || [], 'removePaymentEvidence')}</div></div>${trialBonusBadge(item)}</section>`;
+    <section class="subsection conversion-fields" data-conversion-fields><h3>正式報名與繳費</h3><div class="notice">${icon('badge-dollar-sign')}<div>一期或半年皆可登記；只有「首次正式報名並完成繳費」才會產生 50 元待審獎金，續報不計。</div></div><div class="form-grid mt-16"><div class="field"><label for="enrollment-date">報名日期 <span class="required">*</span></label><input id="enrollment-date" name="enrollmentDate" type="date" value="${esc(item.enrollmentDate || '')}" ${approved ? 'readonly' : ''}></div><div class="field"><label for="payment-date">繳費確認日期 <span class="required">*</span></label><input id="payment-date" name="paymentDate" type="date" value="${esc(item.paymentDate || '')}" ${approved ? 'readonly' : ''}></div><div class="field full"><label for="enrollment-course">正式報名課程 <span class="required">*</span></label><input id="enrollment-course" name="enrollmentCourse" value="${esc(item.enrollmentCourse || item.course || '')}" ${approved ? 'readonly' : ''}><div class="field-help">預設帶入試上課程，需要時可直接修改。</div></div><div class="field"><label for="first-enrollment">是否為第一次正式報名 <span class="required">*</span></label><select id="first-enrollment" name="firstEnrollment" ${approved ? 'disabled' : ''}><option value="">請確認</option><option value="yes" ${item.firstEnrollment === true ? 'selected' : ''}>是，第一次正式報名</option><option value="no" ${item.firstEnrollment === false && isConvertedTrialStatus(normalizedStatus) ? 'selected' : ''}>不是，屬續報／轉班</option></select>${approved ? '<input type="hidden" name="firstEnrollment" value="yes">' : ''}</div><div class="field"><label for="payment-evidence">報名／繳費證明 <span class="required">*</span> <span class="conditional">首次報名時</span></label><input id="payment-evidence" name="paymentEvidence" type="file" multiple accept="image/*,.pdf" ${approved ? 'disabled' : ''}><div class="field-help">可一次選多張截圖，儲存前可移除點錯的檔案。</div><div class="selected-files" data-file-preview="payment-evidence"></div>${approved ? '' : existingFileControls(item.paymentEvidence || [], 'removePaymentEvidence')}</div></div>${trialBonusBadge(item)}</section>`;
     showDialog(dialogShell(isNew ? '登錄試上預約' : `更新 ${item.studentName}`, isNew ? '可登記未來日期；同一學生的不同課程分開建立' : '只更新目前結果；不必另外新增追蹤紀錄', body, isNew ? '儲存預約' : '儲存更新', 'trial-form'), true);
     updateTrialFormVisibility();
   }
@@ -953,8 +961,8 @@
     const select = $('#trial-status');
     const section = $('[data-conversion-fields]');
     const status = normalizeTrialStatus(select?.value || 'waiting_contact');
-    const converted = status === 'converted';
-    const concluded = ['converted', 'not_enrolled'].includes(status);
+    const converted = isConvertedTrialStatus(status);
+    const concluded = isConcludedTrialStatus(status);
     const locked = Boolean(select?.disabled);
     if (section) {
       section.hidden = !converted;
@@ -1040,7 +1048,7 @@
     const evidence = (item.paymentEvidence || []).map(file => `<a class="badge success" href="${esc(file.url)}" target="_blank" rel="noopener">${icon('paperclip',12)}${esc(file.fileName)}</a>`).join('');
     const review = withReview ? `<div class="field mt-16"><label for="trial-review-note">主管審核說明</label><textarea id="trial-review-note" name="note" placeholder="不符合時必須寫明原因">${esc(item.bonusReviewNote || '')}</textarea></div><div class="grid cols-2 mt-16"><label class="check-row"><input type="radio" name="result" value="approved" ${item.bonusStatus !== 'rejected' ? 'checked' : ''}><span>確認符合，核發 50 元</span></label><label class="check-row"><input type="radio" name="result" value="rejected" ${item.bonusStatus === 'rejected' ? 'checked' : ''}><span>不符合</span></label></div>` : '';
     const trialLabel = [formatDate(item.date), item.trialTime, item.course].filter(Boolean).join(' · ');
-    const body = `<input type="hidden" name="recordId" value="${esc(item.id)}"><div class="detail-grid"><div><span>學生</span><strong>${esc(item.studentName)}</strong></div><div><span>家長識別</span><strong>${esc(trialContact(item))}</strong></div><div><span>試上</span><strong>${esc(trialLabel)}</strong></div><div><span>授課老師</span><strong>${esc(item.teacher)}</strong></div><div><span>目前狀態</span><strong>${esc(trialStatusLabel(item.status))}</strong></div><div><span>負責人</span><strong>${esc(item.owner || workerName)}</strong></div>${item.status === 'converted' ? `<div><span>正式報名</span><strong>${formatDate(item.enrollmentDate)} · ${esc(item.enrollmentCourse)}</strong></div><div><span>繳費確認</span><strong>${formatDate(item.paymentDate)}</strong></div><div><span>首次報名</span><strong>${item.firstEnrollment ? '是' : '否，不計獎金'}</strong></div><div><span>獎金狀態</span><strong>${item.bonusStatus === 'approved' ? '已核准 50 元' : item.bonusStatus === 'rejected' ? '不符合' : '待主管確認'}</strong></div>` : ''}</div>${evidence ? `<div class="file-list mt-16">${evidence}</div>` : ''}<h3>處理時間軸</h3>${renderTrialTimeline(item)}${review}`;
+    const body = `<input type="hidden" name="recordId" value="${esc(item.id)}"><div class="detail-grid"><div><span>學生</span><strong>${esc(item.studentName)}</strong></div><div><span>家長識別</span><strong>${esc(trialContact(item))}</strong></div><div><span>試上</span><strong>${esc(trialLabel)}</strong></div><div><span>授課老師</span><strong>${esc(item.teacher)}</strong></div><div><span>目前狀態</span><strong>${esc(trialStatusLabel(item.status))}</strong></div><div><span>負責人</span><strong>${esc(item.owner || workerName)}</strong></div>${isConvertedTrialStatus(item.status) ? `<div><span>正式報名</span><strong>${formatDate(item.enrollmentDate)} · ${esc(item.enrollmentCourse)}</strong></div><div><span>繳費確認</span><strong>${formatDate(item.paymentDate)}</strong></div><div><span>首次報名</span><strong>${item.firstEnrollment ? '是' : '否，不計獎金'}</strong></div><div><span>獎金狀態</span><strong>${item.bonusStatus === 'approved' ? '已核准 50 元' : item.bonusStatus === 'rejected' ? '不符合' : '待主管確認'}</strong></div>` : ''}</div>${evidence ? `<div class="file-list mt-16">${evidence}</div>` : ''}<h3>處理時間軸</h3>${renderTrialTimeline(item)}${review}`;
     showDialog(dialogShell(withReview ? '確認首報獎金' : '試上追蹤明細', `${item.studentName} · ${formatDate(item.date)} 試上`, body, withReview ? '儲存審核' : '', withReview ? 'trial-bonus-form' : ''), true);
   }
 
@@ -1235,7 +1243,36 @@
       persist();
       return { ok: true, record };
     }
-    const result = await window.API.saveAdminMarketingRecord(currentUser.nickname, type, record);
+    let result = await window.API.saveAdminMarketingRecord(workerName, type, record);
+    if (result?.code === 'RECORD_CONFLICT' && result.current_record) {
+      const latest = result.current_record;
+      const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+      const merged = { ...latest };
+      Object.keys(record).forEach(key => {
+        if (['recordRevision', 'baseRevision', 'updatedAt', 'createdAt', 'lastRequestId'].includes(key)) return;
+        if (original && same(record[key], original[key])) return;
+        if (Array.isArray(record[key]) && Array.isArray(latest[key]) && Array.isArray(original?.[key])) {
+          const identity = item => item && typeof item === 'object' ? String(item.id || item.name || '') : '';
+          const keyed = record[key].every(item => identity(item)) && latest[key].every(item => identity(item));
+          if (keyed) {
+            const originalById = new Map(original[key].map(item => [identity(item), item]));
+            const mergedById = new Map(latest[key].map(item => [identity(item), item]));
+            record[key].forEach(item => {
+              const id = identity(item);
+              if (!originalById.has(id) || !same(item, originalById.get(id))) mergedById.set(id, item);
+            });
+            merged[key] = Array.from(mergedById.values());
+            return;
+          }
+        }
+        merged[key] = record[key];
+      });
+      merged.recordRevision = latest.recordRevision || '';
+      merged.baseRevision = latest.updatedAt || '';
+      merged.updatedAt = new Date().toISOString();
+      result = await window.API.saveAdminMarketingRecord(workerName, type, merged);
+      if (result?.ok) result.merged = true;
+    }
     if (result?.ok) upsertLocal(result.record);
     return result;
   }
@@ -1266,14 +1303,15 @@
     const trialTime = String(data.get('trialTime') || '').trim();
     const teacher = String(data.get('teacher') || '').trim();
     const requestedReminder = String(data.get('nextFollowupDate') || '');
-    const nextFollowupDate = ['converted', 'not_enrolled'].includes(status) ? '' : requestedReminder || (!existing.id ? (date >= todayIso() ? date : todayIso()) : '');
-    const enrollmentDate = status === 'converted' ? String(data.get('enrollmentDate') || '') : '';
-    const paymentDate = status === 'converted' ? String(data.get('paymentDate') || '') : '';
-    const enrollmentCourse = status === 'converted' ? String(data.get('enrollmentCourse') || '').trim() : '';
+    const converted = isConvertedTrialStatus(status);
+    const nextFollowupDate = isConcludedTrialStatus(status) ? '' : requestedReminder || (!existing.id ? (date >= todayIso() ? date : todayIso()) : '');
+    const enrollmentDate = converted ? String(data.get('enrollmentDate') || '') : '';
+    const paymentDate = converted ? String(data.get('paymentDate') || '') : '';
+    const enrollmentCourse = converted ? String(data.get('enrollmentCourse') || '').trim() : '';
     const firstEnrollmentChoice = String(data.get('firstEnrollment') || '');
     if (!studentName || !course || !teacher || !contactRef) throw new Error('學生、課程、授課老師與家長識別資料皆為必填');
     if (date < TRIAL_START_DATE) throw new Error('試上追蹤自 2026/08/15 起實施，請選擇 8/15 或之後的日期');
-    if (status === 'converted') {
+    if (converted) {
       if (!enrollmentDate || !paymentDate || !enrollmentCourse || !firstEnrollmentChoice) throw new Error('請完整填寫報名、繳費、正式課程與是否首次報名');
       if (enrollmentDate > todayIso() || paymentDate > todayIso()) throw new Error('報名與繳費日期不可晚於今天');
       if (firstEnrollmentChoice === 'yes' && !followups.length) {
@@ -1288,14 +1326,14 @@
       interest: String(data.get('interest') || 'unknown'), owner: workerName, nextFollowupDate,
       note: String(data.get('note') || '').trim(), status, followups,
       enrollmentDate, paymentDate, enrollmentCourse,
-      firstEnrollment: status === 'converted' && firstEnrollmentChoice === 'yes',
-      paymentEvidence: status === 'converted' ? retainedFiles(existing.paymentEvidence, data, 'removePaymentEvidence').concat(newEvidence) : [],
+      firstEnrollment: converted && firstEnrollmentChoice === 'yes',
+      paymentEvidence: converted ? retainedFiles(existing.paymentEvidence, data, 'removePaymentEvidence').concat(newEvidence) : [],
     };
-    if (status === 'converted') {
+    if (converted) {
       if (record.firstEnrollment && !evidenceReady({ evidence: record.paymentEvidence })) throw new Error('首次報名需附報名或繳費證明');
     }
     if (PREVIEW_MODE && !['approved', 'rejected'].includes(existing.bonusStatus)) {
-      record.bonusStatus = status === 'converted' && record.firstEnrollment && record.paymentEvidence.length ? 'pending_review' : 'not_eligible';
+      record.bonusStatus = converted && record.firstEnrollment && record.paymentEvidence.length ? 'pending_review' : 'not_eligible';
       record.bonusAmount = 0;
       record.history = (existing.history || []).concat({ id: uid('history'), author: currentUser.nickname, role: currentUser.role, at: new Date().toISOString(), summary: existing.id ? '更新試上追蹤' : '建立試上紀錄' });
     }

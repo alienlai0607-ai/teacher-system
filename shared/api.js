@@ -3,6 +3,7 @@ window.API = (function () {
   const API_URL = window.APP_CONFIG.API_URL;
   let authRedirectScheduled = false;
   const READ_RETRY_DELAYS_MS = [700, 1400];
+  const WRITE_RECEIPT_DELAYS_MS = [0, 700, 1400];
   const activeRequests = new Map();
   const connectionMetrics = [];
   const logRevisions = new Map();
@@ -69,7 +70,7 @@ window.API = (function () {
 
   async function requestJson(payload) {
     const controller = new AbortController();
-    const slowAction = /^(upload|saveTalentLesson|sendSubmitPdf|regenerate|runProduction)/.test(payload.action);
+    const slowAction = /^(upload|saveAdminMarketingRecord|saveTalentLesson|sendSubmitPdf|regenerate|runProduction)/.test(payload.action);
     const timeoutMs = slowAction ? 90000 : 25000;
     let timer;
     const deadline = new Promise((_, reject) => {
@@ -175,17 +176,20 @@ window.API = (function () {
       : action === 'saveTalentLesson' ? 'getTalentWorkspaceData'
       : action === 'saveAdminMarketingRecord' ? 'getAdminMarketingWorkspaceData' : '';
     if (receiptRead) {
-      try {
-        const check = await requestJson({ action: receiptRead, viewer: payload.nickname, nickname: payload.nickname, session_token: sessionToken });
-        if (check.ok) {
-          const rows = action === 'saveTalentLesson' ? check.lessons : check.records;
-          const id = payload.prep?.id || payload.lesson?.id || payload.record?.id;
-          const saved = (rows || []).find(row => (row.id || row.prepId) === id && row.lastRequestId === payload.request_id);
-          if (saved && action === 'saveCoursePrep') return { ok: true, prep_id: id, revision: saved.revision, updated_at: saved.updatedAt, recovered: true };
-          if (saved && action === 'saveTalentLesson') return { ok: true, lesson: saved, reportStatus: 'pending', recovered: true };
-          if (saved) return { ok: true, record: saved, recovered: true };
-        }
-      } catch (error) { /* Keep the original failure and the user's local draft. */ }
+      for (const delay of WRITE_RECEIPT_DELAYS_MS) {
+        if (delay) await wait(delay);
+        try {
+          const check = await requestJson({ action: receiptRead, viewer: payload.nickname, nickname: payload.nickname, session_token: sessionToken });
+          if (check.ok) {
+            const rows = action === 'saveTalentLesson' ? check.lessons : check.records;
+            const id = payload.prep?.id || payload.lesson?.id || payload.record?.id;
+            const saved = (rows || []).find(row => (row.id || row.prepId) === id && row.lastRequestId === payload.request_id);
+            if (saved && action === 'saveCoursePrep') return { ok: true, prep_id: id, revision: saved.revision, updated_at: saved.updatedAt, recovered: true };
+            if (saved && action === 'saveTalentLesson') return { ok: true, lesson: saved, reportStatus: 'pending', recovered: true };
+            if (saved) return { ok: true, record: saved, recovered: true };
+          }
+        } catch (error) { /* The original request can still finish while the receipt is checked again. */ }
+      }
     }
     return {
       ok: false,

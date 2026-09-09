@@ -83,6 +83,27 @@ function createApi(fetchImpl, options = {}) {
   assert.equal(mutations, 1);
   assert.equal(confirmations, 1);
 
+  let adminMutationId = ''; let adminReceiptReads = 0;
+  const adminRecoveryApi = createApi(async (_url, init) => {
+    const payload = JSON.parse(init.body);
+    if (payload.action === 'saveAdminMarketingRecord') {
+      adminMutationId = payload.request_id;
+      throw new Error('response lost after admin commit');
+    }
+    if (payload.action === 'getAdminMarketingWorkspaceData') {
+      adminReceiptReads += 1;
+      return response(JSON.stringify({
+        ok: true,
+        records: adminReceiptReads < 3 ? [] : [{ id: 'daily-qa', lastRequestId: adminMutationId, recordRevision: 'rev-admin' }],
+      }));
+    }
+    throw new Error('unexpected API');
+  });
+  const recoveredAdmin = await adminRecoveryApi.saveAdminMarketingRecord('QA', 'daily', { id: 'daily-qa' });
+  assert.equal(recoveredAdmin.ok, true, '行政寫入失去原回覆時應輪詢到雲端回執');
+  assert.equal(recoveredAdmin.recovered, true);
+  assert.equal(adminReceiptReads, 3, '回執尚未出現時應有限重查，不可立即誤報失敗');
+
   let release; let duplicateCalls = 0;
   const clickApi = createApi(() => { duplicateCalls++; return new Promise(resolve => { release = () => resolve(response('{"ok":true}')); }); });
   const click1 = clickApi.saveLog({ nickname: 'QA' });

@@ -18,6 +18,9 @@ vm.runInContext(backendSource, context);
 context.LockService = { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
 const helpers = fs.readFileSync(path.join(root, 'apps-script/utils.gs'), 'utf8');
 vm.runInContext(helpers.slice(helpers.indexOf('function withRecordWriteLock_'), helpers.indexOf('function reportClientMetrics')), context);
+assert.equal(context.recordConflict_('2026-09-05T12:33:09.000Z', new Date('2026-09-05T20:33:09+08:00')), false, '同一時間的 ISO 字串與試算表 Date 不得誤判衝突');
+assert.equal(context.recordConflict_('2026-09-05T12:33:08.000Z', new Date('2026-09-05T20:33:09+08:00')), true, '不同更新時間仍須阻擋覆蓋');
+assert.equal(context.recordConflictResult_({ id: 'latest' }).current_record.id, 'latest', '衝突時需回傳最新版供前端安全合併');
 
 const driveEvidence = [{ fileName: '完成截圖.png', url: 'https://drive.google.com/file/d/test/view', mimeType: 'image/png' }];
 const validDaily = () => ({
@@ -128,6 +131,22 @@ assert.match(saveTrial(managerUser, '2026-08-14', '補登舊資料').error, /202
 assert.equal(saveTrial(managerUser, '2026-08-15', '制度起算日補登').ok, true, '主管應可補登制度起算日的試上');
 assert.equal(saveTrial(managerUser, '2026-08-25', '家長訊息延遲轉交').ok, true, '小魚應可填原因後補登過去試上');
 
+const originalRecordObject = context.adminMarketingRecordObject_;
+context.findObject = () => ({ record_id: 'trial-legacy-revision' });
+context.adminMarketingRecordObject_ = () => ({
+  ...trial, id: 'trial-legacy-revision', updatedAt: new Date('2026-09-05T20:33:09+08:00'), history: [],
+});
+const legacyRevisionUpdate = context.saveAdminMarketingRecord({
+  __actor: workerUser,
+  nickname: workerUser.nickname,
+  record_type: 'trial',
+  request_id: 'legacy-revision-update',
+  record: { ...trial, id: 'trial-legacy-revision', baseRevision: '2026-09-05T12:33:09.000Z', note: '更新家長回覆' },
+});
+assert.equal(legacyRevisionUpdate.ok, true, '舊紀錄的試算表日期與前端 ISO 相同時必須能正常更新');
+context.findObject = () => null;
+context.adminMarketingRecordObject_ = originalRecordObject;
+
 assert.doesNotThrow(() => context.validateAdminMarketingRecord_('trial', {
   ...trial, id: 'trial-missing-next', nextFollowupDate: '', status: 'considering',
 }));
@@ -143,6 +162,11 @@ const convertedTrial = context.validateAdminMarketingRecord_('trial', {
 });
 assert.equal(context.adminMarketingTrialBonusEligibility_(convertedTrial).eligible, true);
 assert.equal(context.adminMarketingTrialBonusEligibility_(convertedTrial).amount, 50);
+const halfYearTrial = context.validateAdminMarketingRecord_('trial', {
+  ...convertedTrial, id: 'trial-half-year', status: 'converted_half_year', enrollmentCourse: '機器人半年班',
+});
+assert.equal(halfYearTrial.status, 'converted_half_year');
+assert.equal(context.adminMarketingTrialBonusEligibility_(halfYearTrial).eligible, true, '首次半年報名完成繳費也應進入首報審核');
 assert.throws(() => context.validateAdminMarketingRecord_('trial', {
   ...convertedTrial, id: 'trial-future-payment', paymentDate: '2026-08-27',
 }), /不可晚於今天/);
@@ -199,6 +223,7 @@ const alertTrial = { id: 'trial-qa', type: 'trial', studentName: 'QA', status: '
 const alertRuntime = vm.createContext({
   workerRecords: () => [], trialRecords: () => [alertTrial], todayIso: () => '2026-09-07',
   normalizeTrialStatus: value => value, esc: value => String(value || ''), formatDate: value => value,
+  isConcludedTrialStatus: value => ['converted', 'converted_half_year', 'not_enrolled'].includes(value),
   emptyState: () => '',
 });
 vm.runInContext(uiSource.slice(uiSource.indexOf('function statusBadge('), uiSource.indexOf('function evidenceReady(')), alertRuntime);
@@ -228,7 +253,7 @@ assert.match(uiSource, /主管.*回覆今日工作[\s\S]*data-route="performance
 assert.match(uiSource, /admin-marketing-review-\$\{id\}[\s\S]*conversationRecord\.messages/, '主管逐筆回覆需同步到可來回回覆的月度對話');
 assert.match(uiSource, /<strong>主管評語<\/strong>[\s\S]*score\.comment/, '老師查看已公布評核時必須看得到主管評語');
 assert.match(uiSource, /今日無試上/, '需區分無試上與忘記填寫');
-assert.match(uiSource, /首次一期且完成繳費/, '使用規則需寫明首報獎金原則');
+assert.match(uiSource, /首次正式報名且完成繳費/, '使用規則需涵蓋一期與半年首報');
 assert.match(uiSource, /function handleDailyCheck/, '每日訊息確認需與工作項目分開儲存');
 assert.match(uiSource, /const communication = todayCommunication\(\)/, '每日工作頁需依獨立訊息確認紀錄判定，不得把新增工作誤當已檢查訊息');
 const dailyRecordSource = uiSource.slice(uiSource.indexOf('function renderDailyRecord('), uiSource.indexOf('function renderTuesdayPage('));
@@ -257,7 +282,7 @@ assert.match(uiSource, /mayReplaceDefaultDate/, '貼上未來日期時需取代�
 assert.match(uiSource, /state\.ui\.month = date\.slice\(0, 7\)/, '跨月試上儲存後需切到預約月份');
 assert.match(uiSource, /trialTime/, '試上時段需能帶入、儲存並重新顯示');
 assert.match(uiSource, /data-trial-next/, '下一次追蹤日期需能依結案狀態動態隱藏');
-assert.match(uiSource, /\['converted', 'not_enrolled'\]\.includes\(status\) \? ''/, '結案後不得殘留無效的下次追蹤日期');
+assert.match(uiSource, /isConcludedTrialStatus\(status\) \? ''/, '一期、半年與未報名結案後不得殘留無效提醒日期');
 assert.match(uiCssSource, /\.dialog > form \{[^}]*min-height: 0;[^}]*display: flex;[^}]*overflow: hidden;/, '彈窗表單需形成可捲動的 flex 容器');
 assert.match(uiCssSource, /\.dialog-body \{[^}]*min-height: 0;[^}]*overflow-y: auto;/, '所有行政彈窗內容需可獨立向下捲動');
 assert.match(uiCssSource, /\.dialog-foot \{[^}]*flex: 0 0 auto;/, '行政彈窗底部操作需固定留在畫面內');
@@ -271,7 +296,10 @@ assert.match(workspacesCssSource, /\.workspace-quick-title \{[^}]*width: 100%;[^
 assert.match(workspacesCssSource, /grid-template-columns: repeat\(auto-fit, minmax\(136px, 1fr\)\)/, '手機三身分按鈕需保留可讀寬度');
 assert.match(uiHtmlSource, /workspaces\.css\?v=20260901-workspace-wrap-1/, '行政頁需載入防溢出的工作身分樣式');
 assert.match(uiHtmlSource, /styles\.css\?v=20260903-admin-stability-1/, '行政提示穿透修正需使用新快取版本');
-assert.match(uiHtmlSource, /app\.js\?v=20260907-admin-labels-1/, '行政穩定版表單需使用獨立快取版本');
+assert.match(uiHtmlSource, /app\.js\?v=20260909-update-recovery-1/, '行政更新修正版需使用獨立快取版本');
+assert.match(uiHtmlSource, /shared\/api\.js\?v=20260909-admin-recovery-1/, '行政頁需載入具寫入回執復原的新 API');
+assert.match(uiSource, /\['converted_half_year', '已報名半年'\]/, '試上結果需可選擇已報名半年');
+assert.match(uiSource, /result\?\.code === 'RECORD_CONFLICT'[\s\S]*result\.current_record[\s\S]*merged\.recordRevision/, '更新衝突需合併最新版後安全重試');
 assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=admin-marketing(?:-manager)?&v=20260903-admin-stability-1/g) || []).length, 2, '行政與主管入口都需避開舊版快取');
 assert.match(uiSource, /trialIdentity\(item\.studentName, trialContact\(item\), item\.course, item\.date\)/, '重複預約需依學生、課程與日期判定');
 assert.match(uiSource, /同一學生可登記不同課程/, '行政需清楚知道同一學生可登記多門試上課');

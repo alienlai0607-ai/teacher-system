@@ -981,11 +981,23 @@ function withRecordWriteLock_(callback) {
 }
 
 function recordConflict_(expected, current) {
-  return String(expected || '') !== String(current || '');
+  function normalized(value) {
+    if (!value) return '';
+    if (Object.prototype.toString.call(value) === '[object Date]') return String(value.getTime());
+    const text = String(value).trim().replace(/^"|"$/g, '');
+    if (/^\d{4}-\d{2}-\d{2}[T\s]/.test(text) || /^[A-Z][a-z]{2}\s[A-Z][a-z]{2}\s\d{2}\s\d{4}/.test(text)) {
+      const timestamp = new Date(text).getTime();
+      if (!isNaN(timestamp)) return String(timestamp);
+    }
+    return text;
+  }
+  return normalized(expected) !== normalized(current);
 }
 
-function recordConflictResult_() {
-  return { ok: false, code: 'RECORD_CONFLICT', error: '這筆資料已在其他裝置更新，您的內容仍保留；請先查看最新紀錄再決定修改，避免覆蓋' };
+function recordConflictResult_(currentRecord) {
+  const result = { ok: false, code: 'RECORD_CONFLICT', error: '這筆資料剛有更新；系統會合併最新內容後再儲存' };
+  if (currentRecord) result.current_record = currentRecord;
+  return result;
 }
 
 function withResourceLease_(resource, callback) {
@@ -6755,7 +6767,7 @@ function adminMarketingStudentIdentity_(data) {
 }
 
 function adminMarketingTrialBonusEligibility_(data) {
-  if (!data || data.status !== 'converted') return { eligible: false, error: '尚未完成首次一期報名' };
+  if (!data || ['converted', 'converted_half_year'].indexOf(data.status) < 0) return { eligible: false, error: '尚未完成首次正式報名' };
   if (data.firstEnrollment !== true) return { eligible: false, error: '不是首次正式報名' };
   if (!data.enrollmentDate || !data.paymentDate || !data.enrollmentCourse) {
     return { eligible: false, error: '報名、繳費日期或正式課程尚未完整' };
@@ -6930,7 +6942,7 @@ function validateAdminMarketingTrial_(data) {
   data.note = adminMarketingText_(data.note, 1800);
   data.nextFollowupDate = adminMarketingDate_(data.nextFollowupDate, false);
   if (data.status === 'contacted' || data.status === 'followup_scheduled') data.status = 'considering';
-  data.status = ['waiting_contact', 'considering', 'converted', 'not_enrolled'].indexOf(data.status) >= 0 ? data.status : 'waiting_contact';
+  data.status = ['waiting_contact', 'considering', 'converted', 'converted_half_year', 'not_enrolled'].indexOf(data.status) >= 0 ? data.status : 'waiting_contact';
   if (!data.studentName || !data.course || !data.teacher || !data.contactRef || !data.owner) {
     throw new Error('學生姓名、試上課程、授課老師、家長識別資料與負責人皆為必填');
   }
@@ -6953,12 +6965,13 @@ function validateAdminMarketingTrial_(data) {
   data.paymentDate = adminMarketingDate_(data.paymentDate, false);
   data.enrollmentCourse = adminMarketingText_(data.enrollmentCourse, 220);
   data.firstEnrollment = data.firstEnrollment === true;
-  data.paymentEvidence = adminMarketingAttachments_(data.paymentEvidence, data.status === 'converted' && data.firstEnrollment);
+  const converted = ['converted', 'converted_half_year'].indexOf(data.status) >= 0;
+  data.paymentEvidence = adminMarketingAttachments_(data.paymentEvidence, converted && data.firstEnrollment);
   data.lateReason = adminMarketingText_(data.lateReason, 1000);
   if (data.enrollmentDate > todayStr() || data.paymentDate > todayStr()) throw new Error('報名與繳費日期不可晚於今天');
-  if (data.status === 'converted') {
+  if (converted) {
     if (!data.enrollmentDate || !data.paymentDate || !data.enrollmentCourse) {
-      throw new Error('已報名一期必須填寫報名日期、繳費日期與正式課程');
+      throw new Error('已報名必須填寫報名日期、繳費日期與正式課程');
     }
   }
   return data;
@@ -7048,7 +7061,7 @@ function getAdminMarketingWorkspaceData(params) {
       videoWeeklyTarget: 2,
       photoWeeklyTarget: 3,
       trialBonusAmount: ADMIN_MARKETING_TRIAL_BONUS_,
-      trialBonusRule: '首次試上轉一期並完成繳費，每位 50 元',
+      trialBonusRule: '首次試上轉正式報名並完成繳費，每位 50 元',
       kpi: ADMIN_MARKETING_KPI_,
     },
   };
@@ -7136,7 +7149,7 @@ function saveAdminMarketingRecordLocked_(params) {
   const existingRow = findObject(SHEET_NAMES.ADMIN_MARKETING_RECORDS, 'record_id', data.id);
   const original = existingRow ? adminMarketingRecordObject_(existingRow) : null;
   if (original && params.request_id && original.lastRequestId === params.request_id) return { ok: true, record: original, duplicate: true };
-  if (original && recordConflict_(params.record.recordRevision || params.record.baseRevision || params.record.updatedAt, original.recordRevision || original.updatedAt)) return recordConflictResult_();
+  if (original && recordConflict_(params.record.recordRevision || params.record.baseRevision || params.record.updatedAt, original.recordRevision || original.updatedAt)) return recordConflictResult_(original);
   data.lastRequestId = String(params.request_id || '');
   if (type === 'trial') {
     if (!original && data.date < ADMIN_MARKETING_TRIAL_START_DATE_) {

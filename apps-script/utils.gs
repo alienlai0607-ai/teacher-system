@@ -53,11 +53,23 @@ function withRecordWriteLock_(callback) {
 }
 
 function recordConflict_(expected, current) {
-  return String(expected || '') !== String(current || '');
+  function normalized(value) {
+    if (!value) return '';
+    if (Object.prototype.toString.call(value) === '[object Date]') return String(value.getTime());
+    const text = String(value).trim().replace(/^"|"$/g, '');
+    if (/^\d{4}-\d{2}-\d{2}[T\s]/.test(text) || /^[A-Z][a-z]{2}\s[A-Z][a-z]{2}\s\d{2}\s\d{4}/.test(text)) {
+      const timestamp = new Date(text).getTime();
+      if (!isNaN(timestamp)) return String(timestamp);
+    }
+    return text;
+  }
+  return normalized(expected) !== normalized(current);
 }
 
-function recordConflictResult_() {
-  return { ok: false, code: 'RECORD_CONFLICT', error: '這筆資料已在其他裝置更新，您的內容仍保留；請先查看最新紀錄再決定修改，避免覆蓋' };
+function recordConflictResult_(currentRecord) {
+  const result = { ok: false, code: 'RECORD_CONFLICT', error: '這筆資料剛有更新；系統會合併最新內容後再儲存' };
+  if (currentRecord) result.current_record = currentRecord;
+  return result;
 }
 
 function withResourceLease_(resource, callback) {
