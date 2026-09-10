@@ -5879,6 +5879,18 @@ function talentAppEvidence_(items, required) {
   return files;
 }
 
+function mergeTalentAppEvidence_(existingItems, incomingItems) {
+  const existing = talentAppEvidence_(existingItems, false).filter(function (item) { return Boolean(item.url); });
+  const incoming = talentAppEvidence_(incomingItems, true);
+  const seen = {};
+  return incoming.concat(existing).filter(function (item) {
+    const key = String(item.fingerprint || item.fileId || item.url || (item.fileName + '|' + item.size));
+    if (seen[key]) return false;
+    seen[key] = true;
+    return true;
+  }).slice(0, 30);
+}
+
 function talentRecordObject_(row) {
   const data = parseJsonField(row.data_json) || {};
   data.id = data.id || row.record_id;
@@ -6314,30 +6326,45 @@ function reviewTalentPrep(params) {
 function updateTalentAppStatus(params) {
   const actor = params.__actor;
   const nickname = String(params.nickname || actor && actor.nickname || '').trim();
-  const row = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', String(params.lesson_id || ''));
-  if (!row || row.record_type !== 'lesson' || row.nickname !== nickname) return { ok: false, error: '找不到本人課堂紀錄' };
   if (!actor || (actor.role !== 'admin' && actor.nickname !== nickname)) return { ok: false, error: '只能更新自己的 APP 狀態' };
-  const lesson = talentRecordObject_(row);
-  if (lesson.lessonStatus === 'cancelled' || lesson.siteType === 'partner') {
-    lesson.appStatus = 'not_required';
-    lesson.appFiles = [];
-    lesson.appUpdatedAt = '';
-    lesson.appPublishedAt = '';
-    return { ok: true, lesson: upsertTalentRecord_('lesson', nickname, lesson, actor.nickname), exempt: true };
-  }
-  if (params.status !== 'published') return { ok: false, error: '請上傳發布完成截圖後再確認' };
-  lesson.appFiles = talentAppEvidence_(params.app_files, true);
-  lesson.appStatus = 'published';
-  lesson.appUpdatedAt = nowIso();
-  lesson.appPublishedAt = lesson.appUpdatedAt;
-  lesson.contentRevision = lesson.appUpdatedAt;
+  const lessonId = String(params.lesson_id || '').trim();
+  const requestId = String(params.request_id || '');
+  if (!lessonId) return { ok: false, error: '找不到本人課堂紀錄' };
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: '系統正在儲存其他課堂，請稍後重試' };
   let saved;
+  let lesson;
   try {
+    const row = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lessonId);
+    if (!row || row.record_type !== 'lesson' || row.nickname !== nickname) return { ok: false, error: '找不到本人課堂紀錄' };
+    lesson = talentRecordObject_(row);
+    if (requestId && lesson.lastRequestId === requestId) {
+      return { ok: true, lesson: lesson, duplicate: true, reportStatus: params.defer_report === true ? 'pending' : '' };
+    }
+    if (lesson.lessonStatus === 'cancelled' || lesson.siteType === 'partner') {
+      lesson.appStatus = 'not_required';
+      lesson.appFiles = [];
+      lesson.appUpdatedAt = '';
+      lesson.appPublishedAt = '';
+      lesson.lastRequestId = requestId;
+      lesson.contentRevision = nowIso() + '-' + Utilities.getUuid().slice(0, 8);
+      return { ok: true, lesson: upsertTalentRecord_('lesson', nickname, lesson, actor.nickname), exempt: true };
+    }
+    if (params.status !== 'published') return { ok: false, error: '請上傳發布完成截圖後再確認' };
+    lesson.appFiles = mergeTalentAppEvidence_(lesson.appFiles, params.app_files);
+    lesson.appStatus = 'published';
+    lesson.appUpdatedAt = nowIso();
+    lesson.appPublishedAt = lesson.appUpdatedAt;
+    lesson.contentRevision = lesson.appUpdatedAt + '-' + Utilities.getUuid().slice(0, 8);
+    lesson.lastRequestId = requestId;
     saved = upsertTalentRecord_('lesson', nickname, lesson, actor.nickname);
   } finally {
     lock.releaseLock();
+  }
+
+  logSystem(actor.nickname, 'save_talent_app_evidence', lesson.id, { teacher: nickname, files: lesson.appFiles.length });
+  if (params.defer_report === true) {
+    return { ok: true, lesson: saved, reportStatus: 'pending' };
   }
 
   let warning = '';
@@ -6362,7 +6389,6 @@ function updateTalentAppStatus(params) {
   } catch (error) {
     warning = 'APP 證據已儲存；雲端 PDF 稍後自動更新：' + String(error.message || error);
   }
-  logSystem(actor.nickname, 'save_talent_app_evidence', lesson.id, { teacher: nickname, files: lesson.appFiles.length });
   return { ok: true, lesson: saved, warning: warning };
 }
 

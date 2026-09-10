@@ -104,6 +104,29 @@ function createApi(fetchImpl, options = {}) {
   assert.equal(recoveredAdmin.recovered, true);
   assert.equal(adminReceiptReads, 3, '回執尚未出現時應有限重查，不可立即誤報失敗');
 
+  let talentMutationId = ''; let talentReceiptReads = 0;
+  const talentRecoveryApi = createApi(async (_url, init) => {
+    const payload = JSON.parse(init.body);
+    if (payload.action === 'updateTalentAppStatus') {
+      assert.equal(payload.defer_report, true, 'APP 截圖寫入不得等待 PDF 產生才回覆');
+      talentMutationId = payload.request_id;
+      throw new Error('response lost after APP evidence commit');
+    }
+    if (payload.action === 'getTalentWorkspaceData') {
+      talentReceiptReads += 1;
+      return response(JSON.stringify({
+        ok: true,
+        lessons: talentReceiptReads < 2 ? [] : [{ id: 'lesson-qa', lastRequestId: talentMutationId, appStatus: 'published', appFiles: [{ fileId: 'photo-1' }] }],
+      }));
+    }
+    throw new Error('unexpected API');
+  });
+  const recoveredTalentEvidence = await talentRecoveryApi.updateTalentAppStatus('QA', 'lesson-qa', 'published', [{ fileId: 'photo-1' }]);
+  assert.equal(recoveredTalentEvidence.ok, true, 'APP 截圖寫入失去原回覆時應查回雲端結果');
+  assert.equal(recoveredTalentEvidence.recovered, true);
+  assert.equal(recoveredTalentEvidence.reportStatus, 'pending');
+  assert.equal(talentReceiptReads, 2, 'APP 截圖回執尚未出現時應有限重查');
+
   let release; let duplicateCalls = 0;
   const clickApi = createApi(() => { duplicateCalls++; return new Promise(resolve => { release = () => resolve(response('{"ok":true}')); }); });
   const click1 = clickApi.saveLog({ nickname: 'QA' });

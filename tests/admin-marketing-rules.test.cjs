@@ -297,7 +297,7 @@ assert.match(workspacesCssSource, /grid-template-columns: repeat\(auto-fit, minm
 assert.match(uiHtmlSource, /workspaces\.css\?v=20260901-workspace-wrap-1/, '行政頁需載入防溢出的工作身分樣式');
 assert.match(uiHtmlSource, /styles\.css\?v=20260903-admin-stability-1/, '行政提示穿透修正需使用新快取版本');
 assert.match(uiHtmlSource, /app\.js\?v=20260909-update-recovery-1/, '行政更新修正版需使用獨立快取版本');
-assert.match(uiHtmlSource, /shared\/api\.js\?v=20260909-admin-recovery-1/, '行政頁需載入具寫入回執復原的新 API');
+assert.match(uiHtmlSource, /shared\/api\.js\?v=20260910-write-recovery-1/, '行政頁需載入具寫入回執復原的新 API');
 assert.match(uiSource, /\['converted_half_year', '已報名半年'\]/, '試上結果需可選擇已報名半年');
 assert.match(uiSource, /result\?\.code === 'RECORD_CONFLICT'[\s\S]*result\.current_record[\s\S]*merged\.recordRevision/, '更新衝突需合併最新版後安全重試');
 assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=admin-marketing(?:-manager)?&v=20260903-admin-stability-1/g) || []).length, 2, '行政與主管入口都需避開舊版快取');

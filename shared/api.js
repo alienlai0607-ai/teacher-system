@@ -70,7 +70,7 @@ window.API = (function () {
 
   async function requestJson(payload) {
     const controller = new AbortController();
-    const slowAction = /^(upload|saveAdminMarketingRecord|saveTalentLesson|sendSubmitPdf|regenerate|runProduction)/.test(payload.action);
+    const slowAction = /^(upload|saveAdminMarketingRecord|saveTalentLesson|updateTalentAppStatus|sendSubmitPdf|regenerate|runProduction)/.test(payload.action);
     const timeoutMs = slowAction ? 90000 : 25000;
     let timer;
     const deadline = new Promise((_, reject) => {
@@ -173,7 +173,7 @@ window.API = (function () {
       } catch (error) { /* The original request may still complete; do not resend. */ }
     }
     const receiptRead = action === 'saveCoursePrep' ? 'listCoursePreps'
-      : action === 'saveTalentLesson' ? 'getTalentWorkspaceData'
+      : action === 'saveTalentLesson' || action === 'updateTalentAppStatus' ? 'getTalentWorkspaceData'
       : action === 'saveAdminMarketingRecord' ? 'getAdminMarketingWorkspaceData' : '';
     if (receiptRead) {
       for (const delay of WRITE_RECEIPT_DELAYS_MS) {
@@ -181,11 +181,12 @@ window.API = (function () {
         try {
           const check = await requestJson({ action: receiptRead, viewer: payload.nickname, nickname: payload.nickname, session_token: sessionToken });
           if (check.ok) {
-            const rows = action === 'saveTalentLesson' ? check.lessons : check.records;
-            const id = payload.prep?.id || payload.lesson?.id || payload.record?.id;
+            const rows = action === 'saveTalentLesson' || action === 'updateTalentAppStatus' ? check.lessons : check.records;
+            const id = payload.prep?.id || payload.lesson?.id || payload.record?.id || payload.lesson_id;
             const saved = (rows || []).find(row => (row.id || row.prepId) === id && row.lastRequestId === payload.request_id);
             if (saved && action === 'saveCoursePrep') return { ok: true, prep_id: id, revision: saved.revision, updated_at: saved.updatedAt, recovered: true };
             if (saved && action === 'saveTalentLesson') return { ok: true, lesson: saved, reportStatus: 'pending', recovered: true };
+            if (saved && action === 'updateTalentAppStatus') return { ok: true, lesson: saved, reportStatus: 'pending', recovered: true };
             if (saved) return { ok: true, record: saved, recovered: true };
           }
         } catch (error) { /* The original request can still finish while the receipt is checked again. */ }
@@ -321,7 +322,7 @@ window.API = (function () {
       confirmation_name: confirmationName,
     }),
     reviewTalentPrep: (prepId, result, note) => call('reviewTalentPrep', { prep_id: prepId, result, note }),
-    updateTalentAppStatus: (nickname, lessonId, status, appFiles = []) => call('updateTalentAppStatus', { nickname, lesson_id: lessonId, status, app_files: appFiles }),
+    updateTalentAppStatus: (nickname, lessonId, status, appFiles = []) => call('updateTalentAppStatus', { nickname, lesson_id: lessonId, status, app_files: appFiles, defer_report: true }),
     saveTalentScore: (nickname, month, score) => call('saveTalentScore', { nickname, month, score }),
     addTalentMessage: (nickname, month, text) => call('addTalentMessage', { nickname, month, text }),
     approveTalentBonus: (lessonId, approvedNewCount, approvedRenewalCount, note = '') => call('approveTalentBonus', {

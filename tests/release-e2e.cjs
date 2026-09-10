@@ -509,6 +509,32 @@ async function talentWorkflow(browser) {
     await waitForApp(page);
     await clickRoute(page, 'today');
     check('才藝紀錄重新整理後仍存在', (await page.locator('body').innerText()).includes('端到端才藝教材'));
+
+    await clickRoute(page, 'weekly');
+    let appEvidenceRow = page.locator('.app-evidence-row', { hasText: '端到端才藝教材' }).first();
+    await appEvidenceRow.locator('input[data-app-evidence-id]').setInputFiles(imageA);
+    await page.waitForFunction(courseName => {
+      const row = Array.from(document.querySelectorAll('.app-evidence-row')).find(item => item.textContent.includes(courseName));
+      return row?.textContent.includes('已確認') && row.querySelectorAll('.app-evidence-files > *').length === 1;
+    }, '端到端才藝教材', { timeout: 12000 });
+    check('才藝老師可在上課當日從家長 APP 頁補傳截圖', true);
+
+    appEvidenceRow = page.locator('.app-evidence-row', { hasText: '端到端才藝教材' }).first();
+    await appEvidenceRow.locator('input[data-app-evidence-id]').setInputFiles(imageB);
+    await page.waitForFunction(courseName => {
+      const row = Array.from(document.querySelectorAll('.app-evidence-row')).find(item => item.textContent.includes(courseName));
+      return row?.querySelectorAll('.app-evidence-files > *').length === 2;
+    }, '端到端才藝教材', { timeout: 12000 });
+    check('才藝家長 APP 補傳新截圖會保留原有截圖', await appEvidenceRow.locator('.app-evidence-files > *').count() === 2);
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForApp(page);
+    await clickRoute(page, 'weekly');
+    appEvidenceRow = page.locator('.app-evidence-row', { hasText: '端到端才藝教材' }).first();
+    check('才藝家長 APP 截圖重新整理後仍完整存在', (
+      (await appEvidenceRow.innerText()).includes('已確認')
+      && await appEvidenceRow.locator('.app-evidence-files > *').count() === 2
+    ));
     await pageHealth(page, label, 'reload');
     await page.screenshot({ path: path.join(artifactDir, 'talent-pt-workflow.png'), fullPage: true });
 

@@ -67,9 +67,50 @@ assert.equal(driveAttachment[0].url, 'https://drive.google.com/file/d/abc/view')
 assert.throws(() => context.talentAttachments_([{ fileName: 'fake.jpg', url: 'https://example.com/fake.jpg' }], true), /尚未完整上傳/);
 assert.equal(context.talentAppEvidence_([{ fileName: 'app.png', mimeType: 'image/png', url: 'https://drive.google.com/file/d/app/view' }], true).length, 1);
 assert.throws(() => context.talentAppEvidence_([{ fileName: 'app.pdf', mimeType: 'application/pdf', url: 'https://drive.google.com/file/d/app/view' }], true), /只接受圖片/);
+const mergedAppEvidence = context.mergeTalentAppEvidence_(
+  [{ fileName: 'old.png', fileId: 'old', mimeType: 'image/png', url: 'https://drive.google.com/file/d/old/view' }],
+  [
+    { fileName: 'new.png', fileId: 'new', mimeType: 'image/png', url: 'https://drive.google.com/file/d/new/view' },
+    { fileName: 'old-copy.png', fileId: 'old', mimeType: 'image/png', url: 'https://drive.google.com/file/d/old/view' },
+  ],
+);
+assert.deepEqual(Array.from(mergedAppEvidence, file => file.fileId), ['new', 'old'], '補傳 APP 截圖需保留舊檔並略過重複檔案');
 const simplifiedLesson = { courseType: '樂高小創客', courseName: '齒輪課', siteType: 'self', site: '布拉克自營教室', prepId: 'prep-1', issue: '齒輪容易鬆脫，下次先示範固定方式。', parentStatus: 'complete' };
 assert.doesNotThrow(() => context.validateTalentLessonRequiredFields_(simplifiedLesson), '省略 completed 與 response 後仍須能通過後端必填檢核');
 assert.throws(() => context.validateTalentLessonRequiredFields_({ ...simplifiedLesson, issue: '  ' }), /課程問題及下次優化/, '唯一保留的課程問題及下次優化不得空白，且錯誤需顯示老師看得懂的欄位名稱');
+
+let storedLesson = {
+  id: 'lesson-app-qa', teacher: 'QA老師', lessonStatus: 'held', siteType: 'self', status: 'submitted',
+  appStatus: 'published', appFiles: [{ fileName: 'old.png', fileId: 'old', mimeType: 'image/png', url: 'https://drive.google.com/file/d/old/view' }],
+};
+let appEvidenceSaves = 0;
+let appEvidencePdfCalls = 0;
+context.SHEET_NAMES = { TALENT_RECORDS: 'TalentRecords' };
+context.LockService = { getScriptLock: () => ({ tryLock: () => true, releaseLock: () => {} }) };
+context.findObject = () => ({ record_type: 'lesson', nickname: 'QA老師', data: storedLesson });
+context.talentRecordObject_ = row => JSON.parse(JSON.stringify(row.data));
+context.upsertTalentRecord_ = (_type, _nickname, lesson) => {
+  appEvidenceSaves += 1;
+  storedLesson = JSON.parse(JSON.stringify(lesson));
+  return JSON.parse(JSON.stringify(storedLesson));
+};
+context.nowIso = () => '2026-09-10T12:00:00.000Z';
+context.logSystem = () => {};
+context.generateTalentLessonPdf_ = () => { appEvidencePdfCalls += 1; return {}; };
+const appEvidenceParams = {
+  __actor: { nickname: 'QA老師', role: 'teacher', status: 'active' },
+  nickname: 'QA老師', lesson_id: 'lesson-app-qa', status: 'published', request_id: 'req-app-1', defer_report: true,
+  app_files: [{ fileName: 'new.png', fileId: 'new', mimeType: 'image/png', url: 'https://drive.google.com/file/d/new/view' }],
+};
+const savedAppEvidence = context.updateTalentAppStatus(appEvidenceParams);
+assert.equal(savedAppEvidence.ok, true);
+assert.equal(savedAppEvidence.reportStatus, 'pending', 'APP 截圖寫入成功後應立即回覆，由背景接續日報');
+assert.deepEqual(Array.from(savedAppEvidence.lesson.appFiles, file => file.fileId), ['new', 'old']);
+assert.equal(savedAppEvidence.lesson.lastRequestId, 'req-app-1');
+assert.equal(appEvidencePdfCalls, 0, 'APP 截圖寫入不得同步等待 PDF');
+const duplicateAppEvidence = context.updateTalentAppStatus(appEvidenceParams);
+assert.equal(duplicateAppEvidence.duplicate, true, '相同請求重送時需直接回傳既有結果');
+assert.equal(appEvidenceSaves, 1, '相同 APP 截圖請求不得再次寫入');
 
 const archiveSource = fs.readFileSync(path.join(root, 'apps-script/archivefiles.gs'), 'utf8');
 const setupSource = fs.readFileSync(path.join(root, 'apps-script/setup.gs'), 'utf8');
@@ -240,7 +281,7 @@ assert.match(talentUiSource, /\.\.\.values,[\s\S]*id: editingId \|\| existingLog
 assert.match(talentUiSource, /state\.logs = \(Array\.isArray\(state\.logs\)[\s\S]*id: uid\('log'\)/, '舊本機課堂缺少編號時需自動修復');
 assert.match(talentUiSource, /class="record-actions"[\s\S]*data-action="edit-log"[\s\S]*data-action="view-log"/, '編輯與查看按鈕需放入獨立動作列，避免疊在同一座標');
 assert.match(talentStyleSource, /\.record-actions \{ display: flex;[\s\S]*gap: 6px;/, '編輯與查看按鈕需保留可點擊間距');
-assert.match(talentIndexSource, /app\.js\?v=20260906-reliability-1/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
+assert.match(talentIndexSource, /app\.js\?v=20260910-app-upload-1/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
 assert.match(talentUiSource, /completed: String\(values\.issue \|\| ''\)\.trim\(\), response: String\(values\.issue \|\| ''\)\.trim\(\)/, '簡化後的才藝表單需相容尚未更新的舊後端驗證');
 assert.match(talentUiSource, /function talentSubmissionError\(/, '才藝送出錯誤不得直接顯示內部欄位名稱');
 const talentPaySource = talentUiSource.slice(talentUiSource.indexOf('function renderPay()'), talentUiSource.indexOf('function renderPayRow('));
@@ -253,8 +294,11 @@ assert.match(talentUiSource, /data-app-evidence-id=/, 'APP 發布確認必須上
 assert.match(talentUiSource, /statusBadge\('bonus-approved'\).*statusBadge\('bonus-pending'\)/, '獎金核准狀態不可誤用舊版備課狀態文案');
 assert.match(talentUiSource, /'bonus-approved': \['已核准'.*'bonus-pending': \['待核准'/, '獎金狀態需明確顯示已核准或待核准');
 assert.match(talentUiSource, /uploadField\('家長 APP 發布完成截圖', 'app'/, '本堂紀錄內也要有 APP 截圖上傳入口');
+assert.match(talentUiSource, /上課當日可直接上傳多張/, '家長 APP 截圖需明確支援上課當日直接上傳');
 assert.match(talentUiSource, /截圖需同時看得到發布日期與課程名稱/, 'APP 截圖規則需明確要求日期與課程名稱');
 assert.match(talentUiSource, /appFiles, appStatus: siteType === 'partner'/, '本堂送出時需一併保存已選擇的 APP 截圖');
+assert.match(talentUiSource, /mergeAppEvidenceFiles\(appEvidenceFiles\(item\), uploaded\)/, '從家長 APP 頁補傳截圖時不得覆蓋原有檔案');
+assert.match(talentUiSource, /result\.reportStatus === 'pending'.*refreshTalentReportAfterSave/s, 'APP 截圖儲存成功後才可在背景更新日報');
 assert.match(talentUiSource, /app-publish-fields.*siteType !== 'self'/s, '合作校必須隱藏 APP 截圖欄位');
 assert.match(talentUiSource, /function appEvidenceRequired\(/);
 assert.match(talentUiSource, /function selectedPerformanceMonth\(\)/, '才藝老師 KPI 應使用獨立評核月份');
@@ -266,7 +310,11 @@ assert.match(talentUiSource, /目前評核尚未儲存，確定要切換月份�
 assert.match(talentUiSource, /item\?\.siteType === 'self'.*TALENT_EFFECTIVE_DATE/s, '只有 9/1 起的自營教室課堂列入 APP 缺件');
 assert.match(talentUiSource, /appMissing/, 'PT 續報資格與月結需納入 APP 證據缺件');
 assert.match(backendSource, /lesson\.siteType === 'partner'[\s\S]*lesson\.appStatus = 'not_required'/, '合作校課程後端必須強制免發布');
-assert.match(backendSource, /talentAppEvidence_\(params\.app_files, true\)/, '後端必須驗證 APP 圖片已上傳至 Drive');
+assert.match(backendSource, /mergeTalentAppEvidence_\(lesson\.appFiles, params\.app_files\)/, '後端必須驗證 APP 圖片並合併既有雲端檔案');
+assert.match(backendSource, /lesson\.lastRequestId = requestId/, 'APP 截圖寫入需保存請求編號，逾時後才能確認實際結果');
+assert.match(backendSource, /if \(requestId && lesson\.lastRequestId === requestId\)/, '同一筆 APP 截圖請求不得重複處理');
+assert.match(backendSource, /if \(params\.defer_report === true\)[\s\S]*reportStatus: 'pending'/, 'APP 截圖寫入不得等待 PDF 完成才回覆老師');
+assert.match(apiSource, /updateTalentAppStatus[\s\S]*defer_report: true/, '共用 API 需要求 APP 截圖先完成儲存，再背景更新日報');
 assert.match(backendSource, /家長 APP 發布完成截圖/, '正式 PDF 需收錄 APP 發布證據');
 assert.match(adminDashboardSource, /快速測試老師畫面/);
 assert.match(adminDashboardSource, /KPI_WORKSPACES\.hrefFor\(workspaceId\)/, '測試入口需導向老師真正使用的新版工作區');

@@ -577,6 +577,16 @@
     return Array.isArray(item?.appFiles) ? item.appFiles : [];
   }
 
+  function mergeAppEvidenceFiles(...lists) {
+    const seen = new Set();
+    return lists.flat().filter(Boolean).filter(file => {
+      const key = String(file.fingerprint || file.fileId || file.url || `${attachmentName(file)}|${Number(file.size || 0)}`);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 30);
+  }
+
   function appEvidenceComplete(item) {
     return item?.appStatus === 'published' && appEvidenceFiles(item).length > 0;
   }
@@ -613,7 +623,7 @@
       <div class="record-main"><div class="record-title">${esc(item.courseName)}</div><div class="record-meta">${esc(item.site)}${uploadedAt ? ` · ${formatTime(uploadedAt)} 完成確認` : ''}</div>${partner ? '' : '<small class="app-evidence-rule">截圖需看得到發布日期與課程名稱</small>'}${renderAppEvidenceFiles(item)}</div>
       <div class="record-side"><span class="badge ${stateInfo.className}">${stateInfo.label}</span>${partner
         ? '<small>不列入缺件</small>'
-        : `<label class="btn btn-small ${appEvidenceComplete(item) ? '' : 'btn-primary'} app-evidence-upload">${icon(appEvidenceComplete(item) ? 'refresh-cw' : 'upload', 15)}${appEvidenceComplete(item) ? '更換截圖' : '上傳截圖'}<input class="sr-only" type="file" accept="image/*" multiple data-app-evidence-id="${esc(item.id)}"></label>`}</div>
+        : `<label class="btn btn-small ${appEvidenceComplete(item) ? '' : 'btn-primary'} app-evidence-upload">${icon(appEvidenceComplete(item) ? 'image-plus' : 'upload', 15)}${appEvidenceComplete(item) ? '補上截圖' : '上傳截圖'}<input class="sr-only" type="file" accept="image/*" multiple data-app-evidence-id="${esc(item.id)}"></label>`}</div>
     </article>`;
   }
 
@@ -622,7 +632,7 @@
     const required = logs.filter(appEvidenceRequired);
     const completed = required.filter(appEvidenceComplete);
     const exempt = logs.filter(item => item.siteType === 'partner');
-    return `${pageHead('家長 APP 發布確認', '完成家長 APP 發布後，上傳本堂發布完成截圖。')}
+    return `${pageHead('家長 APP 發布確認', '上課當日可直接上傳；尚未發布時可先送出紀錄，之後再補截圖。')}
       <div class="notice info">${icon('image-up', 19)}<div><strong>截圖需同時看得到發布日期與課程名稱</strong><span>自營教室每堂必填，可一次選多張；若填日誌時尚未發布，可在週六前回到本頁補上。合作校課程自動免發布。</span></div></div>
       <section class="status-grid app-status-grid"><article class="status-card"><span class="status-icon green">${icon('circle-check-big', 20)}</span><div><small>本月已確認</small><strong>${completed.length}／${required.length} 堂</strong><span>自營教室必填課堂</span></div></article><article class="status-card"><span class="status-icon yellow">${icon('clock-3', 20)}</span><div><small>待上傳</small><strong>${Math.max(0, required.length - completed.length)} 堂</strong><span>上傳後主管即可查看</span></div></article><article class="status-card"><span class="status-icon blue">${icon('school', 20)}</span><div><small>合作校免發布</small><strong>${exempt.length} 堂</strong><span>不列入缺件與續報資格</span></div></article></section>
       <section class="panel"><div class="panel-head"><div><h2>本月課堂</h2><p>每堂截圖直接綁定日期與課程</p></div></div><div class="panel-body">${logs.length ? logs.map(renderAppEvidenceRow).join('') : renderEmpty('本月尚無課堂', '完成本堂紀錄後，將自動出現在這裡。', 'images')}</div></section>`;
@@ -1110,7 +1120,7 @@
           <div class="form-grid"><label class="form-field"><span>親師溝通狀態 <b>*</b></span><select name="parentStatus" required><option value="">請選擇</option><option value="complete" ${formValue('parentStatus') === 'complete' ? 'selected' : ''}>已完成全班回報</option><option value="followup" ${formValue('parentStatus') === 'followup' ? 'selected' : ''}>已回報，另有個別追蹤</option></select></label></div>
           <label class="form-field span-all followup-field" ${formValue('parentStatus') === 'followup' ? '' : 'hidden'}><span>個別追蹤與下一步 <b>*</b></span><textarea name="parentFollowup" placeholder="只記錄需要繼續處理的具體狀況。">${esc(formValue('parentFollowup'))}</textarea></label>
           ${uploadField('課後教室復原照片', 'room', '不需要另寫照片判讀說明。', 'image/*', true)}
-          <div class="app-publish-fields">${uploadField('家長 APP 發布完成截圖', 'app', '截圖需同時看得到發布日期與課程名稱；可一次選多張。若尚未發布，可先送出本堂紀錄，最晚週六前到「家長 APP」補上。', 'image/*', false)}</div>
+          <div class="app-publish-fields">${uploadField('家長 APP 發布完成截圖', 'app', '上課當日可直接上傳多張；截圖需同時看得到發布日期與課程名稱。若尚未發布，可先送出本堂紀錄，最晚週六前到「家長 APP」補上。', 'image/*', false)}</div>
           <div class="bonus-fields"><div class="form-grid">${isPt() ? '' : numberField('新生確定報名', 'newCount', formValue('newCount', 0), false, '藍筆圈選「新」')}${numberField('續報確定', 'renewalCount', formValue('renewalCount', 0), false, '紅筆圈選「續」')}</div></div>
           ${isPt() ? '<div id="pay-preview" class="calculation-card"></div>' : ''}
         </section></div>
@@ -1296,6 +1306,7 @@
       mimeType: source.type || file.type || '',
       url: result.url || '',
       category,
+      size: source.size,
     };
   }
 
@@ -1324,7 +1335,7 @@
         }
         try {
           let fingerprint = '';
-          if (category === 'prep') {
+          if (category === 'prep' || category === 'app') {
             fingerprint = await fileContentFingerprint(file);
             const duplicate = [...(pendingFiles[category] || []), ...uploaded].some(item => item.fingerprint === fingerprint);
             if (duplicate) {
@@ -1382,28 +1393,47 @@
     if (label) label.innerHTML = `${icon('loader-circle', 15)}正在上傳 0／${files.length}`;
     const uploaded = [];
     const failed = [];
+    let skipped = 0;
     try {
       for (let index = 0; index < files.length; index += 1) {
         if (label) label.innerHTML = `${icon('loader-circle', 15)}正在上傳 ${index + 1}／${files.length}`;
         try {
-          uploaded.push(await uploadTalentFile(files[index], 'app-publish'));
+          const fingerprint = await fileContentFingerprint(files[index]);
+          const duplicate = [...appEvidenceFiles(item), ...uploaded].some(file => file.fingerprint === fingerprint);
+          if (duplicate) {
+            skipped += 1;
+            continue;
+          }
+          const uploadedFile = await uploadTalentFile(files[index], 'app-publish');
+          uploadedFile.fingerprint = fingerprint;
+          uploaded.push(uploadedFile);
         } catch (error) {
           failed.push(`${files[index].name}（${error.message || '上傳失敗'}）`);
         }
       }
-      if (!uploaded.length) throw new Error(failed.join('、') || '沒有可儲存的 APP 截圖');
+      if (!uploaded.length && !skipped) throw new Error(failed.join('、') || '沒有可儲存的 APP 截圖');
+      if (!uploaded.length && skipped) {
+        const messages = [`${skipped} 張相同截圖已存在，不需重複上傳`];
+        if (failed.length) messages.push(`${failed.length} 張未上傳：${failed.join('、')}`);
+        toast(messages.join('；'), failed.length ? 'danger' : 'warning');
+        renderApp();
+        return;
+      }
+      const combinedFiles = mergeAppEvidenceFiles(appEvidenceFiles(item), uploaded);
       const result = PREVIEW_MODE
-        ? { ok: true, lesson: { ...item, appStatus: 'published', appFiles: uploaded, appUpdatedAt: new Date().toISOString(), appPublishedAt: new Date().toISOString() } }
-        : await API.updateTalentAppStatus(currentUser.nickname, item.id, 'published', uploaded);
+        ? { ok: true, lesson: { ...item, appStatus: 'published', appFiles: combinedFiles, appUpdatedAt: new Date().toISOString(), appPublishedAt: new Date().toISOString() } }
+        : await API.updateTalentAppStatus(currentUser.nickname, item.id, 'published', combinedFiles);
       if (!result?.ok) throw new Error(result?.error || '發布證據未儲存');
-      Object.assign(item, result.lesson || { appStatus: 'published', appFiles: uploaded, appUpdatedAt: new Date().toISOString() });
+      Object.assign(item, result.lesson || { appStatus: 'published', appFiles: combinedFiles, appUpdatedAt: new Date().toISOString() });
       persist('APP 證據已儲存');
       if (input.closest('#drawer-root')) closeDrawer();
       renderApp();
-      const uploadMessage = failed.length
-        ? `${uploaded.length} 張已綁定；${failed.length} 張未上傳：${failed.join('、')}`
-        : `${uploaded.length} 張家長 APP 發布截圖已綁定本堂課`;
+      const details = [`${uploaded.length} 張家長 APP 發布截圖已綁定本堂課`];
+      if (skipped) details.push(`${skipped} 張相同截圖已略過`);
+      if (failed.length) details.push(`${failed.length} 張未上傳：${failed.join('、')}`);
+      const uploadMessage = details.join('；');
       toast(result.warning || uploadMessage, result.warning || failed.length ? 'warning' : 'success');
+      if (!PREVIEW_MODE && result.reportStatus === 'pending') refreshTalentReportAfterSave(item.id, 'APP 截圖已儲存');
     } catch (error) {
       toast(error.message || '家長 APP 發布證據上傳失敗，請重試', 'danger');
       if (label && originalLabel) label.innerHTML = originalLabel;
@@ -1412,6 +1442,19 @@
       input.value = '';
       hydrateIcons();
     }
+  }
+
+  function refreshTalentReportAfterSave(lessonId, savedLabel = '紀錄已儲存') {
+    API.regenerateTalentLessonReport(lessonId).then(report => {
+      const current = state.logs.find(log => log.id === lessonId);
+      if (report?.ok && report.lesson && current?.contentRevision === report.lesson.contentRevision) {
+        putLocalLesson(report.lesson);
+        persist('日報已完成');
+        renderApp();
+      } else if (!report?.ok) {
+        toast(`${savedLabel}；日報稍後自動更新，不必重送`, 'warning');
+      }
+    }).catch(() => toast(`${savedLabel}；日報稍後自動更新，不必重送`, 'warning'));
   }
 
   function payFor({ teacher, lessonStatus, siteType, present, makeup, duration }) {
@@ -1655,10 +1698,7 @@
     renderApp();
     toast(result.warning || '本堂紀錄已送出並歸檔', result.warning ? 'warning' : 'success');
     if (!PREVIEW_MODE && result.reportStatus === 'pending') {
-      API.regenerateTalentLessonReport(item.id).then(report => {
-        if (report?.ok && report.lesson && state.logs.find(log => log.id === item.id)?.contentRevision === report.lesson.contentRevision) { putLocalLesson(report.lesson); persist('日報已完成'); renderApp(); }
-        else toast('紀錄已送出；日報尚在處理，不必重送', 'warning');
-      }).catch(() => toast('紀錄已送出；日報由系統接續處理', 'warning'));
+      refreshTalentReportAfterSave(item.id, '紀錄已送出');
     }
   }
 
