@@ -212,6 +212,94 @@ async function adminWorkflow(browser) {
     await page.reload({ waitUntil: 'domcontentloaded' });
     await waitForApp(page);
 
+    await clickRoute(page, 'class-roster');
+    const rosterStats = await page.locator('[data-testid="class-roster-stats"]').innerText();
+    check('班級人數初始 30 班與 156 正式人次正確', rosterStats.includes('156') && rosterStats.includes('30'), rosterStats);
+    check('全校、北區、東橋人數摘要分開顯示',
+      (await page.locator('[data-testid="class-campus-all"]').innerText()).includes('156')
+      && (await page.locator('[data-testid="class-campus-北區"]').innerText()).includes('82')
+      && (await page.locator('[data-testid="class-campus-東橋"]').innerText()).includes('74'));
+    check('北區差額歸入北16後不再顯示待確認警告', await page.locator('[data-testid="class-roster-baseline"]').count() === 0);
+    check('北16 已校正為 7 人', (await page.locator('[data-testid="class-count-北16"]').last().innerText()) === '7');
+    check('少於 4 人的班級有圖示、文字與底色警示',
+      await page.locator('[data-testid="mobile-class-row-北02"].is-low-enrollment .roster-recruitment-badge').count() === 1);
+
+    await page.locator('[data-testid="class-campus-東橋"]').click();
+    check('切換東橋後只顯示東橋 13 班',
+      await page.locator('.roster-mobile-row').count() === 13
+      && await page.locator('[data-testid="mobile-class-row-北01"]').count() === 0);
+    await clickAction(page, 'open-class-editor');
+    check('從東橋新增班級會自動帶入東橋', await page.inputValue('#class-roster-editor-form select[name="campus"]') === '東橋');
+    await page.locator('#dialog-root button[data-action="close-dialog"]').last().click();
+    await page.waitForSelector('#dialog-root .dialog', { state: 'detached' });
+
+    await page.locator('[data-testid="class-campus-北區"]').click();
+    check('切換北區後只顯示北區 17 班', await page.locator('.roster-mobile-row').count() === 17);
+    const lowClass = page.locator('[data-testid="mobile-class-row-北02"]');
+    await lowClass.locator('[data-delta="1"]').click();
+    await page.locator('#class-roster-adjust-form button[type="submit"]').click();
+    await page.waitForTimeout(180);
+    check('班級達 4 人後招生警示會立即解除',
+      await page.locator('[data-testid="mobile-class-row-北02"].is-low-enrollment').count() === 0
+      && await page.locator('[data-testid="mobile-class-row-北02"] .roster-recruitment-badge').count() === 0);
+    const zeroClass = page.locator('[data-testid="mobile-class-row-北08-B"]');
+    check('0 人班級仍保留在清單', await zeroClass.count() === 1);
+    check('0 人班級的減號已停用', await zeroClass.locator('[data-delta="-1"]').isDisabled());
+    await zeroClass.locator('[data-delta="1"]').click();
+    check('加人前會顯示 0 到 1 的確認畫面', (await page.locator('#class-roster-adjust-form').innerText()).includes('0') && (await page.locator('#class-roster-adjust-form').innerText()).includes('1'));
+    await page.locator('#class-roster-adjust-form button[type="submit"]').click();
+    await page.waitForTimeout(180);
+    check('正式人數加一後立即讀回', (await page.locator('[data-testid="class-count-北08-B"]').last().innerText()) === '1');
+
+    await page.locator('[data-action="set-class-view"][data-view="history"]').click();
+    check('人數異動自動留下前後值、原因與操作者', /北08-B[\s\S]*調整人數[\s\S]*0 → 1[\s\S]*新增學生[\s\S]*皮皮老師/.test(await page.locator('[data-testid="class-roster-content"]').innerText()));
+    await page.locator('[data-action="set-class-view"][data-view="classes"]').click();
+    await page.fill('#class-roster-query', '北08-B');
+    await page.locator('#class-roster-search-form button[type="submit"]').click();
+    check('班級可依代碼搜尋且只留下符合項目', await page.locator('.roster-mobile-row').count() === 1);
+    await page.locator('[data-action="open-class-reminder"]').filter({ visible: true }).click();
+    await page.fill('#class-roster-reminder-form input[name="title"]', '確認新生正式入班');
+    await page.fill('#class-roster-reminder-form input[name="dueDate"]', tomorrow);
+    await page.locator('#class-roster-reminder-form button[type="submit"]').click();
+    await page.waitForTimeout(180);
+    check('班級提醒可建立並自動切換到提醒頁', (await page.locator('[data-testid="class-roster-content"]').innerText()).includes('確認新生正式入班'));
+    await page.locator('[data-action="toggle-class-reminder"]').click();
+    await page.waitForTimeout(120);
+    check('班級提醒可標示完成', (await page.locator('[data-testid="class-roster-content"]').innerText()).includes('已完成'));
+
+    await page.locator('[data-action="set-class-view"][data-view="classes"]').click();
+    await page.locator('[data-action="clear-class-filter"]').click();
+    await clickAction(page, 'open-class-editor');
+    await page.fill('#class-roster-editor-form input[name="code"]', '北QA');
+    await page.fill('#class-roster-editor-form input[name="teacher"]', '測試老師');
+    await page.selectOption('#class-roster-editor-form select[name="weekday"]', '二');
+    await page.fill('#class-roster-editor-form input[name="course"]', '上市驗收班');
+    await page.fill('#class-roster-editor-form input[name="count"]', '2');
+    await page.locator('#class-roster-editor-form button[type="submit"]').click();
+    await page.waitForTimeout(180);
+    check('新增班級可正常儲存並顯示', (await page.locator('body').innerText()).includes('北QA · 上市驗收班'));
+    const qaClass = page.locator('[data-testid="mobile-class-row-北QA"]');
+    await qaClass.locator('[data-action="open-class-editor"]').click();
+    await page.fill('#class-roster-editor-form input[name="teacher"]', '更新老師');
+    await page.locator('#class-roster-editor-form button[type="submit"]').click();
+    await page.waitForTimeout(180);
+    check('既有班級資料可更新並讀回', (await page.locator('[data-testid="mobile-class-row-北QA"]').innerText()).includes('更新老師'));
+    await page.locator('[data-testid="mobile-class-row-北QA"] [data-action="open-class-editor"]').click();
+    await page.fill('#class-roster-editor-form input[name="start"]', '20:30');
+    await page.fill('#class-roster-editor-form input[name="end"]', '19:00');
+    await page.locator('#class-roster-editor-form button[type="submit"]').click();
+    await page.waitForTimeout(100);
+    check('班級結束時間早於開始時間會被阻擋', await page.locator('#class-roster-editor-form').count() === 1 && (await page.locator('#toast-root').innerText()).includes('結束時間'));
+    await page.locator('#dialog-root button[data-action="close-dialog"]').last().click();
+    await page.waitForSelector('#dialog-root .dialog', { state: 'detached' });
+    await pageHealth(page, label, 'class-roster-mobile');
+    await page.screenshot({ path: path.join(artifactDir, 'admin-class-roster-mobile.png'), fullPage: true });
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForApp(page);
+    await clickRoute(page, 'class-roster');
+    check('班級人數與提醒重新整理後仍存在', (await page.locator('body').innerText()).includes('北QA'));
+
     await clickRoute(page, 'today');
     check('行政尚未確認訊息時不會被工作紀錄誤判完成', (await page.locator('[data-action="open-daily-check"]').innerText()).includes('尚未確認'));
     await clickAction(page, 'open-daily-check');
@@ -377,6 +465,38 @@ async function adminWorkflow(browser) {
     await manager.goto(`${baseUrl}/review/admin-marketing-v1/index.html?workspace=admin-marketing-manager&reviewUser=%E5%B0%8F%E9%AD%9A%E4%B8%BB%E7%AE%A1`, { waitUntil: 'domcontentloaded' });
     await waitForApp(manager);
 
+    await clickRoute(manager, 'class-roster');
+    check('行政主管可開啟相同班級資料', (await manager.locator('body').innerText()).includes('北QA'));
+    await pageHealth(manager, '行政主管完整流程', 'class-roster');
+
+    await clickAction(manager, 'profile');
+    check('小魚下方工作切換有獨立班級人數入口', (await manager.locator('#dialog-root').innerText()).includes('班級人數'));
+    await manager.locator('#dialog-root button[data-action="close-dialog"]').last().click();
+    await manager.waitForSelector('#dialog-root .dialog', { state: 'detached' });
+
+    const liuding = trackPage(await context.newPage(), '柳丁班級人數協作');
+    await liuding.goto(`${baseUrl}/review/admin-marketing-v1/index.html?workspace=class-roster-manager&reviewUser=%E6%9F%B3%E4%B8%81%E4%B8%BB%E7%AE%A1`, { waitUntil: 'domcontentloaded' });
+    await waitForApp(liuding);
+    const liudingRoutes = await liuding.evaluate(() => [...new Set(Array.from(document.querySelectorAll('[data-route]')).map(node => node.dataset.route).filter(Boolean))]);
+    check('柳丁只看到班級人數，不會看到其他行政功能', liudingRoutes.length === 1 && liudingRoutes[0] === 'class-roster', liudingRoutes.join(','));
+    check('柳丁讀到行政剛建立的同一份班級資料', (await liuding.locator('body').innerText()).includes('北QA'));
+    await clickAction(liuding, 'profile');
+    const liudingSwitcher = await liuding.locator('#dialog-root').innerText();
+    check('柳丁下方工作切換有班級人數入口', liudingSwitcher.includes('班級人數'));
+    check('柳丁工作切換沒有行政美宣入口', !liudingSwitcher.includes('行政美宣'));
+    await liuding.locator('#dialog-root button[data-action="close-dialog"]').last().click();
+    await liuding.waitForSelector('#dialog-root .dialog', { state: 'detached' });
+    await liuding.locator('[data-testid="mobile-class-row-北08-B"] [data-delta="1"]').click();
+    await liuding.locator('#class-roster-adjust-form button[type="submit"]').click();
+    await liuding.waitForTimeout(180);
+    check('柳丁可調整班級人數', (await liuding.locator('[data-testid="class-count-北08-B"]').last().innerText()) === '2');
+    await manager.reload({ waitUntil: 'domcontentloaded' });
+    await waitForApp(manager);
+    await clickRoute(manager, 'class-roster');
+    check('柳丁更新後小魚可讀到相同人數', (await manager.locator('[data-testid="class-count-北08-B"]').last().innerText()) === '2');
+    await pageHealth(liuding, '柳丁班級人數協作', 'class-roster');
+    await liuding.close();
+
     await clickRoute(manager, 'reviews');
     const reviewCard = manager.locator('.record-card', { hasText: '項工作' }).first();
     check('行政主管可看到老師新增的工作紀錄', await reviewCard.count() === 1);
@@ -430,6 +550,22 @@ async function adminWorkflow(browser) {
     await clickRoute(page, 'trials');
     check('行政端可看到首報獎金已核准', (await page.locator('body').innerText()).includes('首報獎金 50 元已核准'));
     await manager.close();
+
+    const desktopSession = await createPage(browser, { width: 1440, height: 900 }, '班級人數桌機版');
+    try {
+      await desktopSession.page.goto(`${baseUrl}/review/admin-marketing-v1/index.html?workspace=admin-marketing-manager&reviewUser=%E6%9F%8F%E7%BF%B0`, { waitUntil: 'domcontentloaded' });
+      await waitForApp(desktopSession.page);
+      await clickRoute(desktopSession.page, 'class-roster');
+      check('班級人數桌機版使用完整表格', await desktopSession.page.locator('.roster-desktop').isVisible() && !(await desktopSession.page.locator('.roster-mobile-list').isVisible()));
+      await clickAction(desktopSession.page, 'profile');
+      check('柏翰下方工作切換有獨立班級人數入口', (await desktopSession.page.locator('#dialog-root').innerText()).includes('班級人數'));
+      await desktopSession.page.locator('#dialog-root button[data-action="close-dialog"]').last().click();
+      await desktopSession.page.waitForSelector('#dialog-root .dialog', { state: 'detached' });
+      await pageHealth(desktopSession.page, '班級人數桌機版', 'class-roster');
+      await desktopSession.page.screenshot({ path: path.join(artifactDir, 'admin-class-roster-desktop.png'), fullPage: true });
+    } finally {
+      await desktopSession.context.close();
+    }
   } finally {
     await context.close();
   }
@@ -933,7 +1069,7 @@ async function main() {
     });
     const adminSurface = (key, nickname, workspace) => ({
       key,
-      label: `${nickname}／${workspace === 'admin-marketing' ? '行政美宣' : '行政主管'}`,
+      label: `${nickname}／${workspace === 'admin-marketing' ? '行政美宣' : workspace === 'class-roster-manager' ? '班級人數' : '行政主管'}`,
       url: `/review/admin-marketing-v1/index.html?workspace=${workspace}&reviewUser=${encodeURIComponent(nickname)}`,
     });
     const surfaces = [
@@ -957,6 +1093,7 @@ async function main() {
       adminSurface('admin-pipi', '皮皮老師', 'admin-marketing'),
       adminSurface('admin-xiaoyu', '小魚主管', 'admin-marketing-manager'),
       adminSurface('admin-bohan', '柏翰', 'admin-marketing-manager'),
+      adminSurface('admin-liuding-roster', '柳丁主管', 'class-roster-manager'),
     ];
     if (!only || only === 'routes') {
       for (const surface of surfaces) await auditRoutes(browser, surface, { width: 390, height: 844 });

@@ -37,7 +37,7 @@ window.API = (function () {
     'getDashboard', 'getMyKpiPreview', 'listArchivedKpiFiles',
     'listTeacherReportFolders', 'listCoursePreps', 'getTalentWorkspaceData',
     'getAdminMarketingWorkspaceData',
-    'getAdminMarketingDriveFolders',
+    'getAdminMarketingDriveFolders', 'getClassRosterData',
     'getSystemReadiness',
   ]);
 
@@ -70,7 +70,7 @@ window.API = (function () {
 
   async function requestJson(payload) {
     const controller = new AbortController();
-    const slowAction = /^(upload|saveAdminMarketingRecord|saveTalentLesson|updateTalentAppStatus|sendSubmitPdf|regenerate|runProduction)/.test(payload.action);
+    const slowAction = /^(upload|saveAdminMarketingRecord|saveClassRosterMutation|saveTalentLesson|updateTalentAppStatus|sendSubmitPdf|regenerate|runProduction)/.test(payload.action);
     const timeoutMs = slowAction ? 90000 : 25000;
     let timer;
     const deadline = new Promise((_, reject) => {
@@ -174,6 +174,7 @@ window.API = (function () {
     }
     const receiptRead = action === 'saveCoursePrep' ? 'listCoursePreps'
       : action === 'saveTalentLesson' || action === 'updateTalentAppStatus' ? 'getTalentWorkspaceData'
+      : action === 'saveClassRosterMutation' ? 'getClassRosterData'
       : action === 'saveAdminMarketingRecord' ? 'getAdminMarketingWorkspaceData' : '';
     if (receiptRead) {
       for (const delay of WRITE_RECEIPT_DELAYS_MS) {
@@ -181,6 +182,11 @@ window.API = (function () {
         try {
           const check = await requestJson({ action: receiptRead, viewer: payload.nickname, nickname: payload.nickname, session_token: sessionToken });
           if (check.ok) {
+            if (action === 'saveClassRosterMutation') {
+              const receipt = (check.history || []).find(row => row.requestId === payload.request_id);
+              if (receipt) return { ok: true, classRoster: check, recovered: true };
+              continue;
+            }
             const rows = action === 'saveTalentLesson' || action === 'updateTalentAppStatus' ? check.lessons : check.records;
             const id = payload.prep?.id || payload.lesson?.id || payload.record?.id || payload.lesson_id;
             const saved = (rows || []).find(row => (row.id || row.prepId) === id && row.lastRequestId === payload.request_id);
@@ -357,6 +363,8 @@ window.API = (function () {
     }),
     saveAdminMarketingScore: (nickname, month, score) => call('saveAdminMarketingScore', { nickname, month, score }),
     addAdminMarketingMessage: (nickname, month, text) => call('addAdminMarketingMessage', { nickname, month, text }),
+    getClassRosterData: () => call('getClassRosterData'),
+    saveClassRosterMutation: (operation, payload = {}) => call('saveClassRosterMutation', { operation, payload }),
     setConfig: (data) => call('setConfig', data),
     getSystemReadiness: (operator) => call('getSystemReadiness', { operator }),
     runProductionIntegrityCheck: () => call('runProductionIntegrityCheck'),

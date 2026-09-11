@@ -98,6 +98,19 @@ function setupSheets() {
       'year_week', 'year_month', 'status', 'data_json', 'created_by', 'updated_by',
       'created_at', 'updated_at', 'reviewed_at'
     ],
+    [SHEET_NAMES.CLASS_ROSTER]: [
+      'class_id', 'code', 'campus', 'teacher', 'weekday', 'course',
+      'start_time', 'end_time', 'student_count', 'note', 'active', 'version',
+      'import_batch', 'created_by', 'updated_by', 'created_at', 'updated_at'
+    ],
+    [SHEET_NAMES.CLASS_ROSTER_HISTORY]: [
+      'event_id', 'request_id', 'action', 'class_id', 'code', 'campus', 'course',
+      'before_count', 'after_count', 'reason', 'actor', 'before_json', 'after_json', 'created_at'
+    ],
+    [SHEET_NAMES.CLASS_ROSTER_REMINDERS]: [
+      'reminder_id', 'class_id', 'title', 'due_date', 'status',
+      'created_by', 'updated_by', 'created_at', 'updated_at', 'completed_at'
+    ],
   };
 
   Object.entries(schemas).forEach(([name, headers]) => {
@@ -140,10 +153,10 @@ function setupSheets() {
  */
 function migrateTalentUserProfiles_() {
   const profiles = [
-    { nickname: '柏翰', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'] },
+    { nickname: '柏翰', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'] },
     { nickname: '酸酸', employment_type: 'manager', work_assignments: ['anqin-manager'] },
-    { nickname: '小魚', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'] },
-    { nickname: '柳丁', role: 'manager', department: '才藝部門', status: 'pending', employment_type: 'manager', work_assignments: ['talent-manager'] },
+    { nickname: '小魚', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'] },
+    { nickname: '柳丁', role: 'manager', department: '才藝部門', status: 'pending', employment_type: 'manager', work_assignments: ['talent-manager', 'class-roster-manager'] },
     { nickname: '浩浩', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'], rest_days: ['週一', '週日'] },
     { nickname: 'RITA', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'], rest_days: ['週二', '週日'] },
     { nickname: '毛毛', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'] },
@@ -230,14 +243,15 @@ function migrateTalentUserProfiles() {
   return { ok: true, message: '才藝工作身分與排班已補齊' };
 }
 
-/** 行政美宣上線前執行一次：建立資料表並補齊皮皮、小魚、柏翰的工作區。 */
+/** 行政美宣上線前執行一次：建立資料表並補齊皮皮與三位主管的工作區。 */
 function prepareAdminMarketingLaunch() {
   migrateTalentUserProfiles_();
   ensureAdminMarketingRecordsSheet_();
   const expected = {
     '皮皮老師': ['talent-pt', 'admin-marketing'],
-    '小魚': ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'],
-    '柏翰': ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'],
+    '小魚': ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'],
+    '柏翰': ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'],
+    '柳丁': ['talent-manager', 'class-roster-manager'],
   };
   const result = {};
   Object.keys(expected).forEach(function (nickname) {

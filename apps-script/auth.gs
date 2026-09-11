@@ -153,6 +153,9 @@ function validateUserWorkConfiguration_(role, employment, assignments, schedule)
   if (work.indexOf('admin-marketing-manager') >= 0 && role !== 'manager' && role !== 'admin') {
     throw new Error('行政美宣主管工作區只可指派給主管或管理員');
   }
+  if (work.indexOf('class-roster-manager') >= 0 && role !== 'manager' && role !== 'admin') {
+    throw new Error('班級人數工作區只可指派給主管或管理員');
+  }
 }
 
 /** 驗證首次 Google 登入，或用尚未過期的後端工作階段重新核對身分。 */
@@ -355,6 +358,7 @@ function authorizeApiAction_(action, params, actor) {
     'listArchivedKpiFiles', 'listTeacherReportFolders', 'getTalentWorkspaceData',
     'getAdminMarketingWorkspaceData',
     'getAdminMarketingDriveFolders',
+    'getClassRosterData',
     'getEvalEvidence', 'getEval', 'listEvals',
     'listTasks', 'getDashboard'
   ];
@@ -379,6 +383,17 @@ function authorizeApiAction_(action, params, actor) {
   if (action === 'getAdminMarketingDriveFolders') {
     requireApiRole_(actor, ['admin', 'manager']);
     params.viewer = actor.nickname;
+    return;
+  }
+
+  if (action === 'getClassRosterData') {
+    params.viewer = actor.nickname;
+    return;
+  }
+
+  if (action === 'saveClassRosterMutation') {
+    if (!userHasClassRosterWork_(actor)) throw new Error('此帳號沒有班級人數管理權限');
+    params.operator = actor.nickname;
     return;
   }
 
@@ -677,7 +692,7 @@ function addUser(params) {
     return { ok: false, error: 'invalid employment_type' };
   }
   const workAssignments = parseUserListField_(params.work_assignments);
-  const allowedAssignments = ['anqin-teacher', 'anqin-manager', 'talent-fulltime', 'talent-pt', 'talent-manager', 'talent-payroll', 'admin-marketing', 'admin-marketing-manager'];
+  const allowedAssignments = ['anqin-teacher', 'anqin-manager', 'talent-fulltime', 'talent-pt', 'talent-manager', 'talent-payroll', 'admin-marketing', 'admin-marketing-manager', 'class-roster-manager'];
   if (workAssignments.some(function (item) { return allowedAssignments.indexOf(item) < 0; })) {
     return { ok: false, error: 'invalid work_assignments' };
   }
@@ -754,7 +769,7 @@ function updateUser(params) {
   if (updates.employment_type !== undefined && updates.employment_type && !['fulltime', 'pt', 'manager', 'admin'].includes(String(updates.employment_type))) return { ok: false, error: 'invalid employment_type' };
   if (updates.work_assignments !== undefined) {
     const assignments = parseUserListField_(updates.work_assignments);
-    const allowed = ['anqin-teacher', 'anqin-manager', 'talent-fulltime', 'talent-pt', 'talent-manager', 'talent-payroll', 'admin-marketing', 'admin-marketing-manager'];
+    const allowed = ['anqin-teacher', 'anqin-manager', 'talent-fulltime', 'talent-pt', 'talent-manager', 'talent-payroll', 'admin-marketing', 'admin-marketing-manager', 'class-roster-manager'];
     if (assignments.some(function (item) { return allowed.indexOf(item) < 0; })) return { ok: false, error: 'invalid work_assignments' };
     updates.work_assignments = assignments;
   }

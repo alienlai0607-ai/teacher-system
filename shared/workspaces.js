@@ -65,7 +65,7 @@
       shortLabel: '行政美宣',
       description: '行政日誌、美宣產出與期限追蹤',
       icon: 'megaphone',
-      path: 'review/admin-marketing-v1/index.html?workspace=admin-marketing&v=20260903-admin-stability-1',
+      path: 'review/admin-marketing-v1/index.html?workspace=admin-marketing&v=20260911-class-roster-3',
     },
     'admin-marketing-manager': {
       id: 'admin-marketing-manager',
@@ -74,7 +74,16 @@
       shortLabel: '行政美宣主管',
       description: '期限管理、週 KPI 與主管評核',
       icon: 'clipboard-list',
-      path: 'review/admin-marketing-v1/index.html?workspace=admin-marketing-manager&v=20260903-admin-stability-1',
+      path: 'review/admin-marketing-v1/index.html?workspace=admin-marketing-manager&v=20260911-class-roster-3',
+    },
+    'class-roster-manager': {
+      id: 'class-roster-manager',
+      group: 'admin-marketing',
+      label: '班級人數',
+      shortLabel: '班級人數',
+      description: '北區與東橋班級人數、提醒及異動紀錄',
+      icon: 'users-round',
+      path: 'review/admin-marketing-v1/index.html?workspace=class-roster-manager&v=20260911-class-roster-3',
     },
   };
 
@@ -91,14 +100,15 @@
     talent_payroll: 'talent-payroll',
     admin_marketing: 'admin-marketing',
     admin_marketing_manager: 'admin-marketing-manager',
+    class_roster_manager: 'class-roster-manager',
   };
 
   // 正式後端提供 work_assignments 時會優先採用；此表供審查版與既有帳號過渡使用。
   const LEGACY_ASSIGNMENTS = {
-    '柏翰': ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'],
-    '小魚': ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'],
+    '柏翰': ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'],
+    '小魚': ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'],
     '酸酸': ['anqin-manager'],
-    '柳丁': ['talent-manager'],
+    '柳丁': ['talent-manager', 'class-roster-manager'],
     '浩浩': ['talent-fulltime'],
     RITA: ['talent-fulltime'],
     Rita: ['talent-fulltime'],
@@ -159,7 +169,7 @@
     const role = String(user.role || '').trim();
     const department = String(user.department || '').trim();
     const subtype = String(user.subtype || user.employment_type || '').toLowerCase();
-    if (role === 'admin') return ['anqin-manager', 'talent-manager', 'admin-marketing-manager'];
+    if (role === 'admin') return ['anqin-manager', 'talent-manager', 'admin-marketing-manager', 'class-roster-manager'];
     if (role === 'admin_staff' && String(user.subtype || '').toLowerCase() === 'marketing') {
       return ['admin-marketing'];
     }

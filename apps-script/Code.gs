@@ -106,6 +106,10 @@ function handleRequest(e, method) {
       'saveAdminMarketingScore': () => saveAdminMarketingScore(params),
       'addAdminMarketingMessage': () => addAdminMarketingMessage(params),
 
+      // 行政美宣：班級正式上課人數、異動紀錄與提醒
+      'getClassRosterData': () => getClassRosterData(params),
+      'saveClassRosterMutation': () => saveClassRosterMutation(params),
+
       // 週報
       'saveWeekly': () => saveWeekly(params),
       'getWeekly': () => getWeekly(params),
@@ -205,6 +209,9 @@ const SHEET_NAMES = {
   COURSE_PREP: 'CoursePrep',
   TALENT_RECORDS: 'TalentRecords',
   ADMIN_MARKETING_RECORDS: 'AdminMarketingRecords',
+  CLASS_ROSTER: 'ClassRoster',
+  CLASS_ROSTER_HISTORY: 'ClassRosterHistory',
+  CLASS_ROSTER_REMINDERS: 'ClassRosterReminders',
 };
 
 const DEPARTMENTS = ['東橋教室', '北區教室', '才藝部門', '總部'];
@@ -215,10 +222,10 @@ const ROLES = ['admin', 'manager', 'teacher', 'admin_staff'];
 const ADMIN_STAFF_SUBTYPES = ['general', 'marketing'];
 
 const INITIAL_USERS = [
-  { nickname: '柏翰',     role: 'admin',       department: '總部',     status: 'active', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'] },
+  { nickname: '柏翰',     role: 'admin',       department: '總部',     status: 'active', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'] },
   { nickname: '酸酸',     role: 'manager',     department: '東橋教室', status: 'active', employment_type: 'manager', work_assignments: ['anqin-manager'] },
-  { nickname: '小魚',     role: 'manager',     department: '北區教室', status: 'active', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'] },
-  { nickname: '柳丁',     role: 'manager',     department: '才藝部門', status: 'pending', employment_type: 'manager', work_assignments: ['talent-manager'] },
+  { nickname: '小魚',     role: 'manager',     department: '北區教室', status: 'active', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'] },
+  { nickname: '柳丁',     role: 'manager',     department: '才藝部門', status: 'pending', employment_type: 'manager', work_assignments: ['talent-manager', 'class-roster-manager'] },
   { nickname: '松鼠',     role: 'teacher',     department: '東橋教室', status: 'active' },
   { nickname: '羊羊',     role: 'teacher',     department: '東橋教室', status: 'active' },
   { nickname: '紅豆',     role: 'teacher',     department: '東橋教室', status: 'active', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'] },

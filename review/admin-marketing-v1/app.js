@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 3;
+  const APP_VERSION = 5;
   const MAX_ADMIN_FILE_BYTES = 25 * 1024 * 1024;
   const IMAGE_COMPRESSION_THRESHOLD_BYTES = 2.2 * 1024 * 1024;
   const PREVIEW_MODE = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
@@ -86,11 +86,13 @@
   const WORKSPACES = {
     'admin-marketing': { label: '行政美宣', role: 'worker', start: 'today', icon: 'megaphone' },
     'admin-marketing-manager': { label: '行政美宣主管', role: 'manager', start: 'dashboard', icon: 'clipboard-list' },
+    'class-roster-manager': { label: '班級人數', role: 'roster', start: 'class-roster', icon: 'users-round' },
   };
   const STAFF = [
     { nickname: '皮皮老師', role: 'admin_staff', department: '北區教室', subtype: 'marketing', employment_type: 'pt', work_assignments: ['talent-pt', 'admin-marketing'] },
-    { nickname: '小魚主管', role: 'manager', department: '北區教室', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'] },
-    { nickname: '柏翰', role: 'admin', department: '總部', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'] },
+    { nickname: '小魚主管', role: 'manager', department: '北區教室', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'] },
+    { nickname: '柏翰', role: 'admin', department: '總部', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'] },
+    { nickname: '柳丁主管', role: 'manager', department: '才藝部門', status: 'pending', employment_type: 'manager', work_assignments: ['talent-manager', 'class-roster-manager'] },
   ];
   const KPI = [
     { key: 'daily', label: '行政處理與工作留痕', max: 20, rubric: '18–20：工作日皆有紀錄且重要訊息無漏接；14–17：偶有延遲但能補正；10–13：紀錄或回覆不穩定；0–9：多次漏填或未處理。' },
@@ -133,6 +135,7 @@
   const NAV = {
     worker: [
       { route: 'today', label: '今日工作', icon: 'layout-dashboard' },
+      { route: 'class-roster', label: '班級人數', icon: 'users-round' },
       { route: 'trials', label: '試上名單', icon: 'user-round-search' },
       { route: 'projects', label: '專案與交辦', icon: 'list-checks' },
       { route: 'performance', label: '成果與評核', icon: 'gauge' },
@@ -140,6 +143,7 @@
     ],
     manager: [
       { route: 'dashboard', label: '主管總覽', icon: 'layout-dashboard' },
+      { route: 'class-roster', label: '班級人數', icon: 'users-round' },
       { route: 'trials', label: '家長與獎金', icon: 'badge-dollar-sign' },
       { route: 'reviews', label: '工作紀錄', icon: 'notebook-tabs' },
       { route: 'assignments', label: '交辦與專案', icon: 'list-todo' },
@@ -147,7 +151,73 @@
       { route: 'cloud', label: '雲端資料', icon: 'folder-open' },
       { route: 'guide', label: '評分標準', icon: 'book-open-text' },
     ],
+    roster: [
+      { route: 'class-roster', label: '班級人數', icon: 'users-round' },
+    ],
   };
+  const CLASS_ROSTER_ROWS = [
+    ['北01', '北區', '柳丁', '一', 'WEDO 新班', '19:00', '20:30', 5, ''],
+    ['北02', '北區', '柳丁', '三', 'SPIKE 進階', '19:00', '20:30', 3, ''],
+    ['北03', '北區', '柳丁', '六', 'SPIKE 新班', '09:00', '10:30', 7, ''],
+    ['北04', '北區', '柳丁', '六', 'SPIKE', '13:00', '14:30', 10, ''],
+    ['北05', '北區', '柳丁', '六', 'SPIKE 新班', '15:00', '16:30', 3, ''],
+    ['北06', '北區', 'Rita', '一', '程式小創客新班', '19:00', '20:30', 2, ''],
+    ['北07', '北區', 'Rita', '三', '簡易機械新班', '19:00', '20:30', 1, ''],
+    ['北08-A', '北區', 'Rita', '六', '簡易機械', '10:30', '12:00', 3, ''],
+    ['北08-B', '北區', 'Rita', '六', '簡易機械', '09:00', '10:30', 0, ''],
+    ['北09', '北區', 'Rita', '六', '程式小創客', '13:10', '14:40', 4, ''],
+    ['北10', '北區', 'Rita', '六', '程式小創客', '15:00', '16:30', 8, ''],
+    ['北11', '北區', '小明', '三', 'WEDO', '19:00', '20:30', 4, ''],
+    ['北12', '北區', '皮皮', '四', 'WEDO', '19:00', '20:30', 7, ''],
+    ['北13', '北區', '皮皮', '六', 'WEDO', '13:00', '14:30', 5, ''],
+    ['北14', '北區', '江江', '六', 'WEDO', '11:00', '12:30', 3, ''],
+    ['北15', '北區', '外星人', '四', 'SPIKE', '19:00', '20:30', 10, ''],
+    ['北16', '北區', '外星人', '六', '創意積木', '09:30', '10:30', 7, ''],
+    ['東01', '東橋', 'Rita', '四', '程式小創客新班', '19:00', '20:30', 4, ''],
+    ['東02', '東橋', 'Rita', '五', '簡易機械新班', '19:00', '20:30', 3, ''],
+    ['東03', '東橋', '酸酸', '六', '簡易機械', '09:00', '10:30', 7, '老師待確認'],
+    ['東04', '東橋', '酸酸', '六', 'WEDO', '10:40', '12:10', 11, '老師待確認'],
+    ['東05', '東橋', '浩浩', '四', 'SPIKE 新班', '19:00', '20:30', 4, ''],
+    ['東06', '東橋', '浩浩', '五', 'SPIKE 舊班', '19:00', '20:30', 6, ''],
+    ['東07', '東橋', '浩浩', '六', '程式小創客舊班', '09:00', '10:30', 7, ''],
+    ['東08', '東橋', '浩浩', '六', 'SPIKE 舊班', '10:40', '12:10', 8, ''],
+    ['東09', '東橋', '浩浩', '六', 'SPIKE 舊班', '13:00', '14:30', 8, ''],
+    ['東10', '東橋', '浩浩', '六', 'WEDO 舊班', '15:00', '16:30', 5, ''],
+    ['東11', '東橋', '紅豆', '三', 'WEDO 舊班', '19:00', '20:30', 3, ''],
+    ['東12', '東橋', '紅豆', '四', 'WEDO 新班', '19:00', '20:30', 2, ''],
+    ['東13', '東橋', '紅豆', '五', 'WEDO 舊班', '19:00', '20:30', 6, ''],
+  ];
+
+  function classRosterStats(classes) {
+    return ['北區', '東橋'].map(campus => {
+      const items = classes.filter(item => item.campus === campus);
+      return {
+        campus,
+        classes: items.length,
+        attendance: items.reduce((sum, item) => sum + Number(item.count || 0), 0),
+        activeClasses: items.filter(item => Number(item.count || 0) > 0).length,
+      };
+    });
+  }
+  function createClassRosterSeed() {
+    const importedAt = '2026-09-11T00:00:00+08:00';
+    const classes = CLASS_ROSTER_ROWS.map((row, index) => ({
+      id: `class-roster-seed-${String(index + 1).padStart(3, '0')}`,
+      code: row[0], campus: row[1], teacher: row[2], weekday: row[3], course: row[4],
+      start: row[5], end: row[6], count: row[7], note: row[8], active: true, version: 1,
+      importBatch: '20260911-handoff-v2-north16', createdBy: '初始匯入', updatedBy: '初始匯入',
+      createdAt: importedAt, updatedAt: importedAt,
+    }));
+    return {
+      classes, history: [], reminders: [], stats: classRosterStats(classes),
+      updatedAt: importedAt, syncedAt: new Date().toISOString(),
+      baseline: {
+        status: 'confirmed', detailNorth: 82, detailEast: 74, detailTotal: 156,
+        expectedNorth: 82, expectedEast: 74, expectedTotal: 156,
+        message: '北區差額 3 人已確認歸入北16：週六外星人 09:30–10:30 創意積木。',
+      },
+    };
+  }
 
   function normalizeName(value) {
     return String(value || '').trim().replace(/\s+/g, '').replace(/(?:老師|主管)$/, '').toLowerCase();
@@ -194,6 +264,7 @@
   const TEST_VIEW_MODE = Boolean(identity.session?.impersonate);
   const canOpenTestView = !TEST_VIEW_MODE && currentUser.role === 'admin' && normalizeName(currentUser.nickname) === '柏翰';
   const isManager = workspace.role === 'manager';
+  const isRosterOnly = workspace.role === 'roster';
   const workerName = '皮皮老師';
   if (reviewRibbon && TEST_VIEW_MODE) {
     reviewRibbon.hidden = false;
@@ -213,10 +284,11 @@
   function createSeed() {
     return {
       version: APP_VERSION,
-      ui: { route: workspace.start, month: currentMonth(), performanceMonth: '', evaluationMonth: '', trialStatus: 'all', lastSavedAt: '' },
+      ui: { route: workspace.start, month: currentMonth(), performanceMonth: '', evaluationMonth: '', trialStatus: 'all', classCampus: 'all', classView: 'classes', classQuery: '', lastSavedAt: '' },
       records: [],
-      users: [STAFF[0]],
+      users: isRosterOnly ? [] : [STAFF[0]],
       settings: { supervisor: '小魚', videoWeeklyTarget: 2, photoWeeklyTarget: 3, trialBonusAmount: TRIAL_BONUS_AMOUNT, kpi: KPI },
+      classRoster: createClassRosterSeed(),
       drafts: {},
     };
   }
@@ -234,9 +306,10 @@
       return {
         ...seed,
         ...(shared && shared.version === APP_VERSION ? {
-          records: Array.isArray(shared.records) ? shared.records : [],
-          users: Array.isArray(shared.users) ? shared.users : seed.users,
+          records: isRosterOnly ? [] : (Array.isArray(shared.records) ? shared.records : []),
+          users: isRosterOnly ? [] : (Array.isArray(shared.users) ? shared.users : seed.users),
           settings: { ...seed.settings, ...(shared.settings || {}) },
+          classRoster: shared.classRoster && Array.isArray(shared.classRoster.classes) ? shared.classRoster : seed.classRoster,
         } : {}),
         ...(personal && personal.version === APP_VERSION ? {
           ui: { ...seed.ui, ...(personal.ui || {}) },
@@ -252,12 +325,17 @@
     message: PREVIEW_MODE ? '內部審查不連正式雲端' : '',
     folders: [],
   };
+  let classRosterBusy = false;
 
   function persist(message = '已儲存') {
     state.ui.lastSavedAt = new Date().toISOString();
     if (PREVIEW_MODE) {
       try {
-        localStorage.setItem(sharedStorageKey, JSON.stringify({ version: APP_VERSION, records: state.records, users: state.users, settings: state.settings }));
+        const existingShared = JSON.parse(localStorage.getItem(sharedStorageKey) || 'null');
+        const sharedPayload = isRosterOnly && existingShared?.version === APP_VERSION
+          ? { ...existingShared, classRoster: state.classRoster }
+          : { version: APP_VERSION, records: state.records, users: state.users, settings: state.settings, classRoster: state.classRoster };
+        localStorage.setItem(sharedStorageKey, JSON.stringify(sharedPayload));
         localStorage.setItem(personalStorageKey, JSON.stringify({ version: APP_VERSION, ui: state.ui, drafts: state.drafts }));
       } catch (error) { console.warn(error); }
     }
@@ -473,19 +551,25 @@
     if (PREVIEW_MODE) return { ok: true };
     cloud = { status: 'loading', message: '正在讀取正式資料' };
     renderApp();
-    const result = await window.API?.getAdminMarketingWorkspaceData?.({ viewer: currentUser.nickname });
+    const result = isRosterOnly
+      ? await window.API?.getClassRosterData?.()
+      : await window.API?.getAdminMarketingWorkspaceData?.({ viewer: currentUser.nickname });
     if (!result?.ok) {
-      cloud = { status: 'error', message: result?.error || '行政美宣資料載入失敗' };
+      cloud = { status: 'error', message: result?.error || (isRosterOnly ? '班級資料載入失敗' : '行政美宣資料載入失敗') };
       renderApp();
       if (notify) toast(cloud.message, 'danger');
       return result || { ok: false };
     }
-    state.records = Array.isArray(result.records) ? result.records : [];
-    state.users = Array.isArray(result.users) ? result.users : [];
-    state.settings = { ...state.settings, ...(result.settings || {}) };
+    if (!isRosterOnly) {
+      state.records = Array.isArray(result.records) ? result.records : [];
+      state.users = Array.isArray(result.users) ? result.users : [];
+      state.settings = { ...state.settings, ...(result.settings || {}) };
+    }
+    if (result.classRoster && Array.isArray(result.classRoster.classes)) state.classRoster = result.classRoster;
+    if (isRosterOnly && Array.isArray(result.classes)) applyClassRosterSnapshot(result);
     if (!isManager && state.ui.route === 'performance') state.ui.performanceMonth = scoreMonths(true)[0] || currentMonth();
     if (isManager && state.ui.route === 'evaluation') state.ui.evaluationMonth = scoreMonths(false)[0] || currentMonth();
-    cloud = { status: 'ready', message: `已同步 ${state.records.length} 筆紀錄` };
+    cloud = { status: 'ready', message: isRosterOnly ? '班級人數已同步' : `已同步 ${state.records.length} 筆紀錄` };
     persist('雲端已同步');
     renderApp();
     if (notify) toast(cloud.message);
@@ -533,7 +617,8 @@
   function renderMobileNav() {
     const items = NAV[workspace.role];
     const visible = items.slice(0, 4);
-    return `<nav class="mobile-nav" aria-label="主要功能">${visible.map(item => `<button type="button" class="nav-button ${state.ui.route === item.route ? 'is-active' : ''}" data-route="${item.route}">${icon(item.icon)}<span>${esc(item.label)}</span></button>`).join('')}<button type="button" class="nav-button ${items.slice(4).some(item => item.route === state.ui.route) ? 'is-active' : ''}" data-action="more-nav">${icon('menu')}<span>更多</span></button></nav>`;
+    const more = items.length > 4 ? `<button type="button" class="nav-button ${items.slice(4).some(item => item.route === state.ui.route) ? 'is-active' : ''}" data-action="more-nav">${icon('menu')}<span>更多</span></button>` : '';
+    return `<nav class="mobile-nav" aria-label="主要功能" style="--mobile-nav-count:${visible.length + (more ? 1 : 0)}">${visible.map(item => `<button type="button" class="nav-button ${state.ui.route === item.route ? 'is-active' : ''}" data-route="${item.route}">${icon(item.icon)}<span>${esc(item.label)}</span></button>`).join('')}${more}</nav>`;
   }
   function pageHead(title, subtitle, actions = '') {
     return `<div class="page-head"><div><h1>${esc(title)}</h1><p>${esc(subtitle)}</p></div>${actions ? `<div class="page-actions">${actions}</div>` : ''}</div>`;
@@ -798,6 +883,280 @@
     </section>`;
   }
 
+  function classRosterData() {
+    if (!state.classRoster || !Array.isArray(state.classRoster.classes)) state.classRoster = createClassRosterSeed();
+    return state.classRoster;
+  }
+  function applyClassRosterSnapshot(snapshot) {
+    if (!snapshot || !Array.isArray(snapshot.classes)) return;
+    const seed = createClassRosterSeed();
+    state.classRoster = {
+      ...seed,
+      ...snapshot,
+      classes: snapshot.classes,
+      history: Array.isArray(snapshot.history) ? snapshot.history : [],
+      reminders: Array.isArray(snapshot.reminders) ? snapshot.reminders : [],
+      stats: Array.isArray(snapshot.stats) ? snapshot.stats : classRosterStats(snapshot.classes),
+      baseline: { ...seed.baseline, ...(snapshot.baseline || {}) },
+    };
+  }
+  function classRosterItem(id) {
+    return classRosterData().classes.find(item => item.id === id) || null;
+  }
+  function classRosterActionLabel(action) {
+    return ({
+      adjust: '調整人數', class_created: '新增班級', class_updated: '更新班級',
+      reminder_created: '新增提醒', reminder_completed: '完成提醒',
+      reminder_reopened: '重新開啟提醒', reminder_deleted: '刪除提醒',
+    })[action] || '更新資料';
+  }
+  function filteredClassRosterItems() {
+    const query = String(state.ui.classQuery || '').trim().toLowerCase();
+    return classRosterData().classes.filter(item => {
+      if (state.ui.classCampus !== 'all' && item.campus !== state.ui.classCampus) return false;
+      if (!query) return true;
+      return [item.code, item.course, item.teacher, item.weekday, item.note]
+        .some(value => String(value || '').toLowerCase().includes(query));
+    });
+  }
+  function classRosterNeedsRecruitment(item) {
+    return Number(item?.count || 0) < 4;
+  }
+  function classRosterSummary(campus = 'all') {
+    const items = classRosterData().classes.filter(item => campus === 'all' || item.campus === campus);
+    return {
+      attendance: items.reduce((sum, item) => sum + Number(item.count || 0), 0),
+      classes: items.length,
+      recruitment: items.filter(classRosterNeedsRecruitment).length,
+    };
+  }
+  function renderClassCountControl(item) {
+    return `<div class="roster-count-control" aria-label="${esc(item.code)}目前 ${Number(item.count || 0)} 人">
+      <button type="button" class="roster-step" data-action="open-class-adjust" data-id="${esc(item.id)}" data-delta="-1" aria-label="${esc(item.code)}減少一人" title="減少一人" ${Number(item.count || 0) <= 0 || classRosterBusy ? 'disabled' : ''}>${icon('minus', 17)}</button>
+      <strong data-testid="class-count-${esc(item.code)}">${Number(item.count || 0)}</strong>
+      <button type="button" class="roster-step" data-action="open-class-adjust" data-id="${esc(item.id)}" data-delta="1" aria-label="${esc(item.code)}增加一人" title="增加一人" ${classRosterBusy ? 'disabled' : ''}>${icon('plus', 17)}</button>
+    </div>`;
+  }
+  function renderClassRosterClasses() {
+    const items = filteredClassRosterItems();
+    if (!items.length) return emptyState('search-x', '找不到符合的班級', '請調整分校或搜尋條件。', '<button class="button small" data-action="clear-class-filter">清除搜尋</button>');
+    const desktopRows = items.map(item => {
+      const needsRecruitment = classRosterNeedsRecruitment(item);
+      return `<tr class="${needsRecruitment ? 'is-low-enrollment' : ''}" data-testid="class-row-${esc(item.code)}"><td><strong>${esc(item.code)}</strong><small>${esc(item.campus)}</small>${needsRecruitment ? `<span class="roster-recruitment-badge">${icon('triangle-alert', 13)}招生關注</span>` : ''}</td><td><strong>${esc(item.course)}</strong><small>${esc(item.teacher)}${item.note ? ` · ${esc(item.note)}` : ''}</small></td><td>週${esc(item.weekday)}<small>${esc(item.start)}–${esc(item.end)}</small></td><td>${renderClassCountControl(item)}</td><td><div class="roster-row-actions"><button type="button" class="button icon-only small" data-action="open-class-reminder" data-id="${esc(item.id)}" aria-label="新增 ${esc(item.code)} 提醒" title="新增提醒">${icon('bell-plus', 16)}</button><button type="button" class="button icon-only small" data-action="open-class-editor" data-id="${esc(item.id)}" aria-label="編輯 ${esc(item.code)}" title="編輯班級">${icon('pencil', 16)}</button></div></td></tr>`;
+    }).join('');
+    const mobileRows = items.map(item => {
+      const needsRecruitment = classRosterNeedsRecruitment(item);
+      return `<article class="roster-mobile-row ${needsRecruitment ? 'is-low-enrollment' : ''}" data-testid="mobile-class-row-${esc(item.code)}"><div class="roster-mobile-head"><div><strong>${esc(item.code)} · ${esc(item.course)}</strong><small>${esc(item.campus)} · ${esc(item.teacher)}</small></div><div class="roster-mobile-status"><span class="badge">週${esc(item.weekday)} ${esc(item.start)}–${esc(item.end)}</span>${needsRecruitment ? `<span class="roster-recruitment-badge">${icon('triangle-alert', 13)}招生關注</span>` : ''}</div></div>${item.note ? `<div class="roster-note">${icon('circle-alert', 14)}${esc(item.note)}</div>` : ''}<div class="roster-mobile-actions">${renderClassCountControl(item)}<span></span><button type="button" class="button icon-only" data-action="open-class-reminder" data-id="${esc(item.id)}" aria-label="新增 ${esc(item.code)} 提醒" title="新增提醒">${icon('bell-plus', 17)}</button><button type="button" class="button icon-only" data-action="open-class-editor" data-id="${esc(item.id)}" aria-label="編輯 ${esc(item.code)}" title="編輯班級">${icon('pencil', 17)}</button></div></article>`;
+    }).join('');
+    const desktop = `<div class="roster-desktop table-scroll"><table class="data-table roster-table"><thead><tr><th>班級</th><th>課程與老師</th><th>上課時間</th><th>正式人數</th><th><span class="visually-hidden">操作</span></th></tr></thead><tbody>${desktopRows}</tbody></table></div>`;
+    const mobile = `<div class="roster-mobile-list">${mobileRows}</div>`;
+    return desktop + mobile;
+  }
+  function renderClassRosterHistory() {
+    const query = String(state.ui.classQuery || '').trim().toLowerCase();
+    const items = classRosterData().history.filter(item => {
+      if (state.ui.classCampus !== 'all' && item.campus !== state.ui.classCampus) return false;
+      return !query || [item.code, item.course, item.actor, item.reason, classRosterActionLabel(item.action)]
+        .some(value => String(value || '').toLowerCase().includes(query));
+    });
+    if (!items.length) return emptyState('history', '目前沒有異動紀錄', '調整人數、新增班級或建立提醒後會自動留下紀錄。');
+    return `<div class="roster-history">${items.map(item => {
+      const changed = item.action === 'adjust';
+      return `<article class="roster-history-row"><span class="roster-history-icon">${icon(changed ? (item.afterCount > item.beforeCount ? 'user-round-plus' : 'user-round-minus') : 'file-clock', 17)}</span><div><div class="roster-history-title"><strong>${esc(item.code || '系統')} · ${esc(classRosterActionLabel(item.action))}</strong>${changed ? `<span class="count-change">${Number(item.beforeCount || 0)} → ${Number(item.afterCount || 0)}</span>` : ''}</div><p>${esc(item.reason || '資料更新')}</p><small>${esc(item.actor || '系統')} · ${esc(formatDateTime(item.at))}</small></div></article>`;
+    }).join('')}</div>`;
+  }
+  function renderClassRosterReminders() {
+    const classes = classRosterData().classes;
+    const query = String(state.ui.classQuery || '').trim().toLowerCase();
+    const items = classRosterData().reminders.filter(reminder => {
+      const item = classes.find(entry => entry.id === reminder.classId) || {};
+      if (state.ui.classCampus !== 'all' && item.campus !== state.ui.classCampus) return false;
+      return !query || [item.code, item.course, reminder.title, reminder.createdBy]
+        .some(value => String(value || '').toLowerCase().includes(query));
+    });
+    if (!items.length) return emptyState('bell-off', '目前沒有提醒', '可從班級列表的鈴鐺按鈕新增待確認事項。');
+    return `<div class="roster-reminders">${items.map(reminder => {
+      const item = classes.find(entry => entry.id === reminder.classId) || {};
+      const overdue = !reminder.done && reminder.dueDate && reminder.dueDate < todayIso();
+      return `<article class="roster-reminder-row ${reminder.done ? 'is-done' : ''}"><button type="button" class="roster-check" data-action="toggle-class-reminder" data-id="${esc(reminder.id)}" data-done="${reminder.done ? 'false' : 'true'}" aria-label="${reminder.done ? '重新開啟' : '完成'}提醒" title="${reminder.done ? '重新開啟' : '標示完成'}" ${classRosterBusy ? 'disabled' : ''}>${icon(reminder.done ? 'circle-check-big' : 'circle', 22)}</button><div><strong>${esc(reminder.title)}</strong><small>${esc(item.code || '班級')} · ${esc(item.course || '')}</small></div><span class="badge ${reminder.done ? 'success' : overdue ? 'danger' : 'warning'}">${reminder.done ? '已完成' : overdue ? '已逾期' : formatDate(reminder.dueDate)}</span><button type="button" class="button icon-only small danger" data-action="delete-class-reminder" data-id="${esc(reminder.id)}" aria-label="刪除提醒" title="刪除提醒" ${classRosterBusy ? 'disabled' : ''}>${icon('trash-2', 16)}</button></article>`;
+    }).join('')}</div>`;
+  }
+  function renderClassRosterPage() {
+    const roster = classRosterData();
+    const openReminders = roster.reminders.filter(item => !item.done).length;
+    const selectedView = ['classes', 'reminders', 'history'].includes(state.ui.classView) ? state.ui.classView : 'classes';
+    const selectedCampus = ['all', '北區', '東橋'].includes(state.ui.classCampus) ? state.ui.classCampus : 'all';
+    const campusOptions = [
+      { value: 'all', label: '全校總覽', icon: 'building-2' },
+      { value: '北區', label: '北區', icon: 'map-pin' },
+      { value: '東橋', label: '東橋', icon: 'map-pin' },
+    ].map(option => ({ ...option, summary: classRosterSummary(option.value) }));
+    const selectedSummary = campusOptions.find(option => option.value === selectedCampus) || campusOptions[0];
+    const viewContent = selectedView === 'history' ? renderClassRosterHistory() : selectedView === 'reminders' ? renderClassRosterReminders() : renderClassRosterClasses();
+    const syncLabel = classRosterBusy ? '處理中' : PREVIEW_MODE ? '重設預覽' : '同步最新';
+    return `<section class="page roster-page">${pageHead('班級人數', '先選分校查看班級；少於 4 人列為招生關注，試上學生不計入', `<button class="button" data-action="refresh-class-roster" ${classRosterBusy ? 'disabled' : ''}>${icon('refresh-cw')}${syncLabel}</button><button class="button primary" data-action="open-class-editor" ${classRosterBusy ? 'disabled' : ''}>${icon('plus')}新增班級</button>`)}
+      <div class="roster-campus-overview" data-testid="class-roster-stats" role="group" aria-label="分校人數總覽">
+        ${campusOptions.map(option => `<button type="button" class="roster-campus-card ${selectedCampus === option.value ? 'is-active' : ''}" data-action="set-class-campus" data-campus="${esc(option.value)}" data-testid="class-campus-${esc(option.value)}" aria-pressed="${selectedCampus === option.value}"><span class="roster-campus-title"><span class="roster-campus-icon">${icon(option.icon, 18)}</span><span>${esc(option.label)}</span>${selectedCampus === option.value ? icon('check', 17) : ''}</span><span class="roster-campus-total"><strong>${option.summary.attendance}</strong><span>人</span></span><span class="roster-campus-meta">${option.summary.classes} 班 · ${option.summary.recruitment} 班招生關注</span></button>`).join('')}
+      </div>
+      <div class="roster-recruitment-summary ${selectedSummary.summary.recruitment ? 'has-warning' : ''}" data-testid="class-roster-recruitment-summary">${icon(selectedSummary.summary.recruitment ? 'triangle-alert' : 'circle-check-big', 18)}<div><strong>${esc(selectedSummary.label)}：${selectedSummary.summary.recruitment} 班少於 4 人</strong><span>${selectedSummary.summary.recruitment ? '建議優先安排招生與家長邀約' : '目前不需招生警示'}</span></div></div>
+      ${roster.baseline?.status === 'pending_confirmation' ? `<div class="notice warning mt-16" data-testid="class-roster-baseline">${icon('triangle-alert')}<div><strong>初始人數需要人工確認</strong><br>${esc(roster.baseline.message || '系統保留既有異動，未自動覆蓋人數。')}</div></div>` : ''}
+      <section class="panel mt-16 roster-workspace"><div class="panel-head roster-toolbar"><form id="class-roster-search-form" class="roster-search" role="search"><label class="visually-hidden" for="class-roster-query">搜尋班級</label>${icon('search', 17)}<input id="class-roster-query" name="query" value="${esc(state.ui.classQuery || '')}" placeholder="搜尋代碼、課程或老師"><button type="submit" class="button icon-only small" aria-label="搜尋" title="搜尋">${icon('arrow-right', 16)}</button>${state.ui.classQuery ? `<button type="button" class="button icon-only small" data-action="clear-class-filter" aria-label="清除搜尋" title="清除搜尋">${icon('x', 16)}</button>` : ''}</form><div class="segmented roster-view-tabs" role="tablist" aria-label="資料檢視">${[['classes','班級'],['reminders','提醒'],['history','紀錄']].map(([value,label]) => `<button type="button" role="tab" data-action="set-class-view" data-view="${value}" class="${selectedView === value ? 'is-active' : ''}" aria-selected="${selectedView === value}">${esc(label)}${value === 'reminders' && openReminders ? ` <span>${openReminders}</span>` : ''}</button>`).join('')}</div></div><div class="panel-body flush" data-testid="class-roster-content">${viewContent}</div></section>
+      <div class="roster-sync-note">${icon('cloud-check', 15)}<span>${PREVIEW_MODE ? '本機驗收資料' : `雲端已同步${roster.syncedAt ? ` · ${formatDateTime(roster.syncedAt)}` : ''}`}</span></div>
+    </section>`;
+  }
+
+  function openClassEditor(id = '') {
+    const item = id ? classRosterItem(id) : null;
+    if (id && !item) return toast('找不到這個班級，請重新整理', 'danger');
+    const defaultCampus = item?.campus || (state.ui.classCampus === '東橋' ? '東橋' : '北區');
+    const body = `<input type="hidden" name="classId" value="${esc(item?.id || '')}"><input type="hidden" name="version" value="${Number(item?.version || 0)}"><div class="form-grid">
+      <div class="field"><label>分校 <span class="required">*</span></label><select name="campus" required><option value="北區" ${defaultCampus === '北區' ? 'selected' : ''}>北區</option><option value="東橋" ${defaultCampus === '東橋' ? 'selected' : ''}>東橋</option></select></div>
+      <div class="field"><label>班級代碼 <span class="required">*</span></label><input name="code" maxlength="30" value="${esc(item?.code || '')}" placeholder="例：北17" required></div>
+      <div class="field"><label>授課老師 <span class="required">*</span></label><input name="teacher" maxlength="60" value="${esc(item?.teacher || '')}" required></div>
+      <div class="field"><label>星期 <span class="required">*</span></label><select name="weekday" required>${'一二三四五六日'.split('').map(day => `<option value="${day}" ${item?.weekday === day ? 'selected' : ''}>星期${day}</option>`).join('')}</select></div>
+      <div class="field full"><label>課程名稱 <span class="required">*</span></label><input name="course" maxlength="120" value="${esc(item?.course || '')}" required></div>
+      <div class="field"><label>開始時間 <span class="required">*</span></label><input type="time" name="start" value="${esc(item?.start || '19:00')}" required></div>
+      <div class="field"><label>結束時間 <span class="required">*</span></label><input type="time" name="end" value="${esc(item?.end || '20:30')}" required></div>
+      ${item ? `<div class="field full"><label>正式人數</label><div class="readonly-field"><strong>${Number(item.count || 0)} 人</strong><span>人數請回班級列表使用 ＋／－，系統才會留下異動原因。</span></div></div>` : `<div class="field"><label>初始正式人數 <span class="required">*</span></label><input type="number" name="count" min="0" max="999" step="1" value="0" required></div>`}
+      <div class="field full"><label>備註 <span class="conditional">選填</span></label><textarea name="note" maxlength="500" placeholder="只填需要交接或待確認的資訊">${esc(item?.note || '')}</textarea></div>
+    </div>`;
+    showDialog(dialogShell(item ? `編輯 ${item.code}` : '新增班級', item ? '班級資料更新後會保留修改人與時間' : '建立後可從列表調整正式上課人數', body, item ? '儲存更新' : '建立班級', 'class-roster-editor-form'));
+  }
+  function openClassAdjustment(id, rawDelta) {
+    const item = classRosterItem(id);
+    const delta = Number(rawDelta);
+    if (!item || ![1, -1].includes(delta)) return toast('班級資料不完整，請重新整理', 'danger');
+    if (delta < 0 && Number(item.count || 0) <= 0) return toast('人數已是 0，不能再減少', 'warning');
+    const next = Number(item.count || 0) + delta;
+    const defaultReason = delta > 0 ? '新增學生' : '學生退班';
+    const body = `<input type="hidden" name="classId" value="${esc(item.id)}"><input type="hidden" name="version" value="${Number(item.version || 1)}"><input type="hidden" name="delta" value="${delta}">
+      <div class="roster-adjust-summary"><div><span>目前</span><strong>${Number(item.count || 0)}</strong></div>${icon('arrow-right', 24)}<div class="is-next"><span>調整後</span><strong>${next}</strong></div></div>
+      <div class="notice mt-16">${icon('info')}<div><strong>${esc(item.code)} · ${esc(item.course)}</strong><br>${esc(item.campus)} · ${esc(item.teacher)} · 週${esc(item.weekday)} ${esc(item.start)}–${esc(item.end)}</div></div>
+      <div class="form-grid mt-16"><div class="field full"><label>異動原因 <span class="required">*</span></label><select name="reasonType" required>${['新增學生','學生退班','轉班／換課','名單校正','其他'].map(reason => `<option value="${esc(reason)}" ${reason === defaultReason ? 'selected' : ''}>${esc(reason)}</option>`).join('')}</select></div><div class="field full"><label>補充說明 <span class="conditional">選填</span></label><input name="reasonDetail" maxlength="120" placeholder="需要交接時再填"></div></div>`;
+    showDialog(dialogShell(delta > 0 ? '確認增加 1 人' : '確認減少 1 人', '確認班級與人數後才會寫入，避免誤觸', body, `確認${delta > 0 ? '增加' : '減少'}`, 'class-roster-adjust-form'));
+  }
+  function openClassReminder(id) {
+    const item = classRosterItem(id);
+    if (!item) return toast('找不到這個班級，請重新整理', 'danger');
+    const body = `<input type="hidden" name="classId" value="${esc(item.id)}"><div class="notice">${icon('bell')}<div><strong>${esc(item.code)} · ${esc(item.course)}</strong><br>${esc(item.campus)} · ${esc(item.teacher)}</div></div><div class="form-grid mt-16"><div class="field full"><label>提醒事項 <span class="required">*</span></label><input name="title" maxlength="300" placeholder="例：確認新生是否正式入班" required></div><div class="field"><label>提醒日期 <span class="required">*</span></label><input type="date" name="dueDate" value="${esc(dateOffset(1))}" required></div></div>`;
+    showDialog(dialogShell('新增班級提醒', '到期前會保留在待辦提醒，不會改動班級人數', body, '建立提醒', 'class-roster-reminder-form'));
+  }
+
+  function previewClassRosterMutation(operation, payload, requestId) {
+    const roster = classRosterData();
+    const now = new Date().toISOString();
+    const actor = currentUser.nickname;
+    let item = payload.classId ? roster.classes.find(entry => entry.id === payload.classId) : null;
+    let event;
+    const history = (action, target, beforeCount, afterCount, reason) => ({
+      id: uid('class-history'), requestId, action, classId: target?.id || '', code: target?.code || '',
+      campus: target?.campus || '', course: target?.course || '', beforeCount, afterCount, reason, actor, at: now,
+    });
+    if (operation === 'adjust') {
+      if (!item) throw new Error('找不到這個班級，請重新整理');
+      if (Number(payload.version) !== Number(item.version)) throw new Error('人數已由其他畫面更新，請重新整理後再試');
+      const delta = Number(payload.delta);
+      if (![1, -1].includes(delta)) throw new Error('每次只能增加或減少 1 人');
+      const before = Number(item.count || 0);
+      const after = before + delta;
+      if (after < 0) throw new Error('正式上課人數不能小於 0');
+      if (!String(payload.reason || '').trim()) throw new Error('請選擇異動原因');
+      item = { ...item, count: after, version: Number(item.version || 1) + 1, updatedBy: actor, updatedAt: now };
+      roster.classes = roster.classes.map(entry => entry.id === item.id ? item : entry);
+      event = history('adjust', item, before, after, String(payload.reason).trim());
+    } else if (operation === 'save_class') {
+      const source = payload.class || {};
+      const existing = source.id ? roster.classes.find(entry => entry.id === source.id) : null;
+      const required = [['code','班級代碼'],['campus','館別'],['teacher','授課老師'],['weekday','星期'],['course','課程名稱'],['start','開始時間'],['end','結束時間']];
+      required.forEach(([key, label]) => { if (!String(source[key] || '').trim()) throw new Error(`請填寫${label}`); });
+      if (!['北區', '東橋'].includes(source.campus)) throw new Error('館別選項不正確');
+      if (!'一二三四五六日'.includes(source.weekday)) throw new Error('星期選項不正確');
+      if (source.end <= source.start) throw new Error('結束時間必須晚於開始時間');
+      if (roster.classes.some(entry => entry.id !== source.id && entry.code.trim().toLowerCase() === source.code.trim().toLowerCase())) throw new Error('班級代碼已存在');
+      if (existing && Number(payload.version) !== Number(existing.version)) throw new Error('班級資料已由其他畫面更新，請重新整理後再試');
+      const count = existing ? Number(existing.count || 0) : Number(source.count);
+      if (!Number.isSafeInteger(count) || count < 0 || count > 999) throw new Error('正式上課人數需為 0 至 999 的整數');
+      item = { ...existing, ...source, id: source.id || uid('class-roster'), count, active: true, version: existing ? Number(existing.version || 1) + 1 : 1, updatedBy: actor, updatedAt: now, createdBy: existing?.createdBy || actor, createdAt: existing?.createdAt || now };
+      roster.classes = existing ? roster.classes.map(entry => entry.id === item.id ? item : entry) : roster.classes.concat(item);
+      event = history(existing ? 'class_updated' : 'class_created', item, existing?.count || 0, item.count, existing ? '更新班級資料' : '新增班級');
+    } else if (operation === 'save_reminder') {
+      if (!item) throw new Error('找不到這個班級，請重新整理');
+      if (!String(payload.title || '').trim() || !/^\d{4}-\d{2}-\d{2}$/.test(String(payload.dueDate || ''))) throw new Error('請完整填寫提醒事項與日期');
+      const reminder = { id: payload.id || uid('class-reminder'), classId: item.id, title: String(payload.title).trim(), dueDate: payload.dueDate, done: false, createdBy: actor, updatedBy: actor, createdAt: now, updatedAt: now, completedAt: '' };
+      roster.reminders = roster.reminders.concat(reminder);
+      event = history('reminder_created', item, item.count, item.count, `${reminder.title}｜${reminder.dueDate}`);
+    } else if (operation === 'toggle_reminder' || operation === 'delete_reminder') {
+      const reminder = roster.reminders.find(entry => entry.id === payload.reminderId);
+      if (!reminder) throw new Error('找不到這則提醒，請重新整理');
+      item = roster.classes.find(entry => entry.id === reminder.classId) || { id: reminder.classId };
+      if (operation === 'delete_reminder') {
+        roster.reminders = roster.reminders.filter(entry => entry.id !== reminder.id);
+        event = history('reminder_deleted', item, item.count || 0, item.count || 0, reminder.title);
+      } else {
+        const done = payload.done === true;
+        roster.reminders = roster.reminders.map(entry => entry.id === reminder.id ? { ...entry, done, updatedBy: actor, updatedAt: now, completedAt: done ? now : '' } : entry);
+        event = history(done ? 'reminder_completed' : 'reminder_reopened', item, item.count || 0, item.count || 0, reminder.title);
+      }
+    } else throw new Error('不支援的班級操作');
+    roster.classes.sort((a, b) => ({ '北區': 0, '東橋': 1 }[a.campus] || 0) - ({ '北區': 0, '東橋': 1 }[b.campus] || 0) || a.code.localeCompare(b.code));
+    roster.reminders.sort((a, b) => Number(a.done) - Number(b.done) || String(a.dueDate).localeCompare(String(b.dueDate)));
+    roster.history = [event].concat(roster.history || []).slice(0, 300);
+    roster.stats = classRosterStats(roster.classes);
+    roster.updatedAt = now;
+    roster.syncedAt = now;
+    persist('班級資料已儲存');
+    return { ok: true, event, classRoster: roster };
+  }
+  async function mutateClassRoster(operation, payload) {
+    if (classRosterBusy) throw new Error('上一筆操作仍在處理，請稍候');
+    classRosterBusy = true;
+    try {
+      const requestId = uid(`class-roster-${operation}`);
+      let result;
+      if (PREVIEW_MODE) {
+        result = previewClassRosterMutation(operation, payload, requestId);
+      } else {
+        let nextPayload = { ...payload };
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          result = await window.API?.saveClassRosterMutation?.(operation, nextPayload);
+          if (result?.classRoster) applyClassRosterSnapshot(result.classRoster);
+          if (result?.ok || operation !== 'adjust' || result?.code !== 'RECORD_CONFLICT') break;
+          const latest = classRosterItem(payload.classId);
+          if (!latest) break;
+          nextPayload = { ...nextPayload, version: Number(latest.version || 1) };
+        }
+      }
+      if (result?.classRoster) applyClassRosterSnapshot(result.classRoster);
+      if (!result?.ok) throw new Error(result?.error || '班級資料儲存失敗');
+      return result;
+    } finally {
+      classRosterBusy = false;
+    }
+  }
+  async function loadClassRosterData(notify = true) {
+    if (classRosterBusy) return;
+    classRosterBusy = true;
+    renderApp();
+    try {
+      if (PREVIEW_MODE) {
+        applyClassRosterSnapshot(createClassRosterSeed());
+        persist('預覽資料已重設');
+        if (notify) toast('預覽資料已恢復為初始 30 班');
+      } else {
+        const result = await window.API?.getClassRosterData?.();
+        if (!result?.ok) throw new Error(result?.error || '班級資料同步失敗');
+        applyClassRosterSnapshot(result);
+        persist('班級資料已同步');
+        if (notify) toast('班級資料已同步');
+      }
+    } catch (error) {
+      toast(error.message || '班級資料同步失敗', 'danger');
+    } finally {
+      classRosterBusy = false;
+      renderApp();
+    }
+  }
+
   function renderGuidePage() {
     return `<section class="page">${pageHead(isManager ? '行政美宣評分標準' : '行政美宣使用說明', '規則集中在這裡，正式填寫頁只保留當下需要的欄位')}
       <div class="grid cols-2"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('mouse-pointer-click')}最短填寫方式</div></div></div><div class="panel-body"><ol class="simple-steps"><li><strong>一天一次</strong><span>確認訊息與 LINE、環境、今日是否有試上。</span></li><li><strong>一件工作一筆</strong><span>只寫本次結果；未完成再寫下一步與期限。</span></li><li><strong>同一件持續更新</strong><span>試上、家長追蹤、交辦與專案都不重複建立。</span></li><li><strong>系統自動彙整</strong><span>每週產出、逾期、獎金與月度事實不需另做表格。</span></li></ol></div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('paperclip')}什麼時候要附件</div></div></div><div class="panel-body"><div class="check-list"><div class="check-row"><span><strong>美宣完成</strong><br>附可發布成品、發布畫面或排程截圖。</span></div><div class="check-row"><span><strong>首次正式報名獎金</strong><br>一期或半年皆附報名或完成繳費證明。</span></div><div class="check-row"><span><strong>一般行政</strong><br>只有主管需要核對結果時才附，不為拍照而拍照。</span></div></div></div></section></div>
@@ -808,7 +1167,9 @@
   }
 
   function renderRoute() {
+    if (isRosterOnly) return renderClassRosterPage();
     if (workspace.role === 'worker') {
+      if (state.ui.route === 'class-roster') return renderClassRosterPage();
       if (state.ui.route === 'trials') return renderTrialsPage();
       if (['daily', 'tuesday', 'environment'].includes(state.ui.route)) return renderWorkerDashboard();
       if (state.ui.route === 'projects') return renderProjectsPage();
@@ -816,6 +1177,7 @@
       if (state.ui.route === 'guide') return renderGuidePage();
       return renderWorkerDashboard();
     }
+    if (state.ui.route === 'class-roster') return renderClassRosterPage();
     if (state.ui.route === 'trials') return renderTrialsPage();
     if (state.ui.route === 'reviews') return renderReviewsPage();
     if (state.ui.route === 'assignments') return renderAssignmentsPage();
@@ -1586,6 +1948,59 @@
     renderApp(); toast('訊息已送出');
   }
 
+  async function handleClassRosterEditor(form) {
+    const data = new FormData(form);
+    const id = String(data.get('classId') || '') || uid('class-roster');
+    const existing = classRosterItem(id);
+    const item = {
+      id,
+      code: String(data.get('code') || '').trim(),
+      campus: String(data.get('campus') || ''),
+      teacher: String(data.get('teacher') || '').trim(),
+      weekday: String(data.get('weekday') || ''),
+      course: String(data.get('course') || '').trim(),
+      start: String(data.get('start') || ''),
+      end: String(data.get('end') || ''),
+      count: existing ? Number(existing.count || 0) : Number(data.get('count')),
+      note: String(data.get('note') || '').trim(),
+    };
+    if (!item.code || !item.campus || !item.teacher || !item.weekday || !item.course || !item.start || !item.end) throw new Error('請完整填寫班級必填資料');
+    if (item.end <= item.start) throw new Error('結束時間必須晚於開始時間');
+    if (!Number.isSafeInteger(item.count) || item.count < 0 || item.count > 999) throw new Error('正式上課人數需為 0 至 999 的整數');
+    await mutateClassRoster('save_class', { class: item, version: Number(data.get('version') || 0) });
+    closeDialog();
+    renderApp();
+    toast(existing ? '班級資料已更新' : '班級已建立');
+  }
+  async function handleClassRosterAdjustment(form) {
+    const data = new FormData(form);
+    const reasonType = String(data.get('reasonType') || '').trim();
+    const detail = String(data.get('reasonDetail') || '').trim();
+    if (!reasonType) throw new Error('請選擇異動原因');
+    await mutateClassRoster('adjust', {
+      classId: String(data.get('classId') || ''),
+      version: Number(data.get('version') || 0),
+      delta: Number(data.get('delta') || 0),
+      reason: detail ? `${reasonType}：${detail}` : reasonType,
+    });
+    closeDialog();
+    renderApp();
+    toast('正式上課人數已更新');
+  }
+  async function handleClassRosterReminder(form) {
+    const data = new FormData(form);
+    await mutateClassRoster('save_reminder', {
+      id: uid('class-reminder'),
+      classId: String(data.get('classId') || ''),
+      title: String(data.get('title') || '').trim(),
+      dueDate: String(data.get('dueDate') || ''),
+    });
+    closeDialog();
+    state.ui.classView = 'reminders';
+    renderApp();
+    toast('班級提醒已建立');
+  }
+
   async function runForm(handler, form) {
     const button = form.querySelector('[type="submit"]');
     const buttonHtml = button?.innerHTML || '';
@@ -1611,7 +2026,7 @@
   }
 
   let trialParseTimer = 0;
-  document.addEventListener('click', event => {
+  document.addEventListener('click', async event => {
     const route = event.target.closest('[data-route]');
     if (route) {
       state.ui.route = route.dataset.route;
@@ -1657,6 +2072,45 @@
     else if (action === 'more-nav') moreNavDialog();
     else if (action === 'retry-cloud') loadCloudData(true);
     else if (action === 'refresh-drive') loadDriveFolders(true);
+    else if (action === 'open-class-editor') openClassEditor(actionNode.dataset.id || '');
+    else if (action === 'open-class-adjust') openClassAdjustment(actionNode.dataset.id || '', actionNode.dataset.delta || '');
+    else if (action === 'open-class-reminder') openClassReminder(actionNode.dataset.id || '');
+    else if (action === 'set-class-campus') {
+      state.ui.classCampus = actionNode.dataset.campus || 'all';
+      persist('館別篩選已更新');
+      renderApp();
+    }
+    else if (action === 'set-class-view') {
+      state.ui.classView = actionNode.dataset.view || 'classes';
+      persist('檢視已切換');
+      renderApp();
+    }
+    else if (action === 'clear-class-filter') {
+      state.ui.classQuery = '';
+      persist('搜尋已清除');
+      renderApp();
+    }
+    else if (action === 'refresh-class-roster') {
+      if (TEST_VIEW_MODE) toast('測試模式不會重設或寫入正式班級資料', 'warning');
+      else await loadClassRosterData(true);
+    }
+    else if (action === 'toggle-class-reminder') {
+      if (TEST_VIEW_MODE) return toast('測試模式：操作正常，最後寫入已攔截', 'warning');
+      try {
+        await mutateClassRoster('toggle_reminder', { reminderId: actionNode.dataset.id || '', done: actionNode.dataset.done === 'true' });
+        renderApp();
+        toast(actionNode.dataset.done === 'true' ? '提醒已完成' : '提醒已重新開啟');
+      } catch (error) { toast(error.message || '提醒更新失敗', 'danger'); }
+    }
+    else if (action === 'delete-class-reminder') {
+      if (TEST_VIEW_MODE) return toast('測試模式：操作正常，最後寫入已攔截', 'warning');
+      if (!window.confirm('確定刪除這則提醒？班級資料不會受影響。')) return;
+      try {
+        await mutateClassRoster('delete_reminder', { reminderId: actionNode.dataset.id || '' });
+        renderApp();
+        toast('提醒已刪除');
+      } catch (error) { toast(error.message || '提醒刪除失敗', 'danger'); }
+    }
     else if (action === 'remove-selected-file') removeSelectedFile(actionNode.dataset.inputId || '', actionNode.dataset.index || '0');
     else if (action === 'remove-existing-file') {
       const form = actionNode.closest('form');
@@ -1703,7 +2157,12 @@
   document.addEventListener('submit', event => {
     event.preventDefault();
     const form = event.target;
-    if (form.id === 'performance-history-form') {
+    if (form.id === 'class-roster-search-form') {
+      state.ui.classQuery = String(new FormData(form).get('query') || '').trim();
+      persist('搜尋條件已更新');
+      renderApp();
+    }
+    else if (form.id === 'performance-history-form') {
       state.ui.performanceMonth = String(new FormData(form).get('month') || selectedPerformanceMonth());
       persist('評核月份已切換'); renderApp();
     }
@@ -1728,6 +2187,9 @@
     else if (form.id === 'review-form') runForm(handleReview, form);
     else if (form.id === 'score-form') runForm(handleScore, form);
     else if (form.id === 'message-form') runForm(handleMessage, form);
+    else if (form.id === 'class-roster-editor-form') runForm(handleClassRosterEditor, form);
+    else if (form.id === 'class-roster-adjust-form') runForm(handleClassRosterAdjustment, form);
+    else if (form.id === 'class-roster-reminder-form') runForm(handleClassRosterReminder, form);
   });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') closeDialog(); });
 

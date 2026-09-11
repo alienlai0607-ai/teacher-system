@@ -117,6 +117,10 @@ function handleRequest(e, method) {
       'saveAdminMarketingScore': () => saveAdminMarketingScore(params),
       'addAdminMarketingMessage': () => addAdminMarketingMessage(params),
 
+      // 行政美宣：班級正式上課人數、異動紀錄與提醒
+      'getClassRosterData': () => getClassRosterData(params),
+      'saveClassRosterMutation': () => saveClassRosterMutation(params),
+
       // 週報
       'saveWeekly': () => saveWeekly(params),
       'getWeekly': () => getWeekly(params),
@@ -216,6 +220,9 @@ const SHEET_NAMES = {
   COURSE_PREP: 'CoursePrep',
   TALENT_RECORDS: 'TalentRecords',
   ADMIN_MARKETING_RECORDS: 'AdminMarketingRecords',
+  CLASS_ROSTER: 'ClassRoster',
+  CLASS_ROSTER_HISTORY: 'ClassRosterHistory',
+  CLASS_ROSTER_REMINDERS: 'ClassRosterReminders',
 };
 
 const DEPARTMENTS = ['東橋教室', '北區教室', '才藝部門', '總部'];
@@ -226,10 +233,10 @@ const ROLES = ['admin', 'manager', 'teacher', 'admin_staff'];
 const ADMIN_STAFF_SUBTYPES = ['general', 'marketing'];
 
 const INITIAL_USERS = [
-  { nickname: '柏翰',     role: 'admin',       department: '總部',     status: 'active', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'] },
+  { nickname: '柏翰',     role: 'admin',       department: '總部',     status: 'active', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'] },
   { nickname: '酸酸',     role: 'manager',     department: '東橋教室', status: 'active', employment_type: 'manager', work_assignments: ['anqin-manager'] },
-  { nickname: '小魚',     role: 'manager',     department: '北區教室', status: 'active', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'] },
-  { nickname: '柳丁',     role: 'manager',     department: '才藝部門', status: 'pending', employment_type: 'manager', work_assignments: ['talent-manager'] },
+  { nickname: '小魚',     role: 'manager',     department: '北區教室', status: 'active', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'] },
+  { nickname: '柳丁',     role: 'manager',     department: '才藝部門', status: 'pending', employment_type: 'manager', work_assignments: ['talent-manager', 'class-roster-manager'] },
   { nickname: '松鼠',     role: 'teacher',     department: '東橋教室', status: 'active' },
   { nickname: '羊羊',     role: 'teacher',     department: '東橋教室', status: 'active' },
   { nickname: '紅豆',     role: 'teacher',     department: '東橋教室', status: 'active', employment_type: 'pt', work_assignments: ['anqin-teacher', 'talent-pt'] },
@@ -439,6 +446,19 @@ function setupSheets() {
       'year_week', 'year_month', 'status', 'data_json', 'created_by', 'updated_by',
       'created_at', 'updated_at', 'reviewed_at'
     ],
+    [SHEET_NAMES.CLASS_ROSTER]: [
+      'class_id', 'code', 'campus', 'teacher', 'weekday', 'course',
+      'start_time', 'end_time', 'student_count', 'note', 'active', 'version',
+      'import_batch', 'created_by', 'updated_by', 'created_at', 'updated_at'
+    ],
+    [SHEET_NAMES.CLASS_ROSTER_HISTORY]: [
+      'event_id', 'request_id', 'action', 'class_id', 'code', 'campus', 'course',
+      'before_count', 'after_count', 'reason', 'actor', 'before_json', 'after_json', 'created_at'
+    ],
+    [SHEET_NAMES.CLASS_ROSTER_REMINDERS]: [
+      'reminder_id', 'class_id', 'title', 'due_date', 'status',
+      'created_by', 'updated_by', 'created_at', 'updated_at', 'completed_at'
+    ],
   };
 
   Object.entries(schemas).forEach(([name, headers]) => {
@@ -481,10 +501,10 @@ function setupSheets() {
  */
 function migrateTalentUserProfiles_() {
   const profiles = [
-    { nickname: '柏翰', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'] },
+    { nickname: '柏翰', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'] },
     { nickname: '酸酸', employment_type: 'manager', work_assignments: ['anqin-manager'] },
-    { nickname: '小魚', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'] },
-    { nickname: '柳丁', role: 'manager', department: '才藝部門', status: 'pending', employment_type: 'manager', work_assignments: ['talent-manager'] },
+    { nickname: '小魚', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'] },
+    { nickname: '柳丁', role: 'manager', department: '才藝部門', status: 'pending', employment_type: 'manager', work_assignments: ['talent-manager', 'class-roster-manager'] },
     { nickname: '浩浩', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'], rest_days: ['週一', '週日'] },
     { nickname: 'RITA', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'], rest_days: ['週二', '週日'] },
     { nickname: '毛毛', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'] },
@@ -571,14 +591,15 @@ function migrateTalentUserProfiles() {
   return { ok: true, message: '才藝工作身分與排班已補齊' };
 }
 
-/** 行政美宣上線前執行一次：建立資料表並補齊皮皮、小魚、柏翰的工作區。 */
+/** 行政美宣上線前執行一次：建立資料表並補齊皮皮與三位主管的工作區。 */
 function prepareAdminMarketingLaunch() {
   migrateTalentUserProfiles_();
   ensureAdminMarketingRecordsSheet_();
   const expected = {
     '皮皮老師': ['talent-pt', 'admin-marketing'],
-    '小魚': ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'],
-    '柏翰': ['anqin-manager', 'talent-payroll', 'admin-marketing-manager'],
+    '小魚': ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'],
+    '柏翰': ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'],
+    '柳丁': ['talent-manager', 'class-roster-manager'],
   };
   const result = {};
   Object.keys(expected).forEach(function (nickname) {
@@ -1388,6 +1409,9 @@ function validateUserWorkConfiguration_(role, employment, assignments, schedule)
   if (work.indexOf('admin-marketing-manager') >= 0 && role !== 'manager' && role !== 'admin') {
     throw new Error('行政美宣主管工作區只可指派給主管或管理員');
   }
+  if (work.indexOf('class-roster-manager') >= 0 && role !== 'manager' && role !== 'admin') {
+    throw new Error('班級人數工作區只可指派給主管或管理員');
+  }
 }
 
 /** 驗證首次 Google 登入，或用尚未過期的後端工作階段重新核對身分。 */
@@ -1590,6 +1614,7 @@ function authorizeApiAction_(action, params, actor) {
     'listArchivedKpiFiles', 'listTeacherReportFolders', 'getTalentWorkspaceData',
     'getAdminMarketingWorkspaceData',
     'getAdminMarketingDriveFolders',
+    'getClassRosterData',
     'getEvalEvidence', 'getEval', 'listEvals',
     'listTasks', 'getDashboard'
   ];
@@ -1614,6 +1639,17 @@ function authorizeApiAction_(action, params, actor) {
   if (action === 'getAdminMarketingDriveFolders') {
     requireApiRole_(actor, ['admin', 'manager']);
     params.viewer = actor.nickname;
+    return;
+  }
+
+  if (action === 'getClassRosterData') {
+    params.viewer = actor.nickname;
+    return;
+  }
+
+  if (action === 'saveClassRosterMutation') {
+    if (!userHasClassRosterWork_(actor)) throw new Error('此帳號沒有班級人數管理權限');
+    params.operator = actor.nickname;
     return;
   }
 
@@ -1912,7 +1948,7 @@ function addUser(params) {
     return { ok: false, error: 'invalid employment_type' };
   }
   const workAssignments = parseUserListField_(params.work_assignments);
-  const allowedAssignments = ['anqin-teacher', 'anqin-manager', 'talent-fulltime', 'talent-pt', 'talent-manager', 'talent-payroll', 'admin-marketing', 'admin-marketing-manager'];
+  const allowedAssignments = ['anqin-teacher', 'anqin-manager', 'talent-fulltime', 'talent-pt', 'talent-manager', 'talent-payroll', 'admin-marketing', 'admin-marketing-manager', 'class-roster-manager'];
   if (workAssignments.some(function (item) { return allowedAssignments.indexOf(item) < 0; })) {
     return { ok: false, error: 'invalid work_assignments' };
   }
@@ -1989,7 +2025,7 @@ function updateUser(params) {
   if (updates.employment_type !== undefined && updates.employment_type && !['fulltime', 'pt', 'manager', 'admin'].includes(String(updates.employment_type))) return { ok: false, error: 'invalid employment_type' };
   if (updates.work_assignments !== undefined) {
     const assignments = parseUserListField_(updates.work_assignments);
-    const allowed = ['anqin-teacher', 'anqin-manager', 'talent-fulltime', 'talent-pt', 'talent-manager', 'talent-payroll', 'admin-marketing', 'admin-marketing-manager'];
+    const allowed = ['anqin-teacher', 'anqin-manager', 'talent-fulltime', 'talent-pt', 'talent-manager', 'talent-payroll', 'admin-marketing', 'admin-marketing-manager', 'class-roster-manager'];
     if (assignments.some(function (item) { return allowed.indexOf(item) < 0; })) return { ok: false, error: 'invalid work_assignments' };
     updates.work_assignments = assignments;
   }
@@ -6708,6 +6744,11 @@ function userHasAdminMarketingWork_(user) {
   });
 }
 
+function userHasClassRosterWork_(user) {
+  return userHasAdminMarketingWork_(user)
+    || adminMarketingAssignments_(user).indexOf('class-roster-manager') >= 0;
+}
+
 function adminMarketingManagerCanReview_(user) {
   return !!user && user.status === 'active' && (
     user.role === 'admin' || adminMarketingAssignments_(user).indexOf('admin-marketing-manager') >= 0
@@ -7082,6 +7123,7 @@ function getAdminMarketingWorkspaceData(params) {
     ok: true,
     users: users.map(adminMarketingPublicUser_),
     records: records,
+    classRoster: getClassRosterSnapshot_(),
     settings: {
       supervisor: '小魚',
       videoWeeklyTarget: 2,
@@ -7385,4 +7427,431 @@ function addAdminMarketingMessage(params) {
   data.messages.push({ id: Utilities.getUuid(), author: actor.nickname, role: actor.role, text: text, at: nowIso() });
   const saved = upsertAdminMarketingRecord_('message', nickname, data, actor.nickname);
   return { ok: true, conversation: saved };
+}
+
+// ============ 班級正式上課人數 ============
+
+const CLASS_ROSTER_SEED_VERSION_ = '20260911-handoff-v2-north16';
+const CLASS_ROSTER_SEED_PROPERTY_ = 'CLASS_ROSTER_SEED_VERSION';
+const CLASS_ROSTER_BASELINE_PROPERTY_ = 'CLASS_ROSTER_BASELINE_STATUS';
+
+function classRosterSeedRows_() {
+  const rows = [
+    ['北01', '北區', '柳丁', '一', 'WEDO 新班', '19:00', '20:30', 5, ''],
+    ['北02', '北區', '柳丁', '三', 'SPIKE 進階', '19:00', '20:30', 3, ''],
+    ['北03', '北區', '柳丁', '六', 'SPIKE 新班', '09:00', '10:30', 7, ''],
+    ['北04', '北區', '柳丁', '六', 'SPIKE', '13:00', '14:30', 10, ''],
+    ['北05', '北區', '柳丁', '六', 'SPIKE 新班', '15:00', '16:30', 3, ''],
+    ['北06', '北區', 'Rita', '一', '程式小創客新班', '19:00', '20:30', 2, ''],
+    ['北07', '北區', 'Rita', '三', '簡易機械新班', '19:00', '20:30', 1, ''],
+    ['北08-A', '北區', 'Rita', '六', '簡易機械', '10:30', '12:00', 3, ''],
+    ['北08-B', '北區', 'Rita', '六', '簡易機械', '09:00', '10:30', 0, ''],
+    ['北09', '北區', 'Rita', '六', '程式小創客', '13:10', '14:40', 4, ''],
+    ['北10', '北區', 'Rita', '六', '程式小創客', '15:00', '16:30', 8, ''],
+    ['北11', '北區', '小明', '三', 'WEDO', '19:00', '20:30', 4, ''],
+    ['北12', '北區', '皮皮', '四', 'WEDO', '19:00', '20:30', 7, ''],
+    ['北13', '北區', '皮皮', '六', 'WEDO', '13:00', '14:30', 5, ''],
+    ['北14', '北區', '江江', '六', 'WEDO', '11:00', '12:30', 3, ''],
+    ['北15', '北區', '外星人', '四', 'SPIKE', '19:00', '20:30', 10, ''],
+    ['北16', '北區', '外星人', '六', '創意積木', '09:30', '10:30', 7, ''],
+    ['東01', '東橋', 'Rita', '四', '程式小創客新班', '19:00', '20:30', 4, ''],
+    ['東02', '東橋', 'Rita', '五', '簡易機械新班', '19:00', '20:30', 3, ''],
+    ['東03', '東橋', '酸酸', '六', '簡易機械', '09:00', '10:30', 7, '老師待確認'],
+    ['東04', '東橋', '酸酸', '六', 'WEDO', '10:40', '12:10', 11, '老師待確認'],
+    ['東05', '東橋', '浩浩', '四', 'SPIKE 新班', '19:00', '20:30', 4, ''],
+    ['東06', '東橋', '浩浩', '五', 'SPIKE 舊班', '19:00', '20:30', 6, ''],
+    ['東07', '東橋', '浩浩', '六', '程式小創客舊班', '09:00', '10:30', 7, ''],
+    ['東08', '東橋', '浩浩', '六', 'SPIKE 舊班', '10:40', '12:10', 8, ''],
+    ['東09', '東橋', '浩浩', '六', 'SPIKE 舊班', '13:00', '14:30', 8, ''],
+    ['東10', '東橋', '浩浩', '六', 'WEDO 舊班', '15:00', '16:30', 5, ''],
+    ['東11', '東橋', '紅豆', '三', 'WEDO 舊班', '19:00', '20:30', 3, ''],
+    ['東12', '東橋', '紅豆', '四', 'WEDO 新班', '19:00', '20:30', 2, ''],
+    ['東13', '東橋', '紅豆', '五', 'WEDO 舊班', '19:00', '20:30', 6, ''],
+  ];
+  const importedAt = '2026-09-11T00:00:00+08:00';
+  return rows.map(function (row, index) {
+    return {
+      class_id: 'class-roster-seed-' + String(index + 1).padStart(3, '0'),
+      code: row[0], campus: row[1], teacher: row[2], weekday: row[3], course: row[4],
+      start_time: row[5], end_time: row[6], student_count: row[7], note: row[8],
+      active: true, version: 1, import_batch: CLASS_ROSTER_SEED_VERSION_,
+      created_by: '初始匯入', updated_by: '初始匯入', created_at: importedAt, updated_at: importedAt,
+    };
+  });
+}
+
+function migrateClassRosterNorth16_() {
+  const row = findObject(SHEET_NAMES.CLASS_ROSTER, 'class_id', 'class-roster-seed-017');
+  if (!row) return 'review_required';
+  const current = classRosterClassObject_(row);
+  if (current.code !== '北16' || current.campus !== '北區' || current.teacher !== '外星人'
+    || current.weekday !== '六' || current.course !== '創意積木'
+    || current.start !== '09:30' || current.end !== '10:30') return 'review_required';
+  if (current.count === 7) return 'confirmed';
+  const untouchedSeed = current.count === 4 && current.version === 1
+    && String(row.import_batch || '') === '20260911-handoff-v1'
+    && String(row.updated_by || '') === '初始匯入';
+  if (!untouchedSeed) return 'review_required';
+  const now = nowIso();
+  const next = Object.assign({}, current, {
+    count: 7,
+    version: 2,
+    importBatch: CLASS_ROSTER_SEED_VERSION_,
+    updatedBy: '系統資料校正',
+    updatedAt: now,
+  });
+  updateRow(SHEET_NAMES.CLASS_ROSTER, row._row, {
+    student_count: 7,
+    version: 2,
+    import_batch: CLASS_ROSTER_SEED_VERSION_,
+    updated_by: '系統資料校正',
+    updated_at: now,
+  });
+  try {
+    appendRow(SHEET_NAMES.CLASS_ROSTER_HISTORY, classRosterEventRow_(
+      'seed-correction-north16-v2',
+      'adjust',
+      next,
+      4,
+      7,
+      '確認北區差額 3 人歸入週六外星人 09:30–10:30 創意積木',
+      { nickname: '系統資料校正' },
+      current,
+      next
+    ));
+  } catch (error) {
+    updateRow(SHEET_NAMES.CLASS_ROSTER, row._row, row);
+    throw error;
+  }
+  return 'confirmed';
+}
+
+function ensureClassRosterSheets_() {
+  const ss = getSS();
+  const props = PropertiesService.getScriptProperties();
+  const names = [SHEET_NAMES.CLASS_ROSTER, SHEET_NAMES.CLASS_ROSTER_HISTORY, SHEET_NAMES.CLASS_ROSTER_REMINDERS];
+  const ready = props.getProperty(CLASS_ROSTER_SEED_PROPERTY_) === CLASS_ROSTER_SEED_VERSION_
+    && !!props.getProperty(CLASS_ROSTER_BASELINE_PROPERTY_)
+    && names.every(function (name) { return !!ss.getSheetByName(name); });
+  if (ready) return;
+  const result = withRecordWriteLock_(function () {
+    let classes = ss.getSheetByName(SHEET_NAMES.CLASS_ROSTER);
+    if (!classes) classes = ss.insertSheet(SHEET_NAMES.CLASS_ROSTER);
+    const classHeaders = [
+      'class_id', 'code', 'campus', 'teacher', 'weekday', 'course', 'start_time', 'end_time',
+      'student_count', 'note', 'active', 'version', 'import_batch', 'created_by', 'updated_by', 'created_at', 'updated_at'
+    ];
+    ensureHeaders(classes, classHeaders);
+    let history = ss.getSheetByName(SHEET_NAMES.CLASS_ROSTER_HISTORY);
+    if (!history) history = ss.insertSheet(SHEET_NAMES.CLASS_ROSTER_HISTORY);
+    ensureHeaders(history, [
+      'event_id', 'request_id', 'action', 'class_id', 'code', 'campus', 'course',
+      'before_count', 'after_count', 'reason', 'actor', 'before_json', 'after_json', 'created_at'
+    ]);
+    let reminders = ss.getSheetByName(SHEET_NAMES.CLASS_ROSTER_REMINDERS);
+    if (!reminders) reminders = ss.insertSheet(SHEET_NAMES.CLASS_ROSTER_REMINDERS);
+    ensureHeaders(reminders, [
+      'reminder_id', 'class_id', 'title', 'due_date', 'status',
+      'created_by', 'updated_by', 'created_at', 'updated_at', 'completed_at'
+    ]);
+    let baselineStatus = 'review_required';
+    if (classes.getLastRow() <= 1 && props.getProperty(CLASS_ROSTER_SEED_PROPERTY_) !== CLASS_ROSTER_SEED_VERSION_) {
+      const seedRows = classRosterSeedRows_();
+      classes.getRange(2, 1, seedRows.length, classHeaders.length).setValues(seedRows.map(function (row) {
+        return classHeaders.map(function (header) { return row[header] == null ? '' : row[header]; });
+      }));
+      baselineStatus = 'confirmed';
+    } else {
+      baselineStatus = migrateClassRosterNorth16_();
+    }
+    props.setProperty(CLASS_ROSTER_SEED_PROPERTY_, CLASS_ROSTER_SEED_VERSION_);
+    props.setProperty(CLASS_ROSTER_BASELINE_PROPERTY_, baselineStatus);
+    return { ok: true };
+  });
+  if (result && result.ok === false) throw new Error(result.error || '班級資料初始化忙碌中，請稍後重試');
+}
+
+function classRosterDateCell_(value) {
+  if (Object.prototype.toString.call(value) === '[object Date]') return Utilities.formatDate(value, 'Asia/Taipei', 'yyyy-MM-dd');
+  return String(value || '').slice(0, 10);
+}
+
+function classRosterDateTimeCell_(value) {
+  if (Object.prototype.toString.call(value) === '[object Date]') return Utilities.formatDate(value, 'Asia/Taipei', "yyyy-MM-dd'T'HH:mm:ssXXX");
+  return String(value || '');
+}
+
+function classRosterClassObject_(row) {
+  return {
+    id: String(row.class_id || ''), code: String(row.code || ''), campus: String(row.campus || ''),
+    teacher: String(row.teacher || ''), weekday: String(row.weekday || ''), course: String(row.course || ''),
+    start: String(row.start_time || ''), end: String(row.end_time || ''), count: Number(row.student_count || 0),
+    note: String(row.note || ''), active: row.active === true || String(row.active).toLowerCase() === 'true',
+    version: Math.max(1, Number(row.version || 1)), importBatch: String(row.import_batch || ''),
+    createdBy: String(row.created_by || ''), updatedBy: String(row.updated_by || ''),
+    createdAt: classRosterDateTimeCell_(row.created_at), updatedAt: classRosterDateTimeCell_(row.updated_at),
+  };
+}
+
+function classRosterHistoryObject_(row) {
+  return {
+    id: String(row.event_id || ''), requestId: String(row.request_id || ''), action: String(row.action || ''),
+    classId: String(row.class_id || ''), code: String(row.code || ''), campus: String(row.campus || ''),
+    course: String(row.course || ''), beforeCount: Number(row.before_count || 0), afterCount: Number(row.after_count || 0),
+    reason: String(row.reason || ''), actor: String(row.actor || ''), at: classRosterDateTimeCell_(row.created_at),
+  };
+}
+
+function classRosterReminderObject_(row) {
+  return {
+    id: String(row.reminder_id || ''), classId: String(row.class_id || ''), title: String(row.title || ''),
+    dueDate: classRosterDateCell_(row.due_date), done: String(row.status || '') === 'done',
+    createdBy: String(row.created_by || ''), updatedBy: String(row.updated_by || ''),
+    createdAt: classRosterDateTimeCell_(row.created_at), updatedAt: classRosterDateTimeCell_(row.updated_at),
+    completedAt: classRosterDateTimeCell_(row.completed_at),
+  };
+}
+
+function getClassRosterSnapshot_() {
+  ensureClassRosterSheets_();
+  const campusOrder = { '北區': 0, '東橋': 1 };
+  const classes = sheetToObjects(SHEET_NAMES.CLASS_ROSTER).map(classRosterClassObject_).filter(function (item) { return item.active; });
+  classes.sort(function (a, b) { return (campusOrder[a.campus] || 0) - (campusOrder[b.campus] || 0) || a.code.localeCompare(b.code); });
+  const history = sheetToObjects(SHEET_NAMES.CLASS_ROSTER_HISTORY).map(classRosterHistoryObject_).sort(function (a, b) { return b.at.localeCompare(a.at); }).slice(0, 300);
+  const reminders = sheetToObjects(SHEET_NAMES.CLASS_ROSTER_REMINDERS).map(classRosterReminderObject_).sort(function (a, b) { return Number(a.done) - Number(b.done) || a.dueDate.localeCompare(b.dueDate); });
+  const stats = ['北區', '東橋'].map(function (campus) {
+    const items = classes.filter(function (item) { return item.campus === campus; });
+    return {
+      campus: campus,
+      classes: items.length,
+      attendance: items.reduce(function (sum, item) { return sum + item.count; }, 0),
+      activeClasses: items.filter(function (item) { return item.count > 0; }).length,
+    };
+  });
+  const timestamps = classes.map(function (item) { return item.updatedAt; })
+    .concat(history.map(function (item) { return item.at; }))
+    .concat(reminders.map(function (item) { return item.updatedAt; })).filter(Boolean).sort();
+  const baselineStatus = PropertiesService.getScriptProperties().getProperty(CLASS_ROSTER_BASELINE_PROPERTY_) || 'review_required';
+  return {
+    classes: classes,
+    history: history,
+    reminders: reminders,
+    stats: stats,
+    updatedAt: timestamps.length ? timestamps[timestamps.length - 1] : '',
+    syncedAt: nowIso(),
+    baseline: {
+      status: baselineStatus === 'confirmed' ? 'confirmed' : 'pending_confirmation',
+      detailNorth: 82, detailEast: 74, detailTotal: 156,
+      expectedNorth: 82, expectedEast: 74, expectedTotal: 156,
+      message: baselineStatus === 'confirmed'
+        ? '北區差額 3 人已確認歸入北16：週六外星人 09:30–10:30 創意積木。'
+        : '北16 已有其他異動，系統未自動覆蓋；請人工確認週六外星人 09:30–10:30 創意積木人數。',
+    },
+  };
+}
+
+function getClassRosterData(params) {
+  const actor = params.__actor || findUserByNickname(String(params.viewer || ''));
+  if (!actor || actor.status !== 'active' || !userHasClassRosterWork_(actor)) {
+    return { ok: false, error: '此帳號沒有班級人數管理權限' };
+  }
+  return Object.assign({ ok: true }, getClassRosterSnapshot_());
+}
+
+function classRosterRequiredText_(value, max, label) {
+  const text = String(value == null ? '' : value).trim();
+  if (!text) throw new Error('請填寫' + label);
+  if (text.length > max) throw new Error(label + '內容過長');
+  return text;
+}
+
+function classRosterTime_(value, label) {
+  const text = classRosterRequiredText_(value, 5, label);
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(text)) throw new Error(label + '格式不正確');
+  return text;
+}
+
+function classRosterDate_(value) {
+  const text = classRosterRequiredText_(value, 10, '提醒日期');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw new Error('提醒日期格式不正確');
+  const parsed = new Date(text + 'T12:00:00+08:00');
+  if (isNaN(parsed.getTime()) || Utilities.formatDate(parsed, 'Asia/Taipei', 'yyyy-MM-dd') !== text) throw new Error('提醒日期不存在');
+  return text;
+}
+
+function classRosterCount_(value) {
+  const count = Number(value);
+  if (!Number.isSafeInteger(count) || count < 0 || count > 999) throw new Error('正式上課人數需為 0 至 999 的整數');
+  return count;
+}
+
+function classRosterAdjustedCount_(current, delta) {
+  const step = Number(delta);
+  if (step !== 1 && step !== -1) throw new Error('每次只能增加或減少 1 人');
+  return classRosterCount_(Number(current) + step);
+}
+
+function classRosterClassInput_(raw, existing) {
+  const source = raw || {};
+  const campus = classRosterRequiredText_(source.campus, 20, '館別');
+  const weekday = classRosterRequiredText_(source.weekday, 1, '星期');
+  if (['北區', '東橋'].indexOf(campus) < 0) throw new Error('館別只能選擇北區或東橋');
+  if ('一二三四五六日'.indexOf(weekday) < 0) throw new Error('星期選項不正確');
+  const start = classRosterTime_(source.start, '開始時間');
+  const end = classRosterTime_(source.end, '結束時間');
+  if (end <= start) throw new Error('結束時間必須晚於開始時間');
+  const note = String(source.note || '').trim();
+  if (note.length > 500) throw new Error('備註請勿超過 500 字');
+  return {
+    id: classRosterRequiredText_(source.id, 180, '班級編號'),
+    code: classRosterRequiredText_(source.code, 30, '班級代碼'),
+    campus: campus,
+    teacher: classRosterRequiredText_(source.teacher, 60, '授課老師'),
+    weekday: weekday,
+    course: classRosterRequiredText_(source.course, 120, '課程名稱'),
+    start: start,
+    end: end,
+    count: existing ? Number(existing.student_count || 0) : classRosterCount_(source.count),
+    note: note,
+  };
+}
+
+function classRosterEventRow_(requestId, action, item, beforeCount, afterCount, reason, actor, beforeJson, afterJson) {
+  return {
+    event_id: Utilities.getUuid(), request_id: requestId, action: action,
+    class_id: item.id, code: item.code, campus: item.campus, course: item.course,
+    before_count: Number(beforeCount || 0), after_count: Number(afterCount || 0),
+    reason: reason, actor: actor.nickname,
+    before_json: beforeJson ? JSON.stringify(beforeJson) : '',
+    after_json: afterJson ? JSON.stringify(afterJson) : '',
+    created_at: nowIso(),
+  };
+}
+
+function saveClassRosterMutation(params) {
+  ensureClassRosterSheets_();
+  return withRecordWriteLock_(function () { return saveClassRosterMutationLocked_(params); });
+}
+
+function saveClassRosterMutationLocked_(params) {
+  const actor = params.__actor;
+  if (!actor || actor.status !== 'active' || !userHasClassRosterWork_(actor)) return { ok: false, error: '此帳號沒有班級人數管理權限' };
+  const requestId = classRosterRequiredText_(params.request_id, 180, '操作識別碼');
+  const existingReceipt = findObject(SHEET_NAMES.CLASS_ROSTER_HISTORY, 'request_id', requestId);
+  if (existingReceipt) return { ok: true, duplicate: true, classRoster: getClassRosterSnapshot_() };
+  const operation = String(params.operation || '');
+  const payload = params.payload && typeof params.payload === 'object' ? params.payload : {};
+  let event;
+
+  if (operation === 'adjust') {
+    const row = findObject(SHEET_NAMES.CLASS_ROSTER, 'class_id', classRosterRequiredText_(payload.classId, 180, '班級識別碼'));
+    if (!row || !(row.active === true || String(row.active).toLowerCase() === 'true')) return { ok: false, error: '找不到這個班級，請重新整理' };
+    const current = classRosterClassObject_(row);
+    if (Number(payload.version) !== current.version) return { ok: false, code: 'RECORD_CONFLICT', error: '人數剛由其他裝置更新，已重新整理最新資料', classRoster: getClassRosterSnapshot_() };
+    const nextCount = classRosterAdjustedCount_(current.count, payload.delta);
+    const reason = classRosterRequiredText_(payload.reason, 180, '異動原因');
+    const now = nowIso();
+    const next = Object.assign({}, current, { count: nextCount, version: current.version + 1, updatedBy: actor.nickname, updatedAt: now });
+    updateRow(SHEET_NAMES.CLASS_ROSTER, row._row, { student_count: nextCount, version: next.version, updated_by: actor.nickname, updated_at: now });
+    try {
+      event = classRosterEventRow_(requestId, 'adjust', current, current.count, nextCount, reason, actor, current, next);
+      appendRow(SHEET_NAMES.CLASS_ROSTER_HISTORY, event);
+    } catch (error) {
+      updateRow(SHEET_NAMES.CLASS_ROSTER, row._row, { student_count: current.count, version: current.version, updated_by: row.updated_by, updated_at: row.updated_at });
+      throw error;
+    }
+  } else if (operation === 'save_class') {
+    const source = payload.class || {};
+    const existing = source.id ? findObject(SHEET_NAMES.CLASS_ROSTER, 'class_id', source.id) : null;
+    const item = classRosterClassInput_(source, existing);
+    const duplicateCode = sheetToObjects(SHEET_NAMES.CLASS_ROSTER).some(function (row) {
+      return row.class_id !== item.id && String(row.code || '').trim().toLowerCase() === item.code.toLowerCase() && (row.active === true || String(row.active).toLowerCase() === 'true');
+    });
+    if (duplicateCode) return { ok: false, error: '班級代碼已存在，請使用不同代碼' };
+    const now = nowIso();
+    if (existing) {
+      const current = classRosterClassObject_(existing);
+      if (Number(payload.version) !== current.version) return { ok: false, code: 'RECORD_CONFLICT', error: '班級資料剛由其他裝置更新，已重新整理最新內容', classRoster: getClassRosterSnapshot_() };
+      const next = Object.assign({}, item, { version: current.version + 1, updatedBy: actor.nickname, updatedAt: now });
+      updateRow(SHEET_NAMES.CLASS_ROSTER, existing._row, {
+        code: item.code, campus: item.campus, teacher: item.teacher, weekday: item.weekday, course: item.course,
+        start_time: item.start, end_time: item.end, note: item.note, version: next.version,
+        updated_by: actor.nickname, updated_at: now,
+      });
+      try {
+        event = classRosterEventRow_(requestId, 'class_updated', next, current.count, current.count, '更新班級資料', actor, current, next);
+        appendRow(SHEET_NAMES.CLASS_ROSTER_HISTORY, event);
+      } catch (error) {
+        updateRow(SHEET_NAMES.CLASS_ROSTER, existing._row, existing);
+        throw error;
+      }
+    } else {
+      const created = {
+        class_id: item.id, code: item.code, campus: item.campus, teacher: item.teacher, weekday: item.weekday,
+        course: item.course, start_time: item.start, end_time: item.end, student_count: item.count,
+        note: item.note, active: true, version: 1, import_batch: '', created_by: actor.nickname,
+        updated_by: actor.nickname, created_at: now, updated_at: now,
+      };
+      const rowNumber = appendRow(SHEET_NAMES.CLASS_ROSTER, created);
+      try {
+        const publicItem = classRosterClassObject_(created);
+        event = classRosterEventRow_(requestId, 'class_created', publicItem, 0, item.count, '新增班級', actor, null, publicItem);
+        appendRow(SHEET_NAMES.CLASS_ROSTER_HISTORY, event);
+      } catch (error) {
+        getSheet(SHEET_NAMES.CLASS_ROSTER).deleteRow(rowNumber);
+        throw error;
+      }
+    }
+  } else if (operation === 'save_reminder') {
+    const classRow = findObject(SHEET_NAMES.CLASS_ROSTER, 'class_id', classRosterRequiredText_(payload.classId, 180, '班級識別碼'));
+    if (!classRow) return { ok: false, error: '找不到這個班級，請重新整理' };
+    const item = classRosterClassObject_(classRow);
+    const now = nowIso();
+    const reminder = {
+      reminder_id: classRosterRequiredText_(payload.id, 180, '提醒識別碼'), class_id: item.id,
+      title: classRosterRequiredText_(payload.title, 300, '提醒事項'), due_date: classRosterDate_(payload.dueDate),
+      status: 'open', created_by: actor.nickname, updated_by: actor.nickname,
+      created_at: now, updated_at: now, completed_at: '',
+    };
+    if (findObject(SHEET_NAMES.CLASS_ROSTER_REMINDERS, 'reminder_id', reminder.reminder_id)) return { ok: false, error: '這則提醒已存在' };
+    const reminderRow = appendRow(SHEET_NAMES.CLASS_ROSTER_REMINDERS, reminder);
+    try {
+      event = classRosterEventRow_(requestId, 'reminder_created', item, item.count, item.count, reminder.title + '｜' + reminder.due_date, actor, null, reminder);
+      appendRow(SHEET_NAMES.CLASS_ROSTER_HISTORY, event);
+    } catch (error) {
+      getSheet(SHEET_NAMES.CLASS_ROSTER_REMINDERS).deleteRow(reminderRow);
+      throw error;
+    }
+  } else if (operation === 'toggle_reminder' || operation === 'delete_reminder') {
+    const reminderRow = findObject(SHEET_NAMES.CLASS_ROSTER_REMINDERS, 'reminder_id', classRosterRequiredText_(payload.reminderId, 180, '提醒識別碼'));
+    if (!reminderRow) return { ok: false, error: '找不到這則提醒，請重新整理' };
+    const classRow = findObject(SHEET_NAMES.CLASS_ROSTER, 'class_id', reminderRow.class_id);
+    if (!classRow) return { ok: false, error: '提醒所屬班級已不存在' };
+    const item = classRosterClassObject_(classRow);
+    const originalReminder = classRosterReminderObject_(reminderRow);
+    const now = nowIso();
+    if (operation === 'delete_reminder') {
+      getSheet(SHEET_NAMES.CLASS_ROSTER_REMINDERS).deleteRow(reminderRow._row);
+      try {
+        event = classRosterEventRow_(requestId, 'reminder_deleted', item, item.count, item.count, originalReminder.title, actor, originalReminder, null);
+        appendRow(SHEET_NAMES.CLASS_ROSTER_HISTORY, event);
+      } catch (error) {
+        appendRow(SHEET_NAMES.CLASS_ROSTER_REMINDERS, reminderRow);
+        throw error;
+      }
+    } else {
+      const done = payload.done === true;
+      updateRow(SHEET_NAMES.CLASS_ROSTER_REMINDERS, reminderRow._row, { status: done ? 'done' : 'open', updated_by: actor.nickname, updated_at: now, completed_at: done ? now : '' });
+      try {
+        event = classRosterEventRow_(requestId, done ? 'reminder_completed' : 'reminder_reopened', item, item.count, item.count, originalReminder.title, actor, originalReminder, Object.assign({}, originalReminder, { done: done }));
+        appendRow(SHEET_NAMES.CLASS_ROSTER_HISTORY, event);
+      } catch (error) {
+        updateRow(SHEET_NAMES.CLASS_ROSTER_REMINDERS, reminderRow._row, reminderRow);
+        throw error;
+      }
+    }
+  } else {
+    return { ok: false, error: '不支援的班級操作' };
+  }
+  return { ok: true, event: event ? classRosterHistoryObject_(event) : null, classRoster: getClassRosterSnapshot_() };
 }

@@ -357,7 +357,7 @@ async function editUser(nickname) {
     : String(u.work_assignments || '').replace(/[\[\]"]/g, '');
   const newEmployment = prompt('才藝聘用身分（fulltime/pt/manager/admin；不適用請留空）：', u.employment_type || '');
   if (newEmployment === null) return;
-  const newAssignments = prompt('工作區（可用逗號分隔多個）：\nanqin-teacher, anqin-manager, talent-fulltime, talent-pt, talent-manager, talent-payroll, admin-marketing, admin-marketing-manager', currentAssignments);
+  const newAssignments = prompt('工作區（可用逗號分隔多個）：\nanqin-teacher, anqin-manager, talent-fulltime, talent-pt, talent-manager, talent-payroll, admin-marketing, admin-marketing-manager, class-roster-manager', currentAssignments);
   if (newAssignments === null) return;
   payload.employment_type = newEmployment.trim();
   payload.work_assignments = newAssignments.split(/[,、;|]/).map(item => item.trim()).filter(Boolean);
