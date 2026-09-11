@@ -47,6 +47,54 @@ function userHasClassRosterWork_(user) {
     || adminMarketingAssignments_(user).indexOf('class-roster-manager') >= 0;
 }
 
+function userHasOwnClassRosterWork_(user) {
+  return !!user && talentAssignments_(user).some(function (work) {
+    return work === 'talent-fulltime' || work === 'talent-pt' || work === 'talent-manager';
+  });
+}
+
+function classRosterTeacherKey_(name) {
+  return String(name || '').trim().replace(/\s+/g, '').replace(/(?:老師|主管)$/, '').toLowerCase();
+}
+
+function classRosterOwnsClass_(actor, item, users) {
+  const key = classRosterTeacherKey_(actor && actor.nickname);
+  if (!key || key !== classRosterTeacherKey_(item && item.teacher)) return false;
+  const matches = (users || sheetToObjects(SHEET_NAMES.USERS)).filter(function (user) {
+    return user.status === 'active' && classRosterTeacherKey_(user.nickname) === key;
+  });
+  return matches.length === 1 && String(matches[0].nickname) === String(actor.nickname);
+}
+
+function classRosterOwnScope_(actor, params) {
+  return !userHasClassRosterWork_(actor) || params.scope === 'own';
+}
+
+function classRosterScopedSnapshot_(actor, ownOnly) {
+  const snapshot = getClassRosterSnapshot_();
+  if (!ownOnly) return Object.assign(snapshot, { scope: 'all' });
+  const users = sheetToObjects(SHEET_NAMES.USERS);
+  const classes = snapshot.classes.filter(function (item) { return classRosterOwnsClass_(actor, item, users); });
+  const ids = classes.map(function (item) { return item.id; });
+  return {
+    scope: 'own', classes: classes,
+    history: snapshot.history.filter(function (item) { return ids.indexOf(item.classId) >= 0 && item.action === 'adjust'; }),
+    reminders: [], syncedAt: snapshot.syncedAt,
+  };
+}
+
+function classRosterLowSince_(item, history) {
+  if (item.count >= 4) return '';
+  let since = item.createdAt || '';
+  history.filter(function (event) {
+    return event.classId === item.id && ['adjust', 'class_created', 'baseline_corrected'].indexOf(event.action) >= 0;
+  }).sort(function (a, b) { return a.at.localeCompare(b.at); }).forEach(function (event) {
+    if (event.afterCount >= 4) since = '';
+    else if (event.beforeCount >= 4 || !since) since = event.at;
+  });
+  return since;
+}
+
 function adminMarketingManagerCanReview_(user) {
   return !!user && user.status === 'active' && (
     user.role === 'admin' || adminMarketingAssignments_(user).indexOf('admin-marketing-manager') >= 0
@@ -915,7 +963,9 @@ function getClassRosterSnapshot_() {
   const campusOrder = { '北區': 0, '東橋': 1 };
   const classes = sheetToObjects(SHEET_NAMES.CLASS_ROSTER).map(classRosterClassObject_).filter(function (item) { return item.active; });
   classes.sort(function (a, b) { return (campusOrder[a.campus] || 0) - (campusOrder[b.campus] || 0) || a.code.localeCompare(b.code); });
-  const history = sheetToObjects(SHEET_NAMES.CLASS_ROSTER_HISTORY).map(classRosterHistoryObject_).sort(function (a, b) { return b.at.localeCompare(a.at); }).slice(0, 300);
+  const allHistory = sheetToObjects(SHEET_NAMES.CLASS_ROSTER_HISTORY).map(classRosterHistoryObject_).sort(function (a, b) { return b.at.localeCompare(a.at); });
+  classes.forEach(function (item) { item.lowEnrollmentSince = classRosterLowSince_(item, allHistory); });
+  const history = allHistory.slice(0, 300);
   const reminders = sheetToObjects(SHEET_NAMES.CLASS_ROSTER_REMINDERS).map(classRosterReminderObject_).sort(function (a, b) { return Number(a.done) - Number(b.done) || a.dueDate.localeCompare(b.dueDate); });
   const stats = ['北區', '東橋'].map(function (campus) {
     const items = classes.filter(function (item) { return item.campus === campus; });
@@ -949,11 +999,11 @@ function getClassRosterSnapshot_() {
 }
 
 function getClassRosterData(params) {
-  const actor = params.__actor || findUserByNickname(String(params.viewer || ''));
-  if (!actor || actor.status !== 'active' || !userHasClassRosterWork_(actor)) {
+  const actor = params.__actor;
+  if (!actor || actor.status !== 'active' || !(userHasClassRosterWork_(actor) || userHasOwnClassRosterWork_(actor))) {
     return { ok: false, error: '此帳號沒有班級人數管理權限' };
   }
-  return Object.assign({ ok: true }, getClassRosterSnapshot_());
+  return Object.assign({ ok: true }, classRosterScopedSnapshot_(actor, classRosterOwnScope_(actor, params)));
 }
 
 function classRosterRequiredText_(value, max, label) {
@@ -1033,19 +1083,31 @@ function saveClassRosterMutation(params) {
 
 function saveClassRosterMutationLocked_(params) {
   const actor = params.__actor;
-  if (!actor || actor.status !== 'active' || !userHasClassRosterWork_(actor)) return { ok: false, error: '此帳號沒有班級人數管理權限' };
-  const requestId = classRosterRequiredText_(params.request_id, 180, '操作識別碼');
-  const existingReceipt = findObject(SHEET_NAMES.CLASS_ROSTER_HISTORY, 'request_id', requestId);
-  if (existingReceipt) return { ok: true, duplicate: true, classRoster: getClassRosterSnapshot_() };
+  if (!actor || actor.status !== 'active' || !(userHasClassRosterWork_(actor) || userHasOwnClassRosterWork_(actor))) return { ok: false, error: '此帳號沒有班級人數管理權限' };
+  const ownOnly = classRosterOwnScope_(actor, params);
+  const snapshot = function () { return classRosterScopedSnapshot_(actor, ownOnly); };
   const operation = String(params.operation || '');
   const payload = params.payload && typeof params.payload === 'object' ? params.payload : {};
+  if (ownOnly) {
+    if (operation !== 'adjust') return { ok: false, error: '老師只能調整自己班級的正式人數' };
+    const target = findObject(SHEET_NAMES.CLASS_ROSTER, 'class_id', String(payload.classId || ''));
+    if (!target || !classRosterOwnsClass_(actor, target)) return { ok: false, error: '只能調整自己的班級，請重新整理班級名單' };
+    if (payload.studentType !== 'formal') return { ok: false, error: '僅能調整正式學生，體驗學生不計入人數' };
+  }
+  if (payload.studentType && payload.studentType !== 'formal') return { ok: false, error: '體驗學生不計入正式人數' };
+  const requestId = classRosterRequiredText_(params.request_id, 180, '操作識別碼');
+  const existingReceipt = findObject(SHEET_NAMES.CLASS_ROSTER_HISTORY, 'request_id', requestId);
+  if (existingReceipt) {
+    if (existingReceipt.actor !== actor.nickname || existingReceipt.class_id !== payload.classId && operation === 'adjust') return { ok: false, error: '操作識別碼已使用，請重新整理後重試' };
+    return { ok: true, duplicate: true, classRoster: snapshot() };
+  }
   let event;
 
   if (operation === 'adjust') {
     const row = findObject(SHEET_NAMES.CLASS_ROSTER, 'class_id', classRosterRequiredText_(payload.classId, 180, '班級識別碼'));
     if (!row || !(row.active === true || String(row.active).toLowerCase() === 'true')) return { ok: false, error: '找不到這個班級，請重新整理' };
     const current = classRosterClassObject_(row);
-    if (Number(payload.version) !== current.version) return { ok: false, code: 'RECORD_CONFLICT', error: '人數剛由其他裝置更新，已重新整理最新資料', classRoster: getClassRosterSnapshot_() };
+    if (Number(payload.version) !== current.version) return { ok: false, code: 'RECORD_CONFLICT', error: '人數剛由其他裝置更新，已重新整理最新資料', classRoster: snapshot() };
     const nextCount = classRosterAdjustedCount_(current.count, payload.delta);
     const reason = classRosterRequiredText_(payload.reason, 180, '異動原因');
     const now = nowIso();
@@ -1069,7 +1131,7 @@ function saveClassRosterMutationLocked_(params) {
     const now = nowIso();
     if (existing) {
       const current = classRosterClassObject_(existing);
-      if (Number(payload.version) !== current.version) return { ok: false, code: 'RECORD_CONFLICT', error: '班級資料剛由其他裝置更新，已重新整理最新內容', classRoster: getClassRosterSnapshot_() };
+      if (Number(payload.version) !== current.version) return { ok: false, code: 'RECORD_CONFLICT', error: '班級資料剛由其他裝置更新，已重新整理最新內容', classRoster: snapshot() };
       const next = Object.assign({}, item, { version: current.version + 1, updatedBy: actor.nickname, updatedAt: now });
       updateRow(SHEET_NAMES.CLASS_ROSTER, existing._row, {
         code: item.code, campus: item.campus, teacher: item.teacher, weekday: item.weekday, course: item.course,
@@ -1151,5 +1213,5 @@ function saveClassRosterMutationLocked_(params) {
   } else {
     return { ok: false, error: '不支援的班級操作' };
   }
-  return { ok: true, event: event ? classRosterHistoryObject_(event) : null, classRoster: getClassRosterSnapshot_() };
+  return { ok: true, event: event ? classRosterHistoryObject_(event) : null, classRoster: snapshot() };
 }

@@ -22,6 +22,7 @@ cd "$ROOT"
 "$NODE_BIN" tests/talent-rules.test.cjs
 "$NODE_BIN" tests/admin-marketing-rules.test.cjs
 "$NODE_BIN" tests/class-roster-rules.test.cjs
+"$NODE_BIN" tests/teacher-roster-access.test.cjs
 "$NODE_BIN" tests/production-integrity.test.cjs
 "$NODE_BIN" tests/reliability-regressions.test.cjs
 "$NODE_BIN" tests/reliability-secondary.test.cjs
@@ -35,5 +36,6 @@ trap 'kill "$SERVER_PID" >/dev/null 2>&1 || true' EXIT INT TERM
 sleep 1
 
 KPI_QA_BASE_URL="http://127.0.0.1:$PORT" "$NODE_BIN" tests/release-e2e.cjs
+KPI_QA_BASE_URL="http://127.0.0.1:$PORT" "$NODE_BIN" tests/teacher-roster-e2e.cjs
 
 echo "Local release gate passed. Deploy, then run the five-item production delivery check before announcing completion."

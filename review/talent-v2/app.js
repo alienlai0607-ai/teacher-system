@@ -62,6 +62,7 @@
   const NAV = {
     fulltime: [
       { route: 'today', label: '今日上課', icon: 'clipboard-pen-line' },
+      { route: 'class-roster', label: '我的班級', icon: 'users-round' },
       { route: 'prep', label: '備課檔案', icon: 'notebook-tabs' },
       { route: 'weekly', label: '家長 APP', icon: 'images' },
       { route: 'performance', label: 'KPI 與獎金', icon: 'gauge' },
@@ -70,6 +71,7 @@
     ],
     pt: [
       { route: 'today', label: '今日上課', icon: 'clipboard-pen-line' },
+      { route: 'class-roster', label: '我的班級', icon: 'users-round' },
       { route: 'prep', label: '備課檔案', icon: 'notebook-tabs' },
       { route: 'weekly', label: '家長 APP', icon: 'images' },
       { route: 'pay', label: '鐘點與續報', icon: 'badge-dollar-sign' },
@@ -442,6 +444,7 @@
     `;
     hydrateIcons();
     window.scrollTo({ top: 0, behavior: 'instant' });
+    if (isTeacher()) window.TeacherClassRoster?.mount({ nickname: currentUser.nickname, preview: PREVIEW_MODE });
   }
 
   function renderNavButton(item) {
@@ -473,6 +476,7 @@
     if (gate) return gate;
     const routes = {
       today: renderToday,
+      'class-roster': () => `${pageHead('我的班級', '')}<section class="panel" id="teacher-class-roster"></section>`,
       prep: renderPrep,
       weekly: renderWeekly,
       performance: renderPerformance,
@@ -530,6 +534,7 @@
         <article class="status-card"><span class="status-icon blue">${icon('clipboard-check', 20)}</span><div><small>今日紀錄</small><strong>${logs.length} 堂</strong><span>${logs.filter(item => item.status === 'submitted').length} 堂已送出</span></div></article>
         <article class="status-card"><span class="status-icon green">${icon(isPt() ? 'badge-dollar-sign' : 'gauge', 20)}</span><div><small>${isPt() ? '本月鐘點預估' : '本月 KPI'}</small><strong>${isPt() ? formatMoney(ownLogs().reduce((sum, item) => sum + Number(item.pay || 0), 0)) : `${scoreTotal(scoreFor(currentUser.nickname))} 分`}</strong><span>${isPt() ? '體驗不計級距，補課計入' : '月底由主管核定'}</span></div></article>
       </section>
+      <section class="panel" id="teacher-class-roster"></section>
       ${isPt() ? `<div class="notice strict">${icon('lock', 19)}<div><strong>PT 正常課程只能當日送出</strong><span>任一堂正常課程漏填即取消當月續報獎金；只有停課可補選過去排課日。</span></div></div>` : ''}
       ${state.draftLog ? `<div class="notice warning">${icon('file-pen-line', 19)}<div><strong>有一筆今日未完成草稿</strong><span>上次輸入已保留，請在今日結束前送出。</span></div><button type="button" class="btn btn-small" data-action="new-log">繼續填寫</button><button type="button" class="icon-button" data-action="discard-log-draft" aria-label="刪除這筆草稿" title="刪除草稿">${icon('trash-2', 16)}</button></div>` : ''}
       <section class="panel">

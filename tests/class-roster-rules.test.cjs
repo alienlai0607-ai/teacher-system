@@ -23,6 +23,7 @@ const context = vm.createContext({
 });
 vm.runInContext(backendSource, context);
 context.parseUserListField_ = value => Array.isArray(value) ? value : [];
+context.talentAssignments_ = user => user?.work_assignments || [];
 
 const rosterOnlySupervisor = {
   nickname: '柳丁', role: 'manager', status: 'active', work_assignments: ['talent-manager', 'class-roster-manager'],
@@ -177,7 +178,7 @@ assert.match(codeSource, /'getClassRosterData'/);
 assert.match(codeSource, /'saveClassRosterMutation'/);
 assert.match(authSource, /action === 'saveClassRosterMutation'[\s\S]*userHasClassRosterWork_/);
 assert.match(setupSource, /CLASS_ROSTER_HISTORY[\s\S]*before_count[\s\S]*after_count/);
-assert.match(apiSource, /saveClassRosterMutation: \(operation, payload = \{\}\)/);
+assert.match(apiSource, /saveClassRosterMutation: \(operation, payload = \{\}, options = \{\}\)/);
 assert.match(apiSource, /action === 'saveClassRosterMutation'[\s\S]*requestId/);
 assert.match(backendSource, /CLASS_ROSTER_SEED_PROPERTY_/, '初始匯入需有一次性版本標記，重新部署不得覆蓋資料');
 assert.match(backendSource, /getRange\(2, 1, seedRows\.length, classHeaders\.length\)\.setValues/, '首次 30 班需批次寫入，避免逐筆請求拖慢初次開啟');

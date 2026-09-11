@@ -180,7 +180,7 @@ window.API = (function () {
       for (const delay of WRITE_RECEIPT_DELAYS_MS) {
         if (delay) await wait(delay);
         try {
-          const check = await requestJson({ action: receiptRead, viewer: payload.nickname, nickname: payload.nickname, session_token: sessionToken });
+          const check = await requestJson({ action: receiptRead, viewer: payload.nickname, nickname: payload.nickname, scope: payload.scope, session_token: sessionToken });
           if (check.ok) {
             if (action === 'saveClassRosterMutation') {
               const receipt = (check.history || []).find(row => row.requestId === payload.request_id);
@@ -363,8 +363,8 @@ window.API = (function () {
     }),
     saveAdminMarketingScore: (nickname, month, score) => call('saveAdminMarketingScore', { nickname, month, score }),
     addAdminMarketingMessage: (nickname, month, text) => call('addAdminMarketingMessage', { nickname, month, text }),
-    getClassRosterData: () => call('getClassRosterData'),
-    saveClassRosterMutation: (operation, payload = {}) => call('saveClassRosterMutation', { operation, payload }),
+    getClassRosterData: (options = {}) => call('getClassRosterData', options),
+    saveClassRosterMutation: (operation, payload = {}, options = {}) => call('saveClassRosterMutation', { ...options, operation, payload }),
     setConfig: (data) => call('setConfig', data),
     getSystemReadiness: (operator) => call('getSystemReadiness', { operator }),
     runProductionIntegrityCheck: () => call('runProductionIntegrityCheck'),

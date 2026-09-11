@@ -419,6 +419,21 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .roster-reminder-summary-count { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; background: #c56b12; color: #fff; font-size: 14px; font-weight: 950; font-variant-numeric: tabular-nums; }
 .roster-reminder-summary.is-overdue .roster-reminder-summary-count { background: var(--danger); }
 .roster-reminder-summary > svg { flex: 0 0 auto; }
+.recruitment-escalation { margin-top:12px; border:2px solid #d46633; border-left-width:7px; background:#fff0df; color:#713113; }
+.recruitment-escalation.level-3 { border-color:#cc463c; background:#ffebe8; color:#862821; }
+.recruitment-escalation.level-4, .recruitment-escalation.level-5 { border-color:#9c232b; background:#fce3e4; color:#71151c; }
+.recruitment-escalation-head { display:flex; gap:12px; align-items:center; padding:16px; }
+.recruitment-escalation-head > svg { flex-shrink:0; }
+.recruitment-escalation-head strong { display:block; font-size:18px; }
+.recruitment-escalation-head span { display:block; margin-top:5px; font-weight:700; }
+.recruitment-escalation.level-5 .recruitment-escalation-head { background:#9c232b; color:white; }
+.recruitment-escalation-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px; border-top:1px solid #dca6a0; }
+.recruitment-escalation-row > div { min-width:0; overflow-wrap:anywhere; }
+.recruitment-escalation-row strong, .recruitment-escalation-row span, .recruitment-escalation-row b { display:block; }
+.recruitment-escalation-row span, .recruitment-escalation-row b { margin-top:5px; font-size:13px; }
+.recruitment-escalation-row .button { flex-shrink:0; }
+.recruitment-actions li { margin:14px 0; line-height:1.7; }
+@media(max-width:680px) { .recruitment-escalation-row { align-items:stretch; flex-direction:column; } }
 .roster-toolbar { align-items: center; }
 .roster-filter-group { min-width: 0; display: flex; align-items: center; gap: 10px; flex: 1; }
 .segmented { display: inline-grid; grid-auto-flow: column; grid-auto-columns: minmax(72px, 1fr); padding: 3px; border: 1px solid var(--line); border-radius: 7px; background: #f2eeeb; }

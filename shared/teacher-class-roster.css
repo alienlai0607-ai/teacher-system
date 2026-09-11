@@ -1,0 +1,24 @@
+.own-roster-row { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px; border-top:1px solid #ddd; }
+.own-roster-row > div:first-child { min-width:0; }
+.own-roster-row strong, .own-roster-row small { display:block; overflow-wrap:anywhere; }
+.own-roster-row small { color:#666; margin-top:5px; }
+.own-roster-counter { display:grid; grid-template-columns:44px 60px 44px; flex-shrink:0; align-items:center; text-align:center; }
+.own-roster-counter button { display:grid; place-items:center; width:44px; height:44px; border:1px solid #ccc; border-radius:6px; background:white; color:#217a75; cursor:pointer; }
+.own-roster-counter button:disabled { opacity:.4; cursor:default; }
+.own-roster-counter strong { font-size:22px; }
+.own-roster-counter small { display:inline; font-size:12px; margin-left:3px; }
+.own-roster-campuses { display:flex; gap:8px; padding:12px 16px; }
+.own-roster-campuses button { min-height:44px; flex:1; border:1px solid #ccc; background:white; border-radius:6px; font-weight:700; }
+.own-roster-campuses button[aria-pressed="true"] { background:#e4f3ef; border-color:#217a75; color:#185d59; }
+.own-roster-message, .own-roster-empty { margin:0; padding:16px; }
+.own-roster-message { background:#e4f3ef; color:#185d59; }
+.own-roster-message.is-error { background:#fce9e7; color:#8c2d26; }
+.own-roster-confirm { display:grid; gap:12px; padding:16px; border-top:2px solid #217a75; background:#f4faf8; }
+.own-roster-confirm label { display:grid; gap:6px; }
+.own-roster-confirm .own-roster-check { display:flex; align-items:center; gap:10px; }
+.own-roster-check input { width:20px; height:20px; }
+.own-roster-confirm-actions { display:flex; justify-content:flex-end; gap:10px; }
+@media(max-width:480px) {
+  .own-roster-row { align-items:flex-start; flex-direction:column; gap:12px; }
+  .own-roster-counter { align-self:flex-end; }
+}

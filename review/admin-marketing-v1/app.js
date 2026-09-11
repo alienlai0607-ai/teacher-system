@@ -937,6 +937,29 @@
   function classRosterNeedsRecruitment(item) {
     return Number(item?.count || 0) < 4;
   }
+  function recruitmentStatus(item) {
+    if (PREVIEW_MODE) {
+      const events = classRosterData().history.filter(event => event.classId === item.id && ['adjust', 'class_created', 'baseline_corrected'].includes(event.action)).slice().sort((a, b) => a.at.localeCompare(b.at));
+      let since = item.createdAt || '';
+      events.forEach(event => { if (event.afterCount >= 4) since = ''; else if (event.beforeCount >= 4 || !since) since = event.at; });
+      return window.RosterRecruitment.evaluate({ ...item, lowEnrollmentSince: since });
+    }
+    return window.RosterRecruitment.evaluate(item);
+  }
+  function renderRecruitmentEscalation() {
+    const items = classRosterData().classes.filter(item => item.campus === state.ui.classCampus)
+      .map(item => ({ item, alert: recruitmentStatus(item) })).filter(value => value.alert?.days >= 14)
+      .sort((a, b) => b.alert.days - a.alert.days);
+    if (!items.length) return '';
+    const strongest = items[0].alert;
+    return `<section class="recruitment-escalation level-${strongest.level}" aria-label="持續低人數招生警示"><div class="recruitment-escalation-head">${icon('triangle-alert', 26)}<div><strong>${items.length} 班連續兩週以上不足 4 人</strong><span>最長已持續 ${strongest.weeks} 週（${strongest.days} 天）</span></div></div>${items.map(({ item, alert }) => `<div class="recruitment-escalation-row"><div><strong>${esc(item.code)} · ${esc(item.course)}</strong><span>週${esc(item.weekday)} ${esc(item.start)} · ${item.count} 人 · 尚差 ${alert.missing} 人</span><b>${alert.days} 天未達 4 人 · ${esc(alert.title)}</b></div><button type="button" class="button small" data-action="recruitment-help" data-id="${esc(item.id)}">${icon('megaphone', 16)}本週招生做法</button></div>`).join('')}</section>`;
+  }
+  function openRecruitmentHelp(id) {
+    const item = classRosterItem(id);
+    const alert = item && recruitmentStatus(item);
+    if (!alert) return;
+    showDialog(dialogShell(`${item.code} · 本週招生做法`, alert.title, `<p>正式 ${item.count} 人，尚差 ${alert.missing} 人達到 4 人。${alert.days === null ? '觀察起日待確認。' : `自 ${alert.since} 起連續 ${alert.days} 天不足 4 人。`}</p><ol class="recruitment-actions">${alert.actions.map(action => `<li>${esc(action)}</li>`).join('')}</ol><p>達到 4 位正式學生後，系統會自動解除此提醒。</p>`));
+  }
   function classRosterSummary(campus = 'all') {
     const items = classRosterData().classes.filter(item => campus === 'all' || item.campus === campus);
     return {
@@ -1021,6 +1044,7 @@
         ${campusOptions.map(option => `<${option.value === 'all' ? 'div' : 'button type="button"'} class="roster-campus-card ${selectedCampus === option.value ? 'is-active' : ''}" ${option.value === 'all' ? '' : 'data-action="set-class-campus"'} data-campus="${esc(option.value)}" data-testid="class-campus-${esc(option.value)}" ${option.value === 'all' ? '' : `aria-pressed="${selectedCampus === option.value}"`}><span class="roster-campus-title"><span class="roster-campus-icon">${icon(option.icon, 18)}</span><span>${esc(option.label)}</span>${selectedCampus === option.value ? icon('check', 17) : ''}</span><span class="roster-campus-total"><strong>${option.summary.attendance}</strong><span>人</span></span><span class="roster-campus-meta">${option.summary.classes} 班 · ${option.summary.recruitment} 班招生關注</span></${option.value === 'all' ? 'div' : 'button'}>`).join('')}
       </div>
       <div class="roster-recruitment-summary ${selectedSummary.summary.recruitment ? 'has-warning' : ''}" data-testid="class-roster-recruitment-summary">${icon(selectedSummary.summary.recruitment ? 'triangle-alert' : 'circle-check-big', 18)}<div><strong>${esc(selectedSummary.label)}：${selectedSummary.summary.recruitment} 班少於 4 人</strong><span>${selectedSummary.summary.recruitment ? '建議優先安排招生與家長邀約' : '目前不需招生警示'}</span></div></div>
+      ${renderRecruitmentEscalation()}
       ${openReminders ? `<button type="button" class="roster-reminder-summary ${overdueReminders ? 'is-overdue' : ''}" data-action="open-class-reminders" data-testid="class-roster-reminder-summary"><span class="roster-reminder-summary-icon">${icon(overdueReminders ? 'alarm-clock' : 'bell-ring', 21)}</span><span class="roster-reminder-summary-copy"><strong>${esc(selectedSummary.label)}有 ${openReminders} 項提醒待處理</strong><span>${overdueReminders ? `其中 ${overdueReminders} 項已逾期，請優先確認` : `最近期限 ${formatDate(nearestReminderDate)}，完成後可直接勾選`}</span></span><span class="roster-reminder-summary-count">${openReminders}</span>${icon('chevron-right', 18)}</button>` : ''}
       ${roster.baseline?.status === 'pending_confirmation' ? `<div class="notice warning mt-16" data-testid="class-roster-baseline">${icon('triangle-alert')}<div><strong>初始人數需要人工確認</strong><br>${esc(roster.baseline.message || '系統保留既有異動，未自動覆蓋人數。')}</div></div>` : ''}
       <section class="panel mt-16 roster-workspace"><div class="panel-head roster-toolbar"><form id="class-roster-search-form" class="roster-search" role="search"><label class="visually-hidden" for="class-roster-query">搜尋班級</label>${icon('search', 17)}<input id="class-roster-query" name="query" value="${esc(state.ui.classQuery || '')}" placeholder="搜尋代碼、課程或老師"><button type="submit" class="button icon-only small" aria-label="搜尋" title="搜尋">${icon('arrow-right', 16)}</button>${state.ui.classQuery ? `<button type="button" class="button icon-only small" data-action="clear-class-filter" aria-label="清除搜尋" title="清除搜尋">${icon('x', 16)}</button>` : ''}</form><div class="segmented roster-view-tabs" role="tablist" aria-label="資料檢視">${[['classes','班級'],['reminders','提醒'],['history','紀錄']].map(([value,label]) => `<button type="button" role="tab" data-action="set-class-view" data-view="${value}" class="${selectedView === value ? 'is-active' : ''}${value === 'reminders' && openReminders ? ' has-open-reminders' : ''}" aria-selected="${selectedView === value}">${esc(label)}${value === 'reminders' && openReminders ? ` <span>${openReminders}</span>` : ''}</button>`).join('')}</div></div><div class="panel-body flush" data-testid="class-roster-content">${viewContent}</div></section>
@@ -2100,6 +2124,7 @@
     else if (action === 'open-class-editor') openClassEditor(actionNode.dataset.id || '');
     else if (action === 'open-class-adjust') openClassAdjustment(actionNode.dataset.id || '', actionNode.dataset.delta || '');
     else if (action === 'open-class-reminder') openClassReminder(actionNode.dataset.id || '');
+    else if (action === 'recruitment-help') openRecruitmentHelp(actionNode.dataset.id || '');
     else if (action === 'set-class-campus') {
       state.ui.classCampus = actionNode.dataset.campus === '東橋' ? '東橋' : '北區';
       state.ui.classQuery = '';

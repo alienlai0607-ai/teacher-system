@@ -392,7 +392,7 @@ function authorizeApiAction_(action, params, actor) {
   }
 
   if (action === 'saveClassRosterMutation') {
-    if (!userHasClassRosterWork_(actor)) throw new Error('此帳號沒有班級人數管理權限');
+    if (!(userHasClassRosterWork_(actor) || userHasOwnClassRosterWork_(actor))) throw new Error('此帳號沒有班級人數管理權限');
     params.operator = actor.nickname;
     return;
   }
