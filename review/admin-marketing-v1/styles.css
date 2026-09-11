@@ -19,9 +19,12 @@
 }
 
 * { box-sizing: border-box; }
-html { min-width: 320px; background: #fbf7f4; }
+html { min-width: 320px; max-width: 100%; overflow-x: hidden; background: #fbf7f4; }
 img, video { max-width: 100%; }
 body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
   margin: 0;
   color: var(--ink);
   background:
@@ -61,7 +64,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .review-ribbon span { width: 1px; height: 14px; background: #d8b55f; }
 .test-view-exit { min-height:28px; border:1px solid #d8b55f; border-radius:7px; background:#fff; padding:3px 10px; font-weight:800; cursor:pointer; }
 
-.app-shell { min-height: 100vh; }
+.app-shell { width: 100%; min-width: 0; max-width: 100%; min-height: 100vh; }
 .topbar {
   position: sticky;
   top: 0;
@@ -96,7 +99,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   cursor: pointer;
 }
 
-.layout { display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: calc(100vh - 72px); }
+.layout { width: 100%; min-width: 0; max-width: 100%; display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: calc(100vh - 72px); }
 .sidebar {
   position: sticky;
   top: 72px;
@@ -129,8 +132,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .nav-button.is-active { color: var(--coral-dark); background: var(--coral-soft); box-shadow: inset 3px 0 var(--coral); }
 .sidebar-foot { margin-top: 18px; }
 
-.main { min-width: 0; padding: 28px clamp(18px, 4vw, 54px) 108px; }
-.page { width: min(1180px, 100%); margin: 0 auto; }
+.main { width: 100%; min-width: 0; max-width: 100%; padding: 28px clamp(18px, 4vw, 54px) 108px; }
+.page { width: min(1180px, 100%); min-width: 0; max-width: 100%; margin: 0 auto; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 22px; }
 .page-head h1 { margin: 0; font-size: 28px; line-height: 1.25; }
 .page-head p { margin: 7px 0 0; color: var(--muted); line-height: 1.6; }
@@ -384,27 +387,44 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .stage-cell > span { color: var(--muted); font-size: 11px; font-weight: 800; }
 
 .roster-campus-overview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.roster-campus-card { min-width: 0; min-height: 126px; display: grid; align-content: space-between; gap: 8px; padding: 15px 17px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--ink); text-align: left; box-shadow: var(--shadow); cursor: pointer; }
+.roster-campus-card { min-width: 0; min-height: 126px; display: grid; align-content: space-between; gap: 8px; padding: 15px 17px; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--ink); text-align: left; box-shadow: var(--shadow); cursor: pointer; }
 .roster-campus-card:hover { border-color: #c9b7ad; background: #fffaf7; }
 .roster-campus-card.is-active { border-color: var(--teal); background: #f4fbf9; box-shadow: inset 0 3px var(--teal), var(--shadow); }
 .roster-campus-title { min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; font-weight: 900; }
+.roster-campus-title > span:not(.roster-campus-icon), .roster-campus-meta { min-width: 0; overflow-wrap: anywhere; }
 .roster-campus-title > svg:last-child { margin-left: auto; color: var(--green); }
 .roster-campus-icon { width: 30px; height: 30px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 7px; color: var(--teal); background: var(--teal-soft); }
 .roster-campus-total { display: flex; align-items: baseline; gap: 6px; }
 .roster-campus-total strong { font-size: 34px; line-height: 1; font-variant-numeric: tabular-nums; }
 .roster-campus-total span { color: var(--muted); font-size: 14px; font-weight: 800; }
 .roster-campus-meta { color: var(--muted); font-size: 12px; line-height: 1.45; }
-.roster-recruitment-summary { min-height: 58px; display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 11px 14px; border-left: 4px solid var(--green); background: var(--green-soft); color: #315b42; }
-.roster-recruitment-summary.has-warning { border-color: var(--yellow); background: var(--yellow-soft); color: #715119; }
+.roster-recruitment-summary { min-width: 0; min-height: 58px; display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 11px 14px; border: 1px solid #b8d9c5; border-left: 5px solid var(--green); background: var(--green-soft); color: #315b42; }
+.roster-recruitment-summary.has-warning { border-color: #dfa836; border-left-width: 6px; background: #fff0c2; color: #684508; box-shadow: 0 2px 0 rgba(128, 84, 7, .12); }
 .roster-recruitment-summary > svg { flex: 0 0 auto; }
+.roster-recruitment-summary > div { min-width: 0; overflow-wrap: anywhere; }
 .roster-recruitment-summary strong, .roster-recruitment-summary span { display: block; }
 .roster-recruitment-summary span { margin-top: 2px; font-size: 12px; }
+.roster-reminder-summary { width: 100%; min-width: 0; min-height: 70px; display: grid; grid-template-columns: 42px minmax(0, 1fr) 34px 18px; align-items: center; gap: 11px; margin-top: 10px; padding: 11px 14px; border: 1px solid #df9a32; border-left: 6px solid #d47b18; border-radius: 0; background: #fff2d7; color: #68440d; text-align: left; box-shadow: 0 2px 0 rgba(128, 84, 7, .12); cursor: pointer; }
+.roster-reminder-summary:hover { background: #ffeabe; }
+.roster-reminder-summary.is-overdue { border-color: #d97870; border-left-color: var(--danger); background: #fde7e4; color: #7d2e2e; box-shadow: 0 2px 0 rgba(126, 45, 45, .14); }
+.roster-reminder-summary.is-overdue:hover { background: #fbdcd8; }
+.roster-reminder-summary-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 7px; background: #f7ca72; color: #68440d; }
+.roster-reminder-summary.is-overdue .roster-reminder-summary-icon { background: #efb1ab; color: #7d2e2e; }
+.roster-reminder-summary-copy { min-width: 0; }
+.roster-reminder-summary-copy strong, .roster-reminder-summary-copy span { display: block; overflow-wrap: anywhere; }
+.roster-reminder-summary-copy strong { color: inherit; font-size: 15px; }
+.roster-reminder-summary-copy span { margin-top: 3px; font-size: 12px; line-height: 1.45; }
+.roster-reminder-summary-count { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; background: #c56b12; color: #fff; font-size: 14px; font-weight: 950; font-variant-numeric: tabular-nums; }
+.roster-reminder-summary.is-overdue .roster-reminder-summary-count { background: var(--danger); }
+.roster-reminder-summary > svg { flex: 0 0 auto; }
 .roster-toolbar { align-items: center; }
 .roster-filter-group { min-width: 0; display: flex; align-items: center; gap: 10px; flex: 1; }
 .segmented { display: inline-grid; grid-auto-flow: column; grid-auto-columns: minmax(72px, 1fr); padding: 3px; border: 1px solid var(--line); border-radius: 7px; background: #f2eeeb; }
 .segmented button { min-height: 36px; padding: 6px 11px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 850; cursor: pointer; white-space: nowrap; }
 .segmented button:hover { color: var(--ink); background: rgba(255,255,255,.65); }
 .segmented button.is-active { color: var(--ink); background: #fff; box-shadow: 0 1px 3px rgba(62, 43, 34, .12); }
+.segmented button.has-open-reminders { color: #7b4209; background: #fff4db; }
+.segmented button.has-open-reminders.is-active { color: #6a3503; background: #ffe8af; box-shadow: inset 0 0 0 1px #d99728; }
 .segmented button span { display: inline-grid; place-items: center; min-width: 20px; height: 20px; margin-left: 3px; border-radius: 50%; color: #fff; background: var(--coral); font-size: 11px; }
 .roster-search { min-width: 230px; max-width: 360px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 5px; padding: 3px 3px 3px 10px; border: 1px solid #cfbfb5; border-radius: 7px; background: #fff; }
 .roster-search > svg { color: var(--muted); }
@@ -427,8 +447,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .roster-step:hover { background: var(--teal-soft); }
 .roster-step:disabled { color: #b8afaa; background: #f4f0ee; cursor: not-allowed; }
 .roster-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
-.roster-mobile-list { display: none; }
-.roster-note { display: flex; align-items: center; gap: 6px; margin-top: 10px; color: #865b0a; font-size: 13px; }
+.roster-mobile-list { display: none; min-width: 0; max-width: 100%; }
+.roster-note { min-width: 0; display: flex; align-items: center; gap: 6px; margin-top: 10px; color: #865b0a; font-size: 13px; overflow-wrap: anywhere; }
 .roster-history, .roster-reminders { display: grid; }
 .roster-history-row { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 11px; padding: 15px 18px; border-bottom: 1px solid var(--line); }
 .roster-history-row:last-child, .roster-reminder-row:last-child { border-bottom: 0; }
@@ -437,11 +457,16 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .roster-history-row p { margin: 5px 0 0; line-height: 1.45; }
 .roster-history-row small { display: block; margin-top: 5px; color: var(--muted); }
 .count-change { flex: 0 0 auto; color: var(--teal); font-weight: 900; font-variant-numeric: tabular-nums; }
-.roster-reminder-row { min-height: 72px; display: grid; grid-template-columns: 42px minmax(0, 1fr) auto 36px; align-items: center; gap: 11px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+.roster-reminder-row { min-width: 0; min-height: 76px; display: grid; grid-template-columns: 42px minmax(0, 1fr) auto 36px; align-items: center; gap: 11px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+.roster-reminder-row.is-open { background: #fffaf0; box-shadow: inset 4px 0 #dfa12d; }
+.roster-reminder-row.is-overdue { background: #fff0ee; box-shadow: inset 5px 0 var(--danger); }
+.roster-reminder-copy { min-width: 0; }
 .roster-reminder-row strong, .roster-reminder-row small { display: block; }
+.roster-reminder-row strong, .roster-reminder-row small { overflow-wrap: anywhere; }
 .roster-reminder-row small { margin-top: 4px; color: var(--muted); }
 .roster-reminder-row.is-done strong { color: var(--muted); text-decoration: line-through; }
-.roster-check { width: 42px; height: 42px; display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--teal); cursor: pointer; }
+.roster-check { width: 42px; height: 42px; display: grid; place-items: center; padding: 0; border: 1px solid #d8cbc4; border-radius: 50%; background: #fff; color: var(--teal); cursor: pointer; }
+.roster-reminder-row.is-overdue .roster-check { border-color: #dfa5a0; color: var(--danger); }
 .roster-check:disabled { opacity: .5; cursor: not-allowed; }
 .roster-sync-note { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 10px; color: var(--muted); font-size: 12px; }
 .readonly-field { min-height: 58px; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
@@ -493,25 +518,33 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .mobile-nav .nav-button { min-height: 52px; flex-direction: column; justify-content: center; gap: 3px; padding: 4px 2px; border-radius: 6px; font-size: 11px; text-align: center; }
   .mobile-nav .nav-button.is-active { box-shadow: inset 0 3px var(--coral); }
   .mobile-nav .nav-button:nth-child(n+6) { display: none; }
-  .main { padding-bottom: 96px; }
+  .main { padding-bottom: 36px; }
+  .app-shell.has-mobile-nav .main { padding-bottom: 96px; }
   .evaluation-layout { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 860px) {
   .roster-desktop { display: none; }
   .roster-mobile-list { display: block; }
-  .roster-mobile-row { padding: 15px 14px; border-bottom: 1px solid var(--line); }
+  .roster-mobile-row { width: 100%; min-width: 0; max-width: 100%; padding: 15px 14px; overflow: hidden; border-bottom: 1px solid var(--line); }
   .roster-mobile-row:last-child { border-bottom: 0; }
   .roster-mobile-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
   .roster-mobile-head > div { min-width: 0; }
+  .roster-mobile-copy { flex: 1 1 auto; }
   .roster-mobile-head strong, .roster-mobile-head small { display: block; overflow-wrap: anywhere; }
   .roster-mobile-head strong { line-height: 1.45; }
   .roster-mobile-head small { margin-top: 4px; color: var(--muted); font-size: 12px; }
+  .roster-class-code { display: block; margin-bottom: 3px; color: var(--teal); font-size: 12px; font-weight: 950; }
   .roster-mobile-status { min-width: 0; display: flex; align-items: flex-end; flex: 0 0 auto; flex-direction: column; gap: 6px; }
   .roster-mobile-head .badge { flex: 0 0 auto; }
   .roster-mobile-status .roster-recruitment-badge { margin-top: 0; }
-  .roster-mobile-row.is-low-enrollment { background: #fffaf0; box-shadow: inset 4px 0 var(--yellow); }
-  .roster-mobile-actions { display: grid; grid-template-columns: 132px minmax(0, 1fr) 42px 42px; align-items: center; gap: 7px; margin-top: 13px; }
+  .roster-mobile-row.is-low-enrollment { background: #fff5d9; box-shadow: inset 5px 0 #d99a1e; }
+  .roster-mobile-row.is-low-enrollment .roster-count-control { border-color: #d99a1e; }
+  .roster-mobile-actions { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 13px; padding-top: 12px; border-top: 1px solid rgba(130, 100, 83, .14); }
+  .roster-mobile-count { min-width: 0; display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; font-weight: 850; }
+  .roster-mobile-count > span { flex: 0 0 auto; }
+  .roster-mobile-buttons { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
+  .roster-reminder-action { min-width: 76px; }
 }
 
 @media (max-width: 680px) {
@@ -560,14 +593,37 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .roster-toolbar { align-items: stretch; flex-direction: column; }
   .roster-filter-group { width: 100%; align-items: stretch; flex-direction: column; }
   .roster-filter-group .segmented, .roster-view-tabs { width: 100%; }
-  .roster-search { width: 100%; max-width: none; }
-  .roster-mobile-actions { display: grid; grid-template-columns: 132px minmax(0, 1fr) 42px 42px; align-items: center; gap: 7px; margin-top: 13px; }
+  .roster-search { width: 100%; min-width: 0; max-width: none; }
+  .roster-mobile-head { align-items: stretch; flex-direction: column; }
+  .roster-mobile-status { width: 100%; align-items: center; flex: 1 1 auto; flex-direction: row; flex-wrap: wrap; }
+  .roster-mobile-actions { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: 10px; }
+  .roster-mobile-count { width: 100%; justify-content: space-between; }
+  .roster-mobile-buttons { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 42px; }
+  .roster-reminder-action { width: 100%; }
   .roster-history-row { padding: 14px; }
   .roster-history-title { align-items: flex-start; flex-direction: column; gap: 5px; }
-  .roster-reminder-row { grid-template-columns: 42px minmax(0, 1fr) 36px; padding: 12px 14px; }
+  .roster-reminder-summary { grid-template-columns: 38px minmax(0, 1fr) 32px 16px; gap: 8px; padding: 11px 10px; }
+  .roster-reminder-summary-icon { width: 38px; height: 38px; }
+  .roster-reminder-row { grid-template-columns: 42px minmax(0, 1fr) 36px; padding: 13px 12px; }
   .roster-reminder-row > .badge { grid-column: 2; justify-self: start; }
   .roster-reminder-row > .button { grid-column: 3; grid-row: 1 / span 2; }
   .readonly-field { align-items: flex-start; flex-direction: column; }
+}
+
+@media (max-width: 360px) {
+  .main { padding-right: 9px; padding-left: 9px; }
+  .roster-page > .page-head .page-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .roster-page > .page-head .page-actions > .button { width: 100%; min-width: 0; padding-right: 8px; padding-left: 8px; }
+  .roster-campus-overview { grid-template-columns: 1fr; }
+  .roster-campus-card:first-child { grid-column: auto; }
+  .roster-campus-card { min-height: 96px; }
+  .segmented { grid-auto-columns: minmax(0, 1fr); }
+  .segmented button { min-width: 0; padding-right: 7px; padding-left: 7px; }
+  .roster-reminder-summary { grid-template-columns: 36px minmax(0, 1fr) 30px; }
+  .roster-reminder-summary-icon { width: 36px; height: 36px; }
+  .roster-reminder-summary > svg { display: none; }
+  .roster-reminder-row { grid-template-columns: 38px minmax(0, 1fr) 34px; gap: 8px; padding-right: 9px; padding-left: 9px; }
+  .roster-check { width: 38px; height: 38px; }
 }
 
 @media print {

@@ -604,8 +604,9 @@
 
   function renderTopbar() {
     const initial = String(currentUser.nickname || '?').replace(/老師|主管/g, '').slice(0, 2);
+    const workspaceTitle = isRosterOnly ? '班級人數管理' : isManager ? '行政美宣主管工作台' : '行政美宣工作台';
     return `<header class="topbar">
-      <div class="brand"><img src="../../shared/icons/logo.png" alt="布拉克星球 Logo"><div class="brand-copy"><strong>布拉克星球KPI系統</strong><span>行政美宣工作台</span></div></div>
+      <div class="brand"><img src="../../shared/icons/logo.png" alt="布拉克星球 Logo"><div class="brand-copy"><strong>布拉克星球KPI系統</strong><span>${esc(workspaceTitle)}</span></div></div>
       <div class="save-state" id="save-state">${icon(cloud.status === 'error' ? 'cloud-off' : 'cloud', 14)}<span>${esc(cloud.message)}</span></div>
       <button type="button" class="profile-button" data-action="profile" aria-label="帳號與工作切換" title="帳號與工作切換">${esc(initial)}</button>
     </header>`;
@@ -616,6 +617,7 @@
   }
   function renderMobileNav() {
     const items = NAV[workspace.role];
+    if (items.length <= 1) return '';
     const visible = items.slice(0, 4);
     const more = items.length > 4 ? `<button type="button" class="nav-button ${items.slice(4).some(item => item.route === state.ui.route) ? 'is-active' : ''}" data-action="more-nav">${icon('menu')}<span>更多</span></button>` : '';
     return `<nav class="mobile-nav" aria-label="主要功能" style="--mobile-nav-count:${visible.length + (more ? 1 : 0)}">${visible.map(item => `<button type="button" class="nav-button ${state.ui.route === item.route ? 'is-active' : ''}" data-route="${item.route}">${icon(item.icon)}<span>${esc(item.label)}</span></button>`).join('')}${more}</nav>`;
@@ -917,7 +919,20 @@
       if (!query) return true;
       return [item.code, item.course, item.teacher, item.weekday, item.note]
         .some(value => String(value || '').toLowerCase().includes(query));
-    });
+    }).sort(compareClassRosterItems);
+  }
+  function compareClassRosterItems(a, b) {
+    const campusOrder = ['北區', '東橋'];
+    const weekdayOrder = '一二三四五六日'.split('');
+    const rank = (value, order) => {
+      const index = order.indexOf(String(value || ''));
+      return index < 0 ? order.length : index;
+    };
+    return rank(a.campus, campusOrder) - rank(b.campus, campusOrder)
+      || rank(a.weekday, weekdayOrder) - rank(b.weekday, weekdayOrder)
+      || String(a.start || '').localeCompare(String(b.start || ''))
+      || String(a.end || '').localeCompare(String(b.end || ''))
+      || String(a.code || '').localeCompare(String(b.code || ''), 'zh-Hant-TW', { numeric: true });
   }
   function classRosterNeedsRecruitment(item) {
     return Number(item?.count || 0) < 4;
@@ -942,11 +957,11 @@
     if (!items.length) return emptyState('search-x', '找不到符合的班級', '請調整分校或搜尋條件。', '<button class="button small" data-action="clear-class-filter">清除搜尋</button>');
     const desktopRows = items.map(item => {
       const needsRecruitment = classRosterNeedsRecruitment(item);
-      return `<tr class="${needsRecruitment ? 'is-low-enrollment' : ''}" data-testid="class-row-${esc(item.code)}"><td><strong>${esc(item.code)}</strong><small>${esc(item.campus)}</small>${needsRecruitment ? `<span class="roster-recruitment-badge">${icon('triangle-alert', 13)}招生關注</span>` : ''}</td><td><strong>${esc(item.course)}</strong><small>${esc(item.teacher)}${item.note ? ` · ${esc(item.note)}` : ''}</small></td><td>週${esc(item.weekday)}<small>${esc(item.start)}–${esc(item.end)}</small></td><td>${renderClassCountControl(item)}</td><td><div class="roster-row-actions"><button type="button" class="button icon-only small" data-action="open-class-reminder" data-id="${esc(item.id)}" aria-label="新增 ${esc(item.code)} 提醒" title="新增提醒">${icon('bell-plus', 16)}</button><button type="button" class="button icon-only small" data-action="open-class-editor" data-id="${esc(item.id)}" aria-label="編輯 ${esc(item.code)}" title="編輯班級">${icon('pencil', 16)}</button></div></td></tr>`;
+      return `<tr class="${needsRecruitment ? 'is-low-enrollment' : ''}" data-testid="class-row-${esc(item.code)}" data-campus="${esc(item.campus)}" data-weekday="${esc(item.weekday)}" data-start="${esc(item.start)}"><td><strong>${esc(item.code)}</strong><small>${esc(item.campus)}</small>${needsRecruitment ? `<span class="roster-recruitment-badge">${icon('triangle-alert', 13)}招生關注</span>` : ''}</td><td><strong>${esc(item.course)}</strong><small>${esc(item.teacher)}${item.note ? ` · ${esc(item.note)}` : ''}</small></td><td>週${esc(item.weekday)}<small>${esc(item.start)}–${esc(item.end)}</small></td><td>${renderClassCountControl(item)}</td><td><div class="roster-row-actions"><button type="button" class="button icon-only small" data-action="open-class-reminder" data-id="${esc(item.id)}" aria-label="新增 ${esc(item.code)} 提醒" title="新增提醒">${icon('bell-plus', 16)}</button><button type="button" class="button icon-only small" data-action="open-class-editor" data-id="${esc(item.id)}" aria-label="編輯 ${esc(item.code)}" title="編輯班級">${icon('pencil', 16)}</button></div></td></tr>`;
     }).join('');
     const mobileRows = items.map(item => {
       const needsRecruitment = classRosterNeedsRecruitment(item);
-      return `<article class="roster-mobile-row ${needsRecruitment ? 'is-low-enrollment' : ''}" data-testid="mobile-class-row-${esc(item.code)}"><div class="roster-mobile-head"><div><strong>${esc(item.code)} · ${esc(item.course)}</strong><small>${esc(item.campus)} · ${esc(item.teacher)}</small></div><div class="roster-mobile-status"><span class="badge">週${esc(item.weekday)} ${esc(item.start)}–${esc(item.end)}</span>${needsRecruitment ? `<span class="roster-recruitment-badge">${icon('triangle-alert', 13)}招生關注</span>` : ''}</div></div>${item.note ? `<div class="roster-note">${icon('circle-alert', 14)}${esc(item.note)}</div>` : ''}<div class="roster-mobile-actions">${renderClassCountControl(item)}<span></span><button type="button" class="button icon-only" data-action="open-class-reminder" data-id="${esc(item.id)}" aria-label="新增 ${esc(item.code)} 提醒" title="新增提醒">${icon('bell-plus', 17)}</button><button type="button" class="button icon-only" data-action="open-class-editor" data-id="${esc(item.id)}" aria-label="編輯 ${esc(item.code)}" title="編輯班級">${icon('pencil', 17)}</button></div></article>`;
+      return `<article class="roster-mobile-row ${needsRecruitment ? 'is-low-enrollment' : ''}" data-testid="mobile-class-row-${esc(item.code)}" data-campus="${esc(item.campus)}" data-weekday="${esc(item.weekday)}" data-start="${esc(item.start)}"><div class="roster-mobile-head"><div class="roster-mobile-copy"><span class="roster-class-code">${esc(item.code)}</span><strong>${esc(item.course)}</strong><small>${esc(item.campus)} · ${esc(item.teacher)}</small></div><div class="roster-mobile-status"><span class="badge">週${esc(item.weekday)} ${esc(item.start)}–${esc(item.end)}</span>${needsRecruitment ? `<span class="roster-recruitment-badge">${icon('triangle-alert', 13)}招生關注</span>` : ''}</div></div>${item.note ? `<div class="roster-note">${icon('circle-alert', 14)}${esc(item.note)}</div>` : ''}<div class="roster-mobile-actions"><div class="roster-mobile-count"><span>正式人數</span>${renderClassCountControl(item)}</div><div class="roster-mobile-buttons"><button type="button" class="button small roster-reminder-action" data-action="open-class-reminder" data-id="${esc(item.id)}" aria-label="新增 ${esc(item.code)} 提醒" title="新增提醒">${icon('bell-plus', 17)}<span>提醒</span></button><button type="button" class="button icon-only" data-action="open-class-editor" data-id="${esc(item.id)}" aria-label="編輯 ${esc(item.code)}" title="編輯班級">${icon('pencil', 17)}</button></div></div></article>`;
     }).join('');
     const desktop = `<div class="roster-desktop table-scroll"><table class="data-table roster-table"><thead><tr><th>班級</th><th>課程與老師</th><th>上課時間</th><th>正式人數</th><th><span class="visually-hidden">操作</span></th></tr></thead><tbody>${desktopRows}</tbody></table></div>`;
     const mobile = `<div class="roster-mobile-list">${mobileRows}</div>`;
@@ -973,17 +988,18 @@
       if (state.ui.classCampus !== 'all' && item.campus !== state.ui.classCampus) return false;
       return !query || [item.code, item.course, reminder.title, reminder.createdBy]
         .some(value => String(value || '').toLowerCase().includes(query));
-    });
+    }).sort((a, b) => Number(Boolean(a.done)) - Number(Boolean(b.done))
+      || String(a.dueDate || '9999-12-31').localeCompare(String(b.dueDate || '9999-12-31'))
+      || String(a.title || '').localeCompare(String(b.title || ''), 'zh-Hant-TW'));
     if (!items.length) return emptyState('bell-off', '目前沒有提醒', '可從班級列表的鈴鐺按鈕新增待確認事項。');
     return `<div class="roster-reminders">${items.map(reminder => {
       const item = classes.find(entry => entry.id === reminder.classId) || {};
       const overdue = !reminder.done && reminder.dueDate && reminder.dueDate < todayIso();
-      return `<article class="roster-reminder-row ${reminder.done ? 'is-done' : ''}"><button type="button" class="roster-check" data-action="toggle-class-reminder" data-id="${esc(reminder.id)}" data-done="${reminder.done ? 'false' : 'true'}" aria-label="${reminder.done ? '重新開啟' : '完成'}提醒" title="${reminder.done ? '重新開啟' : '標示完成'}" ${classRosterBusy ? 'disabled' : ''}>${icon(reminder.done ? 'circle-check-big' : 'circle', 22)}</button><div><strong>${esc(reminder.title)}</strong><small>${esc(item.code || '班級')} · ${esc(item.course || '')}</small></div><span class="badge ${reminder.done ? 'success' : overdue ? 'danger' : 'warning'}">${reminder.done ? '已完成' : overdue ? '已逾期' : formatDate(reminder.dueDate)}</span><button type="button" class="button icon-only small danger" data-action="delete-class-reminder" data-id="${esc(reminder.id)}" aria-label="刪除提醒" title="刪除提醒" ${classRosterBusy ? 'disabled' : ''}>${icon('trash-2', 16)}</button></article>`;
+      return `<article class="roster-reminder-row ${reminder.done ? 'is-done' : overdue ? 'is-overdue' : 'is-open'}"><button type="button" class="roster-check" data-action="toggle-class-reminder" data-id="${esc(reminder.id)}" data-done="${reminder.done ? 'false' : 'true'}" aria-label="${reminder.done ? '重新開啟' : '完成'}提醒" title="${reminder.done ? '重新開啟' : '標示完成'}" ${classRosterBusy ? 'disabled' : ''}>${icon(reminder.done ? 'circle-check-big' : 'circle', 22)}</button><div class="roster-reminder-copy"><strong>${esc(reminder.title)}</strong><small>${esc(item.code || '班級')} · ${esc(item.course || '')}</small></div><span class="badge ${reminder.done ? 'success' : overdue ? 'danger' : 'warning'}">${reminder.done ? '已完成' : overdue ? `已逾期 · ${formatDate(reminder.dueDate)}` : `到期 ${formatDate(reminder.dueDate)}`}</span><button type="button" class="button icon-only small danger" data-action="delete-class-reminder" data-id="${esc(reminder.id)}" aria-label="刪除提醒" title="刪除提醒" ${classRosterBusy ? 'disabled' : ''}>${icon('trash-2', 16)}</button></article>`;
     }).join('')}</div>`;
   }
   function renderClassRosterPage() {
     const roster = classRosterData();
-    const openReminders = roster.reminders.filter(item => !item.done).length;
     const selectedView = ['classes', 'reminders', 'history'].includes(state.ui.classView) ? state.ui.classView : 'classes';
     const selectedCampus = ['all', '北區', '東橋'].includes(state.ui.classCampus) ? state.ui.classCampus : 'all';
     const campusOptions = [
@@ -992,15 +1008,21 @@
       { value: '東橋', label: '東橋', icon: 'map-pin' },
     ].map(option => ({ ...option, summary: classRosterSummary(option.value) }));
     const selectedSummary = campusOptions.find(option => option.value === selectedCampus) || campusOptions[0];
+    const campusClassIds = new Set(roster.classes.filter(item => selectedCampus === 'all' || item.campus === selectedCampus).map(item => item.id));
+    const openReminderItems = roster.reminders.filter(item => !item.done && campusClassIds.has(item.classId));
+    const openReminders = openReminderItems.length;
+    const overdueReminders = openReminderItems.filter(item => item.dueDate && item.dueDate < todayIso()).length;
+    const nearestReminderDate = openReminderItems.map(item => item.dueDate).filter(Boolean).sort()[0] || '';
     const viewContent = selectedView === 'history' ? renderClassRosterHistory() : selectedView === 'reminders' ? renderClassRosterReminders() : renderClassRosterClasses();
     const syncLabel = classRosterBusy ? '處理中' : PREVIEW_MODE ? '重設預覽' : '同步最新';
-    return `<section class="page roster-page">${pageHead('班級人數', '先選分校查看班級；少於 4 人列為招生關注，試上學生不計入', `<button class="button" data-action="refresh-class-roster" ${classRosterBusy ? 'disabled' : ''}>${icon('refresh-cw')}${syncLabel}</button><button class="button primary" data-action="open-class-editor" ${classRosterBusy ? 'disabled' : ''}>${icon('plus')}新增班級</button>`)}
+    return `<section class="page roster-page">${pageHead('班級人數', '先分校，再依星期與時間排列；少於 4 人列為招生關注，試上學生不計入人數', `<button class="button" data-action="refresh-class-roster" ${classRosterBusy ? 'disabled' : ''}>${icon('refresh-cw')}${syncLabel}</button><button class="button primary" data-action="open-class-editor" ${classRosterBusy ? 'disabled' : ''}>${icon('plus')}新增班級</button>`)}
       <div class="roster-campus-overview" data-testid="class-roster-stats" role="group" aria-label="分校人數總覽">
         ${campusOptions.map(option => `<button type="button" class="roster-campus-card ${selectedCampus === option.value ? 'is-active' : ''}" data-action="set-class-campus" data-campus="${esc(option.value)}" data-testid="class-campus-${esc(option.value)}" aria-pressed="${selectedCampus === option.value}"><span class="roster-campus-title"><span class="roster-campus-icon">${icon(option.icon, 18)}</span><span>${esc(option.label)}</span>${selectedCampus === option.value ? icon('check', 17) : ''}</span><span class="roster-campus-total"><strong>${option.summary.attendance}</strong><span>人</span></span><span class="roster-campus-meta">${option.summary.classes} 班 · ${option.summary.recruitment} 班招生關注</span></button>`).join('')}
       </div>
       <div class="roster-recruitment-summary ${selectedSummary.summary.recruitment ? 'has-warning' : ''}" data-testid="class-roster-recruitment-summary">${icon(selectedSummary.summary.recruitment ? 'triangle-alert' : 'circle-check-big', 18)}<div><strong>${esc(selectedSummary.label)}：${selectedSummary.summary.recruitment} 班少於 4 人</strong><span>${selectedSummary.summary.recruitment ? '建議優先安排招生與家長邀約' : '目前不需招生警示'}</span></div></div>
+      ${openReminders ? `<button type="button" class="roster-reminder-summary ${overdueReminders ? 'is-overdue' : ''}" data-action="open-class-reminders" data-testid="class-roster-reminder-summary"><span class="roster-reminder-summary-icon">${icon(overdueReminders ? 'alarm-clock' : 'bell-ring', 21)}</span><span class="roster-reminder-summary-copy"><strong>${esc(selectedSummary.label)}有 ${openReminders} 項提醒待處理</strong><span>${overdueReminders ? `其中 ${overdueReminders} 項已逾期，請優先確認` : `最近期限 ${formatDate(nearestReminderDate)}，完成後可直接勾選`}</span></span><span class="roster-reminder-summary-count">${openReminders}</span>${icon('chevron-right', 18)}</button>` : ''}
       ${roster.baseline?.status === 'pending_confirmation' ? `<div class="notice warning mt-16" data-testid="class-roster-baseline">${icon('triangle-alert')}<div><strong>初始人數需要人工確認</strong><br>${esc(roster.baseline.message || '系統保留既有異動，未自動覆蓋人數。')}</div></div>` : ''}
-      <section class="panel mt-16 roster-workspace"><div class="panel-head roster-toolbar"><form id="class-roster-search-form" class="roster-search" role="search"><label class="visually-hidden" for="class-roster-query">搜尋班級</label>${icon('search', 17)}<input id="class-roster-query" name="query" value="${esc(state.ui.classQuery || '')}" placeholder="搜尋代碼、課程或老師"><button type="submit" class="button icon-only small" aria-label="搜尋" title="搜尋">${icon('arrow-right', 16)}</button>${state.ui.classQuery ? `<button type="button" class="button icon-only small" data-action="clear-class-filter" aria-label="清除搜尋" title="清除搜尋">${icon('x', 16)}</button>` : ''}</form><div class="segmented roster-view-tabs" role="tablist" aria-label="資料檢視">${[['classes','班級'],['reminders','提醒'],['history','紀錄']].map(([value,label]) => `<button type="button" role="tab" data-action="set-class-view" data-view="${value}" class="${selectedView === value ? 'is-active' : ''}" aria-selected="${selectedView === value}">${esc(label)}${value === 'reminders' && openReminders ? ` <span>${openReminders}</span>` : ''}</button>`).join('')}</div></div><div class="panel-body flush" data-testid="class-roster-content">${viewContent}</div></section>
+      <section class="panel mt-16 roster-workspace"><div class="panel-head roster-toolbar"><form id="class-roster-search-form" class="roster-search" role="search"><label class="visually-hidden" for="class-roster-query">搜尋班級</label>${icon('search', 17)}<input id="class-roster-query" name="query" value="${esc(state.ui.classQuery || '')}" placeholder="搜尋代碼、課程或老師"><button type="submit" class="button icon-only small" aria-label="搜尋" title="搜尋">${icon('arrow-right', 16)}</button>${state.ui.classQuery ? `<button type="button" class="button icon-only small" data-action="clear-class-filter" aria-label="清除搜尋" title="清除搜尋">${icon('x', 16)}</button>` : ''}</form><div class="segmented roster-view-tabs" role="tablist" aria-label="資料檢視">${[['classes','班級'],['reminders','提醒'],['history','紀錄']].map(([value,label]) => `<button type="button" role="tab" data-action="set-class-view" data-view="${value}" class="${selectedView === value ? 'is-active' : ''}${value === 'reminders' && openReminders ? ' has-open-reminders' : ''}" aria-selected="${selectedView === value}">${esc(label)}${value === 'reminders' && openReminders ? ` <span>${openReminders}</span>` : ''}</button>`).join('')}</div></div><div class="panel-body flush" data-testid="class-roster-content">${viewContent}</div></section>
       <div class="roster-sync-note">${icon('cloud-check', 15)}<span>${PREVIEW_MODE ? '本機驗收資料' : `雲端已同步${roster.syncedAt ? ` · ${formatDateTime(roster.syncedAt)}` : ''}`}</span></div>
     </section>`;
   }
@@ -1199,7 +1221,9 @@
       hydrateIcons();
       return;
     }
-    $('#app').innerHTML = `${renderTopbar()}<div class="layout"><aside class="sidebar"><div class="sidebar-title">${esc(workspace.label)}工作區</div>${renderNav()}<div class="sidebar-foot">${window.KPI_WORKSPACES?.renderQuickSwitcher?.(currentUser, { currentId: workspaceId }) || ''}</div></aside><main class="main">${renderRoute()}</main></div>${renderMobileNav()}`;
+    const mobileNav = renderMobileNav();
+    $('#app').classList.toggle('has-mobile-nav', Boolean(mobileNav));
+    $('#app').innerHTML = `${renderTopbar()}<div class="layout"><aside class="sidebar"><div class="sidebar-title">${esc(workspace.label)}工作區</div>${renderNav()}<div class="sidebar-foot">${window.KPI_WORKSPACES?.renderQuickSwitcher?.(currentUser, { currentId: workspaceId }) || ''}</div></aside><main class="main">${renderRoute()}</main></div>${mobileNav}`;
     hydrateIcons();
     if (isManager && state.ui.route === 'cloud' && driveCloud.status === 'idle') {
       window.setTimeout(() => loadDriveFolders(), 0);
@@ -2083,6 +2107,12 @@
     else if (action === 'set-class-view') {
       state.ui.classView = actionNode.dataset.view || 'classes';
       persist('檢視已切換');
+      renderApp();
+    }
+    else if (action === 'open-class-reminders') {
+      state.ui.classView = 'reminders';
+      state.ui.classQuery = '';
+      persist('已開啟全部待處理提醒');
       renderApp();
     }
     else if (action === 'clear-class-filter') {

@@ -15,6 +15,11 @@ const tomorrow = (() => {
   value.setDate(value.getDate() + 1);
   return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(value);
 })();
+const yesterday = (() => {
+  const value = new Date(`${today}T12:00:00+08:00`);
+  value.setDate(value.getDate() - 1);
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(value);
+})();
 const talentPtTestDate = (() => {
   const [year, month] = today.split('-').map(Number);
   for (let day = 1; day <= 7; day += 1) {
@@ -219,6 +224,19 @@ async function adminWorkflow(browser) {
       (await page.locator('[data-testid="class-campus-all"]').innerText()).includes('156')
       && (await page.locator('[data-testid="class-campus-北區"]').innerText()).includes('82')
       && (await page.locator('[data-testid="class-campus-東橋"]').innerText()).includes('74'));
+    const visibleClassOrder = await page.locator('.roster-mobile-row').evaluateAll(rows => rows.map(row => ({
+      campus: row.dataset.campus, weekday: row.dataset.weekday, start: row.dataset.start,
+    })));
+    const campusRank = value => ['北區', '東橋'].indexOf(value);
+    const weekdayRank = value => '一二三四五六日'.indexOf(value);
+    const classOrderIsStable = visibleClassOrder.every((item, index) => {
+      if (!index) return true;
+      const previous = visibleClassOrder[index - 1];
+      if (campusRank(previous.campus) !== campusRank(item.campus)) return campusRank(previous.campus) < campusRank(item.campus);
+      if (weekdayRank(previous.weekday) !== weekdayRank(item.weekday)) return weekdayRank(previous.weekday) < weekdayRank(item.weekday);
+      return previous.start <= item.start;
+    });
+    check('班級先按北區、東橋分開，再依星期與時間排列', classOrderIsStable, JSON.stringify(visibleClassOrder));
     check('北區差額歸入北16後不再顯示待確認警告', await page.locator('[data-testid="class-roster-baseline"]').count() === 0);
     check('北16 已校正為 7 人', (await page.locator('[data-testid="class-count-北16"]').last().innerText()) === '7');
     check('少於 4 人的班級有圖示、文字與底色警示',
@@ -259,16 +277,28 @@ async function adminWorkflow(browser) {
     check('班級可依代碼搜尋且只留下符合項目', await page.locator('.roster-mobile-row').count() === 1);
     await page.locator('[data-action="open-class-reminder"]').filter({ visible: true }).click();
     await page.fill('#class-roster-reminder-form input[name="title"]', '確認新生正式入班');
-    await page.fill('#class-roster-reminder-form input[name="dueDate"]', tomorrow);
+    await page.fill('#class-roster-reminder-form input[name="dueDate"]', yesterday);
     await page.locator('#class-roster-reminder-form button[type="submit"]').click();
     await page.waitForTimeout(180);
     check('班級提醒可建立並自動切換到提醒頁', (await page.locator('[data-testid="class-roster-content"]').innerText()).includes('確認新生正式入班'));
+    check('待處理與逾期提醒會顯示整列強警示',
+      await page.locator('[data-testid="class-roster-reminder-summary"].is-overdue').count() === 1
+      && await page.locator('.roster-reminder-row.is-overdue').count() === 1
+      && (await page.locator('[data-testid="class-roster-reminder-summary"]').innerText()).includes('已逾期'));
+    await page.screenshot({ path: path.join(artifactDir, 'admin-class-roster-reminder-mobile.png'), fullPage: false });
+    await page.fill('#class-roster-query', '不存在的班級');
+    await page.locator('#class-roster-search-form button[type="submit"]').click();
+    check('搜尋無結果時仍保留總提醒入口', await page.locator('[data-testid="class-roster-reminder-summary"]').count() === 1);
+    await page.locator('[data-testid="class-roster-reminder-summary"]').click();
+    check('點總提醒會清除搜尋並顯示完整待辦',
+      await page.inputValue('#class-roster-query') === ''
+      && await page.locator('.roster-reminder-row.is-overdue').count() === 1);
     await page.locator('[data-action="toggle-class-reminder"]').click();
     await page.waitForTimeout(120);
     check('班級提醒可標示完成', (await page.locator('[data-testid="class-roster-content"]').innerText()).includes('已完成'));
+    check('提醒完成後待處理強警示會立即消失', await page.locator('[data-testid="class-roster-reminder-summary"]').count() === 0);
 
     await page.locator('[data-action="set-class-view"][data-view="classes"]').click();
-    await page.locator('[data-action="clear-class-filter"]').click();
     await clickAction(page, 'open-class-editor');
     await page.fill('#class-roster-editor-form input[name="code"]', '北QA');
     await page.fill('#class-roster-editor-form input[name="teacher"]', '測試老師');
@@ -277,8 +307,11 @@ async function adminWorkflow(browser) {
     await page.fill('#class-roster-editor-form input[name="count"]', '2');
     await page.locator('#class-roster-editor-form button[type="submit"]').click();
     await page.waitForTimeout(180);
-    check('新增班級可正常儲存並顯示', (await page.locator('body').innerText()).includes('北QA · 上市驗收班'));
     const qaClass = page.locator('[data-testid="mobile-class-row-北QA"]');
+    check('新增班級可正常儲存並顯示',
+      await qaClass.count() === 1
+      && (await qaClass.innerText()).includes('北QA')
+      && (await qaClass.innerText()).includes('上市驗收班'));
     await qaClass.locator('[data-action="open-class-editor"]').click();
     await page.fill('#class-roster-editor-form input[name="teacher"]', '更新老師');
     await page.locator('#class-roster-editor-form button[type="submit"]').click();
@@ -292,6 +325,25 @@ async function adminWorkflow(browser) {
     check('班級結束時間早於開始時間會被阻擋', await page.locator('#class-roster-editor-form').count() === 1 && (await page.locator('#toast-root').innerText()).includes('結束時間'));
     await page.locator('#dialog-root button[data-action="close-dialog"]').last().click();
     await page.waitForSelector('#dialog-root .dialog', { state: 'detached' });
+    for (const width of [320, 360, 390, 430]) {
+      await page.setViewportSize({ width, height: 844 });
+      const layout = await page.evaluate(() => {
+        const viewportWidth = document.documentElement.clientWidth;
+        const selectors = ['.roster-page', '.roster-campus-overview', '.roster-recruitment-summary', '.roster-workspace', '.roster-mobile-row'];
+        const escaped = selectors.flatMap(selector => Array.from(document.querySelectorAll(selector))).filter(node => {
+          if (node.offsetParent === null) return false;
+          const rect = node.getBoundingClientRect();
+          return rect.left < -1 || rect.right > viewportWidth + 1;
+        }).map(node => `${node.className}:${Math.round(node.getBoundingClientRect().left)}-${Math.round(node.getBoundingClientRect().right)}`);
+        return {
+          viewportWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+          escaped,
+        };
+      });
+      check(`班級人數 ${width}px 手機版無橫向跑版`, layout.scrollWidth <= layout.viewportWidth + 1 && layout.escaped.length === 0, JSON.stringify(layout));
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
     await pageHealth(page, label, 'class-roster-mobile');
     await page.screenshot({ path: path.join(artifactDir, 'admin-class-roster-mobile.png'), fullPage: true });
 
@@ -479,6 +531,8 @@ async function adminWorkflow(browser) {
     await waitForApp(liuding);
     const liudingRoutes = await liuding.evaluate(() => [...new Set(Array.from(document.querySelectorAll('[data-route]')).map(node => node.dataset.route).filter(Boolean))]);
     check('柳丁只看到班級人數，不會看到其他行政功能', liudingRoutes.length === 1 && liudingRoutes[0] === 'class-roster', liudingRoutes.join(','));
+    check('柳丁單一頁面不顯示佔滿底部的重複導覽', await liuding.locator('.mobile-nav').count() === 0);
+    check('柳丁頁首正確顯示班級人數管理', (await liuding.locator('.brand-copy').innerText()).includes('班級人數管理'));
     check('柳丁讀到行政剛建立的同一份班級資料', (await liuding.locator('body').innerText()).includes('北QA'));
     await clickAction(liuding, 'profile');
     const liudingSwitcher = await liuding.locator('#dialog-root').innerText();
@@ -967,7 +1021,12 @@ async function anqinWorkflow(browser) {
     check('安親完成條件後送出按鈕可用', await submit.isEnabled());
     await submit.click();
     await page.waitForTimeout(900);
-    check('安親送出後有明確成功提示', /已送出|送出完成|正式送出成功/.test(await page.locator('body').innerText()));
+    const submissionReceipt = page.locator('#dialog-root .dialog-box').last();
+    const submissionReceiptText = await submissionReceipt.count() ? await submissionReceipt.innerText() : '';
+    check('安親送出後有明確成功收據',
+      submissionReceiptText.includes('今日紀錄已成功送出')
+      && submissionReceiptText.includes('主管已可查看')
+      && submissionReceiptText.includes('待主管審查'), submissionReceiptText);
     const submittedParentData = await page.evaluate(() => {
       const log = Object.values(window.__KPI_QA_CLOUD__?.store?.logs || {})[0] || {};
       return { kpi5: log.kpi5_data || {}, snapshot: log.kpi6_data?.v2_snapshot || {} };

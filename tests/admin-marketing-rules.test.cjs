@@ -305,13 +305,13 @@ assert.match(workspacesCssSource, /@media \(max-width: 820px\)[\s\S]*\.workspace
 assert.match(workspacesCssSource, /\.workspace-quick-title \{[^}]*width: 100%;[^}]*flex: 0 0 auto;/, '手機工作身分標題高度需依內容決定');
 assert.match(workspacesCssSource, /grid-template-columns: repeat\(auto-fit, minmax\(136px, 1fr\)\)/, '手機三身分按鈕需保留可讀寬度');
 assert.match(uiHtmlSource, /workspaces\.css\?v=20260901-workspace-wrap-1/, '行政頁需載入防溢出的工作身分樣式');
-assert.match(uiHtmlSource, /styles\.css\?v=20260911-class-roster-3/, '班級人數版面需使用獨立快取版本');
-assert.match(uiHtmlSource, /app\.js\?v=20260911-class-roster-3/, '班級人數互動需使用獨立快取版本');
-assert.match(uiHtmlSource, /shared\/api\.js\?v=20260911-class-roster-3/, '行政頁需載入班級人數 API 版本');
+assert.match(uiHtmlSource, /styles\.css\?v=20260911-class-roster-4/, '班級人數版面需使用獨立快取版本');
+assert.match(uiHtmlSource, /app\.js\?v=20260911-class-roster-4/, '班級人數互動需使用獨立快取版本');
+assert.match(uiHtmlSource, /shared\/api\.js\?v=20260911-class-roster-4/, '行政頁需載入班級人數 API 版本');
 assert.match(uiHtmlSource, /shared\/workspaces\.js\?v=20260911-class-roster-access-1/, '工作切換需避開舊權限快取');
 assert.match(uiSource, /\['converted_half_year', '已報名半年'\]/, '試上結果需可選擇已報名半年');
 assert.match(uiSource, /result\?\.code === 'RECORD_CONFLICT'[\s\S]*result\.current_record[\s\S]*merged\.recordRevision/, '更新衝突需合併最新版後安全重試');
-assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=(?:admin-marketing|admin-marketing-manager|class-roster-manager)&v=20260911-class-roster-3/g) || []).length, 3, '行政、主管與班級人數入口都需避開舊版快取');
+assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=(?:admin-marketing|admin-marketing-manager|class-roster-manager)&v=20260911-class-roster-4/g) || []).length, 3, '行政、主管與班級人數入口都需避開舊版快取');
 assert.match(uiSource, /trialIdentity\(item\.studentName, trialContact\(item\), item\.course, item\.date\)/, '重複預約需依學生、課程與日期判定');
 assert.match(uiSource, /同一學生可登記不同課程/, '行政需清楚知道同一學生可登記多門試上課');
 assert.doesNotMatch(uiSource, /首報獎金至少要有一筆家長追蹤紀錄|新增一筆追蹤/, '首報不得強迫另建一筆重複的家長追蹤');
