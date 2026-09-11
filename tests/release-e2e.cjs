@@ -227,6 +227,8 @@ async function adminWorkflow(browser) {
     const visibleClassOrder = await page.locator('.roster-mobile-row').evaluateAll(rows => rows.map(row => ({
       campus: row.dataset.campus, weekday: row.dataset.weekday, start: row.dataset.start,
     })));
+    check('初次開啟僅顯示北區，總數不是混校清單入口', visibleClassOrder.length === 17 && visibleClassOrder.every(item => item.campus === '北區')
+      && await page.locator('[data-testid="class-campus-all"]').getAttribute('data-action') === null);
     const campusRank = value => ['北區', '東橋'].indexOf(value);
     const weekdayRank = value => '一二三四五六日'.indexOf(value);
     const classOrderIsStable = visibleClassOrder.every((item, index) => {
@@ -246,6 +248,14 @@ async function adminWorkflow(browser) {
     check('切換東橋後只顯示東橋 13 班',
       await page.locator('.roster-mobile-row').count() === 13
       && await page.locator('[data-testid="mobile-class-row-北01"]').count() === 0);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForApp(page);
+    check('重新開啟記住東橋且不混入北區', await page.locator('.roster-mobile-row').count() === 13
+      && await page.locator('.roster-mobile-row[data-campus="北區"]').count() === 0);
+    await page.fill('#class-roster-query', '找不到的課程');
+    await page.locator('#class-roster-search-form button[type="submit"]').click();
+    await page.locator('[data-testid="class-campus-東橋"]').click();
+    check('切換分校清除舊搜尋並顯示該校班級', await page.inputValue('#class-roster-query') === '' && await page.locator('.roster-mobile-row').count() === 13);
     await clickAction(page, 'open-class-editor');
     check('從東橋新增班級會自動帶入東橋', await page.inputValue('#class-roster-editor-form select[name="campus"]') === '東橋');
     await page.locator('#dialog-root button[data-action="close-dialog"]').last().click();

@@ -65,7 +65,7 @@
       shortLabel: '行政美宣',
       description: '行政日誌、美宣產出與期限追蹤',
       icon: 'megaphone',
-      path: 'review/admin-marketing-v1/index.html?workspace=admin-marketing&v=20260911-class-roster-4',
+      path: 'review/admin-marketing-v1/index.html?workspace=admin-marketing&v=20260912-campus-switch-1',
     },
     'admin-marketing-manager': {
       id: 'admin-marketing-manager',
@@ -74,7 +74,7 @@
       shortLabel: '行政美宣主管',
       description: '期限管理、週 KPI 與主管評核',
       icon: 'clipboard-list',
-      path: 'review/admin-marketing-v1/index.html?workspace=admin-marketing-manager&v=20260911-class-roster-4',
+      path: 'review/admin-marketing-v1/index.html?workspace=admin-marketing-manager&v=20260912-campus-switch-1',
     },
     'class-roster-manager': {
       id: 'class-roster-manager',
@@ -83,7 +83,7 @@
       shortLabel: '班級人數',
       description: '北區與東橋班級人數、提醒及異動紀錄',
       icon: 'users-round',
-      path: 'review/admin-marketing-v1/index.html?workspace=class-roster-manager&v=20260911-class-roster-4',
+      path: 'review/admin-marketing-v1/index.html?workspace=class-roster-manager&v=20260912-campus-switch-1',
     },
   };
 

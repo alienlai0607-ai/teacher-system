@@ -284,7 +284,7 @@
   function createSeed() {
     return {
       version: APP_VERSION,
-      ui: { route: workspace.start, month: currentMonth(), performanceMonth: '', evaluationMonth: '', trialStatus: 'all', classCampus: 'all', classView: 'classes', classQuery: '', lastSavedAt: '' },
+      ui: { route: workspace.start, month: currentMonth(), performanceMonth: '', evaluationMonth: '', trialStatus: 'all', classCampus: '北區', classView: 'classes', classQuery: '', lastSavedAt: '' },
       records: [],
       users: isRosterOnly ? [] : [STAFF[0]],
       settings: { supervisor: '小魚', videoWeeklyTarget: 2, photoWeeklyTarget: 3, trialBonusAmount: TRIAL_BONUS_AMOUNT, kpi: KPI },
@@ -1001,23 +1001,24 @@
   function renderClassRosterPage() {
     const roster = classRosterData();
     const selectedView = ['classes', 'reminders', 'history'].includes(state.ui.classView) ? state.ui.classView : 'classes';
-    const selectedCampus = ['all', '北區', '東橋'].includes(state.ui.classCampus) ? state.ui.classCampus : 'all';
+    const selectedCampus = state.ui.classCampus === '東橋' ? '東橋' : '北區';
+    state.ui.classCampus = selectedCampus;
     const campusOptions = [
-      { value: 'all', label: '全校總覽', icon: 'building-2' },
+      { value: 'all', label: '全校總人數', icon: 'building-2' },
       { value: '北區', label: '北區', icon: 'map-pin' },
       { value: '東橋', label: '東橋', icon: 'map-pin' },
     ].map(option => ({ ...option, summary: classRosterSummary(option.value) }));
     const selectedSummary = campusOptions.find(option => option.value === selectedCampus) || campusOptions[0];
-    const campusClassIds = new Set(roster.classes.filter(item => selectedCampus === 'all' || item.campus === selectedCampus).map(item => item.id));
+    const campusClassIds = new Set(roster.classes.filter(item => item.campus === selectedCampus).map(item => item.id));
     const openReminderItems = roster.reminders.filter(item => !item.done && campusClassIds.has(item.classId));
     const openReminders = openReminderItems.length;
     const overdueReminders = openReminderItems.filter(item => item.dueDate && item.dueDate < todayIso()).length;
     const nearestReminderDate = openReminderItems.map(item => item.dueDate).filter(Boolean).sort()[0] || '';
     const viewContent = selectedView === 'history' ? renderClassRosterHistory() : selectedView === 'reminders' ? renderClassRosterReminders() : renderClassRosterClasses();
     const syncLabel = classRosterBusy ? '處理中' : PREVIEW_MODE ? '重設預覽' : '同步最新';
-    return `<section class="page roster-page">${pageHead('班級人數', '先分校，再依星期與時間排列；少於 4 人列為招生關注，試上學生不計入人數', `<button class="button" data-action="refresh-class-roster" ${classRosterBusy ? 'disabled' : ''}>${icon('refresh-cw')}${syncLabel}</button><button class="button primary" data-action="open-class-editor" ${classRosterBusy ? 'disabled' : ''}>${icon('plus')}新增班級</button>`)}
+    return `<section class="page roster-page">${pageHead('班級人數', '正式上課人數 · 試上學生不計入', `<button class="button" data-action="refresh-class-roster" ${classRosterBusy ? 'disabled' : ''}>${icon('refresh-cw')}${syncLabel}</button><button class="button primary" data-action="open-class-editor" ${classRosterBusy ? 'disabled' : ''}>${icon('plus')}新增班級</button>`)}
       <div class="roster-campus-overview" data-testid="class-roster-stats" role="group" aria-label="分校人數總覽">
-        ${campusOptions.map(option => `<button type="button" class="roster-campus-card ${selectedCampus === option.value ? 'is-active' : ''}" data-action="set-class-campus" data-campus="${esc(option.value)}" data-testid="class-campus-${esc(option.value)}" aria-pressed="${selectedCampus === option.value}"><span class="roster-campus-title"><span class="roster-campus-icon">${icon(option.icon, 18)}</span><span>${esc(option.label)}</span>${selectedCampus === option.value ? icon('check', 17) : ''}</span><span class="roster-campus-total"><strong>${option.summary.attendance}</strong><span>人</span></span><span class="roster-campus-meta">${option.summary.classes} 班 · ${option.summary.recruitment} 班招生關注</span></button>`).join('')}
+        ${campusOptions.map(option => `<${option.value === 'all' ? 'div' : 'button type="button"'} class="roster-campus-card ${selectedCampus === option.value ? 'is-active' : ''}" ${option.value === 'all' ? '' : 'data-action="set-class-campus"'} data-campus="${esc(option.value)}" data-testid="class-campus-${esc(option.value)}" ${option.value === 'all' ? '' : `aria-pressed="${selectedCampus === option.value}"`}><span class="roster-campus-title"><span class="roster-campus-icon">${icon(option.icon, 18)}</span><span>${esc(option.label)}</span>${selectedCampus === option.value ? icon('check', 17) : ''}</span><span class="roster-campus-total"><strong>${option.summary.attendance}</strong><span>人</span></span><span class="roster-campus-meta">${option.summary.classes} 班 · ${option.summary.recruitment} 班招生關注</span></${option.value === 'all' ? 'div' : 'button'}>`).join('')}
       </div>
       <div class="roster-recruitment-summary ${selectedSummary.summary.recruitment ? 'has-warning' : ''}" data-testid="class-roster-recruitment-summary">${icon(selectedSummary.summary.recruitment ? 'triangle-alert' : 'circle-check-big', 18)}<div><strong>${esc(selectedSummary.label)}：${selectedSummary.summary.recruitment} 班少於 4 人</strong><span>${selectedSummary.summary.recruitment ? '建議優先安排招生與家長邀約' : '目前不需招生警示'}</span></div></div>
       ${openReminders ? `<button type="button" class="roster-reminder-summary ${overdueReminders ? 'is-overdue' : ''}" data-action="open-class-reminders" data-testid="class-roster-reminder-summary"><span class="roster-reminder-summary-icon">${icon(overdueReminders ? 'alarm-clock' : 'bell-ring', 21)}</span><span class="roster-reminder-summary-copy"><strong>${esc(selectedSummary.label)}有 ${openReminders} 項提醒待處理</strong><span>${overdueReminders ? `其中 ${overdueReminders} 項已逾期，請優先確認` : `最近期限 ${formatDate(nearestReminderDate)}，完成後可直接勾選`}</span></span><span class="roster-reminder-summary-count">${openReminders}</span>${icon('chevron-right', 18)}</button>` : ''}
@@ -2100,8 +2101,10 @@
     else if (action === 'open-class-adjust') openClassAdjustment(actionNode.dataset.id || '', actionNode.dataset.delta || '');
     else if (action === 'open-class-reminder') openClassReminder(actionNode.dataset.id || '');
     else if (action === 'set-class-campus') {
-      state.ui.classCampus = actionNode.dataset.campus || 'all';
-      persist('館別篩選已更新');
+      state.ui.classCampus = actionNode.dataset.campus === '東橋' ? '東橋' : '北區';
+      state.ui.classQuery = '';
+      state.ui.classView = 'classes';
+      persist('分校已切換');
       renderApp();
     }
     else if (action === 'set-class-view') {

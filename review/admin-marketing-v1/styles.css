@@ -389,6 +389,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .roster-campus-overview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .roster-campus-card { min-width: 0; min-height: 126px; display: grid; align-content: space-between; gap: 8px; padding: 15px 17px; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--ink); text-align: left; box-shadow: var(--shadow); cursor: pointer; }
 .roster-campus-card:hover { border-color: #c9b7ad; background: #fffaf7; }
+.roster-campus-card[data-campus="all"] { cursor: default; box-shadow: none; }
+.roster-campus-card[data-campus="all"]:hover { border-color: var(--line); background: var(--paper); }
 .roster-campus-card.is-active { border-color: var(--teal); background: #f4fbf9; box-shadow: inset 0 3px var(--teal), var(--shadow); }
 .roster-campus-title { min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; font-weight: 900; }
 .roster-campus-title > span:not(.roster-campus-icon), .roster-campus-meta { min-width: 0; overflow-wrap: anywhere; }
