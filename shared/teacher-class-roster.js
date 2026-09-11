@@ -16,7 +16,7 @@
   function accept(result) {
     if (!result?.ok || result.scope !== 'own' || !Array.isArray(result.classes)) throw new Error(result?.error || '班級資料尚未開通，請聯絡主管');
     if (result.classes.some(item => key(item.teacher) !== key(owner))) throw new Error('班級帳號對應異常，請聯絡主管');
-    classes = own(result.classes);
+    classes = own(result.classes).map(window.RosterTime.item);
     if (!classes.some(item => item.campus === campus)) campus = classes[0]?.campus || '北區';
     status = 'ready'; fetchedAt = Date.now();
   }

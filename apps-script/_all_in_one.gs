@@ -7629,11 +7629,22 @@ function classRosterDateTimeCell_(value) {
   return String(value || '');
 }
 
+function classRosterTimeCell_(value) {
+  if (Object.prototype.toString.call(value) === '[object Date]') {
+    return isNaN(value.getTime()) ? '' : Utilities.formatDate(value, 'Asia/Taipei', 'HH:mm');
+  }
+  const text = String(value == null ? '' : value).trim();
+  const clock = text.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/)
+    || text.match(/^[A-Za-z]{3} [A-Za-z]{3} \d{2} \d{4} (\d{2}):(\d{2}):\d{2} GMT[+-]\d{4}(?: \(.*\))?$/);
+  if (clock && Number(clock[1]) < 24 && Number(clock[2]) < 60) return ('0' + clock[1]).slice(-2) + ':' + clock[2];
+  return '';
+}
+
 function classRosterClassObject_(row) {
   return {
     id: String(row.class_id || ''), code: String(row.code || ''), campus: String(row.campus || ''),
     teacher: String(row.teacher || ''), weekday: String(row.weekday || ''), course: String(row.course || ''),
-    start: String(row.start_time || ''), end: String(row.end_time || ''), count: Number(row.student_count || 0),
+    start: classRosterTimeCell_(row.start_time), end: classRosterTimeCell_(row.end_time), count: Number(row.student_count || 0),
     note: String(row.note || ''), active: row.active === true || String(row.active).toLowerCase() === 'true',
     version: Math.max(1, Number(row.version || 1)), importBatch: String(row.import_batch || ''),
     createdBy: String(row.created_by || ''), updatedBy: String(row.updated_by || ''),

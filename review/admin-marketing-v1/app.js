@@ -887,6 +887,7 @@
 
   function classRosterData() {
     if (!state.classRoster || !Array.isArray(state.classRoster.classes)) state.classRoster = createClassRosterSeed();
+    state.classRoster.classes = state.classRoster.classes.map(window.RosterTime.item);
     return state.classRoster;
   }
   function applyClassRosterSnapshot(snapshot) {

@@ -15,6 +15,29 @@ fs.mkdirSync(dir, { recursive: true });
     await admin.locator('[data-testid="class-campus-北區"]').click();
     const rosterSeed = await admin.evaluate(() => JSON.parse(localStorage.getItem('bp_admin_marketing_v1_shared')));
     assert.equal(rosterSeed.classRoster.classes.length, 30);
+    await admin.evaluate(() => {
+      const shared = JSON.parse(localStorage.getItem('bp_admin_marketing_v1_shared'));
+      shared.classRoster.classes.forEach(item => {
+        item.start = `Sat Dec 30 1899 ${item.start}:00 GMT+0800 (台北標準時間)`;
+        item.end = `Sat Dec 30 1899 ${item.end}:00 GMT+0800 (台北標準時間)`;
+      });
+      localStorage.setItem('bp_admin_marketing_v1_shared', JSON.stringify(shared));
+    });
+    await admin.reload();
+    for (const width of [320, 390, 600, 768, 820, 860, 1024, 1440]) {
+      await admin.setViewportSize({ width, height: 900 });
+      assert.equal(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+      assert.equal((await admin.locator('body').innerText()).includes('1899'), false);
+      if (width <= 860) {
+        const box = await admin.locator('.roster-mobile-copy').first().boundingBox();
+        assert.ok(box.width > 180, `Course title squeezed at ${width}: ${box.width}`);
+        const head = await admin.locator('.roster-mobile-head').first().boundingBox();
+        assert.ok(head.height < 220, `Unexpected vertical stacking at ${width}: ${head.height}`);
+      }
+    }
+    await admin.setViewportSize({ width: 820, height: 900 });
+    await admin.screenshot({ path: dir + '/legacy-time-820.png' });
+    await admin.setViewportSize({ width: 390, height: 844 });
     const teacher = await context.newPage();
     await teacher.goto(base + '/review/talent-v2/index.html?workspace=talent-fulltime&reviewUser=RITA老師');
     const rows = teacher.locator('[data-own-class]');

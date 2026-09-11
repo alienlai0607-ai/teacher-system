@@ -23,6 +23,7 @@ cd "$ROOT"
 "$NODE_BIN" tests/admin-marketing-rules.test.cjs
 "$NODE_BIN" tests/class-roster-rules.test.cjs
 "$NODE_BIN" tests/teacher-roster-access.test.cjs
+"$NODE_BIN" tests/roster-time.test.cjs
 "$NODE_BIN" tests/production-integrity.test.cjs
 "$NODE_BIN" tests/reliability-regressions.test.cjs
 "$NODE_BIN" tests/reliability-secondary.test.cjs

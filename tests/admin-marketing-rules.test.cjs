@@ -305,8 +305,9 @@ assert.match(workspacesCssSource, /@media \(max-width: 820px\)[\s\S]*\.workspace
 assert.match(workspacesCssSource, /\.workspace-quick-title \{[^}]*width: 100%;[^}]*flex: 0 0 auto;/, '手機工作身分標題高度需依內容決定');
 assert.match(workspacesCssSource, /grid-template-columns: repeat\(auto-fit, minmax\(136px, 1fr\)\)/, '手機三身分按鈕需保留可讀寬度');
 assert.match(uiHtmlSource, /workspaces\.css\?v=20260901-workspace-wrap-1/, '行政頁需載入防溢出的工作身分樣式');
-assert.match(uiHtmlSource, /styles\.css\?v=20260912-own-roster-1/, '班級人數版面需使用獨立快取版本');
-assert.match(uiHtmlSource, /app\.js\?v=20260912-own-roster-1/, '班級人數互動需使用獨立快取版本');
+assert.match(uiHtmlSource, /styles\.css\?v=20260912-roster-time-2/, '班級人數版面需使用獨立快取版本');
+assert.match(uiHtmlSource, /app\.js\?v=20260912-roster-time-2/, '班級人數互動需使用獨立快取版本');
+assert.match(uiHtmlSource, /shared\/roster-time\.js\?v=20260912-roster-time-2/, '舊版時間字串需要先正規化');
 assert.match(uiHtmlSource, /shared\/api\.js\?v=20260912-own-roster-1/, '行政頁需載入班級人數 API 版本');
 assert.match(uiHtmlSource, /shared\/workspaces\.js\?v=20260911-class-roster-access-1/, '工作切換需避開舊權限快取');
 assert.match(uiSource, /\['converted_half_year', '已報名半年'\]/, '試上結果需可選擇已報名半年');

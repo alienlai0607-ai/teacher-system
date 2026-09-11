@@ -545,15 +545,15 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .roster-mobile-list { display: block; }
   .roster-mobile-row { width: 100%; min-width: 0; max-width: 100%; padding: 15px 14px; overflow: hidden; border-bottom: 1px solid var(--line); }
   .roster-mobile-row:last-child { border-bottom: 0; }
-  .roster-mobile-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .roster-mobile-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 8px; }
   .roster-mobile-head > div { min-width: 0; }
   .roster-mobile-copy { flex: 1 1 auto; }
   .roster-mobile-head strong, .roster-mobile-head small { display: block; overflow-wrap: anywhere; }
   .roster-mobile-head strong { line-height: 1.45; }
   .roster-mobile-head small { margin-top: 4px; color: var(--muted); font-size: 12px; }
   .roster-class-code { display: block; margin-bottom: 3px; color: var(--teal); font-size: 12px; font-weight: 950; }
-  .roster-mobile-status { min-width: 0; display: flex; align-items: flex-end; flex: 0 0 auto; flex-direction: column; gap: 6px; }
-  .roster-mobile-head .badge { flex: 0 0 auto; }
+  .roster-mobile-status { min-width: 0; max-width: 100%; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+  .roster-mobile-head .badge { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
   .roster-mobile-status .roster-recruitment-badge { margin-top: 0; }
   .roster-mobile-row.is-low-enrollment { background: #fff5d9; box-shadow: inset 5px 0 #d99a1e; }
   .roster-mobile-row.is-low-enrollment .roster-count-control { border-color: #d99a1e; }
@@ -611,8 +611,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .roster-filter-group { width: 100%; align-items: stretch; flex-direction: column; }
   .roster-filter-group .segmented, .roster-view-tabs { width: 100%; }
   .roster-search { width: 100%; min-width: 0; max-width: none; }
-  .roster-mobile-head { align-items: stretch; flex-direction: column; }
-  .roster-mobile-status { width: 100%; align-items: center; flex: 1 1 auto; flex-direction: row; flex-wrap: wrap; }
+  .roster-mobile-head { align-items: stretch; grid-template-columns: minmax(0, 1fr); }
+  .roster-mobile-status { width: 100%; align-items: center; justify-content: flex-start; flex: 1 1 auto; flex-direction: row; flex-wrap: wrap; }
   .roster-mobile-actions { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: 10px; }
   .roster-mobile-count { width: 100%; justify-content: space-between; }
   .roster-mobile-buttons { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 42px; }
