@@ -132,6 +132,8 @@ function verifyReleaseLogicFromEditor() {
   });
   check('cleanup', function () {
     const result = withRecordWriteLock_(function () {
+      // HTTP calls wrote in other executions; discard the pre-upload Sheet read cache.
+      SpreadsheetApp.flush();
       cleanupRows.forEach(function (entry) {
         require(entry.id.indexOf(runId + '-') === 0, '拒絕清理非本次測試資料');
         const rowNum = findRow(entry.sheet, entry.key, entry.id);

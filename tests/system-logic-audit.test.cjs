@@ -92,6 +92,11 @@ function test(name, fn) {
 }
 
 function runTests() {
+test('live acceptance refreshes Sheets before looking for externally created QA rows', () => {
+  const cleanup = source('tasks').split("check('cleanup', function () {")[1];
+  assert.ok(cleanup.indexOf('SpreadsheetApp.flush();') < cleanup.indexOf('cleanupRows.forEach'), 'pre-upload read cache must be discarded before checking whether the remote QA row exists');
+});
+
 test('acceptance cleanup finds both material and photo prefixes and never removes real rows', ({ c }) => {
   c.Session.getActiveUser = () => ({ getEmail: () => 'boss@example.invalid' });
   c.ensureTalentRecordsSheet_();
