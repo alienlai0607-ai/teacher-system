@@ -118,6 +118,12 @@ async function createPage(browser, viewport, label) {
     timezoneId: 'Asia/Taipei',
     serviceWorkers: 'block',
   });
+  // Keep optional push failures deterministic. This suite tests record workflows,
+  // not the external notification provider's network or delivery availability.
+  await context.route('https://cdn.onesignal.com/**', route => route.fulfill({
+    contentType: 'application/javascript',
+    body: `for (const callback of (window.OneSignalDeferred || [])) callback({ init: async () => { throw new Error('QA notification service unavailable'); } });`,
+  }));
   const page = trackPage(await context.newPage(), label);
   return { context, page };
 }

@@ -1210,6 +1210,7 @@
 
   function maybeShowPushPermissionReminder() {
     if (SAFE_START_MODE) return;
+    if (state.ui.route !== 'today' || $('#dialog-root')?.children.length || $('#drawer-root')?.children.length) return;
     const session = legacySession();
     if (session?.role !== 'teacher' || session.status === 'suspended' || session.impersonate === true) return;
     if (state.ui.pushPermissionReminderSeen || !('Notification' in window) || Notification.permission !== 'default') return;
@@ -1842,16 +1843,11 @@
   function toast(message, type = '') {
     const root = $('#toast-root');
     if (!root) return;
-    const duplicate = Array.from(root.children).find(item => item.dataset.message === String(message));
-    if (duplicate) {
-      duplicate.className = `toast ${type}`.trim();
-      return;
-    }
     const node = document.createElement('div');
     node.className = `toast ${type}`.trim();
     node.dataset.message = String(message);
     node.innerHTML = `${icon(type === 'danger' ? 'circle-alert' : type === 'warning' ? 'triangle-alert' : 'circle-check', 17)}<span>${esc(message)}</span>`;
-    root.appendChild(node);
+    root.replaceChildren(node);
     hydrateIcons();
     window.setTimeout(() => node.remove(), 3200);
   }
@@ -3734,6 +3730,7 @@
     const priority = taskPriorityMeta(task);
     const detail = taskDetailText(task);
     return `<div class="task-detail-view">
+      ${task.conflictDraft ? `<section class="task-detail-section"><div class="notice-band warning"><div>已載入其他裝置的最新版本。上次未同步內容：${esc(task.conflictDraft.title)}；狀態：${task.conflictDraft.status === 'done' ? '已完成' : '進行中'}。<br>${nl2br(task.conflictDraft.detail || '')}<br>期限：${formatDate(task.conflictDraft.dueDate)}</div></div></section>` : ''}
       <div class="task-detail-badges"><span class="badge ${task.status === 'done' ? 'green' : 'yellow'}">${task.status === 'done' ? '已完成' : '進行中'}</span><span class="badge ${priority.tone}">${priority.label}優先</span></div>
       <section class="task-detail-section"><div class="task-detail-label">事項內容</div><div class="task-detail-copy">${nl2br(task.title)}</div></section>
       ${detail ? `<section class="task-detail-section"><div class="task-detail-label">主管說明</div><div class="task-detail-copy">${nl2br(detail)}</div></section>` : ''}
@@ -5704,13 +5701,22 @@
     return true;
   }
 
-  function saveTaskForm(form) {
+  async function saveTaskForm(form) {
     if (!form.reportValidity()) return;
     const data = new FormData(form);
     const task = { id: uid('task'), title: data.get('title').trim(), source: data.get('source'), owner: state.context.teacher, dueDate: data.get('dueDate'), status: 'open', priority: data.get('priority') };
     state.tasks.unshift(task);
-    scheduleTaskCloudSync(task);
-    closeDrawer(); persist(); renderApp(); toast('事項已新增', 'success');
+    task.localUpdatedAt = new Date().toISOString();
+    task.cloudSyncStatus = state.integration.cloudSyncEnabled ? 'saving' : 'local';
+    closeDrawer(); persist(); renderApp();
+    if (!state.integration.cloudSyncEnabled) { toast('事項已儲存於此裝置', 'success'); return; }
+    toast('事項已暫存，正在同步雲端…');
+    let result;
+    try { result = await syncTaskToCloud(task); }
+    catch (error) { result = { ok: false, error: '連線中斷，請稍後重新同步' }; }
+    if (!result?.ok && !result?.current_task && result?.code !== 'RECORD_DELETED') task.cloudSyncStatus = 'error';
+    persist(); renderApp();
+    toast(result?.ok ? '事項已新增並儲存雲端' : `事項尚未同步：${result?.error || '請稍後重試'}；本機內容仍保留`, result?.ok ? 'success' : 'danger');
   }
 
   function derivedTaskCloudId(ref) {
@@ -5786,9 +5792,12 @@
       toast('正在同步追蹤狀態…');
       const cloudResult = await syncTaskToCloud(task);
       if (!cloudResult?.ok) {
-        Object.keys(task).forEach(key => { if (!(key in taskSnapshot)) delete task[key]; });
-        Object.assign(task, taskSnapshot);
-        if (linked && linkedSnapshot) {
+        const remoteChanged = cloudResult?.current_task || cloudResult?.code === 'RECORD_DELETED';
+        if (!remoteChanged) {
+          Object.keys(task).forEach(key => { if (!(key in taskSnapshot)) delete task[key]; });
+          Object.assign(task, taskSnapshot);
+        }
+        if (linked && linkedSnapshot && !remoteChanged) {
           Object.keys(linked.record).forEach(key => { if (!(key in linkedSnapshot)) delete linked.record[key]; });
           Object.assign(linked.record, linkedSnapshot);
         }
@@ -5844,6 +5853,7 @@
     if (result?.ok) {
       task.cloudTaskId = cloudTaskId;
       task.cloudUpdatedAt = result.updated_at || new Date().toISOString();
+      if (result.task_statuses?.[cloudTaskId]) task.status = result.task_statuses[cloudTaskId];
     }
     return result;
   }
@@ -5877,6 +5887,7 @@
     const cloudTask = { ...task, source: taskDetailText(task) || task.source };
     const result = await API.saveSelfTask({ nickname: cloudTeacherNickname(), task: removeInlineMedia(cloudTask) });
     if (result?.ok) {
+      delete task.conflictDraft;
       task.cloudUpdatedAt = result.updated_at || new Date().toISOString();
       if (String(task.localUpdatedAt || '') !== mutationStamp) {
         task.cloudSyncStatus = 'pending';
@@ -5886,10 +5897,26 @@
       } else {
         task.cloudSyncStatus = 'saved';
       }
+    } else if (result?.code === 'RECORD_CONFLICT' && result.current_task) {
+      adoptConflictingCloudTask(task, result.current_task);
+    } else if (result?.code === 'RECORD_DELETED') {
+      state.tasks = state.tasks.filter(item => item.id !== task.id);
+      pendingTaskSyncIds.delete(task.id);
     } else {
       task.cloudSyncStatus = 'error';
     }
     return result;
+  }
+
+  function adoptConflictingCloudTask(task, remote) {
+    task.conflictDraft = { title: task.title, detail: task.detail || task.source || '', status: task.status, dueDate: task.dueDate };
+    Object.assign(task, {
+      title: String(remote.title || ''), detail: String(remote.detail || ''),
+      status: remote.status === 'done' ? 'done' : 'open', dueDate: String(remote.due_date || '').slice(0, 10),
+      cloudUpdatedAt: remote.updated_at || '', cloudSyncStatus: 'saved',
+    });
+    pendingTaskSyncIds.delete(task.id);
+    applyTaskStatusToLinkedRecord(task, state, true);
   }
 
   async function flushTaskCloudSync() {
@@ -5928,6 +5955,9 @@
     if (!session || session.role !== 'teacher' || !window.API?.listTasks) return { ok: false, imported: 0 };
     const result = await API.listTasks({ viewer: session.nickname });
     if (!result?.ok) return { ok: false, imported: 0, error: result?.error || '事項讀取失敗' };
+    const deletedIds = new Set(result.deletedIds || []);
+    state.tasks = state.tasks.filter(task => task.owner !== state.context.teacher || !deletedIds.has(task.id));
+    deletedIds.forEach(id => pendingTaskSyncIds.delete(id));
     let imported = 0;
     (result.tasks || []).forEach(remote => {
       const id = String(remote.task_id || '');
@@ -7510,7 +7540,7 @@
     if (type === 'weekly') saveWeeklyForm(form);
     if (type === 'evidence') saveEvidenceForm(form);
     if (type === 'plan') await savePlanForm(form);
-    if (type === 'task') saveTaskForm(form);
+    if (type === 'task') await saveTaskForm(form);
   });
 
   document.addEventListener('click', async event => {

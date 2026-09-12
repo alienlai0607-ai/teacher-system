@@ -383,7 +383,7 @@
     const node = document.createElement('div');
     node.className = `toast ${type}`;
     node.innerHTML = `${icon(type === 'danger' ? 'circle-alert' : type === 'warning' ? 'triangle-alert' : 'circle-check', 17)}<span>${esc(message)}</span>`;
-    root.appendChild(node);
+    root.replaceChildren(node);
     hydrateIcons();
     window.setTimeout(() => node.remove(), 3200);
   }

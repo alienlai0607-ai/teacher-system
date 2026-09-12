@@ -58,7 +58,7 @@ function handleRequest(e, method) {
 
     const ROUTES = {
       // 認證
-      'ping': () => ({ ok: true, time: new Date().toISOString(), release: '20260906-reliability-1' }),
+      'ping': () => ({ ok: true, time: new Date().toISOString(), release: '20260912-logic-audit-2' }),
       'whoami': () => whoami(params),
       'getSessionIdentity': () => getSessionIdentity(params),
       'reportClientMetrics': () => reportClientMetrics(params),
@@ -1001,6 +1001,11 @@ function withRecordWriteLock_(callback) {
   try { return callback(); } finally { lock.releaseLock(); }
 }
 
+function cellTimestamp_(value) {
+  const time = value instanceof Date ? value.getTime() : Date.parse(String(value || '').replace(/^"|"$/g, ''));
+  return isNaN(time) ? 0 : time;
+}
+
 function recordConflict_(expected, current) {
   function normalized(value) {
     if (!value) return '';
@@ -1171,6 +1176,7 @@ function appendRow(name, obj) {
   const row = headers.map(h => {
     const v = obj[h];
     if (v === undefined || v === null) return '';
+    if (Object.prototype.toString.call(v) === '[object Date]') return v;
     if (typeof v === 'object') return JSON.stringify(v);
     return v;
   });
@@ -1186,6 +1192,7 @@ function updateRow(name, rowNum, obj) {
     if (obj[h] === undefined) return current[i];
     const v = obj[h];
     if (v === null) return '';
+    if (Object.prototype.toString.call(v) === '[object Date]') return v;
     if (typeof v === 'object') return JSON.stringify(v);
     return v;
   });
@@ -1667,8 +1674,8 @@ function authorizeApiAction_(action, params, actor) {
     return;
   }
 
-  if (action === 'reviewAdminMarketingRecord' || action === 'saveAdminMarketingScore') {
-    requireApiRole_(actor, ['admin', 'manager']);
+  if (action === 'reviewAdminMarketingRecord' || action === 'saveAdminMarketingScore' || action === 'reviewAdminMarketingTrialBonus') {
+    if (!adminMarketingManagerCanReview_(actor)) throw new Error('只有行政美宣主管可審核');
     params.operator = actor.nickname;
     return;
   }
@@ -1730,7 +1737,8 @@ function authorizeApiAction_(action, params, actor) {
 
   if (action === 'getLog') {
     let nickname = params.nickname || '';
-    if (!nickname && params.log_id) {
+    // log_id takes precedence in getLog; authorize that same resource.
+    if (params.log_id) {
       const log = findObject(SHEET_NAMES.LOGS, 'log_id', params.log_id);
       nickname = log ? log.nickname : '';
     }
@@ -1755,11 +1763,22 @@ function authorizeApiAction_(action, params, actor) {
   }
 
   if (action === 'addFeedback') {
-    const target = requireApiUserScope_(actor, params.to_nickname);
+    const target = findUserByNickname(String(params.to_nickname || ''));
+    if (!target || target.status !== 'active') throw new Error('對話帳號不存在或未啟用');
     if (actor.role === 'teacher' || actor.role === 'admin_staff') {
       if (!(target.role === 'admin' || (target.role === 'manager' && (sameDepartment_(target.department, actor.department) || isGlobalManager_(target))))) {
         throw new Error('只能回覆主管或管理員');
       }
+    } else if (target.role !== 'admin') requireApiUserScope_(actor, target.nickname);
+    const log = findObject(SHEET_NAMES.LOGS, 'log_id', String(params.log_id || ''));
+    if (log) {
+      requireApiUserScope_(actor, log.nickname);
+      requireApiUserScope_(target, log.nickname);
+    } else if (String(params.log_id || '').indexOf('LOG-') === 0) {
+      throw new Error('找不到日報，請重新讀取後再回覆');
+    } else if (actor.role === 'teacher' || actor.role === 'admin_staff') {
+      const messages = sheetToObjects(SHEET_NAMES.FEEDBACK).filter(item => item.log_id === params.log_id);
+      if (messages.length && !messages.some(item => item.from_nickname === actor.nickname || item.to_nickname === actor.nickname)) throw new Error('只能回覆自己的對話');
     }
     params.from_nickname = actor.nickname;
     return;
@@ -1771,10 +1790,11 @@ function authorizeApiAction_(action, params, actor) {
     return;
   }
   if (action === 'listFeedbackThread') {
+    const log = findObject(SHEET_NAMES.LOGS, 'log_id', String(params.log_id || ''));
+    if (log) requireApiUserScope_(actor, log.nickname);
     const messages = sheetToObjects(SHEET_NAMES.FEEDBACK).filter(item => item.log_id === params.log_id);
     if (messages.length && actor.role !== 'admin') {
-      const allowed = messages.some(item => item.from_nickname === actor.nickname || item.to_nickname === actor.nickname ||
-        actorCanAccessUser_(actor, findUserByNickname(item.from_nickname)) || actorCanAccessUser_(actor, findUserByNickname(item.to_nickname)));
+      const allowed = messages.some(item => feedbackMessageVisible_(actor, item));
       if (!allowed) throw new Error('無權讀取此對話');
     }
     params.viewer = actor.nickname;
@@ -2153,6 +2173,8 @@ function saveLog(params) {
 function saveLogRecord_(params) {
   const { nickname, date } = params;
   if (!nickname || !date) return { ok: false, error: 'missing nickname or date' };
+  const parsedDate = new Date(String(date) + 'T00:00:00Z');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date)) || isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== date || date > todayStr()) return { ok: false, error: '工作日期不正確，不可填寫未來日期的日報' };
 
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
@@ -2529,8 +2551,7 @@ function saveManagerPosts(nickname, department, date, posts) {
   const week = weekOf(date);
   posts.forEach(p => {
     if (!p.url && !p.screenshot) return;
-    appendRow(SHEET_NAMES.POSTS, {
-      post_id: Utilities.getUuid(),
+    upsertManagerPost_({
       date,
       nickname,
       department,
@@ -2538,10 +2559,28 @@ function saveManagerPosts(nickname, department, date, posts) {
       url: p.url || '',
       screenshot: p.screenshot || '',
       content_type: p.content_type || '其他',
-      week_of: week,
-      created_at: nowIso()
+      week_of: week
     });
   });
+}
+
+// Both callers hold the write lock; a daily autosave must not add another post.
+function upsertManagerPost_(post) {
+  const clean = value => String(value || '').trim();
+  post.url = clean(post.url);
+  post.screenshot = clean(post.screenshot);
+  post.platform = clean(post.platform);
+  const existing = sheetToObjects(SHEET_NAMES.POSTS).find(row =>
+    row.nickname === post.nickname && cellDateStr_(row.date) === cellDateStr_(post.date) &&
+    clean(row.platform) === post.platform &&
+    (post.url ? clean(row.url) === post.url : !clean(row.url) && clean(row.screenshot) === post.screenshot));
+  const record = Object.assign({}, existing || {}, post, {
+    post_id: existing ? existing.post_id : Utilities.getUuid(),
+    created_at: existing ? existing.created_at : nowIso()
+  });
+  if (existing) updateRow(SHEET_NAMES.POSTS, existing._row, record);
+  else appendRow(SHEET_NAMES.POSTS, record);
+  return record;
 }
 
 /**
@@ -2576,7 +2615,7 @@ function dailyLockOldLogs() {
   const cutoffStr = Utilities.formatDate(cutoff, 'Asia/Taipei', 'yyyy-MM-dd');
 
   for (let r = 2; r <= lastRow; r++) {
-    const d = String(sheet.getRange(r, dateCol).getValue());
+    const d = String(cellDateStr_(sheet.getRange(r, dateCol).getValue()));
     if (d < cutoffStr) {
       sheet.getRange(r, lockedCol).setValue(true);
     }
@@ -2697,36 +2736,15 @@ function getAttachmentPreviews(params) {
   });
   if (!ids.length) return { ok: true, previews: [], errors: [] };
 
-  let ownerByFileId = null;
-  function ownerForFile(fileId) {
-    if (!ownerByFileId) {
-      ownerByFileId = {};
-      sheetToObjects(SHEET_NAMES.EVIDENCE).forEach(function (row) {
-        const url = String(row.url || '');
-        ids.forEach(function (id) {
-          if (!ownerByFileId[id] && url.indexOf(id) >= 0) ownerByFileId[id] = String(row.nickname || '');
-        });
-      });
-      sheetToObjects(SHEET_NAMES.LOGS).forEach(function (row) {
-        const haystack = [
-          row.attachments, row.kpi1_data, row.kpi2_data, row.kpi3_data,
-          row.kpi4_data, row.kpi5_data, row.kpi6_data,
-        ].map(function (value) {
-          if (typeof value === 'string') return value;
-          try { return JSON.stringify(value || ''); } catch (error) { return ''; }
-        }).join('|');
-        ids.forEach(function (id) {
-          if (!ownerByFileId[id] && haystack.indexOf(id) >= 0) ownerByFileId[id] = String(row.nickname || '');
-        });
-      });
-    }
-    return String(ownerByFileId[fileId] || '');
-  }
-
   function actorListedOnFile(file) {
     if (actor.role === 'admin' || isGlobalManager_(actor)) return true;
     const email = String(actor.email || '').trim().toLowerCase();
     if (!email) return false;
+    // Text in a submitted log is not proof of file ownership. Use Drive's ACL.
+    try {
+      const access = file.getAccess(email);
+      if ([DriveApp.Permission.VIEW, DriveApp.Permission.EDIT, DriveApp.Permission.OWNER].indexOf(access) >= 0) return true;
+    } catch (error) {}
     try {
       if (String(file.getOwner().getEmail() || '').trim().toLowerCase() === email) return true;
     } catch (error) {}
@@ -2748,12 +2766,7 @@ function getAttachmentPreviews(params) {
   ids.forEach(function (fileId) {
     try {
       const file = DriveApp.getFileById(fileId);
-      let allowed = actorListedOnFile(file);
-      if (!allowed) {
-        const ownerNickname = ownerForFile(fileId);
-        const owner = ownerNickname ? findUserByNickname(ownerNickname) : null;
-        allowed = Boolean(owner && actorCanAccessUser_(actor, owner));
-      }
+      const allowed = actorListedOnFile(file);
       if (!allowed) {
         errors.push({ fileId: fileId, error: '無權查看此照片' });
         return;
@@ -2885,13 +2898,13 @@ function listWeekly(params) {
 
 function addFeedback(params) {
   const { log_id, from_nickname, to_nickname, content, tag } = params;
-  if (!log_id || !from_nickname || !to_nickname || !content) {
+  if (!log_id || !from_nickname || !to_nickname || !String(content || '').trim()) {
     return { ok: false, error: 'missing required fields' };
   }
   const fromU = findUserByNickname(from_nickname);
   const toU = findUserByNickname(to_nickname);
   if (!fromU || !toU || fromU.status !== 'active' || toU.status !== 'active') return { ok: false, error: '對話帳號不存在或未啟用' };
-  if (fromU.role === 'teacher' && !(toU.role === 'manager' && (sameDepartment_(toU.department, fromU.department) || isGlobalManager_(toU))) && toU.role !== 'admin') {
+  if (['teacher', 'admin_staff'].indexOf(fromU.role) >= 0 && !(toU.role === 'manager' && (sameDepartment_(toU.department, fromU.department) || isGlobalManager_(toU))) && toU.role !== 'admin') {
     return { ok: false, error: '老師只能回覆同部門主管或管理員' };
   }
   if (fromU.role === 'manager' && !isGlobalManager_(fromU) && toU.role !== 'admin' && !sameDepartment_(toU.department, fromU.department)) {
@@ -2925,12 +2938,24 @@ function addFeedback(params) {
 }
 
 /** 對話串：某則日誌的所有往來訊息，依時間正序（老師/主管共用） */
+function feedbackMessageVisible_(actor, message) {
+  if (!actor || actor.status !== 'active') return false;
+  if (actor.role === 'admin' || isGlobalManager_(actor)) return true;
+  if (message.from_nickname === actor.nickname || message.to_nickname === actor.nickname) return true;
+  if (actor.role !== 'manager') return false;
+  return [message.from_nickname, message.to_nickname].some(function (nickname) {
+    const user = findUserByNickname(nickname);
+    return user && ['teacher', 'admin_staff'].indexOf(user.role) >= 0 && actorCanAccessUser_(actor, user);
+  });
+}
+
 function listFeedbackThread(params) {
   const { log_id } = params;
   if (!log_id) return { ok: false, error: 'missing log_id' };
+  const actor = params.__actor || findUserByNickname(String(params.viewer || ''));
   const list = sheetToObjects(SHEET_NAMES.FEEDBACK)
-    .filter(f => f.log_id === log_id)
-    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+    .filter(f => f.log_id === log_id && feedbackMessageVisible_(actor, f))
+    .sort((a, b) => cellTimestamp_(a.created_at) - cellTimestamp_(b.created_at));
   return { ok: true, thread: list };
 }
 
@@ -2940,7 +2965,7 @@ function listFeedback(params) {
   if (nickname) list = list.filter(f => f.to_nickname === nickname || f.from_nickname === nickname);
   if (log_id) list = list.filter(f => f.log_id === log_id);
   if (unread_only) list = list.filter(f => !f.read_at);
-  list.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  list.sort((a, b) => cellTimestamp_(b.created_at) - cellTimestamp_(a.created_at));
   return { ok: true, feedback: list };
 }
 
@@ -2986,12 +3011,16 @@ function listObservations(params) {
 }
 
 function addPost(params) {
+  return withRecordWriteLock_(function () { return addPostLocked_(params); });
+}
+
+function addPostLocked_(params) {
   const { nickname, date, platform, url, screenshot, content_type } = params;
   if (!nickname || !platform) return { ok: false, error: 'missing required fields' };
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
-  appendRow(SHEET_NAMES.POSTS, {
-    post_id: Utilities.getUuid(),
+  if (!String(url || '').trim() && !String(screenshot || '').trim()) return { ok: false, error: '請提供發文連結或截圖' };
+  const row = upsertManagerPost_({
     date: date || todayStr(),
     nickname,
     department: normalizeDepartment_(user.department),
@@ -2999,10 +3028,9 @@ function addPost(params) {
     url: url || '',
     screenshot: screenshot || '',
     content_type: content_type || '其他',
-    week_of: weekOf(date),
-    created_at: nowIso()
+    week_of: weekOf(date || todayStr())
   });
-  return { ok: true };
+  return { ok: true, post_id: row.post_id };
 }
 
 function listPosts(params) {
@@ -3634,13 +3662,18 @@ function listStudents(params) {
 }
 
 function addStudent(params) {
-  const { name, teacher } = params;
+  return withRecordWriteLock_(function () { return addStudentLocked_(params); });
+}
+
+function addStudentLocked_(params) {
+  const name = String(params.name || '').trim();
+  const teacher = String(params.teacher || '').trim();
   if (!name || !teacher) return { ok: false, error: '缺少姓名或老師' };
   const t = findUserByNickname(teacher);
-  if (!t) return { ok: false, error: '老師不存在：' + teacher };
+  if (!t || t.status !== 'active') return { ok: false, error: '老師不存在或未啟用：' + teacher };
   // 同老師班內姓名重複檢查
   const dup = sheetToObjects(SHEET_NAMES.STUDENTS)
-    .some(s => s.teacher === teacher && s.name === name && s.status !== 'inactive');
+    .some(s => s.teacher === teacher && String(s.name || '').trim() === name && s.status !== 'inactive');
   if (dup) return { ok: false, error: '此老師班上已有同名學生' };
 
   appendRow(SHEET_NAMES.STUDENTS, {
@@ -3658,29 +3691,39 @@ function addStudent(params) {
 }
 
 function updateStudent(params) {
+  return withRecordWriteLock_(function () { return updateStudentLocked_(params); });
+}
+
+function updateStudentLocked_(params) {
   const { student_id } = params;
   if (!student_id) return { ok: false, error: '缺少 student_id' };
-  const rowNum = findRow(SHEET_NAMES.STUDENTS, 'student_id', student_id);
-  if (rowNum < 0) return { ok: false, error: '學生不存在' };
+  const existing = findObject(SHEET_NAMES.STUDENTS, 'student_id', student_id);
+  if (!existing) return { ok: false, error: '學生不存在' };
 
   const updates = {};
-  ['name', 'teacher', 'department', 'status', 'notes'].forEach(k => {
+  ['name', 'teacher', 'status', 'notes'].forEach(k => {
     if (params[k] !== undefined) updates[k] = params[k];
   });
-  // 換老師時連帶更新所屬部門
-  if (params.teacher) {
-    const t = findUserByNickname(params.teacher);
-    if (t) updates.department = normalizeDepartment_(t.department);
-  } else if (updates.department !== undefined) {
-    updates.department = normalizeDepartment_(updates.department);
-  }
+  const name = String(updates.name === undefined ? existing.name : updates.name).trim();
+  const teacher = String(updates.teacher === undefined ? existing.teacher : updates.teacher).trim();
+  const status = updates.status === undefined ? existing.status : updates.status;
+  if (!name || !teacher) return { ok: false, error: '缺少姓名或老師' };
+  if (['active', 'inactive'].indexOf(status) < 0) return { ok: false, error: '學生狀態不正確' };
+  const t = findUserByNickname(teacher);
+  if (!t || (params.teacher !== undefined && t.status !== 'active')) return { ok: false, error: '老師不存在或未啟用' };
+  if (status !== 'inactive' && sheetToObjects(SHEET_NAMES.STUDENTS).some(s => s.student_id !== student_id && s.teacher === teacher && String(s.name || '').trim() === name && s.status !== 'inactive')) return { ok: false, error: '此老師班上已有同名學生' };
+  Object.assign(updates, { name: name, teacher: teacher, department: normalizeDepartment_(t.department) });
   updates.updated_at = nowIso();
-  updateRow(SHEET_NAMES.STUDENTS, rowNum, updates);
+  updateRow(SHEET_NAMES.STUDENTS, existing._row, updates);
   logSystem(params.operator || 'system', 'update_student', student_id, updates);
   return { ok: true, msg: '更新成功' };
 }
 
 function deleteStudent(params) {
+  return withRecordWriteLock_(function () { return deleteStudentLocked_(params); });
+}
+
+function deleteStudentLocked_(params) {
   const { student_id } = params;
   if (!student_id) return { ok: false, error: '缺少 student_id' };
   const rowNum = findRow(SHEET_NAMES.STUDENTS, 'student_id', student_id);
@@ -3696,13 +3739,153 @@ function deleteStudent(params) {
 
 /**
  * 事項系統 + LINE 推播
- * Tasks schema: task_id, title, detail, assignee, department, due_date, status(open/done), created_by, created_at, updated_at, done_at
+ * Tasks schema: task_id, title, detail, assignee, department, due_date, status(open/done/deleted), created_by, created_at, updated_at, done_at
  * Users 需有 line_user_id 欄
  * Script Property: LINE_TOKEN（LINE Messaging API channel access token）
  */
 
 function canCreateTask_(role) {
   return role === 'admin' || role === 'manager' || role === 'admin_staff';
+}
+
+/** Editor-only live API acceptance. Never overwrites daily logs or user profiles. */
+function verifyReleaseLogicFromEditor() {
+  const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  const admin = email ? findUserByEmail(email) : null;
+  if (!admin || admin.role !== 'admin' || admin.status !== 'active') throw new Error('須由正式管理員執行驗收');
+  const endpoint = 'https://script.google.com/macros/s/AKfycbyantQSORV8ulYF_LhHvhxOeRxvlwvUV40oFGRY_Hk9O6JxI5EaRXyFg_Vvi6C8K170UQ/exec';
+  const runId = 'QA-RELEASE-' + Utilities.getUuid();
+  const checks = [];
+  const cleanupRows = [];
+  const started = Date.now();
+  const users = sheetToObjects(SHEET_NAMES.USERS).filter(user => user.status === 'active');
+  const teacher = users.find(user => user.role === 'teacher' && user.email && isAnqinUser(user));
+  const talent = users.find(user => user.role === 'teacher' && user.email && userHasTalentWork_(user));
+  const staff = users.find(user => user.email && adminMarketingAssignments_(user).indexOf('admin-marketing') >= 0);
+  const other = users.find(user => user.role === 'teacher' && user.email && teacher && user.nickname !== teacher.nickname);
+  function require(condition, message) { if (!condition) throw new Error(message); }
+  function check(id, callback) {
+    const start = Date.now();
+    try { checks.push({ id: id, ok: true, detail: callback(), ms: Date.now() - start }); }
+    catch (error) { checks.push({ id: id, ok: false, error: String(error.message || error), ms: Date.now() - start }); }
+    console.log(JSON.stringify({ run_id: runId, check: checks[checks.length - 1] }));
+  }
+  function request(user, action, payload) {
+    require(user, '缺少此角色可驗收的啟用帳號');
+    const body = Object.assign({}, payload || {}, { action: action, session_token: issueSessionToken_(user) });
+    const response = UrlFetchApp.fetch(endpoint, { method: 'post', contentType: 'text/plain', payload: JSON.stringify(body), followRedirects: true, muteHttpExceptions: true });
+    let data;
+    try { data = JSON.parse(response.getContentText()); } catch (error) { throw new Error(action + ' 回應不是 JSON：HTTP ' + response.getResponseCode()); }
+    return data;
+  }
+  function ok(data) { require(data && data.ok, data && data.error || '正式 API 未回報成功'); return data; }
+  function reserve(sheet, key, suffix) {
+    const id = runId + '-' + suffix;
+    require(!findObject(sheet, key, id), '測試編號已存在，不可覆蓋');
+    cleanupRows.push({ sheet: sheet, key: key, id: id });
+    return id;
+  }
+  check('live_version', function () {
+    const response = JSON.parse(UrlFetchApp.fetch(endpoint + '?action=ping').getContentText());
+    require(response.release === '20260912-logic-audit-2', '正式後端尚未更新至本次版本');
+    return { release: response.release };
+  });
+  if (!checks[0].ok) { const result = { ok: false, run_id: runId, checks: checks }; console.log(JSON.stringify(result)); return result; }
+  check('active_accounts', function () {
+    const emails = {};
+    const accounts = users.map(function (user) {
+      const address = String(user.email || '').trim().toLowerCase();
+      if (address) emails[address] = (emails[address] || 0) + 1;
+      const valid = verifySessionToken_(issueSessionToken_(user));
+      return { nickname: user.nickname, role: user.role, email_bound: Boolean(address), signed_identity_valid: valid.ok === true };
+    });
+    require(accounts.every(account => account.signed_identity_valid), '有啟用帳號未通過身分驗證');
+    return { accounts: accounts, duplicate_email_groups: Object.keys(emails).filter(key => emails[key] > 1).length, google_login_tested: false };
+  });
+  check('live_role_identities', function () {
+    return [admin, teacher, talent, staff].map(function (user) {
+      const result = ok(request(user, 'getSessionIdentity'));
+      require(result.user.nickname === user.nickname, '回應身分不符');
+      return { nickname: user.nickname, role: result.user.role };
+    });
+  });
+  check('task_conflict_and_deletion', function () {
+    require(teacher && other, '需要兩位啟用老師');
+    const id = reserve(SHEET_NAMES.TASKS, 'task_id', 'TASK');
+    const initial = { id: id, title: runId, dueDate: todayStr(), status: 'open' };
+    const first = ok(request(teacher, 'saveSelfTask', { nickname: teacher.nickname, task: initial }));
+    const complete = ok(request(teacher, 'saveSelfTask', { nickname: teacher.nickname, task: Object.assign({}, initial, { status: 'done', cloudUpdatedAt: first.updated_at }) }));
+    const stale = request(teacher, 'saveSelfTask', { nickname: teacher.nickname, task: Object.assign({}, initial, { cloudUpdatedAt: first.updated_at }) });
+    require(stale.code === 'RECORD_CONFLICT' && stale.current_task.status === 'done', '舊版本覆蓋了完成狀態');
+    require(!request(other, 'saveSelfTask', { nickname: other.nickname, task: initial }).ok, '其他老師可修改此事項');
+    require(ok(request(admin, 'listTasks', { viewer: admin.nickname })).tasks.some(row => row.task_id === id && row.status === 'done'), '主管未讀到完成結果');
+    ok(request(teacher, 'deleteSelfTask', { nickname: teacher.nickname, task_id: id }));
+    require(request(teacher, 'saveSelfTask', { nickname: teacher.nickname, task: Object.assign({}, initial, { cloudUpdatedAt: complete.updated_at }) }).code === 'RECORD_DELETED', '已刪除事項被復活');
+    return { owner: teacher.nickname, conflict: true, privacy: true, manager_read: true, deleted: true };
+  });
+  check('teacher_photo_upload_and_private_preview', function () {
+    require(teacher, '缺少老師帳號');
+    const base64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    const payload = { nickname: teacher.nickname, date: todayStr(), kpi: runId, mimeType: 'image/png', base64: base64 };
+    const uploaded = ok(request(teacher, 'uploadPhoto', payload));
+    const retry = ok(request(teacher, 'uploadPhoto', payload));
+    require(retry.fileId === uploaded.fileId, '相同照片重試產生重複原檔');
+    const file = DriveApp.getFileById(uploaded.fileId);
+    require(Utilities.base64Encode(file.getBlob().getBytes()) === base64, '照片原始內容不一致');
+    const preview = ok(request(teacher, 'getAttachmentPreviews', { file_ids: [uploaded.fileId] }));
+    require(preview.previews.length === 1 && !preview.errors.length, '老師本人無法取得照片預覽');
+    return { owner: teacher.nickname, bytes_match: true, retry_reused: true, private_preview: true };
+  });
+  check('talent_material_and_prep', function () {
+    require(talent, '缺少才藝老師');
+    ensureTalentRecordsSheet_();
+    const id = reserve(SHEET_NAMES.TALENT_RECORDS, 'record_id', 'PREP');
+    const content = 'KPI QA material content: ' + runId;
+    const base64 = Utilities.base64Encode(content, Utilities.Charset.UTF_8);
+    const upload = ok(request(talent, 'uploadFile', { nickname: talent.nickname, date: todayStr(), category: 'talent-' + runId, fileName: runId + '.txt', mimeType: 'text/plain', base64: base64 }));
+    require(DriveApp.getFileById(upload.fileId).getBlob().getDataAsString() === content, '教材原檔內容不一致');
+    const prep = { id: id, courseType: '系統驗收', courseName: runId, date: todayStr(), materials: [{ fileId: upload.fileId, fileName: runId + '.txt', url: upload.url, mimeType: 'text/plain' }] };
+    ok(request(talent, 'saveTalentPrep', { nickname: talent.nickname, prep: prep }));
+    const workspace = ok(request(talent, 'getTalentWorkspaceData'));
+    require(workspace.preps.some(item => item.id === id && item.materials.length === 1), '才藝備課寫入後未能讀回');
+    return { owner: talent.nickname, bytes_match: true, prep_readback: true };
+  });
+  check('admin_work_update_and_conflict', function () {
+    require(staff, '缺少行政帳號');
+    ensureAdminMarketingRecordsSheet_();
+    const id = reserve(SHEET_NAMES.ADMIN_MARKETING_RECORDS, 'record_id', 'ADMIN');
+    const record = { id: id, date: todayStr(), messages: { parentChecked: true, officialLineChecked: true, groupChecked: true }, items: [{ id: id + '-item', category: 'admin', title: runId, completedToday: '系統驗收', progress: 50, status: 'in_progress', remaining: '驗證讀回', dueDate: todayStr(), evidence: [] }] };
+    const first = ok(request(staff, 'saveAdminMarketingRecord', { nickname: staff.nickname, record_type: 'daily', record: record, request_id: id + '-create' }));
+    const changed = JSON.parse(JSON.stringify(first.record));
+    changed.items[0].completedToday = '系統驗收已讀回';
+    ok(request(staff, 'saveAdminMarketingRecord', { nickname: staff.nickname, record_type: 'daily', record: changed, request_id: id + '-update' }));
+    const stale = request(staff, 'saveAdminMarketingRecord', { nickname: staff.nickname, record_type: 'daily', record: first.record, request_id: id + '-stale' });
+    require(stale.code === 'RECORD_CONFLICT', '行政舊版本未拒絕');
+    const workspace = ok(request(staff, 'getAdminMarketingWorkspaceData'));
+    require(workspace.records.some(item => item.id === id && item.items[0].completedToday === changed.items[0].completedToday), '行政修改後內容未保留');
+    return { owner: staff.nickname, update_readback: true, stale_rejected: true };
+  });
+  check('cleanup', function () {
+    const result = withRecordWriteLock_(function () {
+      cleanupRows.forEach(function (entry) {
+        require(entry.id.indexOf(runId + '-') === 0, '拒絕清理非本次測試資料');
+        const row = findObject(entry.sheet, entry.key, entry.id);
+        if (row) deleteRow(entry.sheet, row._row);
+      });
+      SpreadsheetApp.flush();
+      require(cleanupRows.every(entry => !findObject(entry.sheet, entry.key, entry.id)), '測試列未清理');
+      return { ok: true };
+    });
+    ok(result);
+    const files = DriveApp.searchFiles("trashed = false and title contains '" + runId + "'");
+    let removed = 0;
+    while (files.hasNext()) { const file = files.next(); require(file.getName().indexOf(runId) >= 0, '拒絕清理非測試檔'); file.setTrashed(true); require(file.isTrashed(), '測試檔清理失敗'); removed++; }
+    return { rows: cleanupRows.length, files_trashed: removed };
+  });
+  const readiness = getSystemReadiness({ operator: admin.nickname });
+  const result = { ok: checks.every(item => item.ok), run_id: runId, elapsed_ms: Date.now() - started, checks: checks, readiness: readiness, real_google_logins_tested: false };
+  console.log(JSON.stringify({ ok: result.ok, run_id: runId, elapsed_ms: result.elapsed_ms, checks: checks.map(item => ({ id: item.id, ok: item.ok, error: item.error })), readiness: readiness, real_google_logins_tested: false }));
+  return result;
 }
 
 function systemMaintenanceUser_(params) {
@@ -4140,8 +4323,18 @@ function getLineBindingCode(params) {
 }
 
 function addTask(params) {
+  const notifications = [];
+  const result = withRecordWriteLock_(function () { return addTaskLocked_(params, notifications); });
+  if (result.ok) notifications.forEach(function (item) {
+    try { notifyUser_(item.user, item.title, item.body); }
+    catch (error) { result.warning = '事項已儲存，但通知未完成'; }
+  });
+  return result;
+}
+
+function addTaskLocked_(params, notifications) {
   const { title, created_by } = params;
-  if (!title) return { ok: false, error: '缺少事項標題' };
+  if (!String(title || '').trim()) return { ok: false, error: '缺少事項標題' };
   const creator = findUserByNickname(created_by);
   if (!creator || !canCreateTask_(creator.role)) return { ok: false, error: '無建立事項權限' };
 
@@ -4152,12 +4345,16 @@ function addTask(params) {
   if (requestedTaskId && assignees.length !== 1) return { ok: false, error: '指定事項編號時只能指派一位老師' };
   const existingRequestedTask = requestedTaskId ? findObject(SHEET_NAMES.TASKS, 'task_id', requestedTaskId) : null;
   if (existingRequestedTask && existingRequestedTask.assignee !== assignees[0]) return { ok: false, error: '事項編號已由其他老師使用' };
+  if (existingRequestedTask && existingRequestedTask.status === 'deleted') return { ok: false, code: 'RECORD_DELETED', error: '此事項已刪除，請另建新事項' };
+  if (existingRequestedTask && existingRequestedTask.created_by !== created_by && creator.role !== 'admin') return { ok: false, error: '只能修改自己建立的事項' };
 
   const due = params.due_date || todayStr();
   const now = nowIso();
   let created = 0;
   let updated = 0;
   const taskIds = [];
+  const taskStatuses = {};
+  const taskRevisions = {};
   assignees.forEach(nk => {
     const u = findUserByNickname(nk);
     if (!u) return;
@@ -4170,11 +4367,11 @@ function addTask(params) {
       assignee: nk,
       department: normalizeDepartment_(u.department),
       due_date: due,
-      status: 'open',
+      status: existing ? existing.status : 'open',
       created_by: existing ? existing.created_by : created_by,
       created_at: existing ? existing.created_at : now,
-      updated_at: now,
-      done_at: ''
+      updated_at: nextTaskUpdatedAt_(existing),
+      done_at: existing ? existing.done_at : ''
     };
     if (existing) {
       upsertRow(SHEET_NAMES.TASKS, 'task_id', row);
@@ -4182,16 +4379,28 @@ function addTask(params) {
     } else {
       appendRow(SHEET_NAMES.TASKS, row);
       created++;
-      if (params.notify !== false) notifyUser_(u, '🆕 你有新事項：' + title, (params.detail ? params.detail + '\n' : '') + '期限 ' + due);
+      if (params.notify !== false) notifications.push({ user: u, title: '🆕 你有新事項：' + title, body: (params.detail ? params.detail + '\n' : '') + '期限 ' + due });
     }
     taskIds.push(taskId);
+    taskStatuses[taskId] = row.status;
+    taskRevisions[taskId] = row.updated_at;
   });
   logSystem(created_by, 'add_task', title, { assignees: assignees, due: due, created: created, updated: updated });
-  return { ok: true, created: created, updated: updated, task_ids: taskIds, updated_at: now };
+  return { ok: true, created: created, updated: updated, task_ids: taskIds, task_statuses: taskStatuses, task_revisions: taskRevisions, updated_at: taskRevisions[taskIds[0]] || now };
 }
 
 /** V2 老師將自己的追蹤事項同步到雲端，供提醒排程與跨裝置使用。 */
+function nextTaskUpdatedAt_(existing) {
+  const previous = existing && existing.updated_at;
+  const parsed = previous instanceof Date ? previous.getTime() : Date.parse(String(previous || '').replace(/^"|"$/g, ''));
+  return new Date(Math.max(Date.now(), isNaN(parsed) ? 0 : parsed + 1)).toISOString();
+}
+
 function saveSelfTask(params) {
+  return withRecordWriteLock_(function () { return saveSelfTaskLocked_(params); });
+}
+
+function saveSelfTaskLocked_(params) {
   const nickname = String(params.nickname || '').trim();
   const user = nickname ? findUserByNickname(nickname) : null;
   const task = params.task || {};
@@ -4199,31 +4408,45 @@ function saveSelfTask(params) {
   if (!task.id || !String(task.title || '').trim()) return { ok: false, error: '事項資料不完整' };
   const existing = findObject(SHEET_NAMES.TASKS, 'task_id', task.id);
   if (existing && existing.assignee !== nickname) return { ok: false, error: '不可修改其他人的事項' };
-  const now = nowIso();
-  upsertRow(SHEET_NAMES.TASKS, 'task_id', {
+  if (existing && existing.status === 'deleted') return { ok: false, code: 'RECORD_DELETED', error: '此事項已在雲端刪除' };
+  if (task.status && ['open', 'done'].indexOf(task.status) < 0) return { ok: false, error: '事項狀態不正確' };
+  const assigned = existing && existing.created_by !== nickname;
+  const now = nextTaskUpdatedAt_(existing);
+  const record = {
     task_id: task.id,
-    title: String(task.title || '').trim(),
-    detail: String(task.source || task.detail || ''),
+    title: assigned ? existing.title : String(task.title || '').trim(),
+    detail: assigned ? existing.detail : String(task.source || task.detail || ''),
     assignee: nickname,
     department: normalizeDepartment_(user.department),
-    due_date: String(task.dueDate || todayStr()).slice(0, 10),
+    due_date: assigned ? existing.due_date : String(task.dueDate || todayStr()).slice(0, 10),
     status: task.status === 'done' ? 'done' : 'open',
     created_by: existing ? existing.created_by : nickname,
     created_at: existing ? existing.created_at : now,
     updated_at: now,
     done_at: task.status === 'done' ? (existing && existing.done_at || now) : '',
-  });
+  };
+  if (existing) {
+    const same = ['title', 'detail', 'status'].every(key => String(record[key] || '') === String(existing[key] || '')) && taskDateStr_(record.due_date) === taskDateStr_(existing.due_date);
+    if (same) return { ok: true, task_id: task.id, updated_at: existing.updated_at, duplicate: true };
+    if (recordConflict_(task.cloudUpdatedAt, existing.updated_at)) return { ok: false, code: 'RECORD_CONFLICT', current_task: Object.assign({}, existing, { due_date: taskDateStr_(existing.due_date) }), error: '事項已在其他裝置更新，已顯示最新狀態；請確認後再操作' };
+  }
+  upsertRow(SHEET_NAMES.TASKS, 'task_id', record);
   return { ok: true, task_id: task.id, updated_at: now };
 }
 
 function deleteSelfTask(params) {
+  return withRecordWriteLock_(function () { return deleteSelfTaskLocked_(params); });
+}
+
+function deleteSelfTaskLocked_(params) {
   const nickname = String(params.nickname || '').trim();
   const user = nickname ? findUserByNickname(nickname) : null;
   if (!user || user.status !== 'active') return { ok: false, error: '找不到可用帳號' };
   const existing = findObject(SHEET_NAMES.TASKS, 'task_id', params.task_id);
   if (!existing) return { ok: true, removed: false };
   if (existing.assignee !== nickname && user.role !== 'admin') return { ok: false, error: '不可刪除其他人的事項' };
-  deleteRow(SHEET_NAMES.TASKS, existing._row);
+  if (existing.created_by !== nickname && user.role !== 'admin') return { ok: false, error: '主管交辦事項只能由建立者或主管刪除' };
+  updateRow(SHEET_NAMES.TASKS, existing._row, { status: 'deleted', updated_at: nextTaskUpdatedAt_(existing) });
   return { ok: true, removed: true };
 }
 
@@ -4234,40 +4457,54 @@ function listTasks(params) {
   if (!vu) return { ok: false, error: 'viewer not found' };
   let list = sheetToObjects(SHEET_NAMES.TASKS);
   list.forEach(t => { t.due_date = taskDateStr_(t.due_date); });   // 正規化日期
-  if (vu.role === 'admin') {
+  if (vu.role === 'admin' || isGlobalManager_(vu)) {
     // 全部
   } else if (vu.role === 'manager' && !isGlobalManager_(vu)) {
     list = list.filter(t => sameDepartment_(t.department, vu.department) || t.assignee === viewer || t.created_by === viewer);
   } else {
     list = list.filter(t => t.assignee === viewer || t.created_by === viewer);
   }
+  const deletedIds = list.filter(t => t.status === 'deleted' || /^v2_(?:case|contact)_/.test(String(t.task_id || ''))).map(t => t.task_id);
+  list = list.filter(t => deletedIds.indexOf(t.task_id) < 0);
   if (status) list = list.filter(t => t.status === status);
   if (from) list = list.filter(t => String(t.due_date) >= from);
   if (to) list = list.filter(t => String(t.due_date) <= to);
-  list.sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)) || String(b.created_at).localeCompare(String(a.created_at)));
-  return { ok: true, tasks: list };
+  list.sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)) || cellTimestamp_(b.created_at) - cellTimestamp_(a.created_at));
+  return { ok: true, tasks: list, deletedIds: deletedIds };
 }
 
 function updateTaskStatus(params) {
+  return withRecordWriteLock_(function () { return updateTaskStatusLocked_(params); });
+}
+
+function updateTaskStatusLocked_(params) {
   const { task_id, status, operator } = params || {};
   if (!task_id || !status) return { ok: false, error: 'missing task_id/status' };
-  const row = findRow(SHEET_NAMES.TASKS, 'task_id', task_id);
-  if (row < 0) return { ok: false, error: 'task not found' };
-  updateRow(SHEET_NAMES.TASKS, row, {
+  if (['open', 'done'].indexOf(status) < 0) return { ok: false, error: '事項狀態不正確' };
+  const existing = findObject(SHEET_NAMES.TASKS, 'task_id', task_id);
+  if (!existing) return { ok: false, error: 'task not found' };
+  if (existing.status === 'deleted') return { ok: false, code: 'RECORD_DELETED', error: '此事項已刪除' };
+  const now = nextTaskUpdatedAt_(existing);
+  updateRow(SHEET_NAMES.TASKS, existing._row, {
     status: status,
-    done_at: status === 'done' ? nowIso() : '',
-    updated_at: nowIso()
+    done_at: status === 'done' ? existing.done_at || now : '',
+    updated_at: now
   });
   logSystem(operator || 'system', 'update_task', task_id, { status: status });
-  return { ok: true };
+  return { ok: true, updated_at: now };
 }
 
 function deleteTask(params) {
+  return withRecordWriteLock_(function () { return deleteTaskLocked_(params); });
+}
+
+function deleteTaskLocked_(params) {
   const { task_id } = params || {};
   if (!task_id) return { ok: false, error: 'missing task_id' };
   const row = findRow(SHEET_NAMES.TASKS, 'task_id', task_id);
   if (row < 0) return { ok: false, error: 'task not found' };
-  deleteRow(SHEET_NAMES.TASKS, row);
+  const existing = findObject(SHEET_NAMES.TASKS, 'task_id', task_id);
+  updateRow(SHEET_NAMES.TASKS, row, { status: 'deleted', updated_at: nextTaskUpdatedAt_(existing) });
   return { ok: true };
 }
 
@@ -4345,7 +4582,7 @@ function debugPush(params) {
 
 // 同時發 LINE + OneSignal
 function notifyUser_(user, title, body) {
-  if (!user) return;
+  if (!user || user.status !== 'active') return;
   if (user.line_user_id) pushLine_(user.line_user_id, title + '\n━━━━━━━━\n' + body);
   pushOneSignal_(user.nickname, title, body);
 }
@@ -4384,7 +4621,7 @@ function addDaysStr_(dateStr, n) {
 function sendTaskReminders_(mode) {
   const today = todayStr();
   const tomorrow = addDaysStr_(today, 1);
-  const open = sheetToObjects(SHEET_NAMES.TASKS).filter(t => t.status === 'open');
+  const open = sheetToObjects(SHEET_NAMES.TASKS).filter(t => t.status === 'open' && !/^v2_(?:case|contact)_/.test(String(t.task_id || '')));
   open.forEach(t => { t.due_date = taskDateStr_(t.due_date); });   // 正規化日期
   let relevant, header;
   if (mode === 'evening') {
@@ -4401,7 +4638,7 @@ function sendTaskReminders_(mode) {
   let sent = 0;
   Object.keys(byAssignee).forEach(nk => {
     const u = umap[nk];
-    if (!u) return;
+    if (!u || u.status !== 'active') return;
     if (isAnqinUser(u) && (isKpiWeekend_(today) || (mode === 'evening' && isKpiWeekend_(tomorrow)))) return;
     const items = byAssignee[nk]
       .map((t, i) => (i + 1) + '. ' + t.title + '（' + t.due_date + (String(t.due_date) < today ? ' 逾期' : '') + '）')
@@ -5705,7 +5942,7 @@ function listCoursePreps(params) {
     rows = rows.filter(row => sameDepartment_(row.department, viewerUser.department) || row.nickname === viewer);
   }
   if (params.nickname) rows = rows.filter(row => row.nickname === String(params.nickname));
-  rows.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+  rows.sort((a, b) => cellTimestamp_(b.updated_at) - cellTimestamp_(a.updated_at));
   const deletedIds = rows.filter(row => row.status === 'deleted').map(row => row.prep_id);
   const records = rows.filter(row => row.status !== 'deleted').map(row => {
     const data = parseJsonField(row.data_json) || {};
@@ -6828,6 +7065,8 @@ function adminMarketingDate_(value, required) {
   const date = String(value || '').slice(0, 10);
   if (!date && !required) return '';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('日期格式不正確');
+  const parsed = new Date(date + 'T00:00:00Z');
+  if (isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) throw new Error('日期不存在，請重新選擇');
   return date;
 }
 
@@ -7313,6 +7552,10 @@ function saveAdminMarketingRecordLocked_(params) {
 }
 
 function reviewAdminMarketingTrialBonus(params) {
+  return withRecordWriteLock_(function () { return reviewAdminMarketingTrialBonusLocked_(params); });
+}
+
+function reviewAdminMarketingTrialBonusLocked_(params) {
   const actor = params.__actor;
   if (!adminMarketingManagerCanReview_(actor)) return { ok: false, error: '只有行政美宣主管可審核首報獎金' };
   const existing = findObject(SHEET_NAMES.ADMIN_MARKETING_RECORDS, 'record_id', String(params.record_id || ''));

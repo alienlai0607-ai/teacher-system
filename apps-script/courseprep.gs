@@ -105,7 +105,7 @@ function listCoursePreps(params) {
     rows = rows.filter(row => sameDepartment_(row.department, viewerUser.department) || row.nickname === viewer);
   }
   if (params.nickname) rows = rows.filter(row => row.nickname === String(params.nickname));
-  rows.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+  rows.sort((a, b) => cellTimestamp_(b.updated_at) - cellTimestamp_(a.updated_at));
   const deletedIds = rows.filter(row => row.status === 'deleted').map(row => row.prep_id);
   const records = rows.filter(row => row.status !== 'deleted').map(row => {
     const data = parseJsonField(row.data_json) || {};

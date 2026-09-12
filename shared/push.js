@@ -10,6 +10,15 @@
   var initializationPromise = null;
   var subscriptionListenerAttached = false;
 
+  function withPushTimeout(promise, milliseconds, message) {
+    return new Promise(function (resolve, reject) {
+      var timer = window.setTimeout(function () { reject(new Error(message)); }, milliseconds);
+      Promise.resolve(promise).then(function (value) {
+        window.clearTimeout(timer); resolve(value);
+      }, function (error) { window.clearTimeout(timer); reject(error); });
+    });
+  }
+
   function nativePermission() {
     return 'Notification' in window ? Notification.permission : 'unsupported';
   }
@@ -100,7 +109,7 @@
     oneSignalClient = OneSignal;
     initializationPromise = (async function () {
       try {
-        await OneSignal.init({ appId: appId, allowLocalhostAsSecureOrigin: true });
+        await withPushTimeout(OneSignal.init({ appId: appId, allowLocalhostAsSecureOrigin: true }), 8000, 'APP 通知服務初始化逾時');
         attachSubscriptionListener(OneSignal);
         publishStatus(await syncSubscription(readStatus(OneSignal)));
         return true;
@@ -130,6 +139,7 @@
       window.OneSignalDeferred.push(async function (OneSignal) {
         if (settled) return;
         if (initializationPromise) await initializationPromise;
+        if (settled) return;
         settled = true;
         window.clearTimeout(timer);
         oneSignalClient = OneSignal;
@@ -140,26 +150,44 @@
 
   // 手動開啟時同時取得瀏覽器權限、恢復訂閱並綁定目前登入者。
   window.promptPush = function () {
+    if (latestStatus && latestStatus.error) return Promise.resolve(latestStatus);
     return new Promise(function (resolve) {
+      var settled = false;
+      var timer = window.setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        resolve(publishStatus(unavailableStatus('APP 通知服務回應逾時；請稍後重試，不影響紀錄儲存')));
+      }, 30000);
+      function finish(status) {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(status);
+      }
       window.OneSignalDeferred = window.OneSignalDeferred || [];
       window.OneSignalDeferred.push(async function (OneSignal) {
+        if (settled) return;
         try {
           oneSignalClient = OneSignal;
           if (initializationPromise && !(await initializationPromise)) {
-            resolve(latestStatus || unavailableStatus('APP 通知服務初始化失敗'));
+            finish(latestStatus || unavailableStatus('APP 通知服務初始化失敗'));
             return;
           }
+          if (settled) return;
           if (!OneSignal.Notifications.isPushSupported()) {
-            resolve(publishStatus(readStatus(OneSignal)));
+            finish(publishStatus(readStatus(OneSignal)));
             return;
           }
           if (!OneSignal.Notifications.permission) await OneSignal.Notifications.requestPermission();
+          if (settled) return;
           if (OneSignal.Notifications.permission) {
             await OneSignal.User.PushSubscription.optIn();
           }
-          resolve(publishStatus(await syncSubscription(await waitForSubscription(OneSignal))));
+          if (settled) return;
+          var status = await syncSubscription(await waitForSubscription(OneSignal));
+          if (!settled) finish(publishStatus(status));
         } catch (e) {
-          resolve(publishStatus(unavailableStatus(e && e.message ? e.message : String(e || ''))));
+          if (!settled) finish(publishStatus(unavailableStatus(e && e.message ? e.message : String(e || ''))));
         }
       });
     });

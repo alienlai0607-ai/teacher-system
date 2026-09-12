@@ -352,7 +352,7 @@
     const node = document.createElement('div');
     node.className = `toast ${tone}`;
     node.textContent = message;
-    root.appendChild(node);
+    root.replaceChildren(node);
     window.setTimeout(() => node.remove(), 3200);
   }
   function upsertLocal(record) {
@@ -1028,7 +1028,7 @@
     const selectedCampus = state.ui.classCampus === '東橋' ? '東橋' : '北區';
     state.ui.classCampus = selectedCampus;
     const campusOptions = [
-      { value: 'all', label: '全校總人數', icon: 'building-2' },
+      { value: 'all', label: '全校正式人次', icon: 'building-2' },
       { value: '北區', label: '北區', icon: 'map-pin' },
       { value: '東橋', label: '東橋', icon: 'map-pin' },
     ].map(option => ({ ...option, summary: classRosterSummary(option.value) }));
@@ -1042,7 +1042,7 @@
     const syncLabel = classRosterBusy ? '處理中' : PREVIEW_MODE ? '重設預覽' : '同步最新';
     return `<section class="page roster-page">${pageHead('班級人數', '正式上課人數 · 試上學生不計入', `<button class="button" data-action="refresh-class-roster" ${classRosterBusy ? 'disabled' : ''}>${icon('refresh-cw')}${syncLabel}</button><button class="button primary" data-action="open-class-editor" ${classRosterBusy ? 'disabled' : ''}>${icon('plus')}新增班級</button>`)}
       <div class="roster-campus-overview" data-testid="class-roster-stats" role="group" aria-label="分校人數總覽">
-        ${campusOptions.map(option => `<${option.value === 'all' ? 'div' : 'button type="button"'} class="roster-campus-card ${selectedCampus === option.value ? 'is-active' : ''}" ${option.value === 'all' ? '' : 'data-action="set-class-campus"'} data-campus="${esc(option.value)}" data-testid="class-campus-${esc(option.value)}" ${option.value === 'all' ? '' : `aria-pressed="${selectedCampus === option.value}"`}><span class="roster-campus-title"><span class="roster-campus-icon">${icon(option.icon, 18)}</span><span>${esc(option.label)}</span>${selectedCampus === option.value ? icon('check', 17) : ''}</span><span class="roster-campus-total"><strong>${option.summary.attendance}</strong><span>人</span></span><span class="roster-campus-meta">${option.summary.classes} 班 · ${option.summary.recruitment} 班招生關注</span></${option.value === 'all' ? 'div' : 'button'}>`).join('')}
+        ${campusOptions.map(option => `<${option.value === 'all' ? 'div' : 'button type="button"'} class="roster-campus-card ${selectedCampus === option.value ? 'is-active' : ''}" ${option.value === 'all' ? '' : 'data-action="set-class-campus"'} data-campus="${esc(option.value)}" data-testid="class-campus-${esc(option.value)}" ${option.value === 'all' ? '' : `aria-pressed="${selectedCampus === option.value}"`}><span class="roster-campus-title"><span class="roster-campus-icon">${icon(option.icon, 18)}</span><span>${esc(option.label)}</span>${selectedCampus === option.value ? icon('check', 17) : ''}</span><span class="roster-campus-total"><strong>${option.summary.attendance}</strong><span>人次</span></span><span class="roster-campus-meta">${option.summary.classes} 班 · ${option.summary.recruitment} 班招生關注</span></${option.value === 'all' ? 'div' : 'button'}>`).join('')}
       </div>
       <div class="roster-recruitment-summary ${selectedSummary.summary.recruitment ? 'has-warning' : ''}" data-testid="class-roster-recruitment-summary">${icon(selectedSummary.summary.recruitment ? 'triangle-alert' : 'circle-check-big', 18)}<div><strong>${esc(selectedSummary.label)}：${selectedSummary.summary.recruitment} 班少於 4 人</strong><span>${selectedSummary.summary.recruitment ? '建議優先安排招生與家長邀約' : '目前不需招生警示'}</span></div></div>
       ${renderRecruitmentEscalation()}

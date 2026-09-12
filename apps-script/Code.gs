@@ -47,7 +47,7 @@ function handleRequest(e, method) {
 
     const ROUTES = {
       // 認證
-      'ping': () => ({ ok: true, time: new Date().toISOString(), release: '20260906-reliability-1' }),
+      'ping': () => ({ ok: true, time: new Date().toISOString(), release: '20260912-logic-audit-2' }),
       'whoami': () => whoami(params),
       'getSessionIdentity': () => getSessionIdentity(params),
       'reportClientMetrics': () => reportClientMetrics(params),

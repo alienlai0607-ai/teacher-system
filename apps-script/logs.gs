@@ -12,6 +12,8 @@ function saveLog(params) {
 function saveLogRecord_(params) {
   const { nickname, date } = params;
   if (!nickname || !date) return { ok: false, error: 'missing nickname or date' };
+  const parsedDate = new Date(String(date) + 'T00:00:00Z');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date)) || isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== date || date > todayStr()) return { ok: false, error: '工作日期不正確，不可填寫未來日期的日報' };
 
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
@@ -388,8 +390,7 @@ function saveManagerPosts(nickname, department, date, posts) {
   const week = weekOf(date);
   posts.forEach(p => {
     if (!p.url && !p.screenshot) return;
-    appendRow(SHEET_NAMES.POSTS, {
-      post_id: Utilities.getUuid(),
+    upsertManagerPost_({
       date,
       nickname,
       department,
@@ -397,10 +398,28 @@ function saveManagerPosts(nickname, department, date, posts) {
       url: p.url || '',
       screenshot: p.screenshot || '',
       content_type: p.content_type || '其他',
-      week_of: week,
-      created_at: nowIso()
+      week_of: week
     });
   });
+}
+
+// Both callers hold the write lock; a daily autosave must not add another post.
+function upsertManagerPost_(post) {
+  const clean = value => String(value || '').trim();
+  post.url = clean(post.url);
+  post.screenshot = clean(post.screenshot);
+  post.platform = clean(post.platform);
+  const existing = sheetToObjects(SHEET_NAMES.POSTS).find(row =>
+    row.nickname === post.nickname && cellDateStr_(row.date) === cellDateStr_(post.date) &&
+    clean(row.platform) === post.platform &&
+    (post.url ? clean(row.url) === post.url : !clean(row.url) && clean(row.screenshot) === post.screenshot));
+  const record = Object.assign({}, existing || {}, post, {
+    post_id: existing ? existing.post_id : Utilities.getUuid(),
+    created_at: existing ? existing.created_at : nowIso()
+  });
+  if (existing) updateRow(SHEET_NAMES.POSTS, existing._row, record);
+  else appendRow(SHEET_NAMES.POSTS, record);
+  return record;
 }
 
 /**
@@ -435,7 +454,7 @@ function dailyLockOldLogs() {
   const cutoffStr = Utilities.formatDate(cutoff, 'Asia/Taipei', 'yyyy-MM-dd');
 
   for (let r = 2; r <= lastRow; r++) {
-    const d = String(sheet.getRange(r, dateCol).getValue());
+    const d = String(cellDateStr_(sheet.getRange(r, dateCol).getValue()));
     if (d < cutoffStr) {
       sheet.getRange(r, lockedCol).setValue(true);
     }
@@ -556,36 +575,15 @@ function getAttachmentPreviews(params) {
   });
   if (!ids.length) return { ok: true, previews: [], errors: [] };
 
-  let ownerByFileId = null;
-  function ownerForFile(fileId) {
-    if (!ownerByFileId) {
-      ownerByFileId = {};
-      sheetToObjects(SHEET_NAMES.EVIDENCE).forEach(function (row) {
-        const url = String(row.url || '');
-        ids.forEach(function (id) {
-          if (!ownerByFileId[id] && url.indexOf(id) >= 0) ownerByFileId[id] = String(row.nickname || '');
-        });
-      });
-      sheetToObjects(SHEET_NAMES.LOGS).forEach(function (row) {
-        const haystack = [
-          row.attachments, row.kpi1_data, row.kpi2_data, row.kpi3_data,
-          row.kpi4_data, row.kpi5_data, row.kpi6_data,
-        ].map(function (value) {
-          if (typeof value === 'string') return value;
-          try { return JSON.stringify(value || ''); } catch (error) { return ''; }
-        }).join('|');
-        ids.forEach(function (id) {
-          if (!ownerByFileId[id] && haystack.indexOf(id) >= 0) ownerByFileId[id] = String(row.nickname || '');
-        });
-      });
-    }
-    return String(ownerByFileId[fileId] || '');
-  }
-
   function actorListedOnFile(file) {
     if (actor.role === 'admin' || isGlobalManager_(actor)) return true;
     const email = String(actor.email || '').trim().toLowerCase();
     if (!email) return false;
+    // Text in a submitted log is not proof of file ownership. Use Drive's ACL.
+    try {
+      const access = file.getAccess(email);
+      if ([DriveApp.Permission.VIEW, DriveApp.Permission.EDIT, DriveApp.Permission.OWNER].indexOf(access) >= 0) return true;
+    } catch (error) {}
     try {
       if (String(file.getOwner().getEmail() || '').trim().toLowerCase() === email) return true;
     } catch (error) {}
@@ -607,12 +605,7 @@ function getAttachmentPreviews(params) {
   ids.forEach(function (fileId) {
     try {
       const file = DriveApp.getFileById(fileId);
-      let allowed = actorListedOnFile(file);
-      if (!allowed) {
-        const ownerNickname = ownerForFile(fileId);
-        const owner = ownerNickname ? findUserByNickname(ownerNickname) : null;
-        allowed = Boolean(owner && actorCanAccessUser_(actor, owner));
-      }
+      const allowed = actorListedOnFile(file);
       if (!allowed) {
         errors.push({ fileId: fileId, error: '無權查看此照片' });
         return;

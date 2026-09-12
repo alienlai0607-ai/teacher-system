@@ -411,8 +411,8 @@ function authorizeApiAction_(action, params, actor) {
     return;
   }
 
-  if (action === 'reviewAdminMarketingRecord' || action === 'saveAdminMarketingScore') {
-    requireApiRole_(actor, ['admin', 'manager']);
+  if (action === 'reviewAdminMarketingRecord' || action === 'saveAdminMarketingScore' || action === 'reviewAdminMarketingTrialBonus') {
+    if (!adminMarketingManagerCanReview_(actor)) throw new Error('只有行政美宣主管可審核');
     params.operator = actor.nickname;
     return;
   }
@@ -474,7 +474,8 @@ function authorizeApiAction_(action, params, actor) {
 
   if (action === 'getLog') {
     let nickname = params.nickname || '';
-    if (!nickname && params.log_id) {
+    // log_id takes precedence in getLog; authorize that same resource.
+    if (params.log_id) {
       const log = findObject(SHEET_NAMES.LOGS, 'log_id', params.log_id);
       nickname = log ? log.nickname : '';
     }
@@ -499,11 +500,22 @@ function authorizeApiAction_(action, params, actor) {
   }
 
   if (action === 'addFeedback') {
-    const target = requireApiUserScope_(actor, params.to_nickname);
+    const target = findUserByNickname(String(params.to_nickname || ''));
+    if (!target || target.status !== 'active') throw new Error('對話帳號不存在或未啟用');
     if (actor.role === 'teacher' || actor.role === 'admin_staff') {
       if (!(target.role === 'admin' || (target.role === 'manager' && (sameDepartment_(target.department, actor.department) || isGlobalManager_(target))))) {
         throw new Error('只能回覆主管或管理員');
       }
+    } else if (target.role !== 'admin') requireApiUserScope_(actor, target.nickname);
+    const log = findObject(SHEET_NAMES.LOGS, 'log_id', String(params.log_id || ''));
+    if (log) {
+      requireApiUserScope_(actor, log.nickname);
+      requireApiUserScope_(target, log.nickname);
+    } else if (String(params.log_id || '').indexOf('LOG-') === 0) {
+      throw new Error('找不到日報，請重新讀取後再回覆');
+    } else if (actor.role === 'teacher' || actor.role === 'admin_staff') {
+      const messages = sheetToObjects(SHEET_NAMES.FEEDBACK).filter(item => item.log_id === params.log_id);
+      if (messages.length && !messages.some(item => item.from_nickname === actor.nickname || item.to_nickname === actor.nickname)) throw new Error('只能回覆自己的對話');
     }
     params.from_nickname = actor.nickname;
     return;
@@ -515,10 +527,11 @@ function authorizeApiAction_(action, params, actor) {
     return;
   }
   if (action === 'listFeedbackThread') {
+    const log = findObject(SHEET_NAMES.LOGS, 'log_id', String(params.log_id || ''));
+    if (log) requireApiUserScope_(actor, log.nickname);
     const messages = sheetToObjects(SHEET_NAMES.FEEDBACK).filter(item => item.log_id === params.log_id);
     if (messages.length && actor.role !== 'admin') {
-      const allowed = messages.some(item => item.from_nickname === actor.nickname || item.to_nickname === actor.nickname ||
-        actorCanAccessUser_(actor, findUserByNickname(item.from_nickname)) || actorCanAccessUser_(actor, findUserByNickname(item.to_nickname)));
+      const allowed = messages.some(item => feedbackMessageVisible_(actor, item));
       if (!allowed) throw new Error('無權讀取此對話');
     }
     params.viewer = actor.nickname;

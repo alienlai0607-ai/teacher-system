@@ -4,13 +4,13 @@
 
 function addFeedback(params) {
   const { log_id, from_nickname, to_nickname, content, tag } = params;
-  if (!log_id || !from_nickname || !to_nickname || !content) {
+  if (!log_id || !from_nickname || !to_nickname || !String(content || '').trim()) {
     return { ok: false, error: 'missing required fields' };
   }
   const fromU = findUserByNickname(from_nickname);
   const toU = findUserByNickname(to_nickname);
   if (!fromU || !toU || fromU.status !== 'active' || toU.status !== 'active') return { ok: false, error: '對話帳號不存在或未啟用' };
-  if (fromU.role === 'teacher' && !(toU.role === 'manager' && (sameDepartment_(toU.department, fromU.department) || isGlobalManager_(toU))) && toU.role !== 'admin') {
+  if (['teacher', 'admin_staff'].indexOf(fromU.role) >= 0 && !(toU.role === 'manager' && (sameDepartment_(toU.department, fromU.department) || isGlobalManager_(toU))) && toU.role !== 'admin') {
     return { ok: false, error: '老師只能回覆同部門主管或管理員' };
   }
   if (fromU.role === 'manager' && !isGlobalManager_(fromU) && toU.role !== 'admin' && !sameDepartment_(toU.department, fromU.department)) {
@@ -44,12 +44,24 @@ function addFeedback(params) {
 }
 
 /** 對話串：某則日誌的所有往來訊息，依時間正序（老師/主管共用） */
+function feedbackMessageVisible_(actor, message) {
+  if (!actor || actor.status !== 'active') return false;
+  if (actor.role === 'admin' || isGlobalManager_(actor)) return true;
+  if (message.from_nickname === actor.nickname || message.to_nickname === actor.nickname) return true;
+  if (actor.role !== 'manager') return false;
+  return [message.from_nickname, message.to_nickname].some(function (nickname) {
+    const user = findUserByNickname(nickname);
+    return user && ['teacher', 'admin_staff'].indexOf(user.role) >= 0 && actorCanAccessUser_(actor, user);
+  });
+}
+
 function listFeedbackThread(params) {
   const { log_id } = params;
   if (!log_id) return { ok: false, error: 'missing log_id' };
+  const actor = params.__actor || findUserByNickname(String(params.viewer || ''));
   const list = sheetToObjects(SHEET_NAMES.FEEDBACK)
-    .filter(f => f.log_id === log_id)
-    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+    .filter(f => f.log_id === log_id && feedbackMessageVisible_(actor, f))
+    .sort((a, b) => cellTimestamp_(a.created_at) - cellTimestamp_(b.created_at));
   return { ok: true, thread: list };
 }
 
@@ -59,7 +71,7 @@ function listFeedback(params) {
   if (nickname) list = list.filter(f => f.to_nickname === nickname || f.from_nickname === nickname);
   if (log_id) list = list.filter(f => f.log_id === log_id);
   if (unread_only) list = list.filter(f => !f.read_at);
-  list.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  list.sort((a, b) => cellTimestamp_(b.created_at) - cellTimestamp_(a.created_at));
   return { ok: true, feedback: list };
 }
 
@@ -105,12 +117,16 @@ function listObservations(params) {
 }
 
 function addPost(params) {
+  return withRecordWriteLock_(function () { return addPostLocked_(params); });
+}
+
+function addPostLocked_(params) {
   const { nickname, date, platform, url, screenshot, content_type } = params;
   if (!nickname || !platform) return { ok: false, error: 'missing required fields' };
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
-  appendRow(SHEET_NAMES.POSTS, {
-    post_id: Utilities.getUuid(),
+  if (!String(url || '').trim() && !String(screenshot || '').trim()) return { ok: false, error: '請提供發文連結或截圖' };
+  const row = upsertManagerPost_({
     date: date || todayStr(),
     nickname,
     department: normalizeDepartment_(user.department),
@@ -118,10 +134,9 @@ function addPost(params) {
     url: url || '',
     screenshot: screenshot || '',
     content_type: content_type || '其他',
-    week_of: weekOf(date),
-    created_at: nowIso()
+    week_of: weekOf(date || todayStr())
   });
-  return { ok: true };
+  return { ok: true, post_id: row.post_id };
 }
 
 function listPosts(params) {

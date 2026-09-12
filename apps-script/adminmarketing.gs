@@ -126,6 +126,8 @@ function adminMarketingDate_(value, required) {
   const date = String(value || '').slice(0, 10);
   if (!date && !required) return '';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('日期格式不正確');
+  const parsed = new Date(date + 'T00:00:00Z');
+  if (isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) throw new Error('日期不存在，請重新選擇');
   return date;
 }
 
@@ -611,6 +613,10 @@ function saveAdminMarketingRecordLocked_(params) {
 }
 
 function reviewAdminMarketingTrialBonus(params) {
+  return withRecordWriteLock_(function () { return reviewAdminMarketingTrialBonusLocked_(params); });
+}
+
+function reviewAdminMarketingTrialBonusLocked_(params) {
   const actor = params.__actor;
   if (!adminMarketingManagerCanReview_(actor)) return { ok: false, error: '只有行政美宣主管可審核首報獎金' };
   const existing = findObject(SHEET_NAMES.ADMIN_MARKETING_RECORDS, 'record_id', String(params.record_id || ''));

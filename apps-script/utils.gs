@@ -52,6 +52,11 @@ function withRecordWriteLock_(callback) {
   try { return callback(); } finally { lock.releaseLock(); }
 }
 
+function cellTimestamp_(value) {
+  const time = value instanceof Date ? value.getTime() : Date.parse(String(value || '').replace(/^"|"$/g, ''));
+  return isNaN(time) ? 0 : time;
+}
+
 function recordConflict_(expected, current) {
   function normalized(value) {
     if (!value) return '';
@@ -222,6 +227,7 @@ function appendRow(name, obj) {
   const row = headers.map(h => {
     const v = obj[h];
     if (v === undefined || v === null) return '';
+    if (Object.prototype.toString.call(v) === '[object Date]') return v;
     if (typeof v === 'object') return JSON.stringify(v);
     return v;
   });
@@ -237,6 +243,7 @@ function updateRow(name, rowNum, obj) {
     if (obj[h] === undefined) return current[i];
     const v = obj[h];
     if (v === null) return '';
+    if (Object.prototype.toString.call(v) === '[object Date]') return v;
     if (typeof v === 'object') return JSON.stringify(v);
     return v;
   });

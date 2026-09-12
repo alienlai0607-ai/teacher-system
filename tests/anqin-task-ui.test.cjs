@@ -18,6 +18,24 @@ const allInOneBackend = fs.readFileSync(path.join(root, 'apps-script/_all_in_one
 const coursePrepBackend = fs.readFileSync(path.join(root, 'apps-script/courseprep.gs'), 'utf8');
 const qaHarness = fs.readFileSync(path.join(root, 'review/anqin-v2/qa-harness.js'), 'utf8');
 
+const reminderContext = vm.createContext({
+  SAFE_START_MODE: false, state: { ui: { route: 'tasks' } },
+  window: { Notification: {} }, Notification: { permission: 'default' },
+  legacySession: () => ({ role: 'teacher' }), $: () => ({ children: [] }),
+  persist() {}, icon: () => '', openDialog() { throw new Error('Reminder interrupted an active workflow'); },
+});
+vm.runInContext(source.slice(source.indexOf('function maybeShowPushPermissionReminder('), source.indexOf('function sessionCanInspectAccounts(')), reminderContext);
+reminderContext.maybeShowPushPermissionReminder();
+reminderContext.state.ui.route = 'today';
+reminderContext.$ = () => ({ children: [{}] });
+reminderContext.maybeShowPushPermissionReminder();
+reminderContext.$ = () => ({ children: [] });
+let reminders = 0;
+reminderContext.openDialog = () => reminders++;
+reminderContext.maybeShowPushPermissionReminder();
+reminderContext.maybeShowPushPermissionReminder();
+assert.equal(reminders, 1, 'Notification prompt appears once only on an unobstructed home page');
+
 const taskRenderer = source.slice(source.indexOf('function taskPriorityMeta('), source.indexOf('function expectedBackendDepartment('));
 assert.match(taskRenderer, /function openTaskDetail\(/, '待辦事項必須能開啟完整內容對話框');
 assert.match(taskRenderer, /data-action="open-task-detail"/, '每一筆事項都要有明確的查看入口');
@@ -244,7 +262,8 @@ assert.match(sharedApi, /getAttachmentPreviews: \(fileIds\) => call\('getAttachm
 assert.match(apiRouter, /'getAttachmentPreviews': \(\) => getAttachmentPreviews\(params\)/, 'Apps Script 路由需提供私密照片預覽');
 assert.match(authBackend, /if \(action === 'getAttachmentPreviews'\)/, '私密照片預覽必須經過登入權限入口');
 assert.match(logsBackend, /function getAttachmentPreviews\(params\)/, '後端需能讀取授權範圍內的 Drive 照片');
-assert.match(logsBackend, /actorCanAccessUser_\(actor, owner\)/, '後端需依老師與主管資料範圍驗證照片權限');
+assert.match(logsBackend, /file\.getAccess\(email\)/, '照片預覽必須核對雲端檔案實際授權');
+assert.doesNotMatch(logsBackend, /function ownerForFile\(/, '老師可編輯的紀錄文字不得作為檔案所有權證明');
 assert.match(logsBackend, /dataUrl: 'data:' \+ mimeType \+ ';base64,'/, '後端需回傳瀏覽器可直接顯示的圖片資料');
 assert.match(source, /function ensureCloudTeacherIdentity\([\s\S]{0,1200}API\.getSessionIdentity/, '前端需向後端重新確認正式老師身分');
 assert.match(source, /function formalCloudSessionReady\(\)[\s\S]{0,500}session\.role === 'manager' \|\| session\.role === 'admin'/, '主管與管理員的健康檢查不得被老師身分規則誤判');
@@ -263,7 +282,21 @@ assert.match(dailySubmitSource, /data-action="close-dialog">我知道了/, '成�
 assert.match(dailySubmitSource, /data-action="view-daily-submission-status"/, '收據需提供可直接查看送出狀態的入口');
 assert.match(source, /action === 'view-daily-submission-status'[^]*closeDialog\(\); persist\(\); renderApp\(\);/, '查看送出狀態前需先關閉收據，避免畫面被遮住');
 assert.match(dailySubmitSource, /showDailySubmissionReceipt\(submission, '紀錄已存入雲端，主管可查看。PDF 與通知接續處理，不必重複送出。'\)/, '紀錄儲存成功後應立即顯示收據，不應等待 PDF');
-assert.match(source, /duplicate = Array\.from\(root\.children\)/, '相同提示不得在畫面上重複堆疊');
+assert.match(source, /root\.replaceChildren\(node\)/, '新提示應取代舊提示，不得堆疊遮住操作');
+for (const pageName of ['anqin-v2', 'talent-v2', 'admin-marketing-v1']) {
+  const pageSource = fs.readFileSync(path.join(root, 'review', pageName, 'app.js'), 'utf8');
+  const start = pageSource.indexOf('  function toast(');
+  const toastSource = pageSource.slice(start, pageSource.indexOf('\n  function ', start + 10));
+  const toasts = { children: [], replaceChildren(node) { this.children = [node]; } };
+  const timers = [];
+  const context = vm.createContext({
+    $: () => toasts, document: { createElement: () => ({ dataset: {}, remove() {} }) },
+    window: { setTimeout: fn => timers.push(fn) }, icon: () => '', esc: text => text, hydrateIcons() {},
+  });
+  vm.runInContext(toastSource, context);
+  context.toast('saving'); context.toast('saved'); context.toast('saved');
+  assert.equal(toasts.children.length, 1, pageName + ' must show only the latest status');
+}
 const evidenceRemovalSource = source.slice(source.indexOf("else if (action === 'remove-evidence-attachment')"), source.indexOf("else if (action === 'remove-operation-photo')"));
 assert.match(evidenceRemovalSource, /if \(!evidenceDraft\.attachments\.length\)[\s\S]{0,500}evidenceDraft\.fileName = '';[\s\S]{0,500}evidenceDraft\.cloudFileId = '';/, '刪除最後一張成果照片時必須同步清除舊版欄位，避免幽靈附件復活');
 
