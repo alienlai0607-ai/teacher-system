@@ -45,7 +45,7 @@ function harness() {
     Session: { getScriptTimeZone: () => 'Asia/Taipei' },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: text => ({ setMimeType: () => JSON.parse(text) }) },
     LockService: { getScriptLock: () => ({ tryLock: () => { if (held || denyLock) return false; held = true; return true; }, releaseLock: () => { held = false; } }) },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: k => props.get(k), setProperty: (k, v) => props.set(k, v), deleteProperty: k => props.delete(k) }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => props.get(k), getProperties: () => Object.fromEntries(props), setProperty: (k, v) => props.set(k, v), deleteProperty: k => props.delete(k) }) },
     Utilities: {
       getUuid: crypto.randomUUID, formatDate, Charset: { UTF_8: 'utf8' },
       base64EncodeWebSafe: v => Buffer.from(v).toString('base64url'),
@@ -92,6 +92,26 @@ function test(name, fn) {
 }
 
 function runTests() {
+test('acceptance cleanup finds both material and photo prefixes and never removes real rows', ({ c }) => {
+  c.Session.getActiveUser = () => ({ getEmail: () => 'boss@example.invalid' });
+  c.ensureTalentRecordsSheet_();
+  const runId = 'QA-RELEASE-0b550cc2-d002-40d2-be49-9cc68b0f78f6';
+  c.appendRow('Tasks', { task_id: runId + '-TASK', title: 'QA' });
+  c.appendRow('Tasks', { task_id: 'real-task', title: 'Keep' });
+  const files = [runId + '.txt', 'K' + runId + '-2026-09-12.png'].map(name => ({
+    trashed: false, getName: () => name, setTrashed(value) { this.trashed = value; }, isTrashed() { return this.trashed; }
+  }));
+  c.DriveApp = { searchFiles(query) {
+    assert.ok(query.includes("title contains 'K" + runId + "'"));
+    let i = 0;
+    return { hasNext: () => i < files.length, next: () => files[i++] };
+  } };
+  assert.equal(c.cleanupReleaseAcceptanceFromEditor().ok, true);
+  assert.ok(files.every(file => file.trashed));
+  assert.equal(c.sheetToObjects('Tasks').length, 1);
+  assert.equal(c.sheetToObjects('Tasks')[0].task_id, 'real-task');
+});
+
 test('live acceptance refuses non-admin editor identities before any API write', ({ c }) => {
   let calls = 0;
   c.Session.getActiveUser = () => ({ getEmail: () => 'north@example.invalid' });

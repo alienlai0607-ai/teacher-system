@@ -130,6 +130,24 @@ window.API = (function () {
     return request;
   }
 
+  async function confirmMissingAuthResponse(action, payload, data) {
+    if (data?.code !== 'AUTH_REQUIRED' || !payload.session_token) return data;
+    const uncertain = { ok: false, code: 'AUTH_CHECK_UNCERTAIN', uncertain: !isRetryableRead(action), error: '雲端身分回應異常，尚未確認操作結果；登入仍保留，請稍後再試' };
+    try {
+      const identity = await requestJson({ action: 'getSessionIdentity', session_token: payload.session_token });
+      if (!identity.ok) return ['AUTH_INVALID', 'AUTH_EXPIRED'].includes(identity.code) ? identity : uncertain;
+      if (action === 'getSessionIdentity') return { ...identity, recovered_auth_response: true };
+      // Only reads and content-addressed uploads are safe to replay here.
+      if (isRetryableRead(action) || ['uploadPhoto', 'uploadFile'].includes(action)) {
+        const retry = await requestJson(payload);
+        return retry.code === 'AUTH_REQUIRED' ? uncertain : { ...retry, recovered_auth_response: retry.ok === true };
+      }
+      return uncertain;
+    } catch (error) {
+      return uncertain;
+    }
+  }
+
   async function performCall(action, params = {}) {
     if (window.AUTH?.isImpersonating?.() && !IMPERSONATION_READ_ACTIONS.has(action)) {
       return {
@@ -150,7 +168,7 @@ window.API = (function () {
     let lastError = null;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       try {
-        const data = await requestJson(payload);
+        const data = await confirmMissingAuthResponse(action, payload, await requestJson(payload));
         if (!data.ok) {
           console.warn('[API]', action, 'failed:', data.error);
           handleAuthFailure(action, data);

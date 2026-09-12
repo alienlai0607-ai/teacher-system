@@ -308,7 +308,7 @@ assert.match(uiHtmlSource, /workspaces\.css\?v=20260901-workspace-wrap-1/, '行�
 assert.match(uiHtmlSource, /styles\.css\?v=20260912-roster-time-2/, '班級人數版面需使用獨立快取版本');
 assert.match(uiHtmlSource, /app\.js\?v=20260912-logic-audit-2/, '班級人數互動需使用獨立快取版本');
 assert.match(uiHtmlSource, /shared\/roster-time\.js\?v=20260912-roster-time-2/, '舊版時間字串需要先正規化');
-assert.match(uiHtmlSource, /shared\/api\.js\?v=20260912-own-roster-1/, '行政頁需載入班級人數 API 版本');
+assert.match(uiHtmlSource, /shared\/api\.js\?v=20260912-auth-response-1/, '行政頁需載入包含班級人數與登入回應保護的最新 API 版本');
 assert.match(uiHtmlSource, /shared\/workspaces\.js\?v=20260911-class-roster-access-1/, '工作切換需避開舊權限快取');
 assert.match(uiSource, /\['converted_half_year', '已報名半年'\]/, '試上結果需可選擇已報名半年');
 assert.match(uiSource, /result\?\.code === 'RECORD_CONFLICT'[\s\S]*result\.current_record[\s\S]*merged\.recordRevision/, '更新衝突需合併最新版後安全重試');

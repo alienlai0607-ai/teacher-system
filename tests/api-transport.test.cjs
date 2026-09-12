@@ -13,9 +13,12 @@ function createApi(fetchImpl, options = {}) {
   const window = {
     APP_CONFIG: { API_URL: 'https://example.invalid/exec' },
     AUTH: { getSession: () => null, isImpersonating: () => false },
+    location: { href: 'https://example.invalid/review/anqin-v2/index.html', replace() {} },
     setTimeout: (callback, delay) => { const deadline = options.deadlineMs && delay >= 25000; const timer = setTimeout(callback, deadline ? options.deadlineMs : delay < 2000 ? 0 : delay); if (delay >= 2000 && !deadline) timer.unref(); return timer; },
     clearTimeout,
   };
+  if (options.session) window.AUTH.getSession = () => options.session;
+  if (options.onClear) window.AUTH.clearSession = options.onClear;
   const context = vm.createContext({
     window,
     fetch: fetchImpl,
@@ -31,6 +34,60 @@ function createApi(fetchImpl, options = {}) {
 }
 
 (async () => {
+  let cleared = 0;
+  const authSession = { nickname: 'QA', session_token: 'synthetic-token' };
+  const authCalls = [];
+  const authRecoveryApi = createApi(async (_url, init) => {
+    const payload = JSON.parse(init.body);
+    authCalls.push(payload);
+    if (payload.action === 'getSessionIdentity') return response('{"ok":true,"user":{"nickname":"QA"}}');
+    return response(JSON.stringify(authCalls.length === 1 ? { ok: false, code: 'AUTH_REQUIRED' } : { ok: true, previews: [{ fileId: 'photo' }], errors: [] }));
+  }, { session: authSession, onClear: () => cleared++ });
+  const authRecovered = await authRecoveryApi.getAttachmentPreviews(['photo']);
+  assert.equal(authRecovered.ok, true);
+  assert.equal(authRecovered.recovered_auth_response, true);
+  assert.equal(cleared, 0);
+  assert.deepEqual(authCalls.map(payload => payload.action), ['getAttachmentPreviews', 'getSessionIdentity', 'getAttachmentPreviews']);
+  assert.ok(authCalls.every(payload => payload.session_token === authSession.session_token));
+
+  for (const probe of ['valid', 'missing', 'offline', 'expired', 'invalid']) {
+    let saves = 0; let clears = 0;
+    const api = createApi(async (_url, init) => {
+      const payload = JSON.parse(init.body);
+      if (payload.action === 'saveLog') { saves++; return response('{"ok":false,"code":"AUTH_REQUIRED"}'); }
+      if (probe === 'offline') throw new Error('offline');
+      return response(JSON.stringify(probe === 'valid' ? { ok: true, user: { nickname: 'QA' } } : { ok: false, code: probe === 'expired' ? 'AUTH_EXPIRED' : probe === 'invalid' ? 'AUTH_INVALID' : 'AUTH_REQUIRED' }));
+    }, { session: authSession, onClear: () => clears++ });
+    const result = await api.saveLog({ nickname: 'QA' });
+    assert.equal(saves, 1, 'uncertain ordinary writes must never be replayed');
+    assert.equal(result.ok, false);
+    assert.equal(result.code, probe === 'expired' ? 'AUTH_EXPIRED' : probe === 'invalid' ? 'AUTH_INVALID' : 'AUTH_CHECK_UNCERTAIN');
+    assert.equal(clears, ['expired', 'invalid'].includes(probe) ? 1 : 0);
+  }
+
+  let repeatedCalls = 0;
+  const repeatedMissingApi = createApi(async (_url, init) => {
+    repeatedCalls++;
+    return response(JSON.stringify(JSON.parse(init.body).action === 'getSessionIdentity' ? { ok: true } : { ok: false, code: 'AUTH_REQUIRED' }));
+  }, { session: authSession, onClear: () => cleared++ });
+  assert.equal((await repeatedMissingApi.getAttachmentPreviews(['photo'])).code, 'AUTH_CHECK_UNCERTAIN');
+  assert.equal(repeatedCalls, 3, 'recovery must be bounded even when the missing-auth reply repeats');
+  assert.equal(cleared, 0);
+
+  let uploadAttempts = 0; let firstUpload;
+  const uploadRecoveryApi = createApi(async (_url, init) => {
+    const payload = JSON.parse(init.body);
+    if (payload.action === 'getSessionIdentity') return response('{"ok":true,"user":{"nickname":"QA"}}');
+    uploadAttempts++;
+    if (!firstUpload) firstUpload = payload;
+    else assert.deepEqual(payload, firstUpload, 'upload recovery must reuse the content and request ID');
+    return response(JSON.stringify(uploadAttempts === 1 ? { ok: false, code: 'AUTH_REQUIRED' } : { ok: true, fileId: 'same-file' }));
+  }, { session: authSession, onClear: () => cleared++ });
+  const uploaded = await uploadRecoveryApi.uploadPhoto({ nickname: 'QA', base64: 'synthetic' });
+  assert.equal(uploaded.ok, true);
+  assert.equal(uploadAttempts, 2);
+  assert.equal(cleared, 0);
+
   let readCalls = 0;
   const readApi = createApi(async () => {
     readCalls += 1;

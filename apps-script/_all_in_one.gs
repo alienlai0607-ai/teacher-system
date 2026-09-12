@@ -58,7 +58,7 @@ function handleRequest(e, method) {
 
     const ROUTES = {
       // 認證
-      'ping': () => ({ ok: true, time: new Date().toISOString(), release: '20260912-logic-audit-2' }),
+      'ping': () => ({ ok: true, time: new Date().toISOString(), release: '20260912-logic-audit-3' }),
       'whoami': () => whoami(params),
       'getSessionIdentity': () => getSessionIdentity(params),
       'reportClientMetrics': () => reportClientMetrics(params),
@@ -3790,7 +3790,7 @@ function verifyReleaseLogicFromEditor() {
   }
   check('live_version', function () {
     const response = JSON.parse(UrlFetchApp.fetch(endpoint + '?action=ping').getContentText());
-    require(response.release === '20260912-logic-audit-2', '正式後端尚未更新至本次版本');
+    require(response.release === '20260912-logic-audit-3', '正式後端尚未更新至本次版本');
     return { release: response.release };
   });
   if (!checks[0].ok) { PropertiesService.getScriptProperties().deleteProperty('KPI_RELEASE_QA_PENDING_' + runId); const result = { ok: false, run_id: runId, checks: checks }; console.log(JSON.stringify(result)); return result; }
@@ -3872,15 +3872,17 @@ function verifyReleaseLogicFromEditor() {
     const result = withRecordWriteLock_(function () {
       cleanupRows.forEach(function (entry) {
         require(entry.id.indexOf(runId + '-') === 0, '拒絕清理非本次測試資料');
-        const row = findObject(entry.sheet, entry.key, entry.id);
-        if (row) getSheet(entry.sheet).deleteRow(findRow(entry.sheet, entry.key, entry.id));
+        const rowNum = findRow(entry.sheet, entry.key, entry.id);
+        if (rowNum >= 2) getSheet(entry.sheet).deleteRow(rowNum);
+        SpreadsheetApp.flush();
+        const remainingRow = findRow(entry.sheet, entry.key, entry.id);
+        console.log(JSON.stringify({ run_id: runId, cleanup_sheet: entry.sheet, matched_row: rowNum, remaining_row: remainingRow }));
+        require(remainingRow < 2, entry.sheet + ' 驗收列仍存在');
       });
-      SpreadsheetApp.flush();
-      require(cleanupRows.every(entry => !findObject(entry.sheet, entry.key, entry.id)), '測試列未清理');
       return { ok: true };
     });
     ok(result);
-    const files = DriveApp.searchFiles("trashed = false and title contains '" + runId + "'");
+    const files = DriveApp.searchFiles("trashed = false and (title contains '" + runId + "' or title contains 'K" + runId + "')");
     let removed = 0;
     while (files.hasNext()) { const file = files.next(); require(file.getName().indexOf(runId) >= 0, '拒絕清理非測試檔'); file.setTrashed(true); require(file.isTrashed(), '測試檔清理失敗'); removed++; }
     PropertiesService.getScriptProperties().deleteProperty('KPI_RELEASE_QA_PENDING_' + runId);
@@ -3912,7 +3914,7 @@ function cleanupReleaseAcceptanceFromEditor() {
         SpreadsheetApp.flush();
         if (findRow(entry[0], entry[1], id) >= 2) throw new Error(entry[0] + ' 驗收列仍存在');
       });
-      const files = DriveApp.searchFiles("trashed = false and title contains '" + runId + "'");
+      const files = DriveApp.searchFiles("trashed = false and (title contains '" + runId + "' or title contains 'K" + runId + "')");
       let removed = 0;
       while (files.hasNext()) {
         const file = files.next();
