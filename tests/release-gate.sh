@@ -19,6 +19,7 @@ cd "$ROOT"
 "$NODE_BIN" tests/api-transport.test.cjs
 "$NODE_BIN" tests/session-continuity.test.cjs
 "$NODE_BIN" tests/push-resilience.test.cjs
+"$NODE_BIN" tests/icon-catalog.test.cjs
 "$NODE_BIN" tests/anqin-task-ui.test.cjs
 "$NODE_BIN" tests/talent-rules.test.cjs
 "$NODE_BIN" tests/admin-marketing-rules.test.cjs

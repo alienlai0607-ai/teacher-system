@@ -5263,7 +5263,7 @@
     const passed = Number(result.summary?.passed || items.filter(item => item.ok).length || 0);
     const total = Number(result.summary?.total || items.length || 0);
     const allPassed = Boolean(result.ok && total > 0 && passed === total);
-    return `<section class="health-delivery-section"><div class="notice-band ${allPassed ? 'success' : 'danger'}">${icon(allPassed ? 'cloud-check' : 'cloud-alert', 19)}<div><div class="notice-title">雲端實際交付：${allPassed ? `${passed}/${total} 項通過` : `${passed}/${total} 項通過，仍有失敗`}</div><div class="notice-copy">${esc(runtimeHealth.cloudDeliveryCheckedAt || result.checked_at || '')}${result.elapsed_ms != null ? ` · 共 ${esc(String(result.elapsed_ms))} ms` : ''}</div></div></div><div class="health-check-list">${items.map(item => `<div class="health-check-row ${item.ok ? 'good' : 'bad'}"><span class="health-check-icon">${icon(item.ok ? 'check' : 'x', 14)}</span><div><strong>${esc(item.label || item.id || '未命名檢查')}</strong><small>${esc(item.ok ? '已實際寫入、讀回並完成本次測試資料清理。' : (item.error || '驗收失敗'))}</small></div><span class="health-check-value">${item.ok ? `${esc(String(item.elapsed_ms || 0))} ms` : '失敗'}</span></div>`).join('')}</div></section>`;
+    return `<section class="health-delivery-section"><div class="notice-band ${allPassed ? 'success' : 'danger'}">${icon(allPassed ? 'cloud' : 'cloud-alert', 19)}<div><div class="notice-title">雲端實際交付：${allPassed ? `${passed}/${total} 項通過` : `${passed}/${total} 項通過，仍有失敗`}</div><div class="notice-copy">${esc(runtimeHealth.cloudDeliveryCheckedAt || result.checked_at || '')}${result.elapsed_ms != null ? ` · 共 ${esc(String(result.elapsed_ms))} ms` : ''}</div></div></div><div class="health-check-list">${items.map(item => `<div class="health-check-row ${item.ok ? 'good' : 'bad'}"><span class="health-check-icon">${icon(item.ok ? 'check' : 'x', 14)}</span><div><strong>${esc(item.label || item.id || '未命名檢查')}</strong><small>${esc(item.ok ? '已實際寫入、讀回並完成本次測試資料清理。' : (item.error || '驗收失敗'))}</small></div><span class="health-check-value">${item.ok ? `${esc(String(item.elapsed_ms || 0))} ms` : '失敗'}</span></div>`).join('')}</div></section>`;
   }
 
   async function runCloudDeliveryCheck() {
@@ -5292,7 +5292,7 @@
     const cloudCheckButton = session?.role === 'admin'
       && !window.AUTH?.isImpersonating?.()
       && integrationRuntime.readiness?.services?.productionIntegrity === true
-      ? `<button type="button" class="btn btn-primary" data-action="run-cloud-delivery-check" ${runtimeHealth.cloudDeliveryStatus === 'running' ? 'disabled' : ''}>${icon('cloud-check', 15)}${runtimeHealth.cloudDeliveryStatus === 'running' ? '驗收中' : '實測雲端交付'}</button>`
+      ? `<button type="button" class="btn btn-primary" data-action="run-cloud-delivery-check" ${runtimeHealth.cloudDeliveryStatus === 'running' ? 'disabled' : ''}>${icon('cloud', 15)}${runtimeHealth.cloudDeliveryStatus === 'running' ? '驗收中' : '實測雲端交付'}</button>`
       : '';
     openDialog({
       title: '系統健康檢查',

@@ -417,8 +417,7 @@ function upsertManagerPost_(post) {
     post_id: existing ? existing.post_id : Utilities.getUuid(),
     created_at: existing ? existing.created_at : nowIso()
   });
-  if (existing) updateRow(SHEET_NAMES.POSTS, existing._row, record);
-  else appendRow(SHEET_NAMES.POSTS, record);
+  upsertRow(SHEET_NAMES.POSTS, 'post_id', record);
   return record;
 }
 

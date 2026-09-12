@@ -329,10 +329,11 @@ test('manager daily autosave and post retry do not multiply the same evidence', 
   assert.equal(first.ok, true, first.error);
   assert.equal(request('northBoss', 'saveLog', { ...daily, base_revision: first.revision }).ok, true);
   const row = c.sheetToObjects('Posts')[0];
-  const retry = request('northBoss', 'addPost', { nickname: 'northBoss', date: daily.date, ...post });
+  const retry = request('northBoss', 'addPost', { nickname: 'northBoss', date: daily.date, ...post, content_type: '更新的分類' });
   assert.equal(retry.ok, true, retry.error);
   assert.equal(retry.post_id, row.post_id);
   assert.equal(c.sheetToObjects('Posts').length, 1);
+  assert.equal(c.sheetToObjects('Posts')[0].content_type, '更新的分類');
   assert.equal(c.getWeekPostCount({ nickname: 'northBoss', date: daily.date }).count, 1);
   assert.equal(request('northBoss', 'addPost', { nickname: 'northBoss', platform: 'FB' }).ok, false);
   denyLock(true);

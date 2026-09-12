@@ -89,7 +89,7 @@ function check(name, passed, detail = '') {
 function trackPage(page, label) {
   page.on('pageerror', error => report.browserErrors.push({ label, type: 'pageerror', message: error.message }));
   page.on('console', message => {
-    if (message.type() !== 'error') return;
+    if (message.type() !== 'error' && !message.text().includes('icon name was not found')) return;
     const location = message.location();
     const source = location?.url ? ` (${location.url}${location.lineNumber != null ? `:${location.lineNumber + 1}` : ''})` : '';
     if (String(location?.url || '').startsWith('https://cdn.onesignal.com/') && message.text().includes('Failed to load resource')) {

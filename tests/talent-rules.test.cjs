@@ -281,7 +281,7 @@ assert.match(talentUiSource, /\.\.\.values,[\s\S]*id: editingId \|\| existingLog
 assert.match(talentUiSource, /state\.logs = \(Array\.isArray\(state\.logs\)[\s\S]*id: uid\('log'\)/, '舊本機課堂缺少編號時需自動修復');
 assert.match(talentUiSource, /class="record-actions"[\s\S]*data-action="edit-log"[\s\S]*data-action="view-log"/, '編輯與查看按鈕需放入獨立動作列，避免疊在同一座標');
 assert.match(talentStyleSource, /\.record-actions \{ display: flex;[\s\S]*gap: 6px;/, '編輯與查看按鈕需保留可點擊間距');
-assert.match(talentIndexSource, /app\.js\?v=20260912-logic-audit-1/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
+assert.match(talentIndexSource, /app\.js\?v=20260912-logic-audit-2/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
 assert.match(talentUiSource, /completed: String\(values\.issue \|\| ''\)\.trim\(\), response: String\(values\.issue \|\| ''\)\.trim\(\)/, '簡化後的才藝表單需相容尚未更新的舊後端驗證');
 assert.match(talentUiSource, /function talentSubmissionError\(/, '才藝送出錯誤不得直接顯示內部欄位名稱');
 const talentPaySource = talentUiSource.slice(talentUiSource.indexOf('function renderPay()'), talentUiSource.indexOf('function renderPayRow('));

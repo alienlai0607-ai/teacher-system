@@ -306,7 +306,7 @@ assert.match(workspacesCssSource, /\.workspace-quick-title \{[^}]*width: 100%;[^
 assert.match(workspacesCssSource, /grid-template-columns: repeat\(auto-fit, minmax\(136px, 1fr\)\)/, '手機三身分按鈕需保留可讀寬度');
 assert.match(uiHtmlSource, /workspaces\.css\?v=20260901-workspace-wrap-1/, '行政頁需載入防溢出的工作身分樣式');
 assert.match(uiHtmlSource, /styles\.css\?v=20260912-roster-time-2/, '班級人數版面需使用獨立快取版本');
-assert.match(uiHtmlSource, /app\.js\?v=20260912-logic-audit-1/, '班級人數互動需使用獨立快取版本');
+assert.match(uiHtmlSource, /app\.js\?v=20260912-logic-audit-2/, '班級人數互動需使用獨立快取版本');
 assert.match(uiHtmlSource, /shared\/roster-time\.js\?v=20260912-roster-time-2/, '舊版時間字串需要先正規化');
 assert.match(uiHtmlSource, /shared\/api\.js\?v=20260912-own-roster-1/, '行政頁需載入班級人數 API 版本');
 assert.match(uiHtmlSource, /shared\/workspaces\.js\?v=20260911-class-roster-access-1/, '工作切換需避開舊權限快取');

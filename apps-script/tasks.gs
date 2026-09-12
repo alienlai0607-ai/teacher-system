@@ -16,6 +16,7 @@ function verifyReleaseLogicFromEditor() {
   if (!admin || admin.role !== 'admin' || admin.status !== 'active') throw new Error('須由正式管理員執行驗收');
   const endpoint = 'https://script.google.com/macros/s/AKfycbyantQSORV8ulYF_LhHvhxOeRxvlwvUV40oFGRY_Hk9O6JxI5EaRXyFg_Vvi6C8K170UQ/exec';
   const runId = 'QA-RELEASE-' + Utilities.getUuid();
+  PropertiesService.getScriptProperties().setProperty('KPI_RELEASE_QA_PENDING_' + runId, 'true');
   const checks = [];
   const cleanupRows = [];
   const started = Date.now();
@@ -33,10 +34,13 @@ function verifyReleaseLogicFromEditor() {
   }
   function request(user, action, payload) {
     require(user, '缺少此角色可驗收的啟用帳號');
+    const requestedAt = Date.now();
     const body = Object.assign({}, payload || {}, { action: action, session_token: issueSessionToken_(user) });
     const response = UrlFetchApp.fetch(endpoint, { method: 'post', contentType: 'text/plain', payload: JSON.stringify(body), followRedirects: true, muteHttpExceptions: true });
     let data;
     try { data = JSON.parse(response.getContentText()); } catch (error) { throw new Error(action + ' 回應不是 JSON：HTTP ' + response.getResponseCode()); }
+    if (!data.ok) data.error = action + ': ' + (data.error || data.code || 'unknown') + ' [HTTP ' + response.getResponseCode() + ']';
+    console.log(JSON.stringify({ run_id: runId, action: action, ok: data.ok === true, code: data.code || '', ms: Date.now() - requestedAt }));
     return data;
   }
   function ok(data) { require(data && data.ok, data && data.error || '正式 API 未回報成功'); return data; }
@@ -51,7 +55,7 @@ function verifyReleaseLogicFromEditor() {
     require(response.release === '20260912-logic-audit-2', '正式後端尚未更新至本次版本');
     return { release: response.release };
   });
-  if (!checks[0].ok) { const result = { ok: false, run_id: runId, checks: checks }; console.log(JSON.stringify(result)); return result; }
+  if (!checks[0].ok) { PropertiesService.getScriptProperties().deleteProperty('KPI_RELEASE_QA_PENDING_' + runId); const result = { ok: false, run_id: runId, checks: checks }; console.log(JSON.stringify(result)); return result; }
   check('active_accounts', function () {
     const emails = {};
     const accounts = users.map(function (user) {
@@ -131,7 +135,7 @@ function verifyReleaseLogicFromEditor() {
       cleanupRows.forEach(function (entry) {
         require(entry.id.indexOf(runId + '-') === 0, '拒絕清理非本次測試資料');
         const row = findObject(entry.sheet, entry.key, entry.id);
-        if (row) deleteRow(entry.sheet, row._row);
+        if (row) getSheet(entry.sheet).deleteRow(findRow(entry.sheet, entry.key, entry.id));
       });
       SpreadsheetApp.flush();
       require(cleanupRows.every(entry => !findObject(entry.sheet, entry.key, entry.id)), '測試列未清理');
@@ -141,11 +145,50 @@ function verifyReleaseLogicFromEditor() {
     const files = DriveApp.searchFiles("trashed = false and title contains '" + runId + "'");
     let removed = 0;
     while (files.hasNext()) { const file = files.next(); require(file.getName().indexOf(runId) >= 0, '拒絕清理非測試檔'); file.setTrashed(true); require(file.isTrashed(), '測試檔清理失敗'); removed++; }
+    PropertiesService.getScriptProperties().deleteProperty('KPI_RELEASE_QA_PENDING_' + runId);
     return { rows: cleanupRows.length, files_trashed: removed };
   });
   const readiness = getSystemReadiness({ operator: admin.nickname });
   const result = { ok: checks.every(item => item.ok), run_id: runId, elapsed_ms: Date.now() - started, checks: checks, readiness: readiness, real_google_logins_tested: false };
   console.log(JSON.stringify({ ok: result.ok, run_id: runId, elapsed_ms: result.elapsed_ms, checks: checks.map(item => ({ id: item.id, ok: item.ok, error: item.error })), readiness: readiness, real_google_logins_tested: false }));
+  return result;
+}
+
+/** Retry only exact QA IDs from a recorded acceptance run, in a fresh execution. */
+function cleanupReleaseAcceptanceFromEditor() {
+  const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  const admin = email ? findUserByEmail(email) : null;
+  if (!admin || admin.role !== 'admin' || admin.status !== 'active') throw new Error('須由正式管理員清理驗收資料');
+  const props = PropertiesService.getScriptProperties();
+  const knownFirstRun = 'QA-RELEASE-0b550cc2-d002-40d2-be49-9cc68b0f78f6';
+  const runs = [knownFirstRun].concat(Object.keys(props.getProperties()).filter(key => key.indexOf('KPI_RELEASE_QA_PENDING_') === 0).map(key => key.slice('KPI_RELEASE_QA_PENDING_'.length)));
+  const result = withRecordWriteLock_(function () {
+    const results = [];
+    runs.filter((id, i) => runs.indexOf(id) === i).forEach(function (runId) {
+      if (!/^QA-RELEASE-[a-f0-9-]{36}$/.test(runId)) throw new Error('拒絕非驗收編號');
+      const rows = [[SHEET_NAMES.TASKS, 'task_id', 'TASK'], [SHEET_NAMES.TALENT_RECORDS, 'record_id', 'PREP'], [SHEET_NAMES.ADMIN_MARKETING_RECORDS, 'record_id', 'ADMIN']];
+      rows.forEach(function (entry) {
+        const id = runId + '-' + entry[2];
+        const rowNum = findRow(entry[0], entry[1], id);
+        if (rowNum >= 2) getSheet(entry[0]).deleteRow(rowNum);
+        SpreadsheetApp.flush();
+        if (findRow(entry[0], entry[1], id) >= 2) throw new Error(entry[0] + ' 驗收列仍存在');
+      });
+      const files = DriveApp.searchFiles("trashed = false and title contains '" + runId + "'");
+      let removed = 0;
+      while (files.hasNext()) {
+        const file = files.next();
+        if (file.getName().indexOf(runId) < 0) throw new Error('拒絕清除其他原檔');
+        file.setTrashed(true);
+        if (!file.isTrashed()) throw new Error('驗收檔未清理');
+        removed++;
+      }
+      props.deleteProperty('KPI_RELEASE_QA_PENDING_' + runId);
+      results.push({ run_id: runId, rows_absent: true, files_trashed: removed });
+    });
+    return { ok: true, runs: results };
+  });
+  console.log(JSON.stringify(result));
   return result;
 }
 
