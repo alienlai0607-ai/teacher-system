@@ -264,6 +264,16 @@ window.API = (function () {
         if (!data.ok) {
           console.warn('[API]', action, 'failed:', data.error);
           handleAuthFailure(action, data);
+          // Rejecting this retry cannot establish whether the earlier request
+          // committed. Keep its receipt ID and caller's payload across login.
+          if (receiptedWrite && previous && ['AUTH_REQUIRED', 'AUTH_INVALID', 'AUTH_EXPIRED'].includes(data.code)) {
+            return {
+              ...data,
+              uncertain: true,
+              request_id: payload.request_id,
+              error: '登入已失效，請重新登入；先前送出結果仍待確認，內容已保留，重新登入後會沿用原操作確認',
+            };
+          }
           if (receiptedWrite && data.code === 'WRITE_BUSY' && data.retry_safe === true && attempt < maxAttempts - 1) {
             await wait(WRITE_BUSY_DELAYS_MS[attempt] + Math.floor(Math.random() * 500));
             continue;

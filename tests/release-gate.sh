@@ -19,6 +19,7 @@ cd "$ROOT"
 "$NODE_BIN" --check shared/local-drafts.js
 "$NODE_BIN" tests/api-transport.test.cjs
 "$NODE_BIN" tests/api-pending-persistence.test.cjs
+"$NODE_BIN" tests/api-auth-recovery.test.cjs
 "$NODE_BIN" tests/mutation-receipts.test.cjs
 "$NODE_BIN" tests/backend-receipt-safety-20260916.test.cjs
 "$NODE_BIN" tests/backend-text-safety-20260916.test.cjs

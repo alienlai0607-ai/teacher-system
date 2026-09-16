@@ -11,6 +11,20 @@ fs.mkdirSync(dir, { recursive: true });
   context.on('page', page => page.on('pageerror', error => errors.push(error.message)));
   try {
     const admin = await context.newPage();
+    const submitAdminAdjustment = async (code, expectedCount) => {
+      await admin.locator('#class-roster-adjust-form button[type="submit"]').click();
+      // Clicking starts an async save. Check the committed count and its render
+      // before inspecting warnings or submitting a competing teacher update.
+      await admin.locator('#class-roster-adjust-form').waitFor({ state: 'detached' });
+      await admin.waitForFunction(({ code, expectedCount }) => {
+        const shared = JSON.parse(localStorage.getItem('bp_admin_marketing_v1_shared') || 'null');
+        const saved = shared?.classRoster?.classes.find(item => item.code === code);
+        const counters = Array.from(document.querySelectorAll('[data-testid]'))
+          .filter(node => node.dataset.testid === `class-count-${code}`);
+        return saved?.count === expectedCount && counters.length > 0
+          && counters.every(node => node.textContent.trim() === String(expectedCount));
+      }, { code, expectedCount });
+    };
     await admin.goto(base + '/review/admin-marketing-v1/index.html?workspace=class-roster-manager&reviewUser=柳丁主管');
     await admin.locator('[data-testid="class-campus-北區"]').click();
     const rosterSeed = await admin.evaluate(() => JSON.parse(localStorage.getItem('bp_admin_marketing_v1_shared')));
@@ -65,7 +79,7 @@ fs.mkdirSync(dir, { recursive: true });
     await teacher.locator(`[data-own-class="${target.id}"] [data-delta="1"]`).click();
     await teacher.locator('#own-roster-confirm input[name="formal"]').check();
     await admin.locator(`[data-testid="mobile-class-row-${target.code}"] [data-delta="1"]`).click();
-    await admin.locator('#class-roster-adjust-form button[type="submit"]').click();
+    await submitAdminAdjustment(target.code, target.count + 2);
     await teacher.locator('#own-roster-confirm button[type="submit"]').click();
     assert.match(await teacher.locator('.own-roster-message').innerText(), /已有更新/);
     assert.equal(await teacher.locator('#own-roster-confirm').count(), 1);
@@ -98,10 +112,10 @@ fs.mkdirSync(dir, { recursive: true });
     await admin.locator('#dialog-root [data-action="close-dialog"]').last().click();
     await admin.locator('.recruitment-escalation').screenshot({ path: dir + '/week-five-warning.png' });
     await admin.locator('[data-testid="mobile-class-row-北02"] [data-delta="1"]').click();
-    await admin.locator('#class-roster-adjust-form button[type="submit"]').click();
+    await submitAdminAdjustment('北02', 4);
     assert.equal(await admin.locator('.recruitment-escalation').count(), 0, '4 人自動解除，不可勾選假結案');
     await admin.locator('[data-testid="mobile-class-row-北02"] [data-delta="-1"]').click();
-    await admin.locator('#class-roster-adjust-form button[type="submit"]').click();
+    await submitAdminAdjustment('北02', 3);
     assert.equal(await admin.locator('.recruitment-escalation').count(), 0, '再次不足重新計時');
     assert.deepEqual(errors, []);
     console.log('PASS teacher/PT own campus UI, formal-only confirmation, shared admin counts, concurrent edits, persistence, responsive layouts, weekly advice and warning reset');
