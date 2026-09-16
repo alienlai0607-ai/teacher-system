@@ -18,23 +18,8 @@ const allInOneBackend = fs.readFileSync(path.join(root, 'apps-script/_all_in_one
 const coursePrepBackend = fs.readFileSync(path.join(root, 'apps-script/courseprep.gs'), 'utf8');
 const qaHarness = fs.readFileSync(path.join(root, 'review/anqin-v2/qa-harness.js'), 'utf8');
 
-const reminderContext = vm.createContext({
-  SAFE_START_MODE: false, state: { ui: { route: 'tasks' } },
-  window: { Notification: {} }, Notification: { permission: 'default' },
-  legacySession: () => ({ role: 'teacher' }), $: () => ({ children: [] }),
-  persist() {}, icon: () => '', openDialog() { throw new Error('Reminder interrupted an active workflow'); },
-});
-vm.runInContext(source.slice(source.indexOf('function maybeShowPushPermissionReminder('), source.indexOf('function sessionCanInspectAccounts(')), reminderContext);
-reminderContext.maybeShowPushPermissionReminder();
-reminderContext.state.ui.route = 'today';
-reminderContext.$ = () => ({ children: [{}] });
-reminderContext.maybeShowPushPermissionReminder();
-reminderContext.$ = () => ({ children: [] });
-let reminders = 0;
-reminderContext.openDialog = () => reminders++;
-reminderContext.maybeShowPushPermissionReminder();
-reminderContext.maybeShowPushPermissionReminder();
-assert.equal(reminders, 1, 'Notification prompt appears once only on an unobstructed home page');
+assert.doesNotMatch(source, /maybeShowPushPermissionReminder/, '通知邀請不得以延遲彈窗打斷老師開始填寫');
+assert.match(source, /data-action="enable-push"/, '保留使用者主動開啟通知的設定入口');
 
 const taskRenderer = source.slice(source.indexOf('function taskPriorityMeta('), source.indexOf('function expectedBackendDepartment('));
 assert.match(taskRenderer, /function openTaskDetail\(/, '待辦事項必須能開啟完整內容對話框');
@@ -129,14 +114,15 @@ assert.match(source, /TEST_VIEW_MODE && fileInput[\s\S]{0,220}不會上傳正式
 assert.match(source, /可以開啟、輸入與切換完整流程/, '安親測試狀態需明確說明可互動範圍');
 assert.match(qaHarness, /failOnceActions[\s\S]*QA 模擬網路中斷/, '隔離驗收頁需能重現一次性網路中斷並驗證重試流程');
 assert.match(source, /if \(hasNextBatch\) scheduleCloudPreviewHydration\(\)/, '私密照片超過單批上限時必須繼續讀取下一批，不得留下空白縮圖');
-assert.match(source, /先保留本機，正式送出時會再上傳/, '成果照片雲端失敗時需保留壓縮後檔案供正式送出重試');
+assert.match(source, /已保留在這台裝置，送出時會重試/, '成果附件雲端失敗時需提示已保存副本可重試');
+assert.match(source, /附件尚未安全保存，請勿關閉頁面並保留原檔/, '本機保存失敗時不可聲稱附件已保存');
 assert.match(source, /照片已保留在這台裝置，正式送出時會再上傳/, '班務照片雲端失敗時也需保留本機副本');
 assert.match(source, /function applyPreviewReviewContext\(/, '安親審查模式需以同一個身份來源同步角色、教室與主管');
 assert.match(source, /if \(!applyPreviewReviewContext\(control\.dataset\.role\)\) state\.ui\.role = control\.dataset\.role/, '切換審查角色時必須同步身份範圍');
 assert.match(source, /applyPreviewReviewContext\(LOCAL_REVIEW_ROLE\)/, '網址指定主管視角時首次載入就必須套用正確身份');
 assert.match(source, /GLOBAL_MANAGER_NICKNAMES\.some\(name => sameReviewIdentity\(name, managerNickname\)\)/, '小魚在審查與正式登入都必須擁有全教室檢視範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260904-prep-library-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260904-prep-library-1/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260916-reliability-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260916-reliability-1/, '登入備援路徑也必須避開舊版快取');
 
 const startupSafetySource = source.slice(source.indexOf('function stripEmbeddedMediaJson('), source.indexOf('function loadState()'));
 const startupSafetyContext = vm.createContext({ JSON, Number, Set });
@@ -153,7 +139,7 @@ assert.match(source, /embeddedMediaCharacters\(state, MAX_PERSISTED_MEDIA_CHARS\
 assert.doesNotMatch(source.slice(source.indexOf("function persist(message = '草稿已儲存')"), source.indexOf('function schedulePersist()')), /clone\(state\)/, '每次儲存不得再複製整份含照片資料');
 assert.match(source, /const safePayload = JSON\.parse\(serializeStateForStorage\(payload, true\)\)/, '未送出表單草稿不得重複保存 Base64 照片');
 assert.match(source, /const historyDays = SAFE_START_MODE \? 62 : 366/, '安全開啟第一次同步不得一次載入一整年紀錄');
-assert.match(source, /function maybeShowPushPermissionReminder\(\)[\s\S]{0,100}if \(SAFE_START_MODE\) return/, '安全開啟不得同時啟動通知權限流程');
+assert.doesNotMatch(source, /setTimeout\(maybeShowPush/, '安全開啟不得同時啟動通知邀請彈窗');
 
 const activityFormSource = source.slice(source.indexOf('function renderActivitySpecificFields('), source.indexOf('function renderEvidenceAttachmentList('));
 assert.match(activityFormSource, /if \(activityNeedsPrepSource\(type\)\) return '';/, '課業指導與學科外不得重複顯示舊課程內容欄位');
@@ -186,7 +172,8 @@ assert.match(prepReadinessSource, /缺少教案或教材附件/, '工作紀錄�
 const prepSaveSource = source.slice(source.indexOf('async function saveCoursePrepForm('), source.indexOf('function saveActivityForm('));
 assert.match(prepSaveSource, /status: 'complete'/, '完成基本建檔後應直接可供工作紀錄選用');
 assert.doesNotMatch(prepSaveSource, /directPlanReady\(planId\)/, '儲存備課不得依賴舊版教案完成度');
-assert.match(prepSaveSource, /some\(item => materialCloudUrl\(item\)\)/, '前端儲存前必須確認至少一份附件已歸檔');
+assert.match(prepSaveSource, /some\(item => materialCloudUrl\(item\) \|\| item\.dataUrl \|\| item\.localMediaKey\)/, '備課需有已歸檔附件或可接續上傳的原檔');
+assert.match(source.slice(source.indexOf('async function saveCoursePrepToCloud('), source.indexOf('async function saveCoursePrepToCloud(') + 2500), /await uploadRetainedMaterials[\s\S]*API\.saveCoursePrep/, '本機附件需先完成上傳才可宣告雲端備課儲存成功');
 assert.match(prepSaveSource, /form\.elements\.id\.value = id/, '第一次按下儲存時必須立即固定檔案編號，避免連點新增多份');
 assert.match(prepSaveSource, /已有相同課程類型與名稱的備課檔案/, '前端需攔截相同老師的同名同類型重複建檔');
 const prepLibrarySource = source.slice(source.indexOf('function renderLessonPlans('), source.indexOf('function renderRecordTimelineEntry('));
@@ -281,7 +268,10 @@ assert.match(dailySubmitSource, /送出時間/, '送出收據需提供實際送�
 assert.match(dailySubmitSource, /data-action="close-dialog">我知道了/, '成功收據需由老師主動確認後才關閉');
 assert.match(dailySubmitSource, /data-action="view-daily-submission-status"/, '收據需提供可直接查看送出狀態的入口');
 assert.match(source, /action === 'view-daily-submission-status'[^]*closeDialog\(\); persist\(\); renderApp\(\);/, '查看送出狀態前需先關閉收據，避免畫面被遮住');
-assert.match(dailySubmitSource, /showDailySubmissionReceipt\(submission, '紀錄已存入雲端，主管可查看。PDF 與通知接續處理，不必重複送出。'\)/, '紀錄儲存成功後應立即顯示收據，不應等待 PDF');
+const dailyRequestSource = dailySubmitSource.slice(dailySubmitSource.indexOf('async function submitDailyRequest('));
+assert.ok(dailyRequestSource.indexOf('showDailySubmissionReceipt(') > dailyRequestSource.indexOf('await API.saveLog('), '紀錄確認儲存後才可顯示成功收據');
+assert.ok(dailyRequestSource.indexOf('finishDailyDelivery(') > dailyRequestSource.indexOf('showDailySubmissionReceipt('), '收據先顯示，再背景處理 PDF 與待辦');
+assert.doesNotMatch(dailyRequestSource, /await finishDailyDelivery\(/, '日報成功不得等待 PDF 與待辦完成');
 assert.match(source, /root\.replaceChildren\(node\)/, '新提示應取代舊提示，不得堆疊遮住操作');
 for (const pageName of ['anqin-v2', 'talent-v2', 'admin-marketing-v1']) {
   const pageSource = fs.readFileSync(path.join(root, 'review', pageName, 'app.js'), 'utf8');
@@ -449,13 +439,15 @@ assert.match(prepUploadSource, /相同檔案已略過/, '重複附件需略過�
 assert.match(prepUploadSource, /duplicateIndex >= 0/, '先前未完成的同一附件必須允許重新選擇並修復');
 assert.match(prepUploadSource, /if \(file\.size > MAX_DOCUMENT_FILE_BYTES\) \{[\s\S]{0,160}continue;/, '超限附件必須在讀取內容前單獨略過，避免耗盡瀏覽器記憶體');
 assert.match(prepUploadSource, /for \(const file of files\)[\s\S]{0,800}try \{[\s\S]{0,1400}catch \(error\)/, '單一附件失敗不得中止同批其他正常附件');
-assert.match(prepUploadSource, /部分附件未上傳/, '混合批次需明確回報部分成功與部分失敗');
+assert.match(prepUploadSource, /部分附件等待重試/, '混合批次需明確指出尚未完成的附件');
+assert.match(prepUploadSource, /\$\{uploaded\} 份附件已上傳[\s\S]*\$\{failed.length\} 份待重試/, '混合批次需分別回報成功數與待重試數');
 const planMaterialUploadSource = source.slice(source.indexOf('async function uploadPlanMaterial('), source.indexOf('function formatFileSize('));
 assert.match(planMaterialUploadSource, /isImage \? await fileToPreview\(file\) : await readFileAsDataUrl\(file\)/, '備課圖片需先壓縮，文件則保留原始內容');
 assert.match(planMaterialUploadSource, /\.jpg`[\s\S]{0,260}mimeType: isImage \? payload\.mimeType/, '壓縮後圖片的檔名與 MIME 類型必須一致');
 const evidenceUploadSource = source.slice(source.indexOf('async function handleEvidenceFile('), source.indexOf('function placeEvidencePin('));
-assert.match(evidenceUploadSource, /uploadCompressedPhoto\(dataUrl/, '成果照片需在選取時壓縮並立即上傳');
-assert.match(evidenceUploadSource, /if \(cloudFile\) \{[\s\S]*?applyCloudPreview\([\s\S]*?dataUrl = '';[\s\S]*?\}/, '照片成功上傳後需保留當次預覽並清除本機草稿的大型內容');
+assert.match(evidenceUploadSource, /isImage \? await fileToPreview\(file\)[\s\S]*?await API.uploadPhoto\(/, '成果照片需在選取時壓縮並立即上傳');
+assert.ok(evidenceUploadSource.indexOf('saveDraft();') < evidenceUploadSource.indexOf('await API.uploadPhoto('), '成果附件與恢復位置需在上傳等待前先存入草稿');
+assert.match(evidenceUploadSource, /if \(!result\?\.ok\) throw[\s\S]*?applyCloudPreview\([\s\S]*?attachment.dataUrl = '';[\s\S]*?await confirmLocalAttachmentUploaded\(attachment\)/, '照片成功上傳後需保留當次預覽並清除本機草稿的大型內容，保留可恢復的雲端位置');
 assert.match(evidenceUploadSource, /duplicateIndex >= 0/, '未完成的成果附件必須能由同一原檔重新上傳修復');
 assert.match(source, /const MAX_DOCUMENT_FILE_BYTES = 25 \* 1024 \* 1024/, '文件上限需提高至 25 MB');
 assert.match(source, /function sameReviewIdentity\(/, '登入暱稱需忽略老師或主管尾綴後再核對');

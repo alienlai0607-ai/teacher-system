@@ -545,7 +545,7 @@ function adminMarketingAppendTrialHistory_(data, original, actor, summary) {
 }
 
 function saveAdminMarketingRecord(params) {
-  return withRecordWriteLock_(function () { return saveAdminMarketingRecordLocked_(params); });
+  return withRecordWriteLock_(function () { return saveAdminMarketingRecordLocked_(params); }, true);
 }
 
 function saveAdminMarketingRecordLocked_(params) {

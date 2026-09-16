@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const crypto = require('node:crypto');
+const zlib = require('node:zlib');
 const root = path.resolve(__dirname, '..');
 const source = name => fs.readFileSync(path.join(root, 'apps-script', name + '.gs'), 'utf8');
 
@@ -23,6 +24,7 @@ function harness() {
         setValue: value => { (rows[r - 1] ||= [])[c - 1] = structuredClone(value); },
         getValues: () => Array.from({ length: h }, (_, i) => Array.from({ length: w }, (_, j) => structuredClone(rows[r - 1 + i]?.[c - 1 + j] ?? ''))),
         setValues(values) { values.forEach((row, i) => row.forEach((value, j) => { (rows[r - 1 + i] ||= [])[c - 1 + j] = structuredClone(value); })); },
+        createTextFinder(value) { return { matchEntireCell() { return this; }, findNext() { const i = rows.findIndex((row, index) => index >= r - 1 && index < r - 1 + h && row[c - 1] === value); return i >= 0 ? { getRow: () => i + 1 } : null; } }; },
       }),
       appendRow: row => rows.push(structuredClone(row)),
       deleteRow: row => rows.splice(row - 1, 1),
@@ -50,7 +52,16 @@ function harness() {
       getUuid: crypto.randomUUID, formatDate, Charset: { UTF_8: 'utf8' },
       base64EncodeWebSafe: v => Buffer.from(v).toString('base64url'),
       base64DecodeWebSafe: v => Buffer.from(v, 'base64url'),
-      newBlob: bytes => ({ getDataAsString: () => Buffer.from(bytes).toString('utf8') }),
+      newBlob: (bytes, mime = null) => ({ getDataAsString: () => Buffer.from(bytes).toString('utf8'), getBytes: () => Buffer.from(bytes), getContentType: () => mime }),
+      DigestAlgorithm: { SHA_256: 'sha256' },
+      computeDigest: (algorithm, value) => crypto.createHash(algorithm).update(value).digest(),
+      base64Encode: bytes => Buffer.from(bytes).toString('base64'),
+      base64Decode: value => Buffer.from(value, 'base64'),
+      gzip: blob => ({ getBytes: () => zlib.gzipSync(blob.getBytes()), getContentType: () => 'application/gzip' }),
+      ungzip: blob => {
+        if (!blob.getContentType()) throw new Error('Blob object must have non-null content type for this operation.');
+        return { getDataAsString: () => zlib.gunzipSync(blob.getBytes()).toString('utf8') };
+      },
       computeHmacSha256Signature: (value, key) => crypto.createHmac('sha256', key).update(value).digest(),
     },
   });

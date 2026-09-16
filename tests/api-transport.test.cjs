@@ -74,6 +74,33 @@ function createApi(fetchImpl, options = {}) {
   assert.equal(repeatedCalls, 3, 'recovery must be bounded even when the missing-auth reply repeats');
   assert.equal(cleared, 0);
 
+  for (const failure of ['404', 'html', 'offline', 'permission-pending']) {
+    const sent = [];
+    const api = createApi(async (_url, init) => {
+      sent.push(JSON.parse(init.body));
+      if (sent.length === 1) {
+        if (failure === 'offline') throw new Error('response lost');
+        if (failure === 'permission-pending') return response('{"ok":false,"code":"FILE_ACCESS_PENDING"}');
+        return response('<html>temporary response</html>', failure === '404' ? 404 : 200);
+      }
+      return response('{"ok":true,"fileId":"original-file"}');
+    });
+    const result = await api.uploadPhoto({ nickname: 'QA', base64: 'same-image' });
+    assert.equal(result.ok, true);
+    assert.equal(result.recovered, true);
+    assert.equal(sent.length, 2);
+    assert.deepEqual(sent[0], sent[1], 'resuming uploads must reuse exact bytes and the request ID');
+    assert.equal(api.getTransportDiagnostics().filter(item => !item.ok).length, 1);
+  }
+  let uploadFailures = 0;
+  const unavailableUpload = createApi(async () => { uploadFailures++; throw new Error('offline'); });
+  assert.equal((await unavailableUpload.uploadFile({ base64: 'file' })).uncertain, true);
+  assert.equal(uploadFailures, 3, 'upload recovery must be bounded');
+  let deniedUploads = 0;
+  const deniedUpload = createApi(async () => { deniedUploads++; return response('{"ok":false,"code":"AUTH_INVALID"}'); });
+  assert.equal((await deniedUpload.uploadPhoto({ base64: 'file' })).code, 'AUTH_INVALID');
+  assert.equal(deniedUploads, 1, 'permissions must never be bypassed or blindly retried');
+
   let uploadAttempts = 0; let firstUpload;
   const uploadRecoveryApi = createApi(async (_url, init) => {
     const payload = JSON.parse(init.body);
@@ -108,7 +135,7 @@ function createApi(fetchImpl, options = {}) {
   assert.equal(writeResult.ok, false);
   assert.equal(writeResult.code, 'NON_JSON_RESPONSE');
   assert.equal(writeCalls, 1, '寫入不得自動重送，以免建立重複資料');
-  assert.match(writeResult.error, /先到紀錄確認/);
+  assert.match(writeResult.error, /內容仍保留/);
 
   let failedReadCalls = 0;
   const failedReadApi = createApi(async () => {

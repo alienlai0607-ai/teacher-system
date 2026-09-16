@@ -224,6 +224,11 @@
     state.settings.launchReadiness20260901 = true;
   }
   let pendingFiles = { attendance: [], learning: [], room: [], app: [], prep: [] };
+  const failedTalentSelections = new Map();
+  const activeAppUploads = new Set();
+  const failedAppSelections = new Map();
+  const confirmedTalentUploads = new WeakMap();
+  let failedSelectionOwner = '';
   let activeLogSource = null;
   let activePrepSource = null;
   const cloudRuntime = {
@@ -233,11 +238,91 @@
     foldersMessage: '',
     folders: [],
   };
+  const localDraftVault = !TEST_VIEW_MODE && window.KPI_LOCAL_DRAFTS?.create(`${personalStorageKey}:${currentUser.role || ''}:${currentUser.email || ''}:${currentUser.department || ''}`);
+  let localRecovery = { editors: {}, app: {} };
+  let localRecoveryError = '';
+  let localRecoveryReadFailed = false;
+  const talentUploadDates = new WeakMap();
+  const localRecoveryReady = localDraftVault ? localDraftVault.get('recovery').then(saved => {
+    if (saved?.editors && saved?.app) localRecovery = saved;
+    Object.entries(localRecovery.app).forEach(([id, saved]) => {
+      failedAppSelections.set(id, restoreTalentFileEntries(saved));
+    });
+    refreshLocalRecoveryNotice();
+    refreshAppEvidenceRetries();
+  }).catch(() => {
+    localRecoveryReadFailed = true;
+    localRecoveryError = '上次的本機暫存尚未讀取，為保留原內容，本次尚未寫入暫存；請先不要關頁，重新整理後再試。';
+    refreshLocalRecoveryNotice();
+  }) : Promise.resolve();
+
+  function talentFileEntries(files) {
+    return files.map(file => ({ file, confirmed: confirmedTalentUploads.get(file), date: talentUploadDates.get(file) || todayIso() }));
+  }
+  function restoreTalentFileEntries(entries) {
+    return (entries || []).map(entry => {
+      if (entry.confirmed) confirmedTalentUploads.set(entry.file, entry.confirmed);
+      talentUploadDates.set(entry.file, entry.date);
+      return entry.file;
+    });
+  }
+  function refreshLocalRecoveryNotice() {
+    let node = document.getElementById('local-draft-recovery');
+    const main = document.getElementById('main-content');
+    if (!main) return;
+    if (!node) { node = document.createElement('div'); node.id = 'local-draft-recovery'; main.prepend(node); }
+    node.innerHTML = `${localRecoveryError ? `<div class="notice strict">${esc(localRecoveryError)}</div>` : ''}${Object.entries(localRecovery.editors).map(([key, saved]) => `<div class="notice info"><span>這台裝置有尚未完成的${saved.formId === 'prep-form' ? '備課檔案' : '課堂紀錄'}與附件。</span><button type="button" class="btn btn-small" data-action="restore-local-draft" data-key="${esc(key)}">恢復內容</button><button type="button" class="btn btn-small" data-action="discard-local-draft" data-key="${esc(key)}">移除草稿</button></div>`).join('')}`;
+  }
+  async function writeTalentRecovery() {
+    if (!localDraftVault || localRecoveryReadFailed) return false;
+    try { await localDraftVault.put('recovery', localRecovery); localRecoveryError = ''; refreshLocalRecoveryNotice(); return true; }
+    catch (error) { localRecoveryError = '本機附件暫存未完成，請先不要關閉頁面；仍可繼續上傳或保留原檔。'; refreshLocalRecoveryNotice(); return false; }
+  }
+  async function preserveTalentEditor(form = document.querySelector('#log-form, #prep-form')) {
+    if (!form || !localDraftVault) return;
+    const formId = form.getAttribute('id');
+    const key = form.dataset.recoveryId || `${formId}:${form.elements.id?.value || uid('draft')}`;
+    form.dataset.recoveryId = key;
+    const snapshot = window.KPI_LOCAL_DRAFTS.capture(document.getElementById('drawer-root'));
+    const saved = {
+      ...snapshot, formId, pendingFiles: structuredClone(pendingFiles),
+      source: structuredClone(formId === 'prep-form' ? activePrepSource : activeLogSource),
+      selections: Array.from(failedTalentSelections, ([category, files]) => [category, talentFileEntries(files)]),
+    };
+    await localRecoveryReady;
+    localRecovery.editors[key] = saved;
+    await writeTalentRecovery();
+  }
+  async function preserveTalentApp(id, files) {
+    if (!localDraftVault) return;
+    const entries = talentFileEntries(files);
+    await localRecoveryReady;
+    if (entries.length) localRecovery.app[id] = entries; else delete localRecovery.app[id];
+    await writeTalentRecovery();
+  }
+  async function restoreTalentEditor(key) {
+    await localRecoveryReady;
+    const saved = localRecovery.editors[key];
+    if (!saved) return;
+    await preserveTalentEditor();
+    pendingFiles = structuredClone(saved.pendingFiles);
+    failedTalentSelections.clear();
+    saved.selections.forEach(([category, entries]) => failedTalentSelections.set(category, restoreTalentFileEntries(entries)));
+    if (saved.formId === 'prep-form') activePrepSource = structuredClone(saved.source); else activeLogSource = structuredClone(saved.source);
+    failedSelectionOwner = saved.source?.id || key.split(':').slice(1).join(':');
+    window.KPI_LOCAL_DRAFTS.restore(document.getElementById('drawer-root'), saved);
+    Object.keys(pendingFiles).forEach(refreshUploadControl);
+    hydrateIcons();
+    toast('已恢復這台裝置的內容與原選檔；確認後可接續儲存', 'warning');
+  }
+
   let cloudDraftTimer = 0;
   let cloudDraftChain = Promise.resolve();
 
   function persist(message = '已儲存') {
+    const previousSavedAt = state.ui.lastSavedAt;
     state.ui.lastSavedAt = new Date().toISOString();
+    let saved = true;
     try {
       if (PREVIEW_MODE) {
         localStorage.setItem(sharedStorageKey, JSON.stringify({ version: APP_VERSION, settings: state.settings, users: state.users, pendingUsers: state.pendingUsers, archivedUsers: state.archivedUsers, preps: state.preps, logs: state.logs, scores: state.scores, conversations: state.conversations }));
@@ -247,10 +332,18 @@
       localStorage.setItem(personalStorageKey, JSON.stringify({ version: APP_VERSION, ui: state.ui, draftLog: state.draftLog, draftPrep: state.draftPrep }));
     } catch (error) {
       console.warn('[Talent] local draft storage unavailable:', error);
+      saved = false;
+      state.ui.lastSavedAt = previousSavedAt;
     }
+    const storageError = saved ? '' : '本機草稿尚未儲存，請勿關閉或重新整理頁面；請先完成雲端儲存或保留文字原稿';
+    if (storageError && storageError !== cloudRuntime.storageError) toast(storageError, 'danger');
+    cloudRuntime.storageError = storageError;
     const node = $('#save-state');
-    if (node) node.innerHTML = `${icon('circle-check', 14)}<span>${esc(message)} ${formatTime(state.ui.lastSavedAt)}</span>`;
+    if (node) node.innerHTML = saved ? `${icon('circle-check', 14)}<span>${esc(message)} ${formatTime(state.ui.lastSavedAt)}</span>` : `${icon('cloud-alert', 14)}<span>本機草稿未儲存</span>`;
+    const warning = $('#local-storage-warning');
+    if (warning) warning.innerHTML = storageError ? `<div class="notice strict">${icon('cloud-alert', 19)}<span>${esc(storageError)}</span></div>` : '';
     hydrateIcons();
+    return saved;
   }
 
   async function loadCloudData(notify = false) {
@@ -289,7 +382,6 @@
     persist('雲端已同步');
     renderApp();
     if (state.ui.route === 'cloud-reports' && cloudRuntime.foldersStatus === 'idle') window.setTimeout(loadCloudFolders, 0);
-    window.setTimeout(maybeShowPushReminder, 250);
     if (notify) toast(cloudRuntime.message);
     return result;
   }
@@ -349,20 +441,6 @@
       return hasLesson || hasScore;
     });
     return active.concat(historical);
-  }
-
-  function maybeShowPushReminder() {
-    if (PREVIEW_MODE || !isTeacher() || identity.session?.impersonate || !('Notification' in window) || Notification.permission !== 'default') return;
-    const key = `talent_push_reminder_seen_${normalizeName(currentUser.nickname)}`;
-    try {
-      if (localStorage.getItem(key)) return;
-      localStorage.setItem(key, '1');
-    } catch (error) {}
-    openDialog({
-      title: '開啟 APP 通知',
-      body: `<div class="notice info">${icon('bell-ring', 19)}<div><strong>即時收到主管評核與回覆</strong><span>只有按下「開啟通知」後，瀏覽器才會詢問系統授權。</span></div></div>`,
-      footer: `<button type="button" class="btn" data-action="close-dialog">稍後</button><button type="button" class="btn btn-primary" data-action="enable-push">${icon('bell-plus', 16)}開啟通知</button>`,
-    });
   }
 
   function cloudGate() {
@@ -439,10 +517,11 @@
         <nav class="side-nav" aria-label="主要導覽">${navItems().map(renderNavButton).join('')}</nav>
         <div class="sidebar-foot"><img src="../../shared/icons/bg.jpg" alt="" aria-hidden="true"><div><strong>資料只填一次</strong><span>系統自動分流至 KPI、APP 與結算</span></div></div>
       </aside>
-      <main class="app-main" id="main-content">${window.KPI_WORKSPACES?.renderQuickSwitcher?.(currentUser, { currentId: workspaceId }) || ''}${renderRoute()}</main>
+      <main class="app-main" id="main-content"><div id="local-storage-warning">${cloudRuntime.storageError ? `<div class="notice strict">${icon('cloud-alert', 19)}<span>${esc(cloudRuntime.storageError)}</span></div>` : ''}</div>${window.KPI_WORKSPACES?.renderQuickSwitcher?.(currentUser, { currentId: workspaceId }) || ''}${renderRoute()}</main>
       <nav class="mobile-bottom-nav" aria-label="行動版導覽">${renderMobileNav()}</nav>
     `;
     hydrateIcons();
+    refreshLocalRecoveryNotice();
     window.scrollTo({ top: 0, behavior: 'instant' });
     if (isTeacher()) window.TeacherClassRoster?.mount({ nickname: currentUser.nickname, preview: PREVIEW_MODE });
   }
@@ -628,7 +707,7 @@
       <div class="record-main"><div class="record-title">${esc(item.courseName)}</div><div class="record-meta">${esc(item.site)}${uploadedAt ? ` · ${formatTime(uploadedAt)} 完成確認` : ''}</div>${partner ? '' : '<small class="app-evidence-rule">截圖需看得到發布日期與課程名稱</small>'}${renderAppEvidenceFiles(item)}</div>
       <div class="record-side"><span class="badge ${stateInfo.className}">${stateInfo.label}</span>${partner
         ? '<small>不列入缺件</small>'
-        : `<label class="btn btn-small ${appEvidenceComplete(item) ? '' : 'btn-primary'} app-evidence-upload">${icon(appEvidenceComplete(item) ? 'image-plus' : 'upload', 15)}${appEvidenceComplete(item) ? '補上截圖' : '上傳截圖'}<input class="sr-only" type="file" accept="image/*" multiple data-app-evidence-id="${esc(item.id)}"></label>`}</div>
+        : `<label class="btn btn-small ${appEvidenceComplete(item) ? '' : 'btn-primary'} app-evidence-upload">${icon(appEvidenceComplete(item) ? 'image-plus' : 'upload', 15)}${appEvidenceComplete(item) ? '補上截圖' : '上傳截圖'}<input class="sr-only" type="file" accept="image/*" multiple data-app-evidence-id="${esc(item.id)}"></label>${renderAppEvidenceRetry(item.id)}`}</div>
     </article>`;
   }
 
@@ -1079,6 +1158,8 @@
     }
     const draft = existing || state.draftLog || { id: uid('log') };
     if (!draft.id) draft.id = uid('log');
+    if (failedSelectionOwner !== draft.id) failedTalentSelections.clear();
+    failedSelectionOwner = draft.id;
     const editing = Boolean(draft.id && state.logs.some(item => item.id === draft.id));
     activeLogSource = draft;
     const availableSchedules = schedulesForDate(currentUser, draft.date || todayIso());
@@ -1158,7 +1239,9 @@
   }
 
   function selectedFileItems(category) {
-    return (pendingFiles[category] || []).map((item, index) => `<span class="selected-file"><span>${icon(attachmentIcon(item), 13)}${esc(attachmentName(item))}</span><button type="button" data-action="remove-upload" data-category="${esc(category)}" data-index="${index}" aria-label="移除 ${esc(attachmentName(item))}" title="移除附件">${icon('x', 13)}</button></span>`).join('');
+    const failed = failedTalentSelections.get(category) || [];
+    const retry = failed.length ? `<div class="notice warning"><span>${failed.length} 個檔案尚未傳完：${esc(failed.map(file => file.name).join('、'))}</span><button type="button" class="btn btn-small" data-action="retry-upload" data-category="${esc(category)}">${icon('refresh-cw', 15)}重試</button><button type="button" class="icon-button" data-action="discard-upload" data-category="${esc(category)}" aria-label="移除未完成附件" title="移除未完成附件">${icon('x', 15)}</button></div>` : '';
+    return (pendingFiles[category] || []).map((item, index) => `<span class="selected-file"><span>${icon(attachmentIcon(item), 13)}${esc(attachmentName(item))}</span><button type="button" data-action="remove-upload" data-category="${esc(category)}" data-index="${index}" aria-label="移除 ${esc(attachmentName(item))}" title="移除附件">${icon('x', 13)}</button></span>`).join('') + retry;
   }
 
   function refreshUploadControl(category) {
@@ -1192,6 +1275,7 @@
     if (!form) return;
     const data = new FormData(form);
     state.draftLog = {
+      ...(activeLogSource || {}),
       ...Object.fromEntries(data.entries()),
       roomDone: Boolean(pendingFiles.room?.length),
       attendanceFiles: pendingFiles.attendance,
@@ -1293,6 +1377,11 @@
   async function uploadTalentFile(file, category) {
     if (TEST_VIEW_MODE) throw new Error('測試視角為唯讀，不能上傳正式附件');
     if (file.size > MAX_TALENT_FILE_BYTES) throw new Error(`${file.name} 超過 25 MB 上限`);
+    const cached = confirmedTalentUploads.get(file);
+    const uploadDate = talentUploadDates.get(file) || todayIso();
+    talentUploadDates.set(file, uploadDate);
+    const cacheKey = `${currentUser.nickname}:${uploadDate}:${category}`;
+    if (cached?.key === cacheKey) return { ...cached.attachment };
     let source = file;
     const isImage = isImageFile(file);
     if (isImage) source = await compressImage(file);
@@ -1301,10 +1390,10 @@
     }
     const base64 = await fileAsBase64(source);
     const result = isImage
-      ? await API.uploadPhoto({ nickname: currentUser.nickname, date: todayIso(), kpi: `talent-${category}`, mimeType: source.type || 'image/jpeg', base64, description: category })
-      : await API.uploadFile({ nickname: currentUser.nickname, date: todayIso(), category: `talent-${category}`, fileName: source.name, mimeType: source.type || 'application/octet-stream', base64 });
+      ? await API.uploadPhoto({ nickname: currentUser.nickname, date: uploadDate, kpi: `talent-${category}`, mimeType: source.type || 'image/jpeg', base64, description: category })
+      : await API.uploadFile({ nickname: currentUser.nickname, date: uploadDate, category: `talent-${category}`, fileName: source.name, mimeType: source.type || 'application/octet-stream', base64 });
     if (!result?.ok) throw new Error(result?.error || `${file.name} 上傳失敗`);
-    return {
+    const attachment = {
       id: result.fileId || uid('file'),
       fileId: result.fileId || '',
       fileName: result.fileName || source.name,
@@ -1313,11 +1402,14 @@
       category,
       size: source.size,
     };
+    confirmedTalentUploads.set(file, { key: cacheKey, attachment });
+    return attachment;
   }
 
-  async function handleTalentFiles(input) {
+  async function handleTalentFiles(input, retryFiles) {
+    if (!input || input.disabled) return;
     const category = input.dataset.uploadCategory;
-    const files = Array.from(input.files || []);
+    const files = Array.from(new Set([...(failedTalentSelections.get(category) || []), ...Array.from(retryFiles || input.files || [])]));
     if (!files.length) return;
     if (category === 'app' && files.some(file => !isImageFile(file))) {
       input.value = '';
@@ -1325,22 +1417,28 @@
       return;
     }
     const summary = document.querySelector(`[data-file-summary="${category}"]`);
+    failedTalentSelections.set(category, files);
+    files.forEach(file => { if (!talentUploadDates.has(file)) talentUploadDates.set(file, todayIso()); });
     input.disabled = true;
+    input.dataset.uploading = 'true';
+    await preserveTalentEditor();
     if (summary) summary.textContent = `正在上傳 0 / ${files.length}`;
     const uploaded = [];
     let skipped = 0;
     const failed = [];
+    const failedFiles = [];
     try {
       for (let index = 0; index < files.length; index += 1) {
         if (summary) summary.textContent = `正在上傳 ${index + 1} / ${files.length}：${files[index].name}`;
         const file = files[index];
         if (file.size > MAX_TALENT_FILE_BYTES) {
           failed.push(`${file.name}（超過 25 MB）`);
+          failedFiles.push(file);
           continue;
         }
         try {
           let fingerprint = '';
-          if (category === 'prep' || category === 'app') {
+          {
             fingerprint = await fileContentFingerprint(file);
             const duplicate = [...(pendingFiles[category] || []), ...uploaded].some(item => item.fingerprint === fingerprint);
             if (duplicate) {
@@ -1352,11 +1450,14 @@
           uploadedFile.fingerprint = fingerprint;
           uploadedFile.size = uploadedFile.size || file.size;
           uploaded.push(uploadedFile);
+          await preserveTalentEditor();
         } catch (error) {
           failed.push(`${file.name}（${error.message || '上傳失敗'}）`);
+          failedFiles.push(file);
         }
       }
       pendingFiles[category] = [...(pendingFiles[category] || []), ...uploaded];
+      failedTalentSelections.set(category, failedFiles);
       refreshUploadControl(category);
       if (input.closest('#log-form')) captureLogDraft();
       const messages = [`${uploaded.length} 個檔案已上傳`];
@@ -1373,14 +1474,32 @@
       toast(error.message || '附件上傳失敗，請重試', 'danger');
     } finally {
       input.disabled = false;
+      delete input.dataset.uploading;
       input.value = '';
+      refreshUploadControl(category);
+      await preserveTalentEditor();
     }
   }
 
-  async function handleAppEvidence(input) {
+  function renderAppEvidenceRetry(id) {
+    const files = failedAppSelections.get(id) || [];
+    return files.length ? `<span data-app-retry="${esc(id)}"><button type="button" class="btn btn-small" data-action="retry-app-evidence" data-id="${esc(id)}">${icon('refresh-cw', 15)}接續 ${files.length} 張截圖</button><button type="button" class="icon-button" data-action="discard-app-evidence" data-id="${esc(id)}" aria-label="移除未完成截圖" title="移除未完成截圖">${icon('x', 15)}</button></span>` : '';
+  }
+
+  function refreshAppEvidenceRetries() {
+    document.querySelectorAll('[data-app-retry]').forEach(item => item.remove());
+    document.querySelectorAll('[data-app-evidence-id]').forEach(input => {
+      input.closest('label')?.insertAdjacentHTML('afterend', renderAppEvidenceRetry(input.dataset.appEvidenceId));
+    });
+    hydrateIcons();
+  }
+
+  async function handleAppEvidence(input, retryFiles) {
+    if (!input || input.disabled) return;
     const lessonId = String(input.dataset.appEvidenceId || '');
+    if (activeAppUploads.has(lessonId)) return;
     const item = state.logs.find(log => log.id === lessonId);
-    const files = Array.from(input.files || []);
+    const files = Array.from(new Set([...(failedAppSelections.get(lessonId) || []), ...Array.from(retryFiles || input.files || [])]));
     if (!item || !files.length) return;
     if (item.siteType === 'partner') {
       input.value = '';
@@ -1392,9 +1511,13 @@
       toast('家長 APP 發布證據只接受圖片', 'danger');
       return;
     }
+    files.forEach(file => { if (!talentUploadDates.has(file)) talentUploadDates.set(file, todayIso()); });
     const label = input.closest('.app-evidence-upload');
+    const fromDrawer = Boolean(input.closest('#drawer-root'));
     const originalLabel = label?.innerHTML;
+    activeAppUploads.add(lessonId);
     input.disabled = true;
+    await preserveTalentApp(lessonId, files);
     if (label) label.innerHTML = `${icon('loader-circle', 15)}正在上傳 0／${files.length}`;
     const uploaded = [];
     const failed = [];
@@ -1412,12 +1535,15 @@
           const uploadedFile = await uploadTalentFile(files[index], 'app-publish');
           uploadedFile.fingerprint = fingerprint;
           uploaded.push(uploadedFile);
+          await preserveTalentApp(lessonId, files);
         } catch (error) {
           failed.push(`${files[index].name}（${error.message || '上傳失敗'}）`);
         }
       }
+      if (failed.length) throw new Error(`截圖尚未全部傳完：${failed.join('、')}。選檔仍保留，可直接接續。`);
       if (!uploaded.length && !skipped) throw new Error(failed.join('、') || '沒有可儲存的 APP 截圖');
       if (!uploaded.length && skipped) {
+        failedAppSelections.delete(lessonId);
         const messages = [`${skipped} 張相同截圖已存在，不需重複上傳`];
         if (failed.length) messages.push(`${failed.length} 張未上傳：${failed.join('、')}`);
         toast(messages.join('；'), failed.length ? 'danger' : 'warning');
@@ -1429,9 +1555,10 @@
         ? { ok: true, lesson: { ...item, appStatus: 'published', appFiles: combinedFiles, appUpdatedAt: new Date().toISOString(), appPublishedAt: new Date().toISOString() } }
         : await API.updateTalentAppStatus(currentUser.nickname, item.id, 'published', combinedFiles);
       if (!result?.ok) throw new Error(result?.error || '發布證據未儲存');
+      failedAppSelections.delete(lessonId);
       Object.assign(item, result.lesson || { appStatus: 'published', appFiles: combinedFiles, appUpdatedAt: new Date().toISOString() });
       persist('APP 證據已儲存');
-      if (input.closest('#drawer-root')) closeDrawer();
+      if (fromDrawer) closeDrawer();
       renderApp();
       const details = [`${uploaded.length} 張家長 APP 發布截圖已綁定本堂課`];
       if (skipped) details.push(`${skipped} 張相同截圖已略過`);
@@ -1440,12 +1567,16 @@
       toast(result.warning || uploadMessage, result.warning || failed.length ? 'warning' : 'success');
       if (!PREVIEW_MODE && result.reportStatus === 'pending') refreshTalentReportAfterSave(item.id, 'APP 截圖已儲存');
     } catch (error) {
+      failedAppSelections.set(lessonId, files);
       toast(error.message || '家長 APP 發布證據上傳失敗，請重試', 'danger');
       if (label && originalLabel) label.innerHTML = originalLabel;
     } finally {
+      activeAppUploads.delete(lessonId);
       input.disabled = false;
       input.value = '';
       hydrateIcons();
+      refreshAppEvidenceRetries();
+      await preserveTalentApp(lessonId, failedAppSelections.get(lessonId) || []);
     }
   }
 
@@ -1603,6 +1734,13 @@
       return;
     }
     const editingId = String(data.get('id') || '');
+    const sourceDraft = activeLogSource?.id === editingId ? activeLogSource : state.draftLog?.id === editingId ? state.draftLog : null;
+    const existingCreatedAt = state.logs.find(item => item.id === editingId)?.createdAt || '';
+    const submissionAttemptAt = sourceDraft?.submissionAttemptAt || new Date().toISOString();
+    const createdAt = existingCreatedAt || sourceDraft?.createdAt || submissionAttemptAt;
+    if (sourceDraft) Object.assign(sourceDraft, { createdAt, submissionAttemptAt });
+    if (state.draftLog?.id === editingId) Object.assign(state.draftLog, { createdAt, submissionAttemptAt });
+    captureLogDraft(false);
     const duplicateLesson = isPt() && state.logs.some(item => {
       if (item.id === editingId) return false;
       if (normalizeName(item.teacher) !== normalizeName(currentUser.nickname) || item.date !== lessonDate || item.status !== 'submitted') return false;
@@ -1630,7 +1768,7 @@
         cancellationReason: values.cancellationReason, cancellationNote: String(values.cancellationNote || '').trim(),
         attendanceFiles: [], learningFiles: [], roomFiles: [], newCount: 0, renewalCount: 0,
         appStatus: 'not_required', roomDone: false, status: 'submitted', pay: 0,
-        backfilled: lessonDate !== todayIso(), createdAt: new Date().toISOString(),
+        backfilled: lessonDate !== todayIso(), createdAt,
       };
       const submitButton = document.querySelector('[data-action="submit-log"]');
       if (submitButton) { submitButton.disabled = true; submitButton.textContent = '正在儲存…'; }
@@ -1670,7 +1808,7 @@
     const existingLog = editingId ? state.logs.find(record => record.id === editingId) : null;
     const appFiles = siteType === 'self' ? [...(pendingFiles.app || [])] : [];
     const appEvidenceAt = appFiles.length
-      ? (existingLog?.appPublishedAt || existingLog?.appUpdatedAt || new Date().toISOString())
+      ? (existingLog?.appPublishedAt || existingLog?.appUpdatedAt || submissionAttemptAt)
       : '';
     const item = {
       ...(existingLog || {}),
@@ -1684,7 +1822,7 @@
       appFiles, appStatus: siteType === 'partner' ? 'not_required' : appFiles.length ? 'published' : 'pending', appUpdatedAt: appEvidenceAt, appPublishedAt: appEvidenceAt,
       newCount: siteType === 'self' && !isPt() ? Number(values.newCount || 0) : 0,
       renewalCount: siteType === 'self' ? Number(values.renewalCount || 0) : 0,
-      status: 'submitted', createdAt: existingLog?.createdAt || new Date().toISOString(),
+      status: 'submitted', createdAt,
     };
     item.pay = item.employment === 'pt' ? payFor(item) : 0;
     const submitButton = document.querySelector('[data-action="submit-log"]');
@@ -1710,6 +1848,8 @@
   function openPrepEditor(existing = null) {
     const prep = existing || state.draftPrep || { id: uid('prep') };
     if (!prep.id) prep.id = uid('prep');
+    if (failedSelectionOwner !== prep.id) failedTalentSelections.clear();
+    failedSelectionOwner = prep.id;
     activePrepSource = prep;
     pendingFiles.prep = prep.materials || [];
     const selectedCourseType = prep.courseType || COURSE_TYPES[3];
@@ -1723,9 +1863,18 @@
 
   async function runFormAction(form, action) {
     if (!form || form.dataset.submitting === 'true') return;
+    const uploads = Array.from(form.querySelectorAll('[data-upload-category]'));
+    if (uploads.some(input => input.dataset.uploading === 'true')) { toast('附件仍在傳送，完成後即可儲存', 'warning'); return; }
+    if (uploads.some(input => !input.disabled && failedTalentSelections.get(input.dataset.uploadCategory)?.length)) { toast('還有附件尚未傳完，請先重試或移除未完成附件', 'warning'); return; }
     form.dataset.submitting = 'true';
-    try { await action(); }
-    finally { delete form.dataset.submitting; }
+    const previousInert = form.inert;
+    form.inert = true;
+    try { await preserveTalentEditor(form); await action(); }
+    finally {
+      form.inert = previousInert; delete form.dataset.submitting;
+      if (form.isConnected) await preserveTalentEditor(form);
+      else if (form.dataset.recoveryId) { delete localRecovery.editors[form.dataset.recoveryId]; await writeTalentRecovery(); }
+    }
   }
 
   function capturePrep(form) {
@@ -1885,7 +2034,7 @@
     const canUploadApp = isTeacher() && !TEST_VIEW_MODE && item.siteType === 'self'
       && normalizeName(item.teacher) === normalizeName(currentUser.nickname);
     const appUploadControl = canUploadApp
-      ? `<label class="btn ${appEvidenceComplete(item) ? '' : 'btn-primary'} app-evidence-upload">${icon(appEvidenceComplete(item) ? 'refresh-cw' : 'upload', 16)}${appEvidenceComplete(item) ? '更換 APP 截圖' : '上傳 APP 截圖'}<input class="sr-only" type="file" accept="image/*" multiple data-app-evidence-id="${esc(item.id)}"></label>`
+      ? `<label class="btn ${appEvidenceComplete(item) ? '' : 'btn-primary'} app-evidence-upload">${icon(appEvidenceComplete(item) ? 'refresh-cw' : 'upload', 16)}${appEvidenceComplete(item) ? '補上 APP 截圖' : '上傳 APP 截圖'}<input class="sr-only" type="file" accept="image/*" multiple data-app-evidence-id="${esc(item.id)}"></label>${renderAppEvidenceRetry(item.id)}`
       : '';
     openDrawer({ title: item.courseName || item.courseType, subtitle: `${formatDate(item.date)} · ${item.teacher} · ${item.site}`, body: `<div class="detail-metrics"><div><span>應到</span><strong>${item.expected}</strong></div><div><span>正式實到</span><strong>${item.present}</strong></div><div><span>補課</span><strong>${item.makeup}</strong></div><div><span>體驗</span><strong>${item.trial}</strong></div></div><div class="detail-stack">${detailBlock('本堂使用的備課檔案', prep ? (prep.courseName || prep.title || '未命名課程') : '備課檔案已移除')}${detailBlock('課程問題及下次優化', item.issue)}${detailAttachments('點名證據', item.attendanceFiles)}${detailAttachments('學習證據', item.learningFiles)}${detailAttachments('教室復原', item.roomFiles)}${appEvidence}${lessonReportBlock(item)}</div>${item.employment === 'pt' ? `<div class="calculation-card static"><span>${icon('badge-dollar-sign', 20)}</span><div><small>本堂預估鐘點</small><strong>${formatMoney(item.pay)}</strong></div></div>` : ''}`, footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button>${appUploadControl}${prep ? `<button type="button" class="btn" data-action="view-prep" data-id="${prep.id}">${icon('notebook-tabs', 16)}查看備課檔案</button>` : ''}` });
   }
@@ -2018,10 +2167,23 @@
   const TEST_VIEW_WRITE_ACTIONS = new Set([
     'submit-log', 'save-log-draft', 'save-prep', 'confirm-delete-prep',
     'retry-report', 'setup-automation', 'enable-push',
-    'test-notifications',
+    'test-notifications', 'retry-upload', 'retry-app-evidence',
   ]);
 
   document.addEventListener('click', async event => {
+    if (document.querySelector('form[data-submitting="true"], [data-uploading="true"]') || activeAppUploads.size) {
+      if (event.target.closest('[data-action], [data-dialog-backdrop]')) {
+        event.preventDefault();
+        toast('資料正在儲存，完成後即可繼續操作', 'warning');
+        return;
+      }
+    }
+    const recoveryControl = event.target.closest('[data-action="restore-local-draft"], [data-action="discard-local-draft"]');
+    if (recoveryControl) {
+      if (recoveryControl.dataset.action === 'restore-local-draft') await restoreTalentEditor(recoveryControl.dataset.key);
+      else { await localRecoveryReady; delete localRecovery.editors[recoveryControl.dataset.key]; await writeTalentRecovery(); }
+      return;
+    }
     if (event.target.matches('[data-dialog-backdrop]')) {
       closeDialog();
       return;
@@ -2102,7 +2264,20 @@
       pendingFiles[category].splice(index, 1);
       refreshUploadControl(category);
       if ($('#log-form')) captureLogDraft();
+      await preserveTalentEditor();
       toast('附件已從本筆資料移除');
+    }
+    else if (action === 'retry-upload' || action === 'discard-upload') {
+      const category = String(control.dataset.category || '');
+      const input = Array.from(document.querySelectorAll('[data-upload-category]')).find(item => item.dataset.uploadCategory === category);
+      if (action === 'retry-upload') await handleTalentFiles(input, failedTalentSelections.get(category) || []);
+      else { failedTalentSelections.delete(category); refreshUploadControl(category); await preserveTalentEditor(); }
+    }
+    else if (action === 'retry-app-evidence' || action === 'discard-app-evidence') {
+      const id = String(control.dataset.id || '');
+      const input = Array.from(document.querySelectorAll('[data-app-evidence-id]')).find(item => item.dataset.appEvidenceId === id);
+      if (action === 'retry-app-evidence') await handleAppEvidence(input, failedAppSelections.get(id) || []);
+      else { failedAppSelections.delete(id); refreshAppEvidenceRetries(); await preserveTalentApp(id, []); }
     }
     else if (action === 'retry-report') {
       const item = state.logs.find(log => log.id === control.dataset.id);
@@ -2240,6 +2415,7 @@
   });
 
   document.addEventListener('input', event => {
+    if (event.target.closest('#log-form, #prep-form')) preserveTalentEditor();
     if (event.target.matches('[data-delete-prep-name]')) {
       const button = document.querySelector('[data-action="confirm-delete-prep"]');
       if (button) button.disabled = String(event.target.value || '').trim() !== String(event.target.dataset.expectedName || '').trim();
@@ -2255,6 +2431,7 @@
   });
 
   document.addEventListener('change', async event => {
+    if (event.target.closest('#log-form, #prep-form') && event.target.type !== 'file') preserveTalentEditor();
     if (event.target.matches('[data-month-picker]')) {
       state.ui.month = event.target.value || currentMonth();
       persist('月份已切換');
@@ -2290,6 +2467,7 @@
 
   document.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
+    if (document.querySelector('form[data-submitting="true"], [data-uploading="true"]') || activeAppUploads.size) return;
     if ($('#dialog-root').children.length) closeDialog(); else if ($('#drawer-root').children.length) closeDrawer();
   });
 

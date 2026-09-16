@@ -17,6 +17,7 @@ async function main() {
   const context = vm.createContext({ console, Utilities: { getUuid: () => crypto.randomUUID() },
     SHEET_NAMES: { LOGS: 'logs', COURSE_PREP: 'preps' },
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) },
+    SpreadsheetApp: { flush() {} },
     getSheet: () => ({}), ensureHeaders() {},
     findUserByNickname: name => ({ nickname: name, status: 'active', role: name === 'boss' ? 'admin' : 'teacher', department: 'QA' }),
     findObject: (sheet, key, id) => { const found = [...records.values()].find(item => item.sheet === sheet && item[key] === id); return found ? copy(found) : null; },

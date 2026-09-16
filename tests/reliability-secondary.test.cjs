@@ -15,6 +15,7 @@ const context = vm.createContext({
   PropertiesService: { getScriptProperties: () => ({ getProperty: key => key === 'LINE_CHANNEL_SECRET' ? 'synthetic-secret' : properties.get(key), setProperty: (key, value) => properties.set(key, value), deleteProperty: key => properties.delete(key) }) },
   CacheService: { getScriptCache: () => ({ get: key => cache.get(key), put: (key, value) => cache.set(key, value) }) },
   LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) },
+  SpreadsheetApp: { flush() {} },
   Utilities: {
     Charset: { UTF_8: 'utf8' }, DigestAlgorithm: { SHA_256: 'sha256' },
     computeHmacSha256Signature: (value, secret) => crypto.createHmac('sha256', secret).update(value).digest(),

@@ -10,6 +10,8 @@
  * 5. 把網址貼到前端 shared/config.js 的 API_URL
  */
 
+const KPI_RELEASE_VERSION_ = '20260916-reliability-1';
+
 // ============ 路由 ============
 function doGet(e) {
   return handleRequest(e, 'GET');
@@ -20,10 +22,17 @@ function doPost(e) {
 }
 
 function handleRequest(e, method) {
+  const started = Date.now();
+  let trace = { method: method };
+  function reply(result) {
+    try { console.log(JSON.stringify(Object.assign({ event: 'api_result', ms: Date.now() - started, ok: result && result.ok === true, code: result && result.code || '' }, trace))); } catch (ignore) {}
+    return jsonOut(result);
+  }
   try {
     const params = method === 'POST'
       ? JSON.parse(e.postData.contents || '{}')
       : (e.parameter || {});
+    trace = { method: method, action: String(params.action || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 70), request_id: String(params.request_id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 160), token_present: Boolean(params.session_token), body_length: method === 'POST' ? String(e.postData.contents || '').length : 0 };
 
     if (params.lineWebhook) return jsonOut(handleVerifiedLineWebhook_(params.lineWebhook));
 
@@ -40,16 +49,17 @@ function handleRequest(e, method) {
     // 權限不可只靠前端傳來的 nickname / viewer / operator，否則改寫請求即可冒用他人。
     if (action !== 'ping' && action !== 'whoami') {
       const authResult = authenticateApiRequest_(params);
-      if (!authResult.ok) return jsonOut(authResult);
+      if (!authResult.ok) return reply(authResult);
       params.__actor = authResult.user;
       authorizeApiAction_(action, params, authResult.user);
     }
 
     const ROUTES = {
       // 認證
-      'ping': () => ({ ok: true, time: new Date().toISOString(), release: '20260912-logic-audit-3' }),
+      'ping': () => ({ ok: true, time: new Date().toISOString(), release: KPI_RELEASE_VERSION_ }),
       'whoami': () => whoami(params),
       'getSessionIdentity': () => getSessionIdentity(params),
+      'getMutationReceipt': () => getMutationReceipt(params),
       'reportClientMetrics': () => reportClientMetrics(params),
 
       // 使用者管理（admin）
@@ -174,13 +184,13 @@ function handleRequest(e, method) {
     };
 
     if (!ROUTES[action]) {
-      return jsonOut({ ok: false, error: 'Unknown action: ' + action });
+      return reply({ ok: false, error: 'Unknown action: ' + action });
     }
-    const result = ROUTES[action]();
-    return jsonOut(result);
+    const result = executeWithMutationReceipt_(action, params, ROUTES[action]);
+    return reply(result);
   } catch (err) {
     try { console.error(err && err.stack ? err.stack : err); } catch (ignore) {}
-    return jsonOut({ ok: false, code: err && err.code || 'SERVER_ERROR', error: err && err.message ? err.message : '系統處理失敗' });
+    return reply({ ok: false, code: err && err.code || 'SERVER_ERROR', error: err && err.message ? err.message : '系統處理失敗' });
   }
 }
 

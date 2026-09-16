@@ -9,6 +9,7 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
   const selectedFilesByInput = new WeakMap();
+  const confirmedUploadsByInput = new WeakMap();
   let uploadWarning = '';
   const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, char => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
@@ -265,7 +266,7 @@
   const canOpenTestView = !TEST_VIEW_MODE && currentUser.role === 'admin' && normalizeName(currentUser.nickname) === '柏翰';
   const isManager = workspace.role === 'manager';
   const isRosterOnly = workspace.role === 'roster';
-  const workerName = '皮皮老師';
+  const workerName = isManager ? '皮皮老師' : currentUser.nickname;
   if (reviewRibbon && TEST_VIEW_MODE) {
     reviewRibbon.hidden = false;
     reviewRibbon.innerHTML = `<img src="../../shared/icons/logo.png" alt="" aria-hidden="true"><strong>柏翰互動測試</strong><span aria-hidden="true"></span>目前查看：${esc(currentUser.nickname)} · 可操作完整頁面，不會寫入正式資料 <button type="button" class="test-view-exit" data-action="exit-impersonation">換老師</button>`;
@@ -286,7 +287,7 @@
       version: APP_VERSION,
       ui: { route: workspace.start, month: currentMonth(), performanceMonth: '', evaluationMonth: '', trialStatus: 'all', classCampus: '北區', classView: 'classes', classQuery: '', lastSavedAt: '' },
       records: [],
-      users: isRosterOnly ? [] : [STAFF[0]],
+      users: isRosterOnly ? [] : [isManager ? STAFF[0] : currentUser],
       settings: { supervisor: '小魚', videoWeeklyTarget: 2, photoWeeklyTarget: 3, trialBonusAmount: TRIAL_BONUS_AMOUNT, kpi: KPI },
       classRoster: createClassRosterSeed(),
       drafts: {},
@@ -325,6 +326,73 @@
     message: PREVIEW_MODE ? '內部審查不連正式雲端' : '',
     folders: [],
   };
+  const localDraftVault = !TEST_VIEW_MODE && window.KPI_LOCAL_DRAFTS?.create(`${personalStorageKey}:${currentUser.role || ''}:${currentUser.email || ''}:${currentUser.department || ''}`);
+  let localRecovery = {};
+  let localRecoveryError = '';
+  let localRecoveryReadFailed = false;
+  const editorRecordBases = new WeakMap();
+  const editorPendingRecords = new WeakMap();
+  const localRecoveryReady = localDraftVault ? localDraftVault.get('editors').then(saved => {
+    if (saved && typeof saved === 'object') localRecovery = saved;
+    refreshLocalRecoveryNotice();
+  }).catch(() => {
+    localRecoveryReadFailed = true;
+    localRecoveryError = '上次的本機暫存尚未讀取，為保留原內容，本次尚未寫入暫存；請先不要關頁，重新整理後再試。';
+    refreshLocalRecoveryNotice();
+  }) : Promise.resolve();
+
+  function refreshLocalRecoveryNotice() {
+    const main = document.querySelector('.main');
+    if (!main) return;
+    let node = document.getElementById('local-draft-recovery');
+    if (!node) { node = document.createElement('div'); node.id = 'local-draft-recovery'; main.prepend(node); }
+    node.innerHTML = `${localRecoveryError ? `<div class="notice warning">${esc(localRecoveryError)}</div>` : ''}${Object.entries(localRecovery).map(([key, saved]) => `<div class="notice warning"><span>這台裝置有尚未完成的「${esc(saved.title || '工作內容')}」與附件。</span><button type="button" class="button small" data-action="restore-local-draft" data-key="${esc(key)}">恢復內容</button><button type="button" class="button small" data-action="discard-local-draft" data-key="${esc(key)}">移除草稿</button></div>`).join('')}`;
+  }
+  async function writeAdminRecovery() {
+    if (!localDraftVault || localRecoveryReadFailed) return false;
+    try { await localDraftVault.put('editors', localRecovery); localRecoveryError = ''; refreshLocalRecoveryNotice(); return true; }
+    catch (error) { localRecoveryError = '本機附件暫存未完成，請先不要關閉頁面；仍可繼續儲存或保留原檔。'; refreshLocalRecoveryNotice(); return false; }
+  }
+  async function preserveAdminEditor(form = document.querySelector('#dialog-root form')) {
+    if (!form || !localDraftVault) return;
+    const key = form.dataset.recoveryId || uid('editor');
+    form.dataset.recoveryId = key;
+    const saved = {
+      ...window.KPI_LOCAL_DRAFTS.capture(document.getElementById('dialog-root')),
+      title: document.getElementById('dialog-title')?.textContent || '',
+      bases: structuredClone(editorRecordBases.get(form) || state.records),
+      pending: structuredClone(editorPendingRecords.get(form) || null),
+      selections: Array.from(form.querySelectorAll('input[type="file"]'), input => ({
+        id: input.id, date: input.dataset.uploadDate || todayIso(),
+        files: selectedFilesFor(input).map(file => ({ file, confirmed: confirmedUploadsByInput.get(input)?.get(file) })),
+      })),
+    };
+    await localRecoveryReady;
+    localRecovery[key] = saved;
+    await writeAdminRecovery();
+  }
+  async function restoreAdminEditor(key) {
+    await localRecoveryReady;
+    const saved = localRecovery[key];
+    if (!saved) return;
+    await preserveAdminEditor();
+    window.KPI_LOCAL_DRAFTS.restore(document.getElementById('dialog-root'), saved);
+    document.body.classList.add('dialog-open');
+    const form = document.querySelector('#dialog-root form');
+    editorRecordBases.set(form, structuredClone(saved.bases));
+    if (saved.pending) editorPendingRecords.set(form, structuredClone(saved.pending));
+    saved.selections.forEach(selection => {
+      const input = document.getElementById(selection.id);
+      if (!input) return;
+      input.dataset.uploadDate = selection.date;
+      selectedFilesByInput.set(input, selection.files.map(entry => entry.file));
+      confirmedUploadsByInput.set(input, new Map(selection.files.filter(entry => entry.confirmed).map(entry => [entry.file, entry.confirmed])));
+      renderSelectedFiles(input);
+    });
+    hydrateIcons();
+    toast('已恢復這台裝置的內容與原選檔；確認後可接續儲存', 'warning');
+  }
+
   let classRosterBusy = false;
 
   function persist(message = '已儲存') {
@@ -1251,6 +1319,7 @@
     $('#app').classList.toggle('has-mobile-nav', Boolean(mobileNav));
     $('#app').innerHTML = `${renderTopbar()}<div class="layout"><aside class="sidebar"><div class="sidebar-title">${esc(workspace.label)}工作區</div>${renderNav()}<div class="sidebar-foot">${window.KPI_WORKSPACES?.renderQuickSwitcher?.(currentUser, { currentId: workspaceId }) || ''}</div></aside><main class="main">${renderRoute()}</main></div>${mobileNav}`;
     hydrateIcons();
+    refreshLocalRecoveryNotice();
     if (isManager && state.ui.route === 'cloud' && driveCloud.status === 'idle') {
       window.setTimeout(() => loadDriveFolders(), 0);
     }
@@ -1259,6 +1328,11 @@
   function showDialog(content, wide = false) {
     document.body.classList.add('dialog-open');
     $('#dialog-root').innerHTML = `<div class="dialog-backdrop" data-action="close-dialog"><section class="dialog ${wide ? 'wide' : ''}" role="dialog" aria-modal="true" aria-labelledby="dialog-title" data-dialog>${content}</section></div>`;
+    const draftForm = document.querySelector('#dialog-root form');
+    if (draftForm) {
+      draftForm.dataset.workDate = todayIso();
+      editorRecordBases.set(draftForm, structuredClone(state.records));
+    }
     hydrateIcons();
     window.setTimeout(() => $('#dialog-root input:not([type="hidden"]), #dialog-root textarea, #dialog-root select, #dialog-root button')?.focus(), 20);
   }
@@ -1307,6 +1381,7 @@
     if (!input) return;
     selectedFilesByInput.set(input, selectedFilesFor(input).filter((file, fileIndex) => fileIndex !== Number(index)));
     renderSelectedFiles(input);
+    preserveAdminEditor();
   }
 
   function openDailyCheck() {
@@ -1614,10 +1689,19 @@
     }
   }
   async function uploadFiles(input, category) {
+    if (input && !input.dataset.uploadDate) input.dataset.uploadDate = todayIso();
+    await preserveAdminEditor();
     const files = selectedFilesFor(input);
+    const confirmed = confirmedUploadsByInput.get(input) || new Map();
+    confirmedUploadsByInput.set(input, confirmed);
     const output = [];
     const failed = [];
     for (const file of files) {
+      const previous = confirmed.get(file);
+      if (previous && previous.owner === currentUser.nickname && previous.category === category) {
+        output.push(previous.attachment);
+        continue;
+      }
       if (file.size > MAX_ADMIN_FILE_BYTES) {
         failed.push(`${file.name}（超過 25 MB）`);
         continue;
@@ -1625,64 +1709,124 @@
       try {
         const source = isImageFile(file) ? await compressAdminImage(file) : file;
         if (PREVIEW_MODE) {
-          output.push({ id: uid('file'), fileName: source.name, url: `preview://${encodeURIComponent(source.name)}`, mimeType: source.type || file.type, category, size: source.size });
+          const attachment = { id: uid('file'), fileName: source.name, url: `preview://${encodeURIComponent(source.name)}`, mimeType: source.type || file.type, category, size: source.size };
+          output.push(attachment);
+          confirmed.set(file, { owner: currentUser.nickname, category, attachment });
           continue;
         }
         const dataUrl = await readFile(source);
-        const payload = { nickname: currentUser.nickname, date: todayIso(), fileName: source.name, mimeType: source.type || file.type, base64: dataUrl.split(',')[1] || '' };
+        const payload = { nickname: currentUser.nickname, date: input.dataset.uploadDate || todayIso(), fileName: source.name, mimeType: source.type || file.type, base64: dataUrl.split(',')[1] || '' };
         const result = isImageFile(source)
           ? await window.API.uploadPhoto({ ...payload, kpi: `admin-marketing-${category}` })
           : await window.API.uploadFile({ ...payload, category: `admin-marketing-${category}` });
         if (!result?.ok) throw new Error(result?.error || `${file.name} 上傳失敗`);
-        output.push({ id: result.fileId, fileId: result.fileId, fileName: result.fileName || source.name, url: result.url, mimeType: source.type || file.type, category, size: source.size });
+        const attachment = { id: result.fileId, fileId: result.fileId, fileName: result.fileName || source.name, url: result.url, mimeType: source.type || file.type, category, size: source.size };
+        output.push(attachment);
+        confirmed.set(file, { owner: currentUser.nickname, category, attachment });
+        await preserveAdminEditor();
       } catch (error) {
         failed.push(`${file.name}（${error.message || '上傳失敗'}）`);
       }
     }
-    if (failed.length && !output.length) throw new Error(`附件未上傳：${failed.join('、')}`);
-    if (failed.length) uploadWarning = `${output.length} 個附件已儲存；${failed.length} 個未上傳：${failed.join('、')}`;
+    if (failed.length) throw new Error(`${output.length} 個附件已傳好；${failed.length} 個尚未傳完：${failed.join('、')}。表單與選檔仍保留，再按儲存即可接續。`);
     return output;
+  }
+  function adminEditorSignature(form) {
+    return JSON.stringify({ fields: Array.from(new FormData(form).entries()).filter(([, value]) => typeof value === 'string'),
+      files: Array.from(form.querySelectorAll('input[type="file"]'), input => [input.id, selectedFilesFor(input).map(selectedFileKey)]) });
+  }
+  async function sendAdminRecord(type, record, form, originalSignature) {
+    if (form) {
+      editorPendingRecords.set(form, { type, record: structuredClone(record), signature: originalSignature ?? adminEditorSignature(form) });
+      await preserveAdminEditor(form);
+    }
+    const result = await window.API.saveAdminMarketingRecord(workerName, type, record);
+    if (form && !result?.uncertain) { editorPendingRecords.delete(form); await preserveAdminEditor(form); }
+    return result;
+  }
+  function combinedEvidence(existing, added) {
+    const seen = new Set();
+    return [...existing, ...added].filter(item => {
+      const key = item?.fileId || item?.id || item?.url;
+      if (!key) return true;
+      if (seen.has(key)) return false;
+      seen.add(key); return true;
+    });
   }
   async function saveRecord(type, record) {
     record.nickname = workerName;
     record.type = type;
-    const original = state.records.find(item => item.id === record.id);
-    record.recordRevision = record.recordRevision || original?.recordRevision || '';
-    record.baseRevision = original?.updatedAt || record.updatedAt || '';
-    record.updatedAt = new Date().toISOString();
+    const form = document.querySelector('#dialog-root form');
+    const pending = form && editorPendingRecords.get(form);
+    if (pending && !PREVIEW_MODE) {
+      const changed = adminEditorSignature(form) !== pending.signature;
+      const confirmed = await sendAdminRecord(pending.type, pending.record, form, pending.signature);
+      if (confirmed?.ok) {
+        upsertLocal(confirmed.record);
+        editorRecordBases.set(form, structuredClone(state.records));
+        if (changed) return { ok: false, code: 'PREVIOUS_SAVE_CONFIRMED', error: '前一次內容已確認儲存；後續修改仍保留，請再按儲存送出新內容' };
+      }
+      return confirmed;
+    }
+    const editorBases = editorRecordBases.get(form);
+    const original = (editorBases || state.records).find(item => item.id === record.id);
+    if (editorBases) {
+      record.recordRevision = original?.recordRevision || '';
+      record.baseRevision = original?.updatedAt || '';
+      record.updatedAt = original?.updatedAt || '';
+    } else {
+      record.recordRevision = record.recordRevision || original?.recordRevision || '';
+      record.baseRevision = original?.updatedAt || record.updatedAt || '';
+    }
     if (PREVIEW_MODE) {
+      record.updatedAt = new Date().toISOString();
       upsertLocal(record);
       persist();
       return { ok: true, record };
     }
-    let result = await window.API.saveAdminMarketingRecord(workerName, type, record);
+    let result = await sendAdminRecord(type, record, form);
     if (result?.code === 'RECORD_CONFLICT' && result.current_record) {
       const latest = result.current_record;
       const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
       const merged = { ...latest };
+      let overlappingChange = false;
       Object.keys(record).forEach(key => {
         if (['recordRevision', 'baseRevision', 'updatedAt', 'createdAt', 'lastRequestId'].includes(key)) return;
         if (original && same(record[key], original[key])) return;
+        if (same(record[key], latest[key]) || (original && same(latest[key], original[key]))) {
+          merged[key] = record[key];
+          return;
+        }
         if (Array.isArray(record[key]) && Array.isArray(latest[key]) && Array.isArray(original?.[key])) {
           const identity = item => item && typeof item === 'object' ? String(item.id || item.name || '') : '';
-          const keyed = record[key].every(item => identity(item)) && latest[key].every(item => identity(item));
+          const keyed = [record[key], latest[key], original[key]].every(items => items.every(item => identity(item)) && new Set(items.map(identity)).size === items.length);
           if (keyed) {
             const originalById = new Map(original[key].map(item => [identity(item), item]));
             const mergedById = new Map(latest[key].map(item => [identity(item), item]));
+            const localById = new Map(record[key].map(item => [identity(item), item]));
+            originalById.forEach((item, id) => {
+              if (localById.has(id)) return;
+              if (!mergedById.has(id) || same(mergedById.get(id), item)) mergedById.delete(id);
+              else overlappingChange = true;
+            });
             record[key].forEach(item => {
               const id = identity(item);
-              if (!originalById.has(id) || !same(item, originalById.get(id))) mergedById.set(id, item);
+              if (originalById.has(id) && same(item, originalById.get(id))) return;
+              const remote = mergedById.get(id);
+              if (same(remote, item) || same(remote, originalById.get(id))) mergedById.set(id, item);
+              else overlappingChange = true;
             });
             merged[key] = Array.from(mergedById.values());
             return;
           }
         }
-        merged[key] = record[key];
+        overlappingChange = true;
       });
+      if (overlappingChange) return { ...result, error: '這筆資料的同一欄位已在其他地方修改；本次輸入仍保留，請先比較最新紀錄再儲存，避免覆蓋其他人的內容' };
       merged.recordRevision = latest.recordRevision || '';
       merged.baseRevision = latest.updatedAt || '';
-      merged.updatedAt = new Date().toISOString();
-      result = await window.API.saveAdminMarketingRecord(workerName, type, merged);
+      merged.updatedAt = latest.updatedAt || '';
+      result = await sendAdminRecord(type, merged, form);
       if (result?.ok) result.merged = true;
     }
     if (result?.ok) upsertLocal(result.record);
@@ -1691,8 +1835,8 @@
   async function saveAssignment(record) {
     record.nickname = workerName;
     record.type = 'assignment';
-    record.updatedAt = new Date().toISOString();
     if (PREVIEW_MODE) {
+      record.updatedAt = new Date().toISOString();
       upsertLocal(record);
       persist();
       return { ok: true, assignment: record };
@@ -1705,6 +1849,7 @@
   async function handleTrial(form) {
     const data = new FormData(form);
     const id = String(data.get('trialId') || '') || uid('admin-marketing-trial');
+    if (form.elements.trialId) form.elements.trialId.value = id;
     const existing = trialRecords().find(item => item.id === id) || {};
     const status = normalizeTrialStatus(String(data.get('status') || 'waiting_contact'));
     let followups = Array.isArray(existing.followups) ? existing.followups.slice() : [];
@@ -1727,7 +1872,8 @@
       if (!enrollmentDate || !paymentDate || !enrollmentCourse || !firstEnrollmentChoice) throw new Error('請完整填寫報名、繳費、正式課程與是否首次報名');
       if (enrollmentDate > todayIso() || paymentDate > todayIso()) throw new Error('報名與繳費日期不可晚於今天');
       if (firstEnrollmentChoice === 'yes' && !followups.length) {
-        followups = [{ id: uid('trial-followup'), date: paymentDate, method: 'other', note: '系統依首次正式報名與完成繳費自動建立', nextDate: '', author: currentUser.nickname, at: new Date().toISOString() }];
+        form.dataset.firstEnrollmentFollowupAt = form.dataset.firstEnrollmentFollowupAt || new Date().toISOString();
+        followups = [{ id: `${id}-first-enrollment`, date: paymentDate, method: 'other', note: '系統依首次正式報名與完成繳費自動建立', nextDate: '', author: currentUser.nickname, at: form.dataset.firstEnrollmentFollowupAt }];
       }
     }
     const duplicate = trialRecords().find(item => item.id !== id && trialIdentity(item.studentName, trialContact(item), item.course, item.date) === trialIdentity(studentName, contactRef, course, date));
@@ -1739,7 +1885,7 @@
       note: String(data.get('note') || '').trim(), status, followups,
       enrollmentDate, paymentDate, enrollmentCourse,
       firstEnrollment: converted && firstEnrollmentChoice === 'yes',
-      paymentEvidence: converted ? retainedFiles(existing.paymentEvidence, data, 'removePaymentEvidence').concat(newEvidence) : [],
+      paymentEvidence: converted ? combinedEvidence(retainedFiles(existing.paymentEvidence, data, 'removePaymentEvidence'), newEvidence) : [],
     };
     if (converted) {
       if (record.firstEnrollment && !evidenceReady({ evidence: record.paymentEvidence })) throw new Error('首次報名需附報名或繳費證明');
@@ -1759,9 +1905,10 @@
     closeDialog(); renderApp(); toast(existing.id ? '試上結果已更新' : date > todayIso() ? '未來試上已登錄' : '今日試上已登錄');
   }
 
-  async function handleNoTrial() {
-    const record = { id: `admin-marketing-trial-day-${normalizeName(workerName)}-${todayIso()}`, type: 'trial_day', nickname: workerName, date: todayIso(), noTrial: true, status: 'confirmed' };
-    if (trialRecords().some(item => item.date === todayIso())) throw new Error('今天已有試上學生，不能標記為無試上');
+  async function handleNoTrial(form) {
+    const workDate = form.dataset?.workDate || todayIso();
+    const record = { id: `admin-marketing-trial-day-${normalizeName(workerName)}-${workDate}`, type: 'trial_day', nickname: workerName, date: workDate, noTrial: true, status: 'confirmed' };
+    if (trialRecords().some(item => item.date === workDate)) throw new Error('今天已有試上學生，不能標記為無試上');
     const result = await saveRecord('trial_day', record);
     if (!result?.ok) throw new Error(result?.error || '今日試上狀態儲存失敗');
     closeDialog(); renderApp(); toast('已確認今日無試上');
@@ -1792,17 +1939,18 @@
   }
 
   async function handleDailyCheck(form) {
+    const workDate = form.dataset?.workDate || todayIso();
     const data = new FormData(form);
     const status = String(data.get('status') || 'clear');
     const note = status === 'needs_supervisor' ? String(data.get('note') || '').trim() : '';
     const reported = status === 'needs_supervisor' && data.get('reported') === 'on';
     if (status === 'needs_supervisor' && !note) throw new Error('請寫清楚需要主管協助的事項');
     if (status === 'needs_supervisor' && !reported) throw new Error('請確認已主動回報小魚主管');
-    const existing = workerRecords('daily_check').find(item => item.date === todayIso()) || {};
+    const existing = workerRecords('daily_check').find(item => item.date === workDate) || {};
     const record = {
       ...existing,
-      id: existing.id || `admin-marketing-daily-check-${normalizeName(workerName)}-${todayIso()}`,
-      type: 'daily_check', nickname: workerName, date: todayIso(), status, note, reported,
+      id: existing.id || `admin-marketing-daily-check-${normalizeName(workerName)}-${workDate}`,
+      type: 'daily_check', nickname: workerName, date: workDate, status, note, reported,
     };
     const result = await saveRecord('daily_check', record);
     if (!result?.ok) throw new Error(result?.error || '今日訊息確認儲存失敗');
@@ -1810,10 +1958,13 @@
   }
 
   async function handleWorkItem(form) {
+    const workDate = form.dataset?.workDate || todayIso();
     const data = new FormData(form);
     const recordId = String(data.get('recordId') || '');
-    const daily = (recordId ? workerRecords('daily').find(record => record.id === recordId) : null) || todayDaily() || { id: `admin-marketing-daily-${normalizeName(workerName)}-${todayIso()}`, type: 'daily', nickname: workerName, date: todayIso(), items: [], messages: {} };
+    const daily = (recordId ? workerRecords('daily').find(record => record.id === recordId) : null) || workerRecords('daily').find(item => item.date === workDate) || { id: `admin-marketing-daily-${normalizeName(workerName)}-${workDate}`, type: 'daily', nickname: workerName, date: workDate, items: [], messages: {} };
+    if (form.elements.recordId) form.elements.recordId.value = daily.id;
     const id = String(data.get('itemId') || '') || uid('work');
+    if (form.elements.itemId) form.elements.itemId.value = id;
     const existing = (daily.items || []).find(item => item.id === id) || {};
     const status = String(data.get('status') || 'in_progress');
     const item = {
@@ -1823,12 +1974,12 @@
       progress: status === 'completed' ? 100 : Math.max(1, Math.min(95, Number(existing.progress || 50))),
       remaining: status === 'completed' ? '' : String(data.get('remaining') || '').trim(),
       dueDate: status === 'completed' ? '' : String(data.get('dueDate') || ''),
-      actualDate: status === 'completed' ? (existing.actualDate || todayIso()) : '',
+      actualDate: status === 'completed' ? (existing.actualDate || workDate) : '',
     };
     if (!item.category || !item.title || !item.completedToday) throw new Error('請填寫工作類型、工作名稱與本次處理結果');
     if (status !== 'completed' && (!item.remaining || !item.dueDate)) throw new Error('未完成工作要填剩餘工作與預計完成日期');
     const newFiles = await uploadFiles(form.elements.evidence, item.category);
-    item.evidence = retainedFiles(existing.evidence, data).concat(newFiles);
+    item.evidence = combinedEvidence(retainedFiles(existing.evidence, data), newFiles);
     if (status === 'completed' && ['video','photo_post','poster','design','social_schedule'].includes(item.category) && !evidenceReady(item)) throw new Error('美宣工作標記完成時必須附完成證據');
     const items = (daily.items || []).filter(entry => entry.id !== id).concat(item);
     const result = await saveRecord('daily', { ...daily, messages: daily.messages || {}, items, status: 'submitted' });
@@ -1838,14 +1989,16 @@
   }
 
   async function handleTuesday(form) {
+    const workDate = form.dataset?.workDate || todayIso();
     const data = new FormData(form);
-    const existing = currentTuesday() || { id: `admin-marketing-tuesday-${normalizeName(workerName)}-${weekBounds().key}`, type: 'tuesday', nickname: workerName, weekKey: weekBounds().key, followups: [] };
+    const existing = workerRecords('tuesday').find(item => item.weekKey === weekBounds(workDate).key) || { id: `admin-marketing-tuesday-${normalizeName(workerName)}-${weekBounds(workDate).key}`, type: 'tuesday', nickname: workerName, weekKey: weekBounds(workDate).key, followups: [] };
     const mode = String(data.get('mode') || 'check');
     let followups = existing.followups || [];
     if (mode === 'followup') {
       const person = String(data.get('person') || '').trim();
       if (!person) throw new Error('請填寫學生或家長姓名');
       const id = String(data.get('followupId') || '') || uid('followup');
+      if (form.elements.followupId) form.elements.followupId.value = id;
       const followup = { id, person, situation: String(data.get('situation') || '').trim(), handled: String(data.get('handled') || '').trim(), nextDate: String(data.get('nextDate') || ''), status: String(data.get('followupStatus') || 'open') };
       if (!followup.situation || !followup.handled) throw new Error('家長事項要填目前狀況與已處理事項');
       if (followup.status === 'open' && !followup.nextDate) throw new Error('持續追蹤事項必須設定下次追蹤日期');
@@ -1858,8 +2011,8 @@
     } : (existing.checks || {});
     const record = {
       ...existing,
-      date: mode === 'check' ? String(data.get('date') || todayIso()) : (existing.date || todayIso()),
-      weekKey: weekBounds().key, checks, followups,
+      date: mode === 'check' ? String(data.get('date') || workDate) : (existing.date || workDate),
+      weekKey: weekBounds(workDate).key, checks, followups,
       note: mode === 'check' ? String(data.get('note') || '').trim() : String(existing.note || ''), status: 'submitted',
     };
     if (!record.checks.paymentList || !record.checks.expiringStudents || !record.checks.unpaidParents || !record.checks.remindersSent) throw new Error('四項固定行政確認都必須完成');
@@ -1869,8 +2022,9 @@
   }
 
   async function handleEnvironment(form) {
+    const workDate = form.dataset?.workDate || todayIso();
     const data = new FormData(form);
-    const existing = currentEnvironment() || { id: `admin-marketing-environment-${normalizeName(workerName)}-${todayIso()}`, type: 'environment', nickname: workerName, date: todayIso() };
+    const existing = workerRecords('environment').find(item => item.date === workDate) || { id: `admin-marketing-environment-${normalizeName(workerName)}-${workDate}`, type: 'environment', nickname: workerName, date: workDate };
     const environmentStatus = String(data.get('environmentStatus') || 'clear');
     const affectedGroups = new Set(ENVIRONMENT_GROUPS.filter(([key]) => data.get(`issue-${key}`) === 'on').map(([key]) => key));
     const checks = Object.fromEntries(ENVIRONMENT_CHECKS.map(([key]) => [key, true]));
@@ -1884,15 +2038,17 @@
     const improvementDue = environmentStatus === 'issue' ? String(data.get('improvementDue') || '') : '';
     if (environmentStatus === 'issue' && (!issue || !improvementDue)) throw new Error('有待改善時，請填寫問題、改善方式與期限');
     const files = await uploadFiles(form.elements.evidence, 'environment');
-    const record = { ...existing, checks, issue, improvementDue, evidence: retainedFiles(existing.evidence, data).concat(files), status: environmentStatus === 'issue' ? 'needs_action' : 'submitted' };
+    const record = { ...existing, checks, issue, improvementDue, evidence: combinedEvidence(retainedFiles(existing.evidence, data), files), status: environmentStatus === 'issue' ? 'needs_action' : 'submitted' };
     const result = await saveRecord('environment', record);
     if (!result?.ok) throw new Error(result?.error || '環境檢核儲存失敗');
     closeDialog(); renderApp(); toast('今日環境檢核已儲存');
   }
 
   async function handleProject(form) {
+    const workDate = form.dataset?.workDate || todayIso();
     const data = new FormData(form);
     const id = String(data.get('projectId') || '') || uid('project');
+    if (form.elements.projectId) form.elements.projectId.value = id;
     const existing = workerRecords('project').find(item => item.id === id) || {};
     const currentStage = String(data.get('currentStage') || PROJECT_STAGES[0]);
     const currentIndex = Math.max(0, PROJECT_STAGES.indexOf(currentStage));
@@ -1901,12 +2057,12 @@
     const oldStages = Array.isArray(existing.stages) ? existing.stages : [];
     const stages = PROJECT_STAGES.map((name, index) => {
       const old = oldStages.find(stage => stage.name === name) || {};
-      if (index < currentIndex || status === 'completed') return { ...old, name, status: 'completed', actualDate: old.actualDate || todayIso(), dueDate: old.dueDate || (index === currentIndex ? dueDate : '') };
+      if (index < currentIndex || status === 'completed') return { ...old, name, status: 'completed', actualDate: old.actualDate || workDate, dueDate: old.dueDate || (index === currentIndex ? dueDate : '') };
       if (index === currentIndex) return { ...old, name, status: status === 'planning' ? 'pending' : 'active', dueDate, actualDate: '' };
       return { ...old, name, status: 'pending', dueDate: old.status === 'completed' ? old.dueDate || '' : '', actualDate: old.status === 'completed' ? old.actualDate || '' : '' };
     });
     const files = await uploadFiles(form.elements.evidence, 'project');
-    const record = { ...existing, id, date: existing.date || todayIso(), title: String(data.get('title') || '').trim(), projectType: String(data.get('projectType') || ''), summary: String(data.get('summary') || '').trim(), status, currentStage, dueDate, stages, evidence: retainedFiles(existing.evidence, data).concat(files) };
+    const record = { ...existing, id, date: existing.date || workDate, title: String(data.get('title') || '').trim(), projectType: String(data.get('projectType') || ''), summary: String(data.get('summary') || '').trim(), status, currentStage, dueDate, stages, evidence: combinedEvidence(retainedFiles(existing.evidence, data), files) };
     if (!record.title || !record.projectType || !record.summary || !record.dueDate) throw new Error('專案名稱、類型、目前結果與階段期限皆為必填');
     if (record.status === 'completed' && !evidenceReady(record)) throw new Error('專案完成時必須附完成證據');
     const result = await saveRecord('project', record);
@@ -1915,17 +2071,19 @@
   }
 
   async function handleAssignment(form) {
+    const workDate = form.dataset?.workDate || todayIso();
     const data = new FormData(form);
     const id = String(data.get('assignmentId') || '') || uid('assignment');
+    if (form.elements.assignmentId) form.elements.assignmentId.value = id;
     const existing = workerRecords('assignment').find(item => item.id === id) || {};
     let record;
     if (isManager) {
-      record = { ...existing, id, date: String(data.get('date') || todayIso()), title: String(data.get('title') || '').trim(), detail: String(data.get('detail') || '').trim(), dueDate: String(data.get('dueDate') || ''), priority: String(data.get('priority') || 'normal'), status: existing.status || 'pending', progress: Number(existing.progress || 0), evidence: existing.evidence || [] };
+      record = { ...existing, id, date: String(data.get('date') || workDate), title: String(data.get('title') || '').trim(), detail: String(data.get('detail') || '').trim(), dueDate: String(data.get('dueDate') || ''), priority: String(data.get('priority') || 'normal'), status: existing.status || 'pending', progress: Number(existing.progress || 0), evidence: existing.evidence || [] };
       if (!record.title || !record.detail || !record.dueDate) throw new Error('交辦內容、說明與期限皆為必填');
     } else {
       const files = await uploadFiles(form.elements.evidence, 'assignment');
       const status = String(data.get('status') || 'in_progress');
-      record = { ...existing, id, progress: status === 'completed' ? 100 : Math.max(1, Math.min(95, Number(existing.progress || 50))), status, progressNote: String(data.get('progressNote') || '').trim(), actualDate: status === 'completed' ? (existing.actualDate || todayIso()) : '', evidence: retainedFiles(existing.evidence, data).concat(files) };
+      record = { ...existing, id, progress: status === 'completed' ? 100 : Math.max(1, Math.min(95, Number(existing.progress || 50))), status, progressNote: String(data.get('progressNote') || '').trim(), actualDate: status === 'completed' ? (existing.actualDate || workDate) : '', evidence: combinedEvidence(retainedFiles(existing.evidence, data), files) };
       if (!record.progressNote) throw new Error('請填寫目前結果與下一步');
       if (record.status === 'completed') {
         if (!evidenceReady(record)) throw new Error('交辦完成時至少要有一份可判讀附件');
@@ -2001,6 +2159,7 @@
   async function handleClassRosterEditor(form) {
     const data = new FormData(form);
     const id = String(data.get('classId') || '') || uid('class-roster');
+    if (form.elements.classId) form.elements.classId.value = id;
     const existing = classRosterItem(id);
     const item = {
       id,
@@ -2039,8 +2198,9 @@
   }
   async function handleClassRosterReminder(form) {
     const data = new FormData(form);
+    form.dataset.reminderId = form.dataset.reminderId || uid('class-reminder');
     await mutateClassRoster('save_reminder', {
-      id: uid('class-reminder'),
+      id: form.dataset.reminderId,
       classId: String(data.get('classId') || ''),
       title: String(data.get('title') || '').trim(),
       dueDate: String(data.get('dueDate') || ''),
@@ -2052,31 +2212,53 @@
   }
 
   async function runForm(handler, form) {
+    if (form.dataset.submitting === 'true') return;
+    form.dataset.submitting = 'true';
+    const previousInert = form.inert;
+    form.inert = true;
     const button = form.querySelector('[type="submit"]');
     const buttonHtml = button?.innerHTML || '';
     if (button) {
+      button.dataset.recoveryHtml = buttonHtml;
       button.disabled = true;
       button.setAttribute('aria-busy', 'true');
       button.textContent = '正在處理…';
     }
     uploadWarning = '';
     try {
+      await preserveAdminEditor(form);
       await handler(form);
       if (uploadWarning) toast(uploadWarning, 'warning');
     }
     catch (error) { toast(error.message || '操作失敗', 'danger'); }
     finally {
+      form.inert = previousInert;
+      delete form.dataset.submitting;
       if (button?.isConnected) {
         button.disabled = false;
         button.removeAttribute('aria-busy');
         button.innerHTML = buttonHtml;
+        delete button.dataset.recoveryHtml;
         hydrateIcons();
       }
+      if (form.isConnected) await preserveAdminEditor(form);
+      else if (form.dataset.recoveryId) { delete localRecovery[form.dataset.recoveryId]; await writeAdminRecovery(); }
     }
   }
 
   let trialParseTimer = 0;
   document.addEventListener('click', async event => {
+    if (document.querySelector('form[data-submitting="true"]') && event.target.closest('[data-route], [data-action]')) {
+      event.preventDefault();
+      toast('資料正在儲存，完成後即可繼續操作', 'warning');
+      return;
+    }
+    const recoveryControl = event.target.closest('[data-action="restore-local-draft"], [data-action="discard-local-draft"]');
+    if (recoveryControl) {
+      if (recoveryControl.dataset.action === 'restore-local-draft') await restoreAdminEditor(recoveryControl.dataset.key);
+      else { await localRecoveryReady; delete localRecovery[recoveryControl.dataset.key]; await writeAdminRecovery(); }
+      return;
+    }
     const route = event.target.closest('[data-route]');
     if (route) {
       state.ui.route = route.dataset.route;
@@ -2180,11 +2362,13 @@
       marker.value = actionNode.dataset.fileValue || '';
       form.appendChild(marker);
       actionNode.closest('[data-existing-file]')?.remove();
+      preserveAdminEditor(form);
     }
     else if (action === 'print') window.print();
   });
 
   document.addEventListener('input', event => {
+    if (event.target.closest('#dialog-root form')) preserveAdminEditor();
     const scoreForm = event.target.closest('#score-form');
     if (scoreForm) scoreForm.dataset.dirty = 'true';
     if (event.target.id === 'trial-message-import') {
@@ -2212,6 +2396,7 @@
     if (event.target.matches('#daily-check-form input[name="status"]')) updateDailyCheckVisibility();
     if (event.target.matches('#environment-form input[name="environmentStatus"]')) updateEnvironmentVisibility();
     if (event.target.matches('input[type="file"]')) mergeSelectedFiles(event.target);
+    if (event.target.closest('#dialog-root form')) preserveAdminEditor();
   });
   document.addEventListener('submit', event => {
     event.preventDefault();
@@ -2250,7 +2435,7 @@
     else if (form.id === 'class-roster-adjust-form') runForm(handleClassRosterAdjustment, form);
     else if (form.id === 'class-roster-reminder-form') runForm(handleClassRosterReminder, form);
   });
-  document.addEventListener('keydown', event => { if (event.key === 'Escape') closeDialog(); });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && !document.querySelector('form[data-submitting="true"]')) closeDialog(); });
 
   if (!isManager && state.ui.route === 'performance') state.ui.performanceMonth = scoreMonths(true)[0] || currentMonth();
   if (isManager && state.ui.route === 'evaluation') state.ui.evaluationMonth = scoreMonths(false)[0] || currentMonth();

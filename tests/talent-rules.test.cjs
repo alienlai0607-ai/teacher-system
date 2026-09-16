@@ -121,6 +121,8 @@ const adminDashboardSource = fs.readFileSync(path.join(root, 'admin/dashboard.ht
 const apiSource = fs.readFileSync(path.join(root, 'shared/api.js'), 'utf8');
 const workspaceSource = fs.readFileSync(path.join(root, 'shared/workspaces.js'), 'utf8');
 const talentUiSource = fs.readFileSync(path.join(root, 'review/talent-v2/app.js'), 'utf8');
+assert.doesNotMatch(talentUiSource, /maybeShowPushReminder|talent_push_reminder_seen_/, '不可在開始操作前以延遲通知彈窗攔截點擊');
+assert.match(talentUiSource, /data-action="enable-push">開啟 APP 通知/, '保留老師主動開啟通知的設定入口');
 const talentStyleSource = fs.readFileSync(path.join(root, 'review/talent-v2/styles.css'), 'utf8');
 const talentIndexSource = fs.readFileSync(path.join(root, 'review/talent-v2/index.html'), 'utf8');
 const anqinUiSource = fs.readFileSync(path.join(root, 'review/anqin-v2/app.js'), 'utf8');
@@ -281,7 +283,7 @@ assert.match(talentUiSource, /\.\.\.values,[\s\S]*id: editingId \|\| existingLog
 assert.match(talentUiSource, /state\.logs = \(Array\.isArray\(state\.logs\)[\s\S]*id: uid\('log'\)/, '舊本機課堂缺少編號時需自動修復');
 assert.match(talentUiSource, /class="record-actions"[\s\S]*data-action="edit-log"[\s\S]*data-action="view-log"/, '編輯與查看按鈕需放入獨立動作列，避免疊在同一座標');
 assert.match(talentStyleSource, /\.record-actions \{ display: flex;[\s\S]*gap: 6px;/, '編輯與查看按鈕需保留可點擊間距');
-assert.match(talentIndexSource, /app\.js\?v=20260912-logic-audit-2/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
+assert.match(talentIndexSource, /app\.js\?v=20260916-reliability-1/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
 assert.match(talentUiSource, /completed: String\(values\.issue \|\| ''\)\.trim\(\), response: String\(values\.issue \|\| ''\)\.trim\(\)/, '簡化後的才藝表單需相容尚未更新的舊後端驗證');
 assert.match(talentUiSource, /function talentSubmissionError\(/, '才藝送出錯誤不得直接顯示內部欄位名稱');
 const talentPaySource = talentUiSource.slice(talentUiSource.indexOf('function renderPay()'), talentUiSource.indexOf('function renderPayRow('));

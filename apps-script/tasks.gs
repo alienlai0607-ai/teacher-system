@@ -36,11 +36,13 @@ function verifyReleaseLogicFromEditor() {
     require(user, '缺少此角色可驗收的啟用帳號');
     const requestedAt = Date.now();
     const body = Object.assign({}, payload || {}, { action: action, session_token: issueSessionToken_(user) });
+    if (!body.request_id) body.request_id = runId + '-' + Utilities.getUuid();
     const response = UrlFetchApp.fetch(endpoint, { method: 'post', contentType: 'text/plain', payload: JSON.stringify(body), followRedirects: true, muteHttpExceptions: true });
     let data;
     try { data = JSON.parse(response.getContentText()); } catch (error) { throw new Error(action + ' 回應不是 JSON：HTTP ' + response.getResponseCode()); }
     if (!data.ok) data.error = action + ': ' + (data.error || data.code || 'unknown') + ' [HTTP ' + response.getResponseCode() + ']';
     console.log(JSON.stringify({ run_id: runId, action: action, ok: data.ok === true, code: data.code || '', ms: Date.now() - requestedAt }));
+    data.qa_request_id = body.request_id;
     return data;
   }
   function ok(data) { require(data && data.ok, data && data.error || '正式 API 未回報成功'); return data; }
@@ -52,7 +54,7 @@ function verifyReleaseLogicFromEditor() {
   }
   check('live_version', function () {
     const response = JSON.parse(UrlFetchApp.fetch(endpoint + '?action=ping').getContentText());
-    require(response.release === '20260912-logic-audit-3', '正式後端尚未更新至本次版本');
+    require(response.release === KPI_RELEASE_VERSION_, '正式後端尚未更新至本次版本');
     return { release: response.release };
   });
   if (!checks[0].ok) { PropertiesService.getScriptProperties().deleteProperty('KPI_RELEASE_QA_PENDING_' + runId); const result = { ok: false, run_id: runId, checks: checks }; console.log(JSON.stringify(result)); return result; }
@@ -79,6 +81,11 @@ function verifyReleaseLogicFromEditor() {
     const id = reserve(SHEET_NAMES.TASKS, 'task_id', 'TASK');
     const initial = { id: id, title: runId, dueDate: todayStr(), status: 'open' };
     const first = ok(request(teacher, 'saveSelfTask', { nickname: teacher.nickname, task: initial }));
+    const receipt = ok(request(teacher, 'getMutationReceipt', { mutation_action: 'saveSelfTask', mutation_id: first.qa_request_id }));
+    require(receipt.state === 'done' && receipt.result.updated_at === first.updated_at, '回執未能確認原寫入結果');
+    require(ok(request(other, 'getMutationReceipt', { mutation_action: 'saveSelfTask', mutation_id: first.qa_request_id })).state === 'not_found', '其他老師可讀取私人回執');
+    const replay = ok(request(teacher, 'saveSelfTask', { nickname: teacher.nickname, task: initial, request_id: first.qa_request_id }));
+    require(replay.updated_at === first.updated_at, '相同儲存編號沒有重用原結果');
     const complete = ok(request(teacher, 'saveSelfTask', { nickname: teacher.nickname, task: Object.assign({}, initial, { status: 'done', cloudUpdatedAt: first.updated_at }) }));
     const stale = request(teacher, 'saveSelfTask', { nickname: teacher.nickname, task: Object.assign({}, initial, { cloudUpdatedAt: first.updated_at }) });
     require(stale.code === 'RECORD_CONFLICT' && stale.current_task.status === 'done', '舊版本覆蓋了完成狀態');
@@ -86,7 +93,7 @@ function verifyReleaseLogicFromEditor() {
     require(ok(request(admin, 'listTasks', { viewer: admin.nickname })).tasks.some(row => row.task_id === id && row.status === 'done'), '主管未讀到完成結果');
     ok(request(teacher, 'deleteSelfTask', { nickname: teacher.nickname, task_id: id }));
     require(request(teacher, 'saveSelfTask', { nickname: teacher.nickname, task: Object.assign({}, initial, { cloudUpdatedAt: complete.updated_at }) }).code === 'RECORD_DELETED', '已刪除事項被復活');
-    return { owner: teacher.nickname, conflict: true, privacy: true, manager_read: true, deleted: true };
+    return { owner: teacher.nickname, receipt_readback: true, replay_reused: true, receipt_privacy: true, conflict: true, privacy: true, manager_read: true, deleted: true };
   });
   check('teacher_photo_upload_and_private_preview', function () {
     require(teacher, '缺少老師帳號');
@@ -143,6 +150,7 @@ function verifyReleaseLogicFromEditor() {
         console.log(JSON.stringify({ run_id: runId, cleanup_sheet: entry.sheet, matched_row: rowNum, remaining_row: remainingRow }));
         require(remainingRow < 2, entry.sheet + ' 驗收列仍存在');
       });
+      cleanupReleaseReceipts_(runId);
       return { ok: true };
     });
     ok(result);
@@ -178,6 +186,7 @@ function cleanupReleaseAcceptanceFromEditor() {
         SpreadsheetApp.flush();
         if (findRow(entry[0], entry[1], id) >= 2) throw new Error(entry[0] + ' 驗收列仍存在');
       });
+      cleanupReleaseReceipts_(runId);
       const files = DriveApp.searchFiles("trashed = false and (title contains '" + runId + "' or title contains 'K" + runId + "')");
       let removed = 0;
       while (files.hasNext()) {
@@ -194,6 +203,21 @@ function cleanupReleaseAcceptanceFromEditor() {
   });
   console.log(JSON.stringify(result));
   return result;
+}
+
+// Called only inside the editor acceptance cleanup's write lock.
+function cleanupReleaseReceipts_(runId) {
+  if (!/^QA-RELEASE-[a-f0-9-]{36}$/.test(runId)) throw new Error('拒絕非驗收編號');
+  SpreadsheetApp.flush();
+  const sheet = mutationReceiptSheet_(false);
+  if (!sheet || sheet.getLastRow() < 2) return;
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, 9).getValues();
+  const matches = rows.map(function (row, i) { return { row: row, index: i + 2 }; }).filter(function (item) { return String(item.row[3]).indexOf(runId + '-') === 0; });
+  if (matches.some(function (item) { return item.row[5] === 'pending'; })) throw new Error('驗收回執仍在處理，不可清理');
+  matches.forEach(function (item) {
+    sheet.getRange(item.index, 1, 1, 9).setValues([['retired:' + Utilities.getUuid(), '', '', '', '', 'retired', '', '', nowIso()]]);
+  });
+  SpreadsheetApp.flush();
 }
 
 function systemMaintenanceUser_(params) {
@@ -705,7 +729,7 @@ function nextTaskUpdatedAt_(existing) {
 }
 
 function saveSelfTask(params) {
-  return withRecordWriteLock_(function () { return saveSelfTaskLocked_(params); });
+  return withRecordWriteLock_(function () { return saveSelfTaskLocked_(params); }, true);
 }
 
 function saveSelfTaskLocked_(params) {
@@ -714,7 +738,16 @@ function saveSelfTaskLocked_(params) {
   const task = params.task || {};
   if (!user || user.status !== 'active') return { ok: false, error: '找不到可用帳號' };
   if (!task.id || !String(task.title || '').trim()) return { ok: false, error: '事項資料不完整' };
-  const existing = findObject(SHEET_NAMES.TASKS, 'task_id', task.id);
+  const sheet = getSheet(SHEET_NAMES.TASKS);
+  const headers = getHeaders(sheet);
+  const keyColumn = headers.indexOf('task_id');
+  if (keyColumn < 0) throw new Error('事項資料表缺少 task_id');
+  const lastRow = sheet.getLastRow();
+  const ids = lastRow > 1 ? sheet.getRange(2, keyColumn + 1, lastRow - 1, 1).getValues() : [];
+  const index = ids.findIndex(row => String(row[0]) === String(task.id));
+  const rowNumber = index < 0 ? 0 : index + 2;
+  const current = rowNumber ? sheet.getRange(rowNumber, 1, 1, headers.length).getValues()[0] : [];
+  const existing = rowNumber ? headers.reduce(function (obj, key, i) { obj[key] = current[i]; return obj; }, { _row: rowNumber }) : null;
   if (existing && existing.assignee !== nickname) return { ok: false, error: '不可修改其他人的事項' };
   if (existing && existing.status === 'deleted') return { ok: false, code: 'RECORD_DELETED', error: '此事項已在雲端刪除' };
   if (task.status && ['open', 'done'].indexOf(task.status) < 0) return { ok: false, error: '事項狀態不正確' };
@@ -738,7 +771,9 @@ function saveSelfTaskLocked_(params) {
     if (same) return { ok: true, task_id: task.id, updated_at: existing.updated_at, duplicate: true };
     if (recordConflict_(task.cloudUpdatedAt, existing.updated_at)) return { ok: false, code: 'RECORD_CONFLICT', current_task: Object.assign({}, existing, { due_date: taskDateStr_(existing.due_date) }), error: '事項已在其他裝置更新，已顯示最新狀態；請確認後再操作' };
   }
-  upsertRow(SHEET_NAMES.TASKS, 'task_id', record);
+  // Keep unknown columns and any existing sheet formulas untouched.
+  if (existing) writeSheetFields_(sheet, rowNumber, headers, record);
+  else sheet.appendRow(headers.map(function (key) { return sheetValueForWrite_(record[key]); }));
   return { ok: true, task_id: task.id, updated_at: now };
 }
 

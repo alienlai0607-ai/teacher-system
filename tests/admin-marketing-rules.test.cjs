@@ -16,6 +16,7 @@ const context = vm.createContext({
 });
 vm.runInContext(backendSource, context);
 context.LockService = { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
+context.SpreadsheetApp = { flush() {} };
 const helpers = fs.readFileSync(path.join(root, 'apps-script/utils.gs'), 'utf8');
 vm.runInContext(helpers.slice(helpers.indexOf('function withRecordWriteLock_'), helpers.indexOf('function reportClientMetrics')), context);
 assert.equal(context.recordConflict_('2026-09-05T12:33:09.000Z', new Date('2026-09-05T20:33:09+08:00')), false, '同一時間的 ISO 字串與試算表 Date 不得誤判衝突');
@@ -277,7 +278,9 @@ assert.match(uiSource, /const selectedFilesByInput = new WeakMap\(\)/, '分次�
 assert.match(uiSource, /function mergeSelectedFiles\([\s\S]*selectedFileKey[\s\S]*input\.value = ''/, '分次選檔需累加、去重，且允許再次選取同一檔案');
 assert.match(uiSource, /const MAX_ADMIN_FILE_BYTES = 25 \* 1024 \* 1024/, '行政附件上限需與正式雲端 25 MB 規則一致');
 assert.match(uiSource, /const source = isImageFile\(file\) \? await compressAdminImage\(file\) : file;[\s\S]*if \(PREVIEW_MODE\)/, '審查模式也需實際執行大圖壓縮');
-assert.match(uiSource, /failed\.push\(`\$\{file\.name\}[\s\S]*if \(failed\.length && !output\.length\)/, '單一附件失敗不得讓其餘成功檔案全部遺失');
+assert.match(uiSource, /if \(failed\.length\) throw new Error/, '附件未傳齊必須保留表單，不得以部分成功關閉表單');
+assert.match(uiSource, /confirmed\.set\(file, \{ owner: currentUser.nickname, category, attachment \}\)/, '重試必須保留已成功附件');
+assert.match(uiSource, /const workerName = isManager \? '皮皮老師' : currentUser\.nickname;/, '行政員工必须以自己的正式帳號儲存，不得寫死為另一位員工');
 assert.match(uiSource, /function parseTrialMessage/, '登錄試上需支援貼上訊息自動辨識');
 assert.match(uiSource, /data-action="parse-trial-message"/, '登錄試上需提供手動重新辨識按鈕');
 assert.match(uiSource, /recognized\.length[\s\S]*欄位已有相同內容/, '重複按辨識時不得把已成功帶入的資料誤報為未辨識');
@@ -306,13 +309,13 @@ assert.match(workspacesCssSource, /\.workspace-quick-title \{[^}]*width: 100%;[^
 assert.match(workspacesCssSource, /grid-template-columns: repeat\(auto-fit, minmax\(136px, 1fr\)\)/, '手機三身分按鈕需保留可讀寬度');
 assert.match(uiHtmlSource, /workspaces\.css\?v=20260901-workspace-wrap-1/, '行政頁需載入防溢出的工作身分樣式');
 assert.match(uiHtmlSource, /styles\.css\?v=20260912-roster-time-2/, '班級人數版面需使用獨立快取版本');
-assert.match(uiHtmlSource, /app\.js\?v=20260912-logic-audit-2/, '班級人數互動需使用獨立快取版本');
+assert.match(uiHtmlSource, /app\.js\?v=20260916-reliability-1/, '班級人數互動需使用獨立快取版本');
 assert.match(uiHtmlSource, /shared\/roster-time\.js\?v=20260912-roster-time-2/, '舊版時間字串需要先正規化');
-assert.match(uiHtmlSource, /shared\/api\.js\?v=20260912-auth-response-1/, '行政頁需載入包含班級人數與登入回應保護的最新 API 版本');
-assert.match(uiHtmlSource, /shared\/workspaces\.js\?v=20260911-class-roster-access-1/, '工作切換需避開舊權限快取');
+assert.match(uiHtmlSource, /shared\/api\.js\?v=20260916-reliability-1/, '行政頁需載入包含班級人數與登入回應保護的最新 API 版本');
+assert.match(uiHtmlSource, /shared\/workspaces\.js\?v=20260916-reliability-1/, '工作切換需避開舊權限快取');
 assert.match(uiSource, /\['converted_half_year', '已報名半年'\]/, '試上結果需可選擇已報名半年');
 assert.match(uiSource, /result\?\.code === 'RECORD_CONFLICT'[\s\S]*result\.current_record[\s\S]*merged\.recordRevision/, '更新衝突需合併最新版後安全重試');
-assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=(?:admin-marketing|admin-marketing-manager|class-roster-manager)&v=20260912-own-roster-1/g) || []).length, 3, '行政、主管與班級人數入口都需避開舊版快取');
+assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=(?:admin-marketing|admin-marketing-manager|class-roster-manager)&v=20260916-reliability-1/g) || []).length, 3, '行政、主管與班級人數入口都需避開舊版快取');
 assert.match(uiSource, /trialIdentity\(item\.studentName, trialContact\(item\), item\.course, item\.date\)/, '重複預約需依學生、課程與日期判定');
 assert.match(uiSource, /同一學生可登記不同課程/, '行政需清楚知道同一學生可登記多門試上課');
 assert.doesNotMatch(uiSource, /首報獎金至少要有一筆家長追蹤紀錄|新增一筆追蹤/, '首報不得強迫另建一筆重複的家長追蹤');

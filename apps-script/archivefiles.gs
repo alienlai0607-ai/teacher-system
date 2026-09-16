@@ -27,14 +27,17 @@ function kpiDriveViewerUsers_(ownerUser, scope, extraUsers) {
     if (user && user.email) extraKeys[String(user.email).toLowerCase()] = true;
   });
   const seen = {};
-  return sheetToObjects(SHEET_NAMES.USERS).filter(function (user) {
+  // Keep the active owner identity when multiple profiles share a Drive email.
+  return sheetToObjects(SHEET_NAMES.USERS).slice().sort(function (a, b) {
+    return Number(b.nickname === ownerNickname) - Number(a.nickname === ownerNickname);
+  }).filter(function (user) {
     if (!user || user.status !== 'active' || !String(user.email || '').trim()) return false;
     const assignments = talentAssignments_(user);
     const included = user.nickname === ownerNickname || user.role === 'admin' || isGlobalManager_(user) ||
       extraKeys[user.nickname] || extraKeys[String(user.email || '').toLowerCase()] ||
       (scope === 'talent' && assignments.indexOf('talent-manager') >= 0) ||
       (scope !== 'talent' && user.role === 'manager' && ownerDepartment && sameDepartment_(user.department, ownerDepartment));
-    const email = String(user.email || '').toLowerCase();
+    const email = String(user.email || '').trim().toLowerCase();
     if (!included || seen[email]) return false;
     seen[email] = true;
     return true;

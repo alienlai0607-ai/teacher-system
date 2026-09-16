@@ -21,6 +21,8 @@
  * 5. 把網址貼到前端 shared/config.js 的 API_URL
  */
 
+const KPI_RELEASE_VERSION_ = '20260916-reliability-1';
+
 // ============ 路由 ============
 function doGet(e) {
   return handleRequest(e, 'GET');
@@ -31,10 +33,17 @@ function doPost(e) {
 }
 
 function handleRequest(e, method) {
+  const started = Date.now();
+  let trace = { method: method };
+  function reply(result) {
+    try { console.log(JSON.stringify(Object.assign({ event: 'api_result', ms: Date.now() - started, ok: result && result.ok === true, code: result && result.code || '' }, trace))); } catch (ignore) {}
+    return jsonOut(result);
+  }
   try {
     const params = method === 'POST'
       ? JSON.parse(e.postData.contents || '{}')
       : (e.parameter || {});
+    trace = { method: method, action: String(params.action || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 70), request_id: String(params.request_id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 160), token_present: Boolean(params.session_token), body_length: method === 'POST' ? String(e.postData.contents || '').length : 0 };
 
     if (params.lineWebhook) return jsonOut(handleVerifiedLineWebhook_(params.lineWebhook));
 
@@ -51,16 +60,17 @@ function handleRequest(e, method) {
     // 權限不可只靠前端傳來的 nickname / viewer / operator，否則改寫請求即可冒用他人。
     if (action !== 'ping' && action !== 'whoami') {
       const authResult = authenticateApiRequest_(params);
-      if (!authResult.ok) return jsonOut(authResult);
+      if (!authResult.ok) return reply(authResult);
       params.__actor = authResult.user;
       authorizeApiAction_(action, params, authResult.user);
     }
 
     const ROUTES = {
       // 認證
-      'ping': () => ({ ok: true, time: new Date().toISOString(), release: '20260912-logic-audit-3' }),
+      'ping': () => ({ ok: true, time: new Date().toISOString(), release: KPI_RELEASE_VERSION_ }),
       'whoami': () => whoami(params),
       'getSessionIdentity': () => getSessionIdentity(params),
+      'getMutationReceipt': () => getMutationReceipt(params),
       'reportClientMetrics': () => reportClientMetrics(params),
 
       // 使用者管理（admin）
@@ -185,13 +195,13 @@ function handleRequest(e, method) {
     };
 
     if (!ROUTES[action]) {
-      return jsonOut({ ok: false, error: 'Unknown action: ' + action });
+      return reply({ ok: false, error: 'Unknown action: ' + action });
     }
-    const result = ROUTES[action]();
-    return jsonOut(result);
+    const result = executeWithMutationReceipt_(action, params, ROUTES[action]);
+    return reply(result);
   } catch (err) {
     try { console.error(err && err.stack ? err.stack : err); } catch (ignore) {}
-    return jsonOut({ ok: false, code: err && err.code || 'SERVER_ERROR', error: err && err.message ? err.message : '系統處理失敗' });
+    return reply({ ok: false, code: err && err.code || 'SERVER_ERROR', error: err && err.message ? err.message : '系統處理失敗' });
   }
 }
 
@@ -954,6 +964,7 @@ function getGradeRules(role, kpi, max) {
 // ★ 如果 Apps Script 是「獨立」（不是從 Sheet 的擴充功能開的），
 //   請把你的 Sheet ID 填在這裡（取自 Sheet 網址 /d/【這裡】/edit）
 const SHEET_ID = '14JSTOpzxmjdaErdjsc-54mSsDe6bZ5Trchas-NHWTS8';
+var spreadsheetHandle_ = null;
 
 /**
  * 取得目標 Spreadsheet：
@@ -962,14 +973,16 @@ const SHEET_ID = '14JSTOpzxmjdaErdjsc-54mSsDe6bZ5Trchas-NHWTS8';
  *  3. 也可呼叫 setSheetId('xxx') 後改用 ScriptProperties
  */
 function getSS() {
+  // Reuse the service handle within this execution, never cached row values.
+  if (spreadsheetHandle_) return spreadsheetHandle_;
   let ss = SpreadsheetApp.getActiveSpreadsheet();
-  if (ss) return ss;
+  if (ss) return (spreadsheetHandle_ = ss);
   const stored = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
   const id = stored || SHEET_ID;
   if (!id) {
     throw new Error('找不到 Sheet：請在 utils.gs 頂部填入 SHEET_ID，或呼叫 setSheetId("...") 一次');
   }
-  return SpreadsheetApp.openById(id);
+  return (spreadsheetHandle_ = SpreadsheetApp.openById(id));
 }
 
 /**
@@ -979,6 +992,7 @@ function getSS() {
 function setSheetId(id) {
   if (!id) throw new Error('請傳入 Sheet ID');
   PropertiesService.getScriptProperties().setProperty('SHEET_ID', id);
+  spreadsheetHandle_ = null;
   return { ok: true, msg: 'Sheet ID 已設定：' + id };
 }
 
@@ -995,10 +1009,168 @@ function getHeaders(sheet) {
   return sheet.getRange(1, 1, 1, lastCol).getValues()[0];
 }
 
-function withRecordWriteLock_(callback) {
+function withRecordWriteLock_(callback, beforeAnyWrite) {
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) return { ok: false, code: 'WRITE_BUSY', error: '目前有其他資料正在儲存，內容仍保留，請稍後再試' };
-  try { return callback(); } finally { lock.releaseLock(); }
+  if (!lock.tryLock(10000)) return Object.assign({ ok: false, code: 'WRITE_BUSY', error: '目前有其他資料正在儲存，內容仍保留，請稍後再試' }, beforeAnyWrite === true ? { retry_safe: true } : {});
+  try { return callback(); }
+  finally {
+    try { SpreadsheetApp.flush(); } finally { lock.releaseLock(); }
+  }
+}
+
+// Receipts outlive ContentService's temporary response URL. Pending operations
+// must never be replayed: the original execution may already have committed.
+const RECEIPTED_ACTIONS_ = new Set([
+  'saveLog', 'saveCoursePrep', 'deleteCoursePrep', 'saveTalentLesson', 'saveTalentDraft',
+  'saveTalentPrep', 'deleteTalentPrep', 'reviewTalentPrep', 'updateTalentAppStatus',
+  'saveTalentScore', 'addTalentMessage', 'approveTalentBonus',
+  'saveAdminMarketingRecord', 'saveAdminMarketingAssignment', 'reviewAdminMarketingRecord',
+  'reviewAdminMarketingTrialBonus', 'saveAdminMarketingScore', 'addAdminMarketingMessage',
+  'saveClassRosterMutation', 'saveWeekly', 'addFeedback', 'markFeedbackRead',
+  'addObservation', 'addPost', 'saveOKR', 'updateOKRProgress', 'saveEval',
+  'addTask', 'saveSelfTask', 'deleteSelfTask', 'updateTaskStatus', 'deleteTask',
+  'addStudent', 'updateStudent', 'deleteStudent'
+]);
+
+function receiptDigest_(value) {
+  return Utilities.base64EncodeWebSafe(Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256, JSON.stringify(value), Utilities.Charset.UTF_8
+  )).replace(/=+$/, '');
+}
+
+function receiptActorKey_(actor) {
+  return receiptDigest_([actor.nickname, String(actor.email || '').toLowerCase(), actor.role, actor.department]);
+}
+
+function receiptPayloadHash_(params) {
+  function sorted(value) {
+    if (Array.isArray(value)) return value.map(sorted);
+    if (!value || typeof value !== 'object') return value;
+    const result = {};
+    Object.keys(value).sort().forEach(function (key) { result[key] = sorted(value[key]); });
+    return result;
+  }
+  const payload = {};
+  Object.keys(params).forEach(function (key) {
+    if (['session_token', '__actor', 'request_id'].indexOf(key) < 0) payload[key] = params[key];
+  });
+  return receiptDigest_(sorted(payload));
+}
+
+function mutationReceiptSheet_(create) {
+  const ss = getSS();
+  let sheet = ss.getSheetByName('ApiReceipts');
+  if (!sheet && create) {
+    sheet = ss.insertSheet('ApiReceipts');
+    sheet.appendRow(['receipt_key', 'actor_key', 'action', 'request_id', 'payload_hash', 'status', 'result_base64', 'created_at', 'updated_at']);
+  }
+  return sheet;
+}
+
+function findMutationReceipt_(sheet, key) {
+  const lastRow = sheet ? sheet.getLastRow() : 0;
+  if (lastRow < 2) return null;
+  const cell = sheet.getRange(2, 1, lastRow - 1, 1).createTextFinder(key).matchEntireCell(true).findNext();
+  if (!cell) return null;
+  return { row: cell.getRow(), values: sheet.getRange(cell.getRow(), 1, 1, 9).getValues()[0] };
+}
+
+function decodeMutationReceipt_(entry) {
+  if (entry.values[5] !== 'done') return { ok: false, code: 'OPERATION_PENDING', uncertain: true, error: '正在確認上次儲存結果，內容仍保留，請稍後再試' };
+  try {
+    const compressed = Utilities.newBlob(Utilities.base64Decode(entry.values[6]), 'application/gzip', 'receipt.json.gz');
+    const result = JSON.parse(Utilities.ungzip(compressed).getDataAsString('UTF-8'));
+    if (!result || typeof result.ok !== 'boolean') throw new Error('INVALID_RECEIPT_RESULT');
+    return result;
+  } catch (error) {
+    return { ok: false, code: 'OPERATION_INTERRUPTED', uncertain: true, request_id: String(entry.values[3]), error: '上次儲存的確認資料異常，內容仍保留；請聯絡管理員查核，勿重複新增' };
+  }
+}
+
+function getMutationReceipt(params) {
+  if (!params.__actor) return { ok: false, code: 'AUTH_REQUIRED' };
+  const action = String(params.mutation_action || '');
+  const id = String(params.mutation_id || '');
+  if (!RECEIPTED_ACTIONS_.has(action) || !id || id.length > 160) return { ok: false, code: 'INVALID_RECEIPT' };
+  const key = receiptDigest_([receiptActorKey_(params.__actor), action, id]);
+  const entry = findMutationReceipt_(mutationReceiptSheet_(false), key);
+  if (!entry) return { ok: true, state: 'not_found' };
+  return { ok: true, state: entry.values[5], result: entry.values[5] === 'done' ? decodeMutationReceipt_(entry) : null };
+}
+
+function executeWithMutationReceipt_(action, params, callback) {
+  if (!RECEIPTED_ACTIONS_.has(action) || !params.request_id) return callback();
+  if (!params.__actor) return { ok: false, code: 'AUTH_REQUIRED' };
+  const id = String(params.request_id);
+  if (id.length > 160 || /^\s*=/.test(id)) return { ok: false, code: 'INVALID_REQUEST_ID', error: '儲存編號格式不正確' };
+  const actorKey = receiptActorKey_(params.__actor);
+  const key = receiptDigest_([actorKey, action, id]);
+  const hash = receiptPayloadHash_(params);
+  // Completed receipts are immutable; reading them must not queue behind writers.
+  // Missing or safely retryable receipts are always checked again under the lock.
+  try {
+    const known = findMutationReceipt_(mutationReceiptSheet_(false), key);
+    if (known && known.values[5] === 'done' && known.values[0] === key) {
+      if (known.values[4] !== hash) return { ok: false, code: 'REQUEST_ID_CONFLICT', error: '這次儲存編號已用於不同內容，請重新開啟紀錄確認' };
+      const result = decodeMutationReceipt_(known);
+      if (result.code !== 'WRITE_BUSY' || result.retry_safe !== true || result.uncertain) return result;
+    }
+  } catch (error) { /* Optional read failed; the locked admission still verifies ownership. */ }
+  let admitted;
+  try {
+    admitted = withRecordWriteLock_(function () {
+    const sheet = mutationReceiptSheet_(true);
+    const existing = findMutationReceipt_(sheet, key);
+    if (existing) {
+      if (existing.values[4] !== hash) return { ok: false, code: 'REQUEST_ID_CONFLICT', error: '這次儲存編號已用於不同內容，請重新開啟紀錄確認' };
+      const previous = decodeMutationReceipt_(existing);
+      // Only an explicit, durable zero-write result can be admitted again.
+      if (previous.code !== 'WRITE_BUSY' || previous.retry_safe !== true || previous.uncertain) return { replay: previous };
+      existing.values[5] = 'pending';
+      existing.values[6] = '';
+      existing.values[8] = nowIso();
+      sheet.getRange(existing.row, 1, 1, 9).setValues([existing.values]);
+      return { admitted: true, row: existing.row };
+    }
+    const now = nowIso();
+    const row = sheet.getLastRow() + 1;
+    sheet.appendRow([key, actorKey, action, id, hash, 'pending', '', now, now]);
+    // withRecordWriteLock_ flushes before releasing this append-only allocation.
+    return { admitted: true, row: row };
+    }, true);
+  } catch (error) {
+    // Admission may have persisted before Google failed to confirm its write.
+    console.error(JSON.stringify({ event: 'mutation_admission_interrupted', action: action, request_id: id }));
+    return { ok: false, code: 'OPERATION_INTERRUPTED', uncertain: true, request_id: id, error: '儲存確認暫時異常，內容仍保留；請聯絡管理員查核，勿重複新增' };
+  }
+  if (!admitted.admitted) return admitted.replay || admitted;
+  let result;
+  try { result = callback(); }
+  catch (error) {
+    // A thrown error can follow a partial write. Keep the admission, never replay it.
+    console.error(JSON.stringify({ event: 'mutation_interrupted', action: action, request_id: id, code: error.code || 'SERVER_ERROR' }));
+    result = { ok: false, code: 'OPERATION_INTERRUPTED', uncertain: true, request_id: id, error: error.message || '儲存結果尚在確認，內容仍保留，請稍後再試' };
+  }
+  try {
+    const encoded = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(JSON.stringify(result), 'application/json')).getBytes());
+    if (encoded.length > 45000) throw new Error('RECEIPT_TOO_LARGE');
+    // ApiReceipts is append-only. Admission owns this fixed row exclusively;
+    // cleanup retires completed rows in place and never shifts live row indexes.
+    SpreadsheetApp.flush();
+    const sheet = mutationReceiptSheet_(false);
+    const range = sheet.getRange(admitted.row, 1, 1, 9);
+    const values = range.getValues()[0];
+    if (values[0] !== key || values[4] !== hash || values[5] !== 'pending') throw new Error('RECEIPT_OWNERSHIP_LOST');
+    values[5] = 'done';
+    values[6] = encoded;
+    values[8] = nowIso();
+    range.setValues([values]);
+    SpreadsheetApp.flush();
+  } catch (error) {
+    // Do not turn a confirmed business result into failure because telemetry failed.
+    console.error(JSON.stringify({ event: 'receipt_persist_failed', action: action, request_id: id, code: String(error.message || 'RECEIPT_ERROR').slice(0, 80) }));
+  }
+  return result;
 }
 
 function cellTimestamp_(value) {
@@ -1043,7 +1215,8 @@ function withResourceLease_(resource, callback) {
 function reportClientMetrics(params) {
   if (!params.__actor) return { ok: false, code: 'AUTH_REQUIRED' };
   const events = (Array.isArray(params.events_batch) ? params.events_batch : []).slice(0, 50).map(function (item) {
-    return { action: String(item.action || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 70), ok: item.ok === true, code: String(item.code || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 70), ms: Math.max(0, Math.min(600000, Number(item.ms) || 0)) };
+    const safe = value => String(value || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 160);
+    return { kind: item.kind === 'attempt' ? 'attempt' : 'operation', action: safe(item.action).slice(0, 70), ok: item.ok === true, code: safe(item.code).slice(0, 70), uncertain: item.uncertain === true, recovered: item.recovered === true, request_id: safe(item.request_id), attempt: Math.max(0, Math.min(20, Number(item.attempt) || 0)), phase: safe(item.phase).slice(0, 30), stage: safe(item.stage).slice(0, 30), status: Math.max(0, Math.min(599, Number(item.status) || 0)), ms: Math.max(0, Math.min(600000, Number(item.ms) || 0)) };
   });
   if (!events.length) return { ok: true };
   const ss = getSS();
@@ -1067,22 +1240,25 @@ function getReliabilityMetrics_() {
   const from = Math.max(2, sheet.getLastRow() - 999);
   const rows = sheet.getRange(from, 1, sheet.getLastRow() - from + 1, 3).getValues();
   const actions = {};
+  const attempts = {};
   rows.forEach(function (row) {
     (parseJsonField(row[2]) || []).forEach(function (event) {
-      const group = actions[event.action] || (actions[event.action] = { samples: 0, failures: 0, uncertain: 0, times: [] });
+      const groups = event.kind === 'attempt' ? attempts : actions;
+      const group = groups[event.action] || (groups[event.action] = { samples: 0, failures: 0, uncertain: 0, recovered: 0, times: [] });
       group.samples += 1;
       if (!event.ok) group.failures += 1;
-      if (event.code === 'REQUEST_TIMEOUT' || event.code === 'NETWORK_ERROR') group.uncertain += 1;
+      if (event.uncertain || ['REQUEST_TIMEOUT', 'NETWORK_ERROR', 'HTTP_ERROR', 'NON_JSON_RESPONSE', 'AUTH_CHECK_UNCERTAIN', 'OPERATION_PENDING'].indexOf(event.code) >= 0) group.uncertain += 1;
+      if (event.recovered) group.recovered += 1;
       group.times.push(event.ms);
     });
   });
-  Object.keys(actions).forEach(function (key) {
-    const group = actions[key];
+  [actions, attempts].forEach(function (groups) { Object.keys(groups).forEach(function (key) {
+    const group = groups[key];
     group.times.sort(function (a, b) { return a - b; });
     group.p95ms = group.times[Math.ceil(group.times.length * 0.95) - 1];
     delete group.times;
-  });
-  return { batches: rows.length, from: rows[0][0], to: rows[rows.length - 1][0], actions: actions, notice: '僅統計成功回傳至伺服器的操作回報，不包含尚未恢復連線的裝置' };
+  }); });
+  return { batches: rows.length, from: rows[0][0], to: rows[rows.length - 1][0], actions: actions, attempts: attempts, notice: '操作結果與個別連線分開統計；不包含尚未恢復連線的裝置' };
 }
 
 function backupSheetFingerprint_(sheet) {
@@ -1170,33 +1346,45 @@ function findObject(name, key, value) {
   return obj;
 }
 
+// These helpers write application data, never formulas. Escape only formula-like
+// strings at the Sheets boundary; JSON, Dates, numbers and booleans retain type.
+function sheetValueForWrite_(value) {
+  if (value === undefined || value === null) return '';
+  if (Object.prototype.toString.call(value) === '[object Date]') return value;
+  if (typeof value === 'object') return JSON.stringify(value);
+  return typeof value === 'string' && /^\s*=/.test(value) ? "'" + value : value;
+}
+
 function appendRow(name, obj) {
   const sheet = getSheet(name);
   const headers = getHeaders(sheet);
-  const row = headers.map(h => {
-    const v = obj[h];
-    if (v === undefined || v === null) return '';
-    if (Object.prototype.toString.call(v) === '[object Date]') return v;
-    if (typeof v === 'object') return JSON.stringify(v);
-    return v;
-  });
-  sheet.appendRow(row);
+  sheet.appendRow(headers.map(function (header) { return sheetValueForWrite_(obj[header]); }));
   return sheet.getLastRow();
+}
+
+// Write only supplied fields, grouping adjacent columns into one request. Reading
+// then rewriting an entire row would turn stored literal '=' text into a formula
+// and replace unrelated formulas with their calculated values.
+function writeSheetFields_(sheet, rowNum, headers, obj) {
+  let start = -1;
+  let values = [];
+  function flush() {
+    if (start < 0) return;
+    sheet.getRange(rowNum, start + 1, 1, values.length).setValues([values]);
+    start = -1;
+    values = [];
+  }
+  headers.forEach(function (header, index) {
+    if (obj[header] === undefined) { flush(); return; }
+    if (start < 0) start = index;
+    values.push(sheetValueForWrite_(obj[header]));
+  });
+  flush();
 }
 
 function updateRow(name, rowNum, obj) {
   const sheet = getSheet(name);
-  const headers = getHeaders(sheet);
-  const current = sheet.getRange(rowNum, 1, 1, headers.length).getValues()[0];
-  const newRow = headers.map((h, i) => {
-    if (obj[h] === undefined) return current[i];
-    const v = obj[h];
-    if (v === null) return '';
-    if (Object.prototype.toString.call(v) === '[object Date]') return v;
-    if (typeof v === 'object') return JSON.stringify(v);
-    return v;
-  });
-  sheet.getRange(rowNum, 1, 1, headers.length).setValues([newRow]);
+  writeSheetFields_(sheet, rowNum, getHeaders(sheet), obj);
 }
 
 function upsertRow(name, key, obj) {
@@ -1576,7 +1764,7 @@ function authorizeTaskResource_(actor, taskId, deleting) {
  * viewer / operator / evaluator，並對資料對象再次做部門範圍判斷。
  */
 function authorizeApiAction_(action, params, actor) {
-  if (action === 'getSessionIdentity' || action === 'reportClientMetrics') return;
+  if (action === 'getSessionIdentity' || action === 'getMutationReceipt' || action === 'reportClientMetrics') return;
 
   const adminOnly = [
     'addUser', 'updateUser', 'approveUser', 'deleteUser', 'setConfig', 'setupSystemAutomation',
@@ -2167,7 +2355,7 @@ function canViewDepartment_(user, department) {
  * 儲存日誌（同日重複呼叫會覆蓋，過了 24h 鎖定後拒絕）
  */
 function saveLog(params) {
-  return withRecordWriteLock_(function () { return saveLogRecord_(params); });
+  return withRecordWriteLock_(function () { return saveLogRecord_(params); }, true);
 }
 
 function saveLogRecord_(params) {
@@ -3774,11 +3962,13 @@ function verifyReleaseLogicFromEditor() {
     require(user, '缺少此角色可驗收的啟用帳號');
     const requestedAt = Date.now();
     const body = Object.assign({}, payload || {}, { action: action, session_token: issueSessionToken_(user) });
+    if (!body.request_id) body.request_id = runId + '-' + Utilities.getUuid();
     const response = UrlFetchApp.fetch(endpoint, { method: 'post', contentType: 'text/plain', payload: JSON.stringify(body), followRedirects: true, muteHttpExceptions: true });
     let data;
     try { data = JSON.parse(response.getContentText()); } catch (error) { throw new Error(action + ' 回應不是 JSON：HTTP ' + response.getResponseCode()); }
     if (!data.ok) data.error = action + ': ' + (data.error || data.code || 'unknown') + ' [HTTP ' + response.getResponseCode() + ']';
     console.log(JSON.stringify({ run_id: runId, action: action, ok: data.ok === true, code: data.code || '', ms: Date.now() - requestedAt }));
+    data.qa_request_id = body.request_id;
     return data;
   }
   function ok(data) { require(data && data.ok, data && data.error || '正式 API 未回報成功'); return data; }
@@ -3790,7 +3980,7 @@ function verifyReleaseLogicFromEditor() {
   }
   check('live_version', function () {
     const response = JSON.parse(UrlFetchApp.fetch(endpoint + '?action=ping').getContentText());
-    require(response.release === '20260912-logic-audit-3', '正式後端尚未更新至本次版本');
+    require(response.release === KPI_RELEASE_VERSION_, '正式後端尚未更新至本次版本');
     return { release: response.release };
   });
   if (!checks[0].ok) { PropertiesService.getScriptProperties().deleteProperty('KPI_RELEASE_QA_PENDING_' + runId); const result = { ok: false, run_id: runId, checks: checks }; console.log(JSON.stringify(result)); return result; }
@@ -3817,6 +4007,11 @@ function verifyReleaseLogicFromEditor() {
     const id = reserve(SHEET_NAMES.TASKS, 'task_id', 'TASK');
     const initial = { id: id, title: runId, dueDate: todayStr(), status: 'open' };
     const first = ok(request(teacher, 'saveSelfTask', { nickname: teacher.nickname, task: initial }));
+    const receipt = ok(request(teacher, 'getMutationReceipt', { mutation_action: 'saveSelfTask', mutation_id: first.qa_request_id }));
+    require(receipt.state === 'done' && receipt.result.updated_at === first.updated_at, '回執未能確認原寫入結果');
+    require(ok(request(other, 'getMutationReceipt', { mutation_action: 'saveSelfTask', mutation_id: first.qa_request_id })).state === 'not_found', '其他老師可讀取私人回執');
+    const replay = ok(request(teacher, 'saveSelfTask', { nickname: teacher.nickname, task: initial, request_id: first.qa_request_id }));
+    require(replay.updated_at === first.updated_at, '相同儲存編號沒有重用原結果');
     const complete = ok(request(teacher, 'saveSelfTask', { nickname: teacher.nickname, task: Object.assign({}, initial, { status: 'done', cloudUpdatedAt: first.updated_at }) }));
     const stale = request(teacher, 'saveSelfTask', { nickname: teacher.nickname, task: Object.assign({}, initial, { cloudUpdatedAt: first.updated_at }) });
     require(stale.code === 'RECORD_CONFLICT' && stale.current_task.status === 'done', '舊版本覆蓋了完成狀態');
@@ -3824,7 +4019,7 @@ function verifyReleaseLogicFromEditor() {
     require(ok(request(admin, 'listTasks', { viewer: admin.nickname })).tasks.some(row => row.task_id === id && row.status === 'done'), '主管未讀到完成結果');
     ok(request(teacher, 'deleteSelfTask', { nickname: teacher.nickname, task_id: id }));
     require(request(teacher, 'saveSelfTask', { nickname: teacher.nickname, task: Object.assign({}, initial, { cloudUpdatedAt: complete.updated_at }) }).code === 'RECORD_DELETED', '已刪除事項被復活');
-    return { owner: teacher.nickname, conflict: true, privacy: true, manager_read: true, deleted: true };
+    return { owner: teacher.nickname, receipt_readback: true, replay_reused: true, receipt_privacy: true, conflict: true, privacy: true, manager_read: true, deleted: true };
   });
   check('teacher_photo_upload_and_private_preview', function () {
     require(teacher, '缺少老師帳號');
@@ -3881,6 +4076,7 @@ function verifyReleaseLogicFromEditor() {
         console.log(JSON.stringify({ run_id: runId, cleanup_sheet: entry.sheet, matched_row: rowNum, remaining_row: remainingRow }));
         require(remainingRow < 2, entry.sheet + ' 驗收列仍存在');
       });
+      cleanupReleaseReceipts_(runId);
       return { ok: true };
     });
     ok(result);
@@ -3916,6 +4112,7 @@ function cleanupReleaseAcceptanceFromEditor() {
         SpreadsheetApp.flush();
         if (findRow(entry[0], entry[1], id) >= 2) throw new Error(entry[0] + ' 驗收列仍存在');
       });
+      cleanupReleaseReceipts_(runId);
       const files = DriveApp.searchFiles("trashed = false and (title contains '" + runId + "' or title contains 'K" + runId + "')");
       let removed = 0;
       while (files.hasNext()) {
@@ -3932,6 +4129,21 @@ function cleanupReleaseAcceptanceFromEditor() {
   });
   console.log(JSON.stringify(result));
   return result;
+}
+
+// Called only inside the editor acceptance cleanup's write lock.
+function cleanupReleaseReceipts_(runId) {
+  if (!/^QA-RELEASE-[a-f0-9-]{36}$/.test(runId)) throw new Error('拒絕非驗收編號');
+  SpreadsheetApp.flush();
+  const sheet = mutationReceiptSheet_(false);
+  if (!sheet || sheet.getLastRow() < 2) return;
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, 9).getValues();
+  const matches = rows.map(function (row, i) { return { row: row, index: i + 2 }; }).filter(function (item) { return String(item.row[3]).indexOf(runId + '-') === 0; });
+  if (matches.some(function (item) { return item.row[5] === 'pending'; })) throw new Error('驗收回執仍在處理，不可清理');
+  matches.forEach(function (item) {
+    sheet.getRange(item.index, 1, 1, 9).setValues([['retired:' + Utilities.getUuid(), '', '', '', '', 'retired', '', '', nowIso()]]);
+  });
+  SpreadsheetApp.flush();
 }
 
 function systemMaintenanceUser_(params) {
@@ -4443,7 +4655,7 @@ function nextTaskUpdatedAt_(existing) {
 }
 
 function saveSelfTask(params) {
-  return withRecordWriteLock_(function () { return saveSelfTaskLocked_(params); });
+  return withRecordWriteLock_(function () { return saveSelfTaskLocked_(params); }, true);
 }
 
 function saveSelfTaskLocked_(params) {
@@ -4452,7 +4664,16 @@ function saveSelfTaskLocked_(params) {
   const task = params.task || {};
   if (!user || user.status !== 'active') return { ok: false, error: '找不到可用帳號' };
   if (!task.id || !String(task.title || '').trim()) return { ok: false, error: '事項資料不完整' };
-  const existing = findObject(SHEET_NAMES.TASKS, 'task_id', task.id);
+  const sheet = getSheet(SHEET_NAMES.TASKS);
+  const headers = getHeaders(sheet);
+  const keyColumn = headers.indexOf('task_id');
+  if (keyColumn < 0) throw new Error('事項資料表缺少 task_id');
+  const lastRow = sheet.getLastRow();
+  const ids = lastRow > 1 ? sheet.getRange(2, keyColumn + 1, lastRow - 1, 1).getValues() : [];
+  const index = ids.findIndex(row => String(row[0]) === String(task.id));
+  const rowNumber = index < 0 ? 0 : index + 2;
+  const current = rowNumber ? sheet.getRange(rowNumber, 1, 1, headers.length).getValues()[0] : [];
+  const existing = rowNumber ? headers.reduce(function (obj, key, i) { obj[key] = current[i]; return obj; }, { _row: rowNumber }) : null;
   if (existing && existing.assignee !== nickname) return { ok: false, error: '不可修改其他人的事項' };
   if (existing && existing.status === 'deleted') return { ok: false, code: 'RECORD_DELETED', error: '此事項已在雲端刪除' };
   if (task.status && ['open', 'done'].indexOf(task.status) < 0) return { ok: false, error: '事項狀態不正確' };
@@ -4476,7 +4697,9 @@ function saveSelfTaskLocked_(params) {
     if (same) return { ok: true, task_id: task.id, updated_at: existing.updated_at, duplicate: true };
     if (recordConflict_(task.cloudUpdatedAt, existing.updated_at)) return { ok: false, code: 'RECORD_CONFLICT', current_task: Object.assign({}, existing, { due_date: taskDateStr_(existing.due_date) }), error: '事項已在其他裝置更新，已顯示最新狀態；請確認後再操作' };
   }
-  upsertRow(SHEET_NAMES.TASKS, 'task_id', record);
+  // Keep unknown columns and any existing sheet formulas untouched.
+  if (existing) writeSheetFields_(sheet, rowNumber, headers, record);
+  else sheet.appendRow(headers.map(function (key) { return sheetValueForWrite_(record[key]); }));
   return { ok: true, task_id: task.id, updated_at: now };
 }
 
@@ -4803,14 +5026,17 @@ function kpiDriveViewerUsers_(ownerUser, scope, extraUsers) {
     if (user && user.email) extraKeys[String(user.email).toLowerCase()] = true;
   });
   const seen = {};
-  return sheetToObjects(SHEET_NAMES.USERS).filter(function (user) {
+  // Keep the active owner identity when multiple profiles share a Drive email.
+  return sheetToObjects(SHEET_NAMES.USERS).slice().sort(function (a, b) {
+    return Number(b.nickname === ownerNickname) - Number(a.nickname === ownerNickname);
+  }).filter(function (user) {
     if (!user || user.status !== 'active' || !String(user.email || '').trim()) return false;
     const assignments = talentAssignments_(user);
     const included = user.nickname === ownerNickname || user.role === 'admin' || isGlobalManager_(user) ||
       extraKeys[user.nickname] || extraKeys[String(user.email || '').toLowerCase()] ||
       (scope === 'talent' && assignments.indexOf('talent-manager') >= 0) ||
       (scope !== 'talent' && user.role === 'manager' && ownerDepartment && sameDepartment_(user.department, ownerDepartment));
-    const email = String(user.email || '').toLowerCase();
+    const email = String(user.email || '').trim().toLowerCase();
     if (!included || seen[email]) return false;
     seen[email] = true;
     return true;
@@ -7530,7 +7756,7 @@ function adminMarketingAppendTrialHistory_(data, original, actor, summary) {
 }
 
 function saveAdminMarketingRecord(params) {
-  return withRecordWriteLock_(function () { return saveAdminMarketingRecordLocked_(params); });
+  return withRecordWriteLock_(function () { return saveAdminMarketingRecordLocked_(params); }, true);
 }
 
 function saveAdminMarketingRecordLocked_(params) {

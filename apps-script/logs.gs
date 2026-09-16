@@ -6,7 +6,7 @@
  * 儲存日誌（同日重複呼叫會覆蓋，過了 24h 鎖定後拒絕）
  */
 function saveLog(params) {
-  return withRecordWriteLock_(function () { return saveLogRecord_(params); });
+  return withRecordWriteLock_(function () { return saveLogRecord_(params); }, true);
 }
 
 function saveLogRecord_(params) {

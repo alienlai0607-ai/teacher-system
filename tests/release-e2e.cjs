@@ -1010,13 +1010,31 @@ async function anqinWorkflow(browser) {
     await clickAction(page, 'open-task');
     await page.fill('#task-title', '確認明日教材已備妥');
     await page.fill('#task-due', tomorrow);
+    await page.evaluate(() => {
+      const original = window.API.saveSelfTask;
+      let first = true;
+      window.API.saveSelfTask = async (...args) => {
+        if (first) {
+          first = false;
+          await new Promise(resolve => { window.__releaseTaskCreate = resolve; });
+        }
+        return original(...args);
+      };
+    });
     await page.locator('button[form="task-form"]').click();
+    await page.waitForFunction(() => typeof window.__releaseTaskCreate === 'function');
+    check('安親新增事項尚未儲存時不能搶先勾選完成', await page.locator('.task-complete-control input[data-change="toggle-task"]').first().isDisabled());
+    await page.evaluate(() => window.__releaseTaskCreate());
     await page.waitForFunction(() => Object.keys(window.__KPI_QA_CLOUD__?.store?.tasks || {}).length > 0, null, { timeout: 12000 });
+    await page.waitForFunction(() => document.querySelector('.task-complete-control input[data-change="toggle-task"]')?.disabled === false);
     await page.evaluate(() => {
       const original = window.API.saveSelfTask;
       let shouldFail = true;
+      window.__taskFailureProbe = [];
       window.API.saveSelfTask = async (...args) => {
-        if (shouldFail) {
+        const status = args[0]?.task?.status;
+        window.__taskFailureProbe.push({ status, at: Date.now() });
+        if (shouldFail && status === 'done') {
           shouldFail = false;
           return { ok: false, error: '驗收模擬雲端中斷' };
         }
@@ -1026,7 +1044,11 @@ async function anqinWorkflow(browser) {
     const taskToggle = page.locator('.task-complete-control input[data-change="toggle-task"]').first();
     await taskToggle.click({ force: true });
     await page.waitForTimeout(450);
-    check('安親待辦事項雲端失敗時會回復未完成，不會假裝成功', await page.locator('.task-complete-control input[data-change="toggle-task"]').first().isChecked() === false && (await page.locator('body').innerText()).includes('事項未更新'));
+    const taskFailureState = await page.evaluate(() => ({ checked: document.querySelector('.task-complete-control input[data-change="toggle-task"]')?.checked,
+      hasFailureMessage: document.body.innerText.includes('事項未更新'), calls: window.__taskFailureProbe,
+      stored: Object.values(window.__KPI_QA_CLOUD__?.store?.tasks || {}).map(task => ({ id: task.task_id, status: task.status })),
+    }));
+    check('安親待辦事項雲端失敗時會回復未完成，不會假裝成功', taskFailureState.checked === false && taskFailureState.hasFailureMessage, JSON.stringify(taskFailureState));
     await page.locator('.task-complete-control input[data-change="toggle-task"]').first().click({ force: true });
     await page.waitForTimeout(450);
     check('安親待辦事項重試成功後才真正完成', (await page.locator('body').innerText()).includes('0 項待完成'));

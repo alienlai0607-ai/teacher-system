@@ -4,8 +4,23 @@ window.API = (function () {
   let authRedirectScheduled = false;
   const READ_RETRY_DELAYS_MS = [700, 1400];
   const WRITE_RECEIPT_DELAYS_MS = [0, 700, 1400];
+  const WRITE_BUSY_DELAYS_MS = [1500, 3500];
+  const RESUMABLE_UPLOADS = new Set(['uploadPhoto', 'uploadFile']);
+  const RECEIPTED_ACTIONS = new Set([
+    'saveLog', 'saveCoursePrep', 'deleteCoursePrep', 'saveTalentLesson', 'saveTalentDraft',
+    'saveTalentPrep', 'deleteTalentPrep', 'reviewTalentPrep', 'updateTalentAppStatus',
+    'saveTalentScore', 'addTalentMessage', 'approveTalentBonus',
+    'saveAdminMarketingRecord', 'saveAdminMarketingAssignment', 'reviewAdminMarketingRecord',
+    'reviewAdminMarketingTrialBonus', 'saveAdminMarketingScore', 'addAdminMarketingMessage',
+    'saveClassRosterMutation', 'saveWeekly', 'addFeedback', 'markFeedbackRead',
+    'addObservation', 'addPost', 'saveOKR', 'updateOKRProgress', 'saveEval',
+    'addTask', 'saveSelfTask', 'deleteSelfTask', 'updateTaskStatus', 'deleteTask',
+    'addStudent', 'updateStudent', 'deleteStudent'
+  ]);
   const activeRequests = new Map();
+  const pendingMutationIds = new Map();
   const connectionMetrics = [];
+  const attemptMetrics = [];
   const logRevisions = new Map();
   const pendingMetrics = [];
   let metricTimer = null;
@@ -29,7 +44,7 @@ window.API = (function () {
   window.addEventListener?.('unhandledrejection', () => queueMetric({ action: 'runtime-error', ok: false, code: 'UNHANDLED_REJECTION', ms: 0 }));
   window.addEventListener?.('online', () => { if (pendingMetrics.length && !metricTimer) metricTimer = window.setTimeout(flushMetrics, 1000); });
   const IMPERSONATION_READ_ACTIONS = new Set([
-    'ping', 'whoami', 'getSessionIdentity', 'listUsers',
+    'ping', 'whoami', 'getSessionIdentity', 'getMutationReceipt', 'listUsers',
     'getLog', 'getTodayLog', 'listLogs', 'getEvidenceLog', 'getMakeupQuota', 'getAttachmentPreviews',
     'listTasks', 'getWeekly', 'listWeekly', 'listFeedback', 'listFeedbackThread',
     'listObservations', 'listPosts', 'getWeekPostCount', 'getOKR',
@@ -68,7 +83,17 @@ window.API = (function () {
     return new Promise(resolve => window.setTimeout(resolve, ms));
   }
 
-  async function requestJson(payload) {
+  async function requestJson(payload, context = {}) {
+    const started = Date.now();
+    let status = 0;
+    let stage = 'request';
+    const track = outcome => {
+      if (payload.action === 'reportClientMetrics') return;
+      const metric = { kind: 'attempt', action: payload.action, request_id: context.requestId || payload.request_id || '', attempt: context.attempt || 1, phase: context.phase || 'request', stage, status, ...outcome, ms: Date.now() - started };
+      attemptMetrics.push(metric);
+      if (attemptMetrics.length > 200) attemptMetrics.shift();
+      queueMetric(metric);
+    };
     const controller = new AbortController();
     const slowAction = /^(upload|saveAdminMarketingRecord|saveClassRosterMutation|saveTalentLesson|updateTalentAppStatus|sendSubmitPdf|regenerate|runProduction)/.test(payload.action);
     const timeoutMs = slowAction ? 90000 : 25000;
@@ -82,13 +107,15 @@ window.API = (function () {
       }, timeoutMs);
     });
     try {
-      return await Promise.race([deadline, (async () => {
+      const result = await Promise.race([deadline, (async () => {
         const res = await fetch(API_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // 避免 CORS preflight
           body: JSON.stringify(payload),
           signal: controller.signal,
         });
+        status = res.status;
+        stage = res.redirected ? 'redirected_response' : 'response';
         const responseText = await res.text();
         if (res.status >= 400) {
           const error = new Error('雲端服務暫時未正確回應');
@@ -107,6 +134,11 @@ window.API = (function () {
           throw transportError;
         }
       })()]);
+      track({ ok: result.ok === true, code: result.code || '', uncertain: result.uncertain === true });
+      return result;
+    } catch (error) {
+      track({ ok: false, code: error.code || 'NETWORK_ERROR', uncertain: !isRetryableRead(payload.action) });
+      throw error;
     } finally {
       window.clearTimeout(timer);
     }
@@ -121,7 +153,7 @@ window.API = (function () {
         (result.logs || (result.log ? [result.log] : [])).forEach(log => logRevisions.set(log.log_id, log.record_revision || log.updated_at || ''));
         if (action === 'saveLog' && result.log_id && result.revision) logRevisions.set(result.log_id, result.revision);
       }
-      connectionMetrics.push({ action, ok: Boolean(result?.ok), code: result?.code || '', ms: Date.now() - start, at: new Date().toISOString() });
+      connectionMetrics.push({ kind: 'operation', action, ok: Boolean(result?.ok), code: result?.code || '', uncertain: result?.uncertain === true, recovered: result?.recovered === true || result?.recovered_auth_response === true, ms: Date.now() - start, at: new Date().toISOString() });
       if (connectionMetrics.length > 100) connectionMetrics.shift();
       queueMetric(connectionMetrics[connectionMetrics.length - 1]);
       return result;
@@ -148,7 +180,56 @@ window.API = (function () {
     }
   }
 
+  function readPendingMutation(storageKey) {
+    for (const name of ['localStorage', 'sessionStorage']) {
+      try {
+        const stored = JSON.parse(window[name].getItem(storageKey) || 'null');
+        if (stored && typeof stored.id === 'string' && stored.id && stored.id.length <= 160) {
+          return { id: stored.id, ...(Object.prototype.hasOwnProperty.call(stored, 'baseRevision') ? { baseRevision: stored.baseRevision } : {}) };
+        }
+      } catch (error) { /* Try the legacy per-tab store if unavailable or malformed. */ }
+    }
+    return null;
+  }
+
+  function storePendingMutation(storageKey, entry) {
+    if (!storageKey) return;
+    for (const name of ['localStorage', 'sessionStorage']) {
+      try { window[name].setItem(storageKey, JSON.stringify(entry)); return; }
+      catch (error) { /* Keep the existing per-tab fallback when persistence is unavailable. */ }
+    }
+  }
+
+  function clearPendingMutation(storageKey) {
+    if (!storageKey) return;
+    for (const name of ['localStorage', 'sessionStorage']) {
+      try { window[name].removeItem(storageKey); } catch (error) {}
+    }
+  }
+
   async function performCall(action, params = {}) {
+    const key = JSON.stringify([window.AUTH?.getSession?.()?.nickname || '', action, params]);
+    let storageKey = '';
+    if (RECEIPTED_ACTIONS.has(action) && window.crypto?.subtle && window.AUTH?.getSession?.()?.session_token) {
+      try {
+        const actor = window.AUTH.getSession();
+        const clean = { ...params };
+        delete clean.session_token;
+        const digest = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([actor.nickname, actor.email, actor.role, actor.department, action, clean])));
+        storageKey = 'kpi-pending-operation-' + Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+        const stored = readPendingMutation(storageKey);
+        if (stored && typeof stored.id === 'string' && stored.id.length <= 160 && !pendingMutationIds.has(key)) pendingMutationIds.set(key, stored);
+      } catch (error) { storageKey = ''; }
+    }
+    const result = await performRequest(action, params, key, storageKey);
+    if (!result?.uncertain) {
+      pendingMutationIds.delete(key);
+      clearPendingMutation(storageKey);
+    }
+    return result;
+  }
+
+  async function performRequest(action, params, key, storageKey) {
     if (window.AUTH?.isImpersonating?.() && !IMPERSONATION_READ_ACTIONS.has(action)) {
       return {
         ok: false,
@@ -156,32 +237,64 @@ window.API = (function () {
         error: '目前是柏翰互動測試，已攔截正式寫入、上傳或送出',
       };
     }
-    const payload = { action, ...params };
+    const payload = { ...params, action };
     if (action === 'saveLog' && !Object.prototype.hasOwnProperty.call(payload, 'base_revision')) {
       payload.base_revision = logRevisions.get(`LOG-${String(payload.date || '').replace(/-/g, '')}-${payload.nickname}`) || '';
     }
-    if (!isRetryableRead(action) && !payload.request_id) payload.request_id = window.crypto?.randomUUID?.() || `req-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const previous = pendingMutationIds.get(key);
+    if (!payload.request_id) payload.request_id = previous?.id || window.crypto?.randomUUID?.() || `req-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    if (action === 'saveLog' && previous && Object.prototype.hasOwnProperty.call(previous, 'baseRevision')) payload.base_revision = previous.baseRevision;
+    if (RECEIPTED_ACTIONS.has(action)) {
+      const entry = { id: payload.request_id, ...(action === 'saveLog' ? { baseRevision: payload.base_revision } : {}) };
+      pendingMutationIds.set(key, entry);
+      storePendingMutation(storageKey, entry);
+    }
     const sessionToken = window.AUTH?.getSession?.()?.session_token || '';
     if (sessionToken && !payload.session_token) payload.session_token = sessionToken;
     const retryable = isRetryableRead(action);
-    const maxAttempts = retryable ? READ_RETRY_DELAYS_MS.length + 1 : 1;
+    const resumableUpload = RESUMABLE_UPLOADS.has(action);
+    const receiptedWrite = RECEIPTED_ACTIONS.has(action);
+    const maxAttempts = retryable || resumableUpload ? READ_RETRY_DELAYS_MS.length + 1 : receiptedWrite ? WRITE_BUSY_DELAYS_MS.length + 1 : 1;
     let lastError = null;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       try {
-        const data = await confirmMissingAuthResponse(action, payload, await requestJson(payload));
+        const data = await confirmMissingAuthResponse(action, payload, await requestJson(payload, { attempt: attempt + 1 }));
+        if (data.code === 'OPERATION_INTERRUPTED') return data;
+        if (data.uncertain) { lastError = data; break; }
         if (!data.ok) {
           console.warn('[API]', action, 'failed:', data.error);
           handleAuthFailure(action, data);
+          if (receiptedWrite && data.code === 'WRITE_BUSY' && data.retry_safe === true && attempt < maxAttempts - 1) {
+            await wait(WRITE_BUSY_DELAYS_MS[attempt] + Math.floor(Math.random() * 500));
+            continue;
+          }
+          if (resumableUpload && ['WRITE_BUSY', 'FILE_ACCESS_PENDING'].includes(data.code) && attempt < maxAttempts - 1) {
+            await wait(READ_RETRY_DELAYS_MS[attempt]);
+            continue;
+          }
         }
-        return data;
+        return data.ok && attempt > 0 ? { ...data, recovered: true } : data;
       } catch (err) {
         lastError = err;
-        const hasRetry = retryable && attempt < maxAttempts - 1;
+        const hasRetry = (retryable || resumableUpload) && attempt < maxAttempts - 1;
         console.warn('[API]', action, hasRetry ? 'retrying:' : 'error:', err.message);
         if (hasRetry) await wait(READ_RETRY_DELAYS_MS[attempt]);
+        else break;
       }
     }
     console.error('[API]', action, 'failed after transport handling:', lastError);
+    if (RECEIPTED_ACTIONS.has(action) && sessionToken) {
+      for (const delay of WRITE_RECEIPT_DELAYS_MS) {
+        if (delay) await wait(delay);
+        try {
+          const check = await requestJson({ action: 'getMutationReceipt', mutation_action: action, mutation_id: payload.request_id, session_token: sessionToken }, { phase: 'receipt', requestId: payload.request_id });
+          if (check.ok && check.state === 'done' && check.result && typeof check.result.ok === 'boolean') {
+            return { ...check.result, recovered: check.result.ok === true };
+          }
+          if (check.code === 'AUTH_INVALID' || check.code === 'AUTH_EXPIRED') break;
+        } catch (error) { /* Never replay an ordinary write when its result is missing. */ }
+      }
+    }
     if (action === 'saveLog' && payload.nickname && payload.date) {
       try {
         const check = await requestJson({ action: 'getLog', nickname: payload.nickname, date: payload.date, session_token: sessionToken });
@@ -223,12 +336,14 @@ window.API = (function () {
       code: lastError?.code || 'NETWORK_ERROR',
       error: retryable
         ? '雲端連線暫時不穩，系統已自動重試，請再試一次'
-        : '雲端回應未完成；請先到紀錄確認是否已儲存，再決定是否重送',
+        : resumableUpload ? '檔案傳送暫時中斷；已選檔案仍保留，可直接重試'
+        : '尚未取得儲存確認，內容仍保留；請稍後再試，系統會先確認上次結果',
     };
   }
 
   return {
     getConnectionDiagnostics: () => connectionMetrics.map(item => ({ ...item })),
+    getTransportDiagnostics: () => attemptMetrics.map(item => ({ ...item })),
     ping: () => call('ping'),
     whoami: (email, credential = '') => call('whoami', { email, credential }),
     getSessionIdentity: () => call('getSessionIdentity'),
