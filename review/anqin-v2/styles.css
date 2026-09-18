@@ -3081,3 +3081,8 @@ html[data-visual-theme="calm"] .mobile-nav-button.active > svg { transform: none
   .legacy-archive-panel .panel-head-actions { width: 100%; justify-content: flex-end; }
   .archive-month-select { flex: 1; }
 }
+
+/* Daily class-photo sharing evidence. */
+.course-record-channels { min-width: 0; padding: 0; border: 0; }
+.course-record-channels .flex { flex-wrap: wrap; }
+#course-record-files { width: 100%; max-width: 100%; min-width: 0; }

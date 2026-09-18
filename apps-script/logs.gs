@@ -28,6 +28,8 @@ function saveLogRecord_(params) {
     return { ok: false, code: 'ALREADY_SUBMITTED', error: '此日紀錄已正式送出，舊草稿未覆蓋；如需修改，請開啟已送出的紀錄' };
   }
   if (existing && recordConflict_(params.base_revision, existing.record_revision || existing.updated_at)) return recordConflictResult_();
+  const courseRecordError = validateAnqinCourseRecord_(params, user);
+  if (courseRecordError) return courseRecordError;
   ensureHeaders(getSheet(SHEET_NAMES.LOGS), ['record_revision', 'last_request_id', 'delivery_state', 'delivery_error', 'evidence_state', 'delivery_attempted_at']);
 
   // ===== 補繳判定 =====
@@ -125,6 +127,51 @@ function saveLogRecord_(params) {
   logSystem(nickname, 'save_log', log_id, { date });
 
   return { ok: true, log_id, revision: data.record_revision, msg: '已儲存', is_makeup: isMakeup === true, makeup_remaining: makeupRemaining };
+}
+
+/** Course-sharing proof uses the same uploaded originals as the daily PDF. */
+function anqinCourseFileId_(attachment) {
+  if (!attachment || typeof attachment !== 'object') return '';
+  const explicit = String(attachment.cloudFileId || attachment.fileId || '').trim();
+  const url = String(attachment.cloudUrl || attachment.url || '').trim();
+  const match = url.match(/^https:\/\/drive\.google\.com\/file\/d\/([A-Za-z0-9_-]+)(?:\/[^\s"'<>]*)?$/);
+  if (url && !match) return '';
+  if (explicit && !/^[A-Za-z0-9_-]+$/.test(explicit)) return '';
+  if (explicit && match && explicit !== match[1]) return '';
+  return explicit || (match ? match[1] : '');
+}
+
+function anqinCourseScreenshots_(record, attachments) {
+  const submitted = Array.isArray(attachments) ? attachments : [];
+  const screenshots = record && Array.isArray(record.attachments) ? record.attachments : [];
+  return screenshots.filter(function (item) {
+    if (!item || !item.id || item.legacyMissing || item.placeholder || !/^image\/[a-z0-9.+-]+$/i.test(String(item.mimeType || ''))) return false;
+    const fileId = anqinCourseFileId_(item);
+    if (!fileId) return false;
+    return submitted.some(function (attachment) {
+      return attachment && attachment.forType === 'v2-course-record' && attachment.type === 'photo'
+        && String(attachment.attachmentId || '') === String(item.id)
+        && /^image\/[a-z0-9.+-]+$/i.test(String(attachment.mimeType || ''))
+        && Boolean(attachment.fileId) && Boolean(attachment.url)
+        && anqinCourseFileId_({ fileId: attachment.fileId, url: attachment.url }) === fileId;
+    });
+  });
+}
+
+function validateAnqinCourseRecord_(params, user) {
+  // Historical reports and optional weekend entries keep their original rules.
+  if (params.submitted !== true || String(params.date) < '2026-09-18' || isKpiWeekend_(params.date)) return null;
+  const kpi6 = parseJsonField(params.kpi6_data) || {};
+  const snapshot = kpi6.v2_snapshot;
+  if (!isAnqinUser(user) && (!snapshot || snapshot.schema !== 'anqin-v2')) return null;
+  const submission = snapshot && snapshot.schema === 'anqin-v2' && snapshot.submission;
+  const record = submission && submission.courseRecord;
+  const failure = { ok: false, code: 'COURSE_RECORD_REQUIRED', error: '請完成課程紀錄：確認今日課程照片已分享到群組或家長通，並上傳至少一張分享截圖後再送出' };
+  if (!submission || submission.date !== params.date || !record || !Array.isArray(record.channels)
+      || !record.channels.length || !record.channels.every(function (channel) { return channel === 'group' || channel === 'parent_app'; })) return failure;
+  const screenshots = Array.isArray(record.attachments) ? record.attachments : [];
+  if (!screenshots.length || anqinCourseScreenshots_(record, parseJsonField(params.attachments)).length !== screenshots.length) return failure;
+  return null;
 }
 
 /**

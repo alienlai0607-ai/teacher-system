@@ -31,6 +31,9 @@ cd "$ROOT"
 "$NODE_BIN" tests/push-resilience.test.cjs
 "$NODE_BIN" tests/icon-catalog.test.cjs
 "$NODE_BIN" tests/anqin-task-ui.test.cjs
+"$NODE_BIN" tests/anqin-course-record.test.cjs
+"$NODE_BIN" tests/anqin-course-record-backend.test.cjs
+"$NODE_BIN" tests/course-record-editor-delivery.test.cjs
 "$NODE_BIN" tests/anqin-summary-state.test.cjs
 "$NODE_BIN" tests/anqin-storage-warning.test.cjs
 "$NODE_BIN" tests/anqin-local-media.test.cjs
@@ -64,6 +67,7 @@ KPI_QA_BASE_URL="http://127.0.0.1:$PORT" "$NODE_BIN" tests/teacher-roster-e2e.cj
 KPI_QA_BASE_URL="http://127.0.0.1:$PORT" "$NODE_BIN" tests/system-logic-ui-e2e.cjs
 "$NODE_BIN" tests/upload-resilience-e2e.cjs
 "$NODE_BIN" tests/anqin-local-media-e2e.cjs
+"$NODE_BIN" tests/anqin-course-record-e2e.cjs
 "$NODE_BIN" tests/workspace-draft-recovery-e2e.cjs
 "$NODE_BIN" tests/controlled-50-e2e.cjs
 

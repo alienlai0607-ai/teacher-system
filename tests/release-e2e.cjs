@@ -961,8 +961,8 @@ async function anqinWorkflow(browser) {
     check('安親上傳成果後不再顯示缺成果證據', !savedActivityText.includes('缺成果證據') && !savedActivityText.includes('待補：成果證據'), savedActivityText);
 
     await clickRoute(page, 'today');
-    check('安親今日流程已移除學生追蹤入口', await page.locator('[data-action="today-tab"][data-tab="students"], [data-action="open-student-case"]').count() === 0);
-    await page.locator('[data-action="today-tab"][data-tab="parents"]').click();
+    check('安親今日流程已移除學生追蹤入口', await page.locator('[role="tab"][data-action="today-tab"][data-tab="students"], [data-action="open-student-case"]').count() === 0);
+    await page.locator('[role="tab"][data-action="today-tab"][data-tab="parents"]').click();
     await page.locator('[data-action="set-parent-status"][data-status="handoff"]').click();
     await page.locator('input[data-change="parent-handoff-confirmed"]').check();
     await page.fill('#parent-handoff-note', '這段切換後不應保存');
@@ -991,7 +991,7 @@ async function anqinWorkflow(browser) {
     check('安親親師溝通儲存後可立即讀回兩段內容', parentSectionText.includes('漏看進位') && parentSectionText.includes('今晚練習一題'));
     check('親師溝通不會自動增加追蹤待辦', await page.evaluate(() => Object.keys(window.__KPI_QA_CLOUD__?.store?.tasks || {}).every(id => !/^v2_contact_/.test(id))));
 
-    await page.locator('[data-action="today-tab"][data-tab="operations"]').click();
+    await page.locator('[role="tab"][data-action="today-tab"][data-tab="operations"]').click();
     await page.locator('label:has(input[name="status_classroom"][value="exception"])').click({ force: true });
     await page.fill('#operation-action-classroom', '測試異常內容，切回正常後必須清除。');
     await page.locator('label:has(input[name="status_classroom"][value="normal"])').click({ force: true });
@@ -1054,7 +1054,24 @@ async function anqinWorkflow(browser) {
     check('安親待辦事項重試成功後才真正完成', (await page.locator('body').innerText()).includes('0 項待完成'));
     await clickRoute(page, 'today');
 
-    await page.locator('[data-action="today-tab"][data-tab="submit"]').click();
+    await page.locator('[role="tab"][data-action="today-tab"][data-tab="submit"]').click();
+    const requiredCourse = today >= '2026-09-18' && ![0, 6].includes(new Date(`${today}T12:00:00+08:00`).getDay());
+    if (requiredCourse) check('安親其他條件完成仍須補上課程照片分享', await page.locator('[data-action="submit-daily"]').isDisabled());
+    await page.locator('[role="tab"][data-action="today-tab"][data-tab="course-record"]').click();
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      const tabGeometry = await page.locator('.workflow-tabs [role="tab"]').evaluateAll(tabs => tabs.map(tab => { const box = tab.getBoundingClientRect(); return { key: tab.dataset.tab, width: box.width, y: box.y }; }));
+      check(`安親 ${width}px 五項分頁等寬同列`, tabGeometry.length === 5 && tabGeometry[4].key === 'course-record'
+        && Math.max(...tabGeometry.map(tab => tab.width)) - Math.min(...tabGeometry.map(tab => tab.width)) <= 1
+        && Math.max(...tabGeometry.map(tab => tab.y)) - Math.min(...tabGeometry.map(tab => tab.y)) <= 1);
+      check(`安親 ${width}px 課程紀錄不需左右捲動`, await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+    }
+    await page.locator('#course-record-form input[name="channels"][value="group"]').check();
+    await page.fill('#course-record-note', '已分享今日上課照片，附上群組畫面。');
+    await page.setInputFiles('#course-record-files', imageA);
+    await page.waitForFunction(() => document.querySelector('[data-course-attachment-id] a') && !document.querySelector('#course-record-files')?.disabled);
+    await page.screenshot({ path: path.join(artifactDir, 'anqin-course-record-390.png'), fullPage: true });
+    await page.locator('[role="tab"][data-action="today-tab"][data-tab="submit"]').click();
     const submit = page.locator('[data-action="submit-daily"]');
     check('安親完成條件後送出按鈕可用', await submit.isEnabled());
     await submit.click();
@@ -1067,8 +1084,12 @@ async function anqinWorkflow(browser) {
       && submissionReceiptText.includes('待主管審查'), submissionReceiptText);
     const submittedParentData = await page.evaluate(() => {
       const log = Object.values(window.__KPI_QA_CLOUD__?.store?.logs || {})[0] || {};
-      return { kpi5: log.kpi5_data || {}, snapshot: log.kpi6_data?.v2_snapshot || {} };
+      return { kpi5: log.kpi5_data || {}, snapshot: log.kpi6_data?.v2_snapshot || {}, attachments: log.attachments || [] };
     });
+    const submittedCourse = submittedParentData.snapshot.submission?.courseRecord;
+    check('安親課程分享截圖與正式日報快照一致', submittedCourse?.channels?.includes('group') && submittedCourse.attachments?.length === 1
+      && submittedParentData.attachments.some(item => item.forType === 'v2-course-record' && item.type === 'photo' && item.kpi === 2
+        && item.attachmentId === submittedCourse.attachments[0].id && item.fileId === submittedCourse.attachments[0].cloudFileId));
     check('安親親師溝通兩段內容已寫入雲端日報', String(submittedParentData.kpi5.parent_summary || '').includes('漏看進位')
       && String(submittedParentData.kpi5.parent_summary || '').includes('今晚練習一題'));
     check('安親新日報沒有寫入退役學生追蹤欄位', submittedParentData.kpi5.student_special === ''

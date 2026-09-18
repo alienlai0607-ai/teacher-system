@@ -66,7 +66,7 @@ async function main() {
   check(context.saveCoursePrep({ nickname: 'QA', prep }).code === 'RECORD_DELETED', 'deleted ID cannot resurrect');
 
   const state = { integration: {}, activities: [{ ...prep, teacher: 'QA', cloudSyncStatus: 'saved' }], submissions: [], contacts: [{ id: 'removed', teacher: 'QA', date: '2026-09-06' }], studentCases: [], lessonPlans: [], operationHistory: [], ui: { role: 'teacher' }, context: { teacher: 'QA' }, daily: { date: '2026-09-06', summary: {} } };
-  const frontend = vm.createContext({ state, clone: copy, cloudLogId: (name, date) => `${name}-${date}`, dailyNeedsResubmit: () => false,
+  const frontend = vm.createContext({ state, integrationRuntime: {}, clone: copy, cloudLogId: (name, date) => `${name}-${date}`, dailyNeedsResubmit: () => false,
     cloudDraftInFlight: null, dailySubmitInFlight: false, dailyCloudConflict: null,
     hydrateCloudSnapshotAttachments: copy, normalizeContactRecord() {}, normalizeEvidenceRecord() {}, reconcileLegacyPlans() {},
     sameReviewIdentity: (a, b) => a === b,

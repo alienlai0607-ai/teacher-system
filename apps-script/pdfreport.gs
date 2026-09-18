@@ -143,6 +143,16 @@ function pdfLogCard_(l) {
   const legacyStudentTracking = (Array.isArray(k5.special_students) && k5.special_students.length ? k5.special_students.join('、') + '：' : '') + (k5.student_special || '');
   if (legacyStudentTracking) h += pdfRow_('📦 舊版學生追蹤（歷史）', legacyStudentTracking);
 
+  const courseRecord = k6.v2_snapshot && k6.v2_snapshot.submission && k6.v2_snapshot.submission.courseRecord;
+  if (courseRecord) {
+    const channels = Array.isArray(courseRecord.channels) ? courseRecord.channels : [];
+    const sharedTo = [channels.indexOf('group') >= 0 ? '群組' : '', channels.indexOf('parent_app') >= 0 ? '家長通' : ''].filter(Boolean);
+    h += pdfRow_('📷 課程紀錄', sharedTo.length ? '今日課程照片已分享到' + sharedTo.join('、') : '尚未確認分享管道');
+    const screenshotCount = anqinCourseScreenshots_(courseRecord, attachments).length;
+    h += pdfRow_('分享截圖佐證', screenshotCount ? screenshotCount + ' 張（見下方照片與成果附件）' : '尚未附上已上傳的截圖');
+    h += pdfRow_('課程紀錄備註', courseRecord.note);
+  }
+
   // 工作紀錄
   h += pdfRow_('✔️ 今日完成', k6.today_done);
   h += pdfRow_('📌 明日待辦', k6.tomorrow_todo);
@@ -166,7 +176,7 @@ function pdfLogCard_(l) {
         if (index > 0 && index % 4 === 0) h += '</tr><tr>';
         h += '<td style="padding:3px; vertical-align:top; text-align:center;">'
            + '<img src="' + item.uri + '" style="width:150px; border-radius:6px;"><br>'
-           + '<span style="font-size:9px; color:#999;">' + (KPI_LABEL[item.photo.kpi] || '') + '</span></td>';
+           + '<span style="font-size:9px; color:#999;">' + (item.photo.forType === 'v2-course-record' ? '課程紀錄截圖' : (KPI_LABEL[item.photo.kpi] || '')) + '</span></td>';
       });
       h += '</tr></table>';
     }

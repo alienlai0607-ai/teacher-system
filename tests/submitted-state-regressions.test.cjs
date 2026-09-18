@@ -35,6 +35,7 @@ function harness(logs, options = {}) {
     state, console, clone: copy, SAFE_START_MODE: true,
     cloudLogId: (name, date) => `${name}-${date}`, dailyNeedsResubmit: () => false,
     cloudDraftInFlight: null, dailySubmitInFlight: false, dailyCloudConflict: null,
+    driveFileId: () => '',
     hydrateCloudSnapshotAttachments: copy, normalizeContactRecord() {}, normalizeEvidenceRecord() {},
     reconcileLegacyPlans() {}, preserveActivityMedia() {}, preserveAttachmentMedia() {},
     operationRecordById: () => null, sameReviewIdentity: (a, b) => a === b,
@@ -52,7 +53,8 @@ function harness(logs, options = {}) {
   });
   context.window.API = context.API;
   vm.runInContext(
-    block('  function importCloudSnapshot(', '  function importCloudCoursePrep(')
+    block('  function normalizeCourseRecord(', '  function normalizePrepTitle(')
+    + block('  function importCloudSnapshot(', '  function importCloudCoursePrep(')
     + block('  async function syncTeacherCloudData(', '  function renderManagerDashboard('), context);
   if (options.feedback) {
     context.API.listFeedback = async () => ({ ok: true, feedback: copy(options.feedback) });

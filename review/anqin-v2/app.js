@@ -275,7 +275,10 @@
     { key: 'parents', label: '親師溝通', icon: 'messages-square' },
     { key: 'operations', label: '班務檢核', icon: 'school' },
     { key: 'submit', label: '確認送出', icon: 'send' },
+    { key: 'course-record', label: '課程紀錄', icon: 'camera' },
   ];
+
+  const COURSE_RECORD_NOTE = '請務必多拍攝今日上課過程，確保每位孩子都有入鏡，並盡可能從不同活動、互動與學習時刻留下多張照片。過程紀錄非常重要，請完整呈現孩子的參與與學習，不要只拍最後成果。完成後請將照片分享到群組或家長通，並在此附上已發布的截圖作為證據。';
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -467,6 +470,7 @@
       daily: {
         date: today, status: 'draft', submittedAt: '', parentStatus: '', parentHandoffConfirmed: false, parentHandoffNote: '',
         summary: { keyResult: '', followup: '', tomorrowPriority: '', teacherNote: '' },
+        courseRecord: { channels: [], attachments: [], note: '' },
       },
       activities: [],
       studentCases: [],
@@ -544,6 +548,24 @@
       record.qualityInferred = true;
     }
     return record;
+  }
+
+  function normalizeCourseRecord(value = {}) {
+    const record = value && typeof value === 'object' ? value : {};
+    return {
+      channels: ['group', 'parent_app'].filter(channel => Array.isArray(record.channels) && record.channels.includes(channel)),
+      attachments: (Array.isArray(record.attachments) ? record.attachments : []).filter(item => item && typeof item === 'object').map(item => normalizeOperationPhotoRecord(item)),
+      note: String(record.note || ''),
+    };
+  }
+
+  function courseRecordRequired(date = state.daily.date) {
+    return String(date).slice(0, 10) >= '2026-09-18' && !dailyKpiOptional(date);
+  }
+
+  function courseRecordComplete(record = state.daily.courseRecord) {
+    return Boolean(record && ['group', 'parent_app'].some(channel => record.channels?.includes(channel))
+      && (record.attachments || []).some(item => String(item.mimeType || '').startsWith('image/') && attachmentAvailable(item)));
   }
 
   function normalizeOperationPhotoRecord(record) {
@@ -673,6 +695,7 @@
     parsed.integration = { ...seed.integration, ...(parsed.integration || {}) };
     parsed.context = { ...seed.context, ...(parsed.context || {}) };
     parsed.daily = { ...seed.daily, ...(parsed.daily || {}), summary: { ...seed.daily.summary, ...(parsed.daily?.summary || {}) } };
+    parsed.daily.courseRecord = normalizeCourseRecord(parsed.daily.courseRecord);
     if (parsed.daily.parentStatus === 'none') parsed.daily.parentStatus = 'handoff';
     parsed.weekly = { ...seed.weekly, ...(parsed.weekly || {}) };
     parsed.operations = { ...seed.operations, ...(parsed.operations || {}), evidenceByCheck: { ...seed.operations.evidenceByCheck, ...(parsed.operations?.evidenceByCheck || {}) } };
@@ -683,6 +706,7 @@
     ['people', 'activities', 'studentCases', 'contacts', 'lessonPlans', 'tasks', 'submissions', 'managerNotes'].forEach(key => {
       if (!Array.isArray(parsed[key])) parsed[key] = clone(seed[key] || []);
     });
+    parsed.submissions.forEach(item => { if (item.courseRecord) item.courseRecord = normalizeCourseRecord(item.courseRecord); });
     parsed.contacts.forEach(normalizeContactRecord);
     parsed.tasks.forEach(task => {
       const ref = derivedTaskRef(task, parsed);
@@ -1268,7 +1292,7 @@
     const cases = state.studentCases.filter(item => item.teacher === teacher && item.date === previousDate);
     const contacts = state.contacts.filter(item => item.teacher === teacher && item.date === previousDate);
     const existingSubmission = state.submissions.find(item => item.teacher === teacher && item.date === previousDate);
-    if (!existingSubmission && (activities.length || cases.length || contacts.length || state.daily.submittedAt)) {
+    if (!existingSubmission && (activities.length || cases.length || contacts.length || state.daily.submittedAt || state.daily.courseRecord?.channels?.length || state.daily.courseRecord?.attachments?.length || state.daily.courseRecord?.note)) {
       state.submissions.unshift({
         id: `draft_${previousDate.replaceAll('-', '')}_${backendNickname(teacher)}`,
         date: previousDate,
@@ -1289,6 +1313,7 @@
         parentStatus: state.daily.parentStatus || '',
         parentHandoffConfirmed: Boolean(state.daily.parentHandoffConfirmed),
         parentHandoffNote: state.daily.parentHandoffNote || '',
+        courseRecord: clone(state.daily.courseRecord || { channels: [], attachments: [], note: '' }),
         feedback: '',
       });
     } else if (existingSubmission && ((state.integration.pendingDailySubmission?.teacher === teacher && state.integration.pendingDailySubmission?.date === previousDate)
@@ -1308,6 +1333,7 @@
         parentStatus: state.daily.parentStatus || '',
         parentHandoffConfirmed: Boolean(state.daily.parentHandoffConfirmed),
         parentHandoffNote: state.daily.parentHandoffNote || '',
+        courseRecord: clone(state.daily.courseRecord || { channels: [], attachments: [], note: '' }),
       });
     }
     const operation = state.operations;
@@ -1837,6 +1863,14 @@
       dailyRows.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
     }
     rows.push(['【每日彙整】'], ['日期', '狀態', '今日成果', '孩子狀況與課程問題', '待辦摘要（送出快照）', '老師補充', '親師狀態', '門口交接備註', '主管與老師對話'], ...dailyRows, []);
+
+    const courseRows = submissions.map(item => ({ date: item.date, record: item.courseRecord }));
+    if (inMonth(state.daily.date) && !currentSubmission) courseRows.push({ date: state.daily.date, record: state.daily.courseRecord });
+    rows.push(['【課程照片分享紀錄】'], ['日期', '已分享管道', '補充備註', '截圖檔名', '截圖連結']);
+    courseRows.filter(item => item.record).forEach(({ date, record }) => rows.push([date,
+      (record.channels || []).map(channel => ({ group: '群組', parent_app: '家長通' })[channel]).filter(Boolean).join('、'), record.note || '',
+      (record.attachments || []).map(item => item.fileName).join('、'), (record.attachments || []).map(materialCloudUrl).filter(Boolean).join('\n')]));
+    rows.push([]);
 
     const activities = state.activities.filter(item => item.teacher === teacher && item.type !== 'lessonprep' && inMonth(item.date)).slice().sort(byDate);
     rows.push(['【工作紀錄明細】'], ['日期', '分類', '工作類型', '標題', '孩子共鳴環節', '教案／教材更新', '班級經營目標', '班級經營做法', '班級經營結果', '班級經營問題', '班級經營下一步', '追蹤日期', '備課檔案', '成果份數', '成果對話']);
@@ -2404,6 +2438,7 @@
       parents: state.contacts.some(item => item.date === state.daily.date && item.teacher === state.context.teacher)
         || (state.daily.parentStatus === 'handoff' && state.daily.parentHandoffConfirmed),
       operations: operationsComplete(),
+      'course-record': !courseRecordRequired() || courseRecordComplete(),
       submit: Boolean(state.daily.submittedAt),
     };
   }
@@ -2414,12 +2449,13 @@
   }
 
   function hasDailyRecords() {
-    return todayActivities().length > 0 || state.contacts.some(item => item.date === state.daily.date && item.teacher === state.context.teacher);
+    return todayActivities().length > 0 || state.contacts.some(item => item.date === state.daily.date && item.teacher === state.context.teacher)
+      || Boolean(state.daily.courseRecord?.channels?.length || state.daily.courseRecord?.attachments?.length || state.daily.courseRecord?.note);
   }
 
   function dailyCompletion() {
     const status = todaySectionStatus();
-    const requiredSections = ['activities', 'parents', 'operations'];
+    const requiredSections = ['activities', 'parents', 'operations', ...(courseRecordRequired() ? ['course-record'] : [])];
     const readySections = requiredSections.filter(key => status[key]).length;
     return Math.round(readySections / requiredSections.length * 100);
   }
@@ -2461,6 +2497,7 @@
       case 'parents': return renderTodayParents();
       case 'operations': return renderTodayOperations();
       case 'submit': return renderTodaySubmit();
+      case 'course-record': return renderTodayCourseRecord();
       default: return renderTodayActivities();
     }
   }
@@ -2666,6 +2703,98 @@
     </div>`;
   }
 
+  function renderCourseRecordAttachments(record, editable = false) {
+    const attachments = record?.attachments || [];
+    if (!attachments.length) return '<p class="text-small muted">尚未加入已發布照片的截圖。</p>';
+    return `<div class="evidence-attachment-grid">${attachments.map(item => {
+      const preview = attachmentPreviewUrl(item, 420);
+      const url = materialCloudUrl(item);
+      return `<article class="evidence-attachment-item" data-course-attachment-id="${esc(item.id)}"><div class="evidence-attachment-preview">${preview ? `<img src="${esc(preview)}"${cloudPreviewImageAttrs(item)} alt="${esc(item.fileName || '課程照片分享截圖')}">` : icon('image', 24)}</div><div class="evidence-attachment-main"><strong>${esc(item.fileName)}</strong><small>${url ? '截圖已上傳' : item.localMediaSaved ? '已保留在這台裝置，送出時會上傳' : '截圖尚未安全保存，請保留原檔'}</small>${url ? `<a class="btn btn-small" href="${esc(url)}" target="_blank" rel="noopener noreferrer">開啟截圖</a>` : ''}</div>${editable ? `<button type="button" class="icon-button" data-action="remove-course-record-attachment" data-attachment-id="${esc(item.id)}" aria-label="移除 ${esc(item.fileName)}">${icon('x', 15)}</button>` : ''}</article>`;
+    }).join('')}</div>`;
+  }
+
+  function renderCourseRecordSummary(record) {
+    if (!record || (!record.channels?.length && !record.attachments?.length && !record.note)) return '';
+    return `<section class="panel"><div class="panel-head"><div class="panel-title">${icon('camera')}課程紀錄</div></div><div class="panel-body"><p>照片已分享到：${esc((record.channels || []).map(channel => ({ group: '群組', parent_app: '家長通' })[channel]).filter(Boolean).join('、') || '尚未確認')}</p>${record.note ? `<p class="pre-wrap">補充備註：${esc(record.note)}</p>` : ''}${renderCourseRecordAttachments(record)}</div></section>`;
+  }
+
+  function renderTodayCourseRecord() {
+    const record = state.daily.courseRecord || { channels: [], attachments: [], note: '' };
+    return `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('camera')}課程紀錄 <span class="badge ${courseRecordRequired() ? 'red' : 'outline'}">${courseRecordRequired() ? '必填' : '選填'}</span></div><div class="panel-subtitle">將今日上課照片分享到群組或家長通，再附上已發布的截圖。</div></div></div><div class="panel-body"><div class="notice-band info"><div><div class="notice-title">備註｜課程過程紀錄很重要</div><div class="notice-copy">${esc(COURSE_RECORD_NOTE)}</div></div></div><form id="course-record-form" data-form="course-record"><fieldset class="course-record-channels mt-16"><legend class="form-label">已完成照片分享（至少擇一）${courseRecordRequired() ? ' <span class="required">*</span>' : ''}</legend><div class="flex gap-8"><label class="choice-chip"><input type="checkbox" name="channels" value="group" data-change="course-record-channel" ${record.channels.includes('group') ? 'checked' : ''}>已分享到群組</label><label class="choice-chip"><input type="checkbox" name="channels" value="parent_app" data-change="course-record-channel" ${record.channels.includes('parent_app') ? 'checked' : ''}>已分享到家長通</label></div></fieldset><div class="form-field mt-16"><label class="form-label" for="course-record-files">分享截圖證據${courseRecordRequired() ? ' <span class="required">*</span>' : ''}</label><div class="text-small muted mb-8">請附上可辨識今日照片已發布到群組或家長通的截圖，至少 1 張；可分次加入，最多 ${MAX_EVIDENCE_FILES} 張。</div><input id="course-record-files" type="file" accept="image/*" multiple data-change="course-record-files" ${integrationRuntime.courseRecordUploading ? 'disabled' : ''}><div id="course-record-attachments" class="mt-12">${renderCourseRecordAttachments(record, true)}</div><p id="course-record-upload-status" class="text-small muted" role="status">${integrationRuntime.courseRecordUploading ? '正在保存截圖，請稍候…' : ''}</p></div><div class="form-field mt-16"><label class="form-label" for="course-record-note">補充備註（選填）</label><textarea id="course-record-note" name="note" data-input="course-record-note" placeholder="如有特殊情況，可在此補充。">${esc(record.note)}</textarea></div><button type="button" class="btn btn-primary mt-16" data-action="today-tab" data-tab="submit">${icon('send', 16)}前往確認送出</button></form></div></section>`;
+  }
+
+  function saveCourseRecordForm(form) {
+    if (!form) return;
+    const data = new FormData(form);
+    const record = state.daily.courseRecord || (state.daily.courseRecord = { channels: [], attachments: [], note: '' });
+    const channels = ['group', 'parent_app'].filter(channel => data.getAll('channels').includes(channel));
+    const note = String(data.get('note') || '');
+    if (JSON.stringify(record.channels) === JSON.stringify(channels) && record.note === note) return;
+    record.channels = channels;
+    record.note = note;
+    markDailyNeedsResubmit();
+    persist();
+    scheduleDailyCloudDraftSync();
+  }
+
+  async function handleCourseRecordFiles(input) {
+    if (integrationRuntime.courseRecordUploading) return;
+    const files = Array.from(input.files || []);
+    if (!files.length) return;
+    saveCourseRecordForm($('#course-record-form'));
+    const daily = state.daily;
+    const record = daily.courseRecord;
+    const context = { date: daily.date, teacher: state.context.teacher };
+    const isCurrent = () => state.daily === daily && state.context.teacher === context.teacher;
+    const slots = Math.max(0, MAX_EVIDENCE_FILES - record.attachments.length);
+    const errors = files.length > slots ? [`最多可加入 ${MAX_EVIDENCE_FILES} 張截圖`] : [];
+    let added = 0;
+    integrationRuntime.courseRecordUploading = true;
+    input.disabled = true;
+    const status = $('#course-record-upload-status');
+    if (status) status.textContent = '正在保存並上傳截圖，請稍候…';
+    try {
+      for (const file of files.slice(0, slots)) {
+        try {
+          if (file.size > MAX_DOCUMENT_FILE_BYTES) throw new Error(`${file.name} 超過 25 MB`);
+          const mime = String(file.type || '') || (/\.(png|jpe?g|webp|heic|heif)$/i.test(file.name) ? 'image/' + file.name.split('.').pop().toLowerCase() : '');
+          if (!mime.startsWith('image/')) throw new Error(`${file.name} 不是圖片，請選擇截圖`);
+          const fingerprint = await hashFile(file);
+          if (record.attachments.some(item => item.fingerprint === fingerprint && attachmentAvailable(item))) continue;
+          const source = file.type ? file : new File([file], file.name, { type: mime });
+          const dataUrl = await fileToPreview(source);
+          if (!dataUrl) throw new Error(`${file.name} 無法讀取，請改選 JPG 或 PNG 截圖`);
+          if (!isCurrent()) throw new Error('已切換日期或老師，請回原日期重新選擇截圖');
+          const item = { id: uid('course-proof'), fileName: file.name, mimeType: 'image/jpeg', dataUrl, size: formatFileSize(dataUrlByteLength(dataUrl)), fingerprint, cloudUrl: '', cloudFileId: '', uploadStatus: 'local', placeholder: false };
+          await preserveLocalAttachment(item);
+          if (!isCurrent()) throw new Error('已切換日期或老師，請回原日期重新選擇截圖');
+          record.attachments.push(item);
+          added += 1;
+          markDailyNeedsResubmit(context.date, context.teacher);
+          persist('課程截圖已保留在這台裝置');
+          if (state.integration.cloudSyncEnabled) {
+            try {
+              const uploaded = await uploadCompressedPhoto(dataUrl, { kpi: 2, description: '今日課程照片分享截圖', context });
+              if (uploaded) {
+                Object.assign(item, uploaded, { dataUrl: '', uploadStatus: 'uploaded', placeholder: false });
+                applyCloudPreview(item.cloudFileId, dataUrl);
+                await confirmLocalAttachmentUploaded(item);
+                persist('課程截圖已上傳');
+              }
+            } catch (error) { item.uploadStatus = 'retry'; item.uploadError = error.message; errors.push(`${file.name} 上傳未完成，已保留在這台裝置，送出時會重試`); persist(); }
+          }
+        } catch (error) { errors.push(error.message || '截圖保存失敗，請保留原檔並重試'); }
+      }
+    } finally {
+      integrationRuntime.courseRecordUploading = false;
+      input.disabled = false;
+      input.value = '';
+      if (isCurrent()) { scheduleDailyCloudDraftSync(); renderApp(); }
+    }
+    if (errors.length) toast(errors.join('；'), 'warning');
+    else toast(added ? `已加入 ${added} 張課程截圖` : '截圖已存在，未重複加入', 'success');
+  }
+
   function renderTodaySubmit() {
     const pendingSubmission = state.integration.pendingDailySubmission;
     if (!pendingSubmission && dailyKpiOptional() && !hasDailyRecords()) {
@@ -2682,6 +2811,7 @@
     if (!dailyKpiOptional() && dailyRequiredTracksReady() && !status.activities) blockers.push('已新增的課程需選擇備課檔案並完成課後回饋；班級經營只需工作欄位及可判讀成果證據');
     if (!dailyKpiOptional() && !status.parents) blockers.push('新增一筆親師溝通紀錄，或確認已完成門口交接');
     if (!dailyKpiOptional() && !status.operations) blockers.push('今日值日班務尚未確認');
+    if (courseRecordRequired() && !status['course-record']) blockers.push('完成第 5 項課程紀錄：確認照片已分享，並附上截圖證據');
     if (dailyKpiOptional() && !todayActivities().every(activityComplete)) blockers.push('已新增的工作紀錄尚未完整');
     return `<div class="content-grid wide-aside">
       <section class="panel">
@@ -2703,8 +2833,9 @@
         </div>
       </section>
       <aside class="stack">
+        ${courseRecordRequired() && !status['course-record'] ? `<button type="button" class="btn btn-primary" data-action="today-tab" data-tab="course-record">前往第 5 項課程紀錄</button>` : ''}
         <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('list-checks')}送出檢查</div></div></div><div class="panel-body"><div class="check-list">
-          ${(dailyKpiOptional() ? [['activities', '自願新增的工作紀錄與證據']] : [['activities', '工作紀錄與證據'], ['parents', '親師溝通或門口交接'], ['operations', '值日班務']]).map(([key, label]) => {
+          ${(dailyKpiOptional() ? [['activities', '自願新增的工作紀錄與證據']] : [['activities', '工作紀錄與證據'], ['parents', '親師溝通或門口交接'], ['operations', '值日班務'], ...(courseRecordRequired() ? [['course-record', '課程照片分享與截圖證據']] : [])]).map(([key, label]) => {
             const done = dailyKpiOptional() ? todayActivities().every(activityComplete) : status[key];
             return `<div class="check-item ${done ? 'done' : 'pending'}"><span class="check-icon">${icon(done ? 'check' : 'minus', 12)}</span><span>${label}</span></div>`;
           }).join('')}
@@ -2749,8 +2880,9 @@
       ['1', '選擇今天的課程', '依實際內容從學科內或學科外入口新增；兩類至少擇一。'],
       ['2', '完整記錄已新增課程', '新增任何一類後，都要完成該筆課後備課回饋與成果證據。'],
       ['3', '選取備課檔案並補成果', '選擇本堂課使用的課程名稱；班級經營不需要備課檔案。'],
-      ['4', '完成學生、親師與班務', '有狀況就留下追蹤；無重要親師事項也要親自在門口完成交接；值日班務四項各拍一張。'],
-      ['5', '確認後送主管', '送出後仍可編輯；只要修改就會退回待送出，重新確認後再送主管。'],
+      ['4', '完成親師與班務', '有重要事項就留下溝通紀錄；無重要親師事項也要親自在門口完成交接；值日班務四項各拍一張。'],
+      ['5', '完成課程紀錄', '課程過程請多拍照片、確保每位孩子入鏡；分享到群組或家長通後，在第 5 項課程紀錄勾選分享管道並附上截圖。'],
+      ['6', '確認後送主管', '送出後仍可編輯；只要修改就會退回待送出，重新確認後再送主管。'],
     ];
     return `<div class="page guide-page">
       ${pageHead('填寫指南', '說明與範例集中管理，不占用正式填寫畫面', `<button type="button" class="btn btn-primary" data-action="navigate" data-route="today">${icon('clipboard-pen-line', 16)}<span>開始今天的紀錄</span></button>`)}
@@ -4129,6 +4261,7 @@
       });
     });
     Object.values(hydrated?.operation?.evidenceByCheck || {}).forEach(reserve);
+    (hydrated?.submission?.courseRecord?.attachments || []).forEach(reserve);
     const claim = (predicate) => {
       const matches = available.map((item, index) => ({ item, index }))
         .filter(({ item, index }) => !used.has(index) && predicate(item));
@@ -4172,6 +4305,12 @@
       });
     });
 
+    if (hydrated.submission.courseRecord) {
+      hydrated.submission.courseRecord = normalizeCourseRecord(hydrated.submission.courseRecord);
+      hydrated.submission.courseRecord.attachments.forEach(item => {
+        if (!attachmentAvailable(item)) applyCloudFile(item, claim(file => file.forType === 'v2-course-record' && file.attachmentId === item.id));
+      });
+    }
     const operation = hydrated?.operation;
     Object.entries(operation?.evidenceByCheck || {}).forEach(([key, photo]) => {
       normalizeOperationPhotoRecord(photo);
@@ -4191,6 +4330,8 @@
     if (!snapshot || snapshot.schema !== 'anqin-v2' || !snapshot.submission) return false;
     const logId = cloudLogId(snapshot.submission.teacher, snapshot.submission.date);
     const isCurrent = snapshot.submission.teacher === state.context.teacher && snapshot.submission.date === state.daily.date;
+    // Keep the exact daily attachment collection stable while screenshot bytes are being saved.
+    if (isCurrent && integrationRuntime.courseRecordUploading) return false;
     const pendingSubmission = state.integration.pendingDailySubmission;
     const hasUnconfirmedSubmission = pendingSubmission?.teacher === snapshot.submission.teacher && pendingSubmission?.date === snapshot.submission.date;
     if (hasUnconfirmedSubmission) return false;
@@ -4231,6 +4372,11 @@
     const repairsSubmittedState = hasCloudSubmission && remoteSubmission.status !== 'draft' && existingSubmission?.status === 'draft' && !existingSubmission.previousStatus;
     const remoteIsNewer = force || !existingSubmission || remoteStamp > localStamp || repairsSubmittedState;
     if (!remoteIsNewer) {
+      (remoteSubmission.courseRecord?.attachments || []).forEach(remote => {
+        const local = existingSubmission?.courseRecord?.attachments?.find(item => item.id === remote.id);
+        preserveAttachmentMedia(remote, local);
+        if (isCurrent) preserveAttachmentMedia(remote, state.daily.courseRecord?.attachments?.find(item => item.id === remote.id));
+      });
       remoteSubmission.activitySnapshots.forEach(remoteActivity => {
         const localActivity = state.activities.find(item => item.id === remoteActivity.id);
         if (localActivity) preserveActivityMedia(remoteActivity, localActivity);
@@ -4246,6 +4392,10 @@
       }
       return false;
     }
+    (remoteSubmission.courseRecord?.attachments || []).forEach(remote => {
+      const local = existingSubmission?.courseRecord?.attachments?.find(item => item.id === remote.id) || (isCurrent ? state.daily.courseRecord?.attachments?.find(item => item.id === remote.id) : null);
+      preserveAttachmentMedia(local, remote);
+    });
     if (existingSubmission) Object.assign(existingSubmission, remoteSubmission);
     else state.submissions.unshift(remoteSubmission);
 
@@ -4284,6 +4434,7 @@
       else state.operationHistory.push(incomingOperation);
     }
     if (hydratedSnapshot.daily && state.ui.role === 'teacher' && remoteSubmission.teacher === state.context.teacher && remoteSubmission.date === state.daily.date) {
+      state.daily.courseRecord = normalizeCourseRecord(clone(remoteSubmission.courseRecord || hydratedSnapshot.daily.courseRecord || {}));
       state.daily.parentStatus = hydratedSnapshot.daily.parentStatus || '';
       state.daily.parentHandoffConfirmed = Boolean(hydratedSnapshot.daily.parentHandoffConfirmed);
       state.daily.parentHandoffNote = hydratedSnapshot.daily.parentHandoffNote || '';
@@ -5030,6 +5181,7 @@
       <div class="status-strip"><div class="status-cell"><div class="status-label">學科內／學科外</div><div class="status-value">${tracks.academic.count}/${tracks.enrichment.count}</div><div class="status-note">每日兩類至少擇一</div></div><div class="status-cell"><div class="status-label">備課檔案／成果</div><div class="status-value">${prepReady}/${prepRequired.length} · ${evidence}</div></div><div class="status-cell"><div class="status-label">親師溝通</div><div class="status-value">${contacts.length}</div><div class="status-note">孩子狀況與家長共識</div></div>${cases.length ? `<div class="status-cell"><div class="status-label">舊版追蹤歷史</div><div class="status-value">${cases.length}</div><div class="status-note">唯讀，不列入完成度</div></div>` : ''}</div>
       <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-list')}工作與證據</div><div class="panel-subtitle">點選任一筆查看送出當下的完整內容</div></div></div><div class="panel-body">${activities.length ? `<div class="archived-activity-list">${activities.map(item => renderArchivedActivityRow(item, submission.id)).join('')}</div>` : `<div class="notice-band danger">${icon('file-question', 19)}<div><div class="notice-title">沒有可追溯的工作事件</div><div class="notice-copy">摘要無法連回班級、教學方法、學生結果與原始證據。</div></div></div>`}</div></section>
       <div class="detail-split"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('messages-square')}親師溝通</div></div></div><div class="panel-body">${contacts.length ? `<div class="metadata-list">${contacts.map(item => `<div class="metadata-row"><div class="metadata-label">${esc(item.student)} · ${esc(item.channel)}</div><div class="metadata-value"><strong>孩子狀況與老師處理：</strong>${esc(item.summary)}<br><span class="muted"><strong>家長回應與共同決定：</strong>${esc(contactDecisionText(item))}</span></div></div>`).join('')}</div>` : submission.parentHandoffConfirmed ? `<div class="notice-band success">${icon('hand-heart', 18)}<div><div class="notice-title">今日無重要事項，已親自完成門口交接</div><div class="notice-copy">${esc(submission.parentHandoffNote || '老師已確認完成交接')}</div></div></div>` : '<div class="text-small muted">當日沒有親師溝通或門口交接確認。</div>'}</div></section>${cases.length ? `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('archive')}舊版學生追蹤紀錄</div><div class="panel-subtitle">歷史資料唯讀，不再產生待辦或影響完成度</div></div></div><div class="panel-body"><div class="metadata-list">${cases.map(item => `<div class="metadata-row"><div class="metadata-label">${esc(item.student)}</div><div class="metadata-value">${esc(item.observation)}${item.nextAction ? `<br><span class="muted">當時下一步：${esc(item.nextAction)}</span>` : ''}</div></div>`).join('')}</div></div></section>` : ''}</div>
+      ${renderCourseRecordSummary(submission.courseRecord)}
       ${showThread ? renderFeedbackThread(threadKey) : ''}
       ${readOnly ? '' : `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('clipboard-check')}本次審查結論</div></div></div><div class="panel-body"><div class="form-field"><label class="form-label" for="submission-feedback">核准說明或補充要求</label><textarea id="submission-feedback" placeholder="指出哪一筆紀錄、哪個欄位或哪份證據需要調整。"></textarea></div></div></section>`}
     </div>`;
@@ -6497,6 +6649,7 @@
       keyResult: state.daily.summary.keyResult, followup: state.daily.summary.followup, tomorrowPriority: state.daily.summary.tomorrowPriority,
       teacherNote: state.daily.summary.teacherNote || '', parentStatus: state.daily.parentStatus || '',
       parentHandoffConfirmed: Boolean(state.daily.parentHandoffConfirmed), parentHandoffNote: state.daily.parentHandoffNote || '',
+      courseRecord: clone(state.daily.courseRecord || { channels: [], attachments: [], note: '' }),
       feedback: existing?.feedback || '', previousStatus: existing?.previousStatus || '',
       previousSubmittedAt: existing?.previousSubmittedAt || '',
     };
@@ -6531,6 +6684,7 @@
         parentStatus: state.daily.parentStatus,
         parentHandoffConfirmed: Boolean(state.daily.parentHandoffConfirmed),
         parentHandoffNote: state.daily.parentHandoffNote || '',
+        courseRecord: clone(state.daily.courseRecord || { channels: [], attachments: [], note: '' }),
         summary: clone(state.daily.summary || {}),
         status: submission.status === 'draft' ? 'draft' : 'submitted',
         submittedAt: submission.submittedAt || '',
@@ -6600,6 +6754,10 @@
         const item = operation.evidenceByCheck?.[key];
         if (item) await upload({ item, kpi: 6, description: `${config.label}${item.action ? `：${item.action}` : ''}`, forType: `env_${key}`, attachmentId: item.id || `env_${key}` });
       }
+    }
+    const courseRecord = context.date === state.daily.date && context.teacher === state.context.teacher ? state.daily.courseRecord : state.submissions.find(item => item.date === context.date && item.teacher === context.teacher)?.courseRecord;
+    for (const item of courseRecord?.attachments || []) {
+      await upload({ item, kpi: 2, description: '今日課程照片分享截圖', forType: 'v2-course-record', attachmentId: item.id });
     }
     return attachments;
   }
@@ -6759,6 +6917,7 @@
   }
 
   async function submitDaily() {
+    if (integrationRuntime.courseRecordUploading) { toast('正在保存課程截圖，請完成後再送出', 'warning'); return; }
     if (dailySubmitInFlight) return;
     const form = $('#daily-summary-form');
     if (form) saveDailySummaryForm(form, false);
@@ -6832,6 +6991,7 @@
       parentStatus: daily.parentStatus || '',
       parentHandoffConfirmed: Boolean(daily.parentHandoffConfirmed),
       parentHandoffNote: daily.parentHandoffNote || '',
+      ...(daily.courseRecord?.channels?.length || daily.courseRecord?.attachments?.length || daily.courseRecord?.note ? { courseRecord: daily.courseRecord } : {}),
       activities: state.activities.filter(item => item.date === date && item.teacher === teacher && item.type !== 'lessonprep'),
       studentCases: state.studentCases.filter(item => item.date === date && item.teacher === teacher),
       contacts: state.contacts.filter(item => item.date === date && item.teacher === teacher),
@@ -7999,6 +8159,11 @@
       state.ui.route = defaultRoute(state.ui.role);
       closeDialog(); closeDrawer(); persist(); renderApp();
     }
+    else if (action === 'remove-course-record-attachment') {
+      if (integrationRuntime.courseRecordUploading) { toast('正在保存截圖，請稍候再移除', 'warning'); return; }
+      state.daily.courseRecord.attachments = state.daily.courseRecord.attachments.filter(item => item.id !== control.dataset.attachmentId);
+      markDailyNeedsResubmit(); persist(); scheduleDailyCloudDraftSync(); renderApp();
+    }
     else if (action === 'today-tab') {
       state.ui.todayTab = control.dataset.tab;
       persist(); renderApp();
@@ -8474,6 +8639,8 @@
       toast(control.checked ? '正式送出已啟用；送出時會核對老師帳號' : '已切回審查模式，不會通知真人主管', 'success');
     }
     if (change === 'prep-files') await handlePrepFiles(control);
+    if (change === 'course-record-files') await handleCourseRecordFiles(control);
+    if (change === 'course-record-channel') { saveCourseRecordForm(control.closest('form')); renderApp(); }
     if (change === 'operation-photo') await handleOperationPhoto(control);
     if (change === 'operation-status') toggleOperationStatus(control);
     if (change === 'parent-handoff-confirmed') {
@@ -8505,6 +8672,7 @@
     const managerEvaluationForm = event.target.closest('#manager-evaluation-form');
     if (managerEvaluationForm) managerEvaluationForm.dataset.dirty = 'true';
     if (event.target.closest('#activity-form, #evidence-form, #plan-form, [data-draft-form]')) scheduleCurrentDrawerDraft();
+    if (event.target.matches('[data-input="course-record-note"]')) saveCourseRecordForm(event.target.closest('form'));
     const dailyForm = event.target.closest('#daily-summary-form');
     if (dailyForm) {
       const data = new FormData(dailyForm);
@@ -8614,7 +8782,11 @@
   if (openedFromNotification && initialSession?.role === 'teacher') state.ui.route = 'records';
   if (openedFromNotification && ['manager', 'admin'].includes(initialSession?.role)) state.ui.route = 'dashboard';
   renderApp();
-  localMediaRestoreInFlight = restoreLocalAttachments().catch(() => {
+  localMediaRestoreInFlight = restoreLocalAttachments().then(result => {
+    if (result?.restored && state.ui.role === 'teacher' && state.ui.route === 'today'
+      && ['course-record', 'submit'].includes(state.ui.todayTab) && !document.activeElement?.matches('input, textarea, select')) renderApp();
+    return result;
+  }).catch(() => {
     runtimeHealth.mediaPersistWarning = '附件暫存未完整恢復，請先保留原檔並重新整理';
     refreshSystemStatusNotice();
   }).finally(() => { localMediaRestoreInFlight = null; });

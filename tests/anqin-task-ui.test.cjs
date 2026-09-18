@@ -52,7 +52,18 @@ const activeTaskContext = vm.createContext({
 });
 vm.runInContext(activeTaskSource, activeTaskContext);
 assert.deepEqual(Array.from(activeTaskContext.activeTaskRecords()).map(item => item.id), ['manual'], '退役的學生與親師追蹤待辦不得出現在新待辦流程');
-const todayTabsSource = source.slice(source.indexOf('const TODAY_TABS'), source.indexOf('const ACTIVITY_TYPES'));
+const todayTabsSource = source.match(/const TODAY_TABS = (\[[\s\S]*?\]);/)[1];
+const todayTabs = vm.runInNewContext(todayTabsSource);
+assert.equal(todayTabs.length, 5, '今日紀錄固定五項');
+assert.equal(todayTabs[4].key, 'course-record', '第五項固定為課程紀錄');
+assert.equal(todayTabs[4].label, '課程紀錄');
+assert.match(styles, /\.workflow-tabs\s*\{[^}]*grid-auto-flow:\s*column;[^}]*grid-auto-columns:\s*minmax\(0,\s*1fr\)/, '五項今日分頁需等寬且可縮至手機寬度');
+const courseFormSource = source.slice(source.indexOf('function renderTodayCourseRecord('), source.indexOf('function saveCourseRecordForm('));
+assert.match(courseFormSource, /data-form="course-record"/, '課程紀錄需有獨立表單');
+assert.match(courseFormSource, /name="channels" value="group"[\s\S]*name="channels" value="parent_app"/, '老師可選群組或家長通');
+assert.match(courseFormSource, /id="course-record-files" type="file" accept="image\/\*" multiple/, '課程分享證據只接受圖片，可加入多張');
+assert.match(courseFormSource, /備註｜課程過程紀錄很重要/, '固定提醒不可被當成老師補填內容');
+assert.match(courseFormSource, /補充備註（選填）/, '額外補充維持選填');
 const managerNavSource = source.slice(source.indexOf('const MANAGER_NAV'), source.indexOf('const TODAY_TABS'));
 assert.doesNotMatch(todayTabsSource, /key: 'students'/, '今日流程不得再顯示學生追蹤分頁');
 assert.doesNotMatch(managerNavSource, /route: 'students'/, '主管導覽不得再顯示學生追蹤入口');
@@ -121,8 +132,8 @@ assert.match(source, /function applyPreviewReviewContext\(/, '安親審查模式
 assert.match(source, /if \(!applyPreviewReviewContext\(control\.dataset\.role\)\) state\.ui\.role = control\.dataset\.role/, '切換審查角色時必須同步身份範圍');
 assert.match(source, /applyPreviewReviewContext\(LOCAL_REVIEW_ROLE\)/, '網址指定主管視角時首次載入就必須套用正確身份');
 assert.match(source, /GLOBAL_MANAGER_NICKNAMES\.some\(name => sameReviewIdentity\(name, managerNickname\)\)/, '小魚在審查與正式登入都必須擁有全教室檢視範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260916-reliability-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260916-reliability-1/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20260918-course-record-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20260918-course-record-1/, '登入備援路徑也必須避開舊版快取');
 
 const startupSafetySource = source.slice(source.indexOf('function stripEmbeddedMediaJson('), source.indexOf('function loadState()'));
 const startupSafetyContext = vm.createContext({ JSON, Number, Set });

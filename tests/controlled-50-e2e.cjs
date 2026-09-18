@@ -146,14 +146,19 @@ async function scenario(browser, spec) {
     if (spec.flow.startsWith('anqin')) {
       await page.goto(origin + '/contract.html');
       const uploaded = [];
-      for (const photo of photos) {
-        const params = { nickname, date: today, kpi: 1, mimeType: photo.mimeType, base64: photo.buffer.toString('base64') };
+      for (const [index, photo] of photos.entries()) {
+        const params = { nickname, date: today, kpi: index === 0 ? 2 : 1, mimeType: photo.mimeType, base64: photo.buffer.toString('base64') };
         let response = await page.evaluate(p => API.uploadPhoto(p), params);
         if (!response.ok) { faultEnabled = false; response = await page.evaluate(p => API.uploadPhoto(p), params); }
         assert.equal(response.ok, true, JSON.stringify(response));
-        uploaded.push({ fileId: response.fileId, url: response.url, name: photo.name, mimeType: photo.mimeType, kpi: 1 });
+        uploaded.push({ fileId: response.fileId, url: response.url, name: photo.name, mimeType: photo.mimeType, kpi: index === 0 ? 2 : 1 });
       }
-      const params = { nickname, date: today, reflection: spec.text, attachments: uploaded, submitted: true };
+      const proofId = `course-proof-${spec.id}`;
+      Object.assign(uploaded[0], { attachmentId: proofId, forType: 'v2-course-record', type: 'photo' });
+      const proof = uploaded[0];
+      const courseRecord = { channels: ['group'], note: '', attachments: [{ id: proofId, fileName: proof.name, mimeType: proof.mimeType, cloudFileId: proof.fileId, cloudUrl: proof.url, uploadStatus: 'uploaded' }] };
+      const params = { nickname, date: today, reflection: spec.text, attachments: uploaded, submitted: true,
+        kpi6_data: { v2_snapshot: { schema: 'anqin-v2', submission: { teacher: nickname, date: today, status: 'pending', courseRecord } } } };
       let saved = spec.method === 'double-submit'
         ? await page.evaluate(async p => { const both = await Promise.all([API.saveLog(p), API.saveLog(p)]); if (!both.every(result => result.ok)) throw new Error('double submit failed'); return both[0]; }, params)
         : await page.evaluate(p => API.saveLog(p), params);
@@ -246,6 +251,10 @@ async function scenario(browser, spec) {
       const result = await page.evaluate(p => API.getLog(p), { nickname, date: today });
       assert.equal(result.ok, true, JSON.stringify(result));
       assert.equal(result.log.reflection, spec.text);
+      const record = typeof result.log.kpi6_data === 'string' ? JSON.parse(result.log.kpi6_data) : result.log.kpi6_data;
+      const course = record.v2_snapshot.submission.courseRecord;
+      assert.deepEqual(course.channels, ['group']);
+      assert.equal(course.attachments.length, 1, 'course screenshot survives saved-log reload');
     } else {
       await page.waitForFunction(() => document.querySelector('#app')?.children.length > 0 && !document.body.innerText.includes('正在讀取正式資料'));
       if (spec.flow.endsWith('prep')) await nav('prep');

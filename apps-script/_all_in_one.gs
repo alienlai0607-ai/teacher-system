@@ -21,7 +21,7 @@
  * 5. 把網址貼到前端 shared/config.js 的 API_URL
  */
 
-const KPI_RELEASE_VERSION_ = '20260916-reliability-1';
+const KPI_RELEASE_VERSION_ = '20260918-course-record-1';
 
 // ============ 路由 ============
 function doGet(e) {
@@ -2377,6 +2377,8 @@ function saveLogRecord_(params) {
     return { ok: false, code: 'ALREADY_SUBMITTED', error: '此日紀錄已正式送出，舊草稿未覆蓋；如需修改，請開啟已送出的紀錄' };
   }
   if (existing && recordConflict_(params.base_revision, existing.record_revision || existing.updated_at)) return recordConflictResult_();
+  const courseRecordError = validateAnqinCourseRecord_(params, user);
+  if (courseRecordError) return courseRecordError;
   ensureHeaders(getSheet(SHEET_NAMES.LOGS), ['record_revision', 'last_request_id', 'delivery_state', 'delivery_error', 'evidence_state', 'delivery_attempted_at']);
 
   // ===== 補繳判定 =====
@@ -2474,6 +2476,51 @@ function saveLogRecord_(params) {
   logSystem(nickname, 'save_log', log_id, { date });
 
   return { ok: true, log_id, revision: data.record_revision, msg: '已儲存', is_makeup: isMakeup === true, makeup_remaining: makeupRemaining };
+}
+
+/** Course-sharing proof uses the same uploaded originals as the daily PDF. */
+function anqinCourseFileId_(attachment) {
+  if (!attachment || typeof attachment !== 'object') return '';
+  const explicit = String(attachment.cloudFileId || attachment.fileId || '').trim();
+  const url = String(attachment.cloudUrl || attachment.url || '').trim();
+  const match = url.match(/^https:\/\/drive\.google\.com\/file\/d\/([A-Za-z0-9_-]+)(?:\/[^\s"'<>]*)?$/);
+  if (url && !match) return '';
+  if (explicit && !/^[A-Za-z0-9_-]+$/.test(explicit)) return '';
+  if (explicit && match && explicit !== match[1]) return '';
+  return explicit || (match ? match[1] : '');
+}
+
+function anqinCourseScreenshots_(record, attachments) {
+  const submitted = Array.isArray(attachments) ? attachments : [];
+  const screenshots = record && Array.isArray(record.attachments) ? record.attachments : [];
+  return screenshots.filter(function (item) {
+    if (!item || !item.id || item.legacyMissing || item.placeholder || !/^image\/[a-z0-9.+-]+$/i.test(String(item.mimeType || ''))) return false;
+    const fileId = anqinCourseFileId_(item);
+    if (!fileId) return false;
+    return submitted.some(function (attachment) {
+      return attachment && attachment.forType === 'v2-course-record' && attachment.type === 'photo'
+        && String(attachment.attachmentId || '') === String(item.id)
+        && /^image\/[a-z0-9.+-]+$/i.test(String(attachment.mimeType || ''))
+        && Boolean(attachment.fileId) && Boolean(attachment.url)
+        && anqinCourseFileId_({ fileId: attachment.fileId, url: attachment.url }) === fileId;
+    });
+  });
+}
+
+function validateAnqinCourseRecord_(params, user) {
+  // Historical reports and optional weekend entries keep their original rules.
+  if (params.submitted !== true || String(params.date) < '2026-09-18' || isKpiWeekend_(params.date)) return null;
+  const kpi6 = parseJsonField(params.kpi6_data) || {};
+  const snapshot = kpi6.v2_snapshot;
+  if (!isAnqinUser(user) && (!snapshot || snapshot.schema !== 'anqin-v2')) return null;
+  const submission = snapshot && snapshot.schema === 'anqin-v2' && snapshot.submission;
+  const record = submission && submission.courseRecord;
+  const failure = { ok: false, code: 'COURSE_RECORD_REQUIRED', error: '請完成課程紀錄：確認今日課程照片已分享到群組或家長通，並上傳至少一張分享截圖後再送出' };
+  if (!submission || submission.date !== params.date || !record || !Array.isArray(record.channels)
+      || !record.channels.length || !record.channels.every(function (channel) { return channel === 'group' || channel === 'parent_app'; })) return failure;
+  const screenshots = Array.isArray(record.attachments) ? record.attachments : [];
+  if (!screenshots.length || anqinCourseScreenshots_(record, parseJsonField(params.attachments)).length !== screenshots.length) return failure;
+  return null;
 }
 
 /**
@@ -4462,6 +4509,194 @@ function runProductionIntegrityCheck(params) {
   };
 }
 
+function courseRecordQaAdmin_() {
+  const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  const actor = email ? findUserByEmail(email) : null;
+  if (!actor || actor.role !== 'admin' || actor.status !== 'active') throw new Error('須由正式啟用管理員在編輯器執行課程紀錄驗收');
+  return actor;
+}
+
+/** Editor-only; never creates a user, submits a real teacher's log or sends notifications. */
+function verifyCourseRecordDeliveryFromEditor() {
+  const actor = courseRecordQaAdmin_();
+  const runId = 'QA-COURSE-' + Utilities.getUuid();
+  const props = PropertiesService.getScriptProperties();
+  const propertyKey = 'KPI_COURSE_QA_PENDING_' + runId;
+  let date = todayStr();
+  while (isKpiWeekend_(date)) date = addDaysStr_(date, -1);
+  if (date < '2026-09-18') throw new Error('驗收日期須在課程紀錄啟用日之後');
+  if (findObject(SHEET_NAMES.LOGS, 'log_id', runId)) throw new Error('驗收編號已存在，不可覆蓋');
+  const registration = { version: 2, created_at: nowIso(), photo_attempted: false, pdf_attempted: false };
+  props.setProperty(propertyKey, JSON.stringify(registration));
+  const checks = [];
+  let stage = 'private_screenshot';
+  let artifact = null;
+  let complete = false;
+  let cleanup;
+  function require(condition, message) { if (!condition) throw new Error(message); }
+  function passed(id) { checks.push({ id: id, ok: true }); }
+  try {
+    const folder = getOrCreateChildFolder_(getEvidenceRootFolder_(), '_系統健康檢查');
+    // Opaque brand-orange pixel, enlarged by pdfLogCard_ for visual verification.
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGN4MdsGAAQuAcDDaEQlAAAAAElFTkSuQmCC';
+    registration.photo_attempted = true;
+    props.setProperty(propertyKey, JSON.stringify(registration));
+    const photo = folder.createFile(Utilities.newBlob(Utilities.base64Decode(png), 'image/png', runId + '-photo.png'));
+    registration.photo_id = photo.getId();
+    props.setProperty(propertyKey, JSON.stringify(registration));
+    secureKpiDriveItem_(photo, actor, 'anqin', []);
+    assertKpiFileReadable_(photo, actor, 'anqin');
+    require(Utilities.base64Encode(DriveApp.getFileById(photo.getId()).getBlob().getBytes()) === png, 'Drive 截圖原始內容不一致');
+    passed(stage);
+
+    stage = 'required_validation';
+    const fakeUser = { nickname: runId, role: 'teacher', department: '北區教室', status: 'active' };
+    const screenshot = { id: runId + '-SCREENSHOT', fileName: photo.getName(), mimeType: 'image/png', cloudFileId: photo.getId(), cloudUrl: 'https://drive.google.com/file/d/' + photo.getId() + '/view' };
+    const record = { channels: ['group', 'parent_app'], attachments: [screenshot], note: '系統驗收：課程照片分享截圖' };
+    const snapshot = { schema: 'anqin-v2', version: 1, submission: { id: runId + '-SUBMISSION', teacher: runId, date: date, courseRecord: record }, daily: { courseRecord: record } };
+    const payload = { nickname: runId, date: date, submitted: true, kpi6_data: { v2_snapshot: snapshot }, attachments: [
+      { type: 'photo', forType: 'v2-course-record', attachmentId: screenshot.id, fileId: photo.getId(), url: screenshot.cloudUrl, fileName: screenshot.fileName, mimeType: 'image/png', kpi: 2, description: '課程紀錄分享截圖（系統驗收）' }
+    ] };
+    require(!validateAnqinCourseRecord_(payload, fakeUser), '合法課程紀錄未通過正式驗證');
+    const missingChannel = JSON.parse(JSON.stringify(payload));
+    missingChannel.kpi6_data.v2_snapshot.submission.courseRecord.channels = [];
+    require((validateAnqinCourseRecord_(missingChannel, fakeUser) || {}).code === 'COURSE_RECORD_REQUIRED', '缺分享管道未被正式驗證拒絕');
+    const missingProof = JSON.parse(JSON.stringify(payload));
+    missingProof.kpi6_data.v2_snapshot.submission.courseRecord.attachments = [];
+    require((validateAnqinCourseRecord_(missingProof, fakeUser) || {}).code === 'COURSE_RECORD_REQUIRED', '缺截圖未被正式驗證拒絕');
+    passed(stage);
+
+    stage = 'snapshot_roundtrip';
+    const stored = withRecordWriteLock_(function () {
+      require(!findObject(SHEET_NAMES.LOGS, 'log_id', runId), '驗收編號已存在，不可覆蓋');
+      appendRow(SHEET_NAMES.LOGS, { log_id: runId, nickname: runId, date: date, department: fakeUser.department, role: 'teacher',
+        kpi6_data: payload.kpi6_data, attachments: payload.attachments, reflection: '僅系統驗收，非真實老師日報',
+        submitted_at: '', delivery_state: '', evidence_state: '', created_at: nowIso(), updated_at: nowIso(), locked: false });
+      SpreadsheetApp.flush();
+      const inserted = findObject(SHEET_NAMES.LOGS, 'log_id', runId);
+      require(inserted && inserted.nickname === runId, '唯一 QA 紀錄未能讀回');
+      const restored = parseJsonField(inserted.kpi6_data).v2_snapshot;
+      require(JSON.stringify(restored.submission.courseRecord) === JSON.stringify(record), '課程紀錄第一次讀回不一致');
+      require(anqinCourseScreenshots_(restored.submission.courseRecord, parseJsonField(inserted.attachments)).length === 1, '第一次讀回遺失截圖關聯');
+      restored.submission.courseRecord.note = '系統驗收：修改後內容已讀回';
+      restored.daily.courseRecord.note = restored.submission.courseRecord.note;
+      const changed = Object.assign({}, payload, { kpi6_data: { v2_snapshot: restored } });
+      require(!validateAnqinCourseRecord_(changed, fakeUser), '修改後課程紀錄未通過正式驗證');
+      updateRow(SHEET_NAMES.LOGS, inserted._row, { kpi6_data: changed.kpi6_data, updated_at: nowIso() });
+      SpreadsheetApp.flush();
+      const updated = findObject(SHEET_NAMES.LOGS, 'log_id', runId);
+      const updatedSnapshot = parseJsonField(updated.kpi6_data).v2_snapshot;
+      require(updatedSnapshot.submission.courseRecord.note === restored.submission.courseRecord.note, '課程紀錄第二次讀回不一致');
+      require(anqinCourseScreenshots_(updatedSnapshot.submission.courseRecord, parseJsonField(updated.attachments)).length === 1, '修改後遺失截圖關聯');
+      return { ok: true, log: updated };
+    });
+    require(stored && stored.ok, stored && stored.error || '驗收寫入未完成');
+    passed(stage);
+
+    stage = 'pdf_conversion';
+    const card = pdfLogCard_(stored.log);
+    require(card.indexOf('今日課程照片已分享到群組、家長通') >= 0 && card.indexOf('系統驗收：修改後內容已讀回') >= 0, 'PDF HTML 遺失課程紀錄文字');
+    require(/<img[^>]+src="data:image\/(?:png|jpeg|jpg|gif);base64,/.test(card), 'PDF HTML 未嵌入真實 Drive 截圖');
+    const html = '<!doctype html><html><head><meta charset="UTF-8"></head><body><h2>課程紀錄交付驗收（合成資料）</h2>' + card + '</body></html>';
+    const pdfBlob = Utilities.newBlob(html, 'text/html', runId + '.html').getAs('application/pdf').setName(runId + '-review.pdf');
+    registration.pdf_attempted = true;
+    props.setProperty(propertyKey, JSON.stringify(registration));
+    const pdf = folder.createFile(pdfBlob);
+    registration.pdf_id = pdf.getId();
+    props.setProperty(propertyKey, JSON.stringify(registration));
+    secureKpiDriveItem_(pdf, actor, 'anqin', []);
+    assertKpiFileReadable_(pdf, actor, 'anqin');
+    const bytes = pdf.getBlob().getBytes();
+    require(bytes.length > 5 && String.fromCharCode.apply(null, bytes.slice(0, 5)) === '%PDF-', 'Google 未產生有效 PDF');
+    artifact = { file_id: pdf.getId(), url: 'https://drive.google.com/file/d/' + pdf.getId() + '/view', file_name: pdf.getName(), private: true, cleanup_pending: true };
+    passed(stage);
+    complete = true;
+  } catch (error) {
+    checks.push({ id: stage, ok: false, error: String(error && error.message || error) });
+  } finally {
+    cleanup = cleanupCourseRecordQaRun_(runId, complete);
+  }
+  const result = { ok: complete && cleanup.ok, run_id: runId, checks: checks, cleanup: cleanup, artifact: artifact,
+    scope: 'formal validator, synthetic Sheets roundtrip, private Drive original and Google PDF conversion; no teacher submission or notification',
+    cleanup_function: 'cleanupCourseRecordDeliveryFromEditor' };
+  console.log(JSON.stringify(result));
+  return result;
+}
+
+function cleanupCourseRecordQaRun_(runId, keepPdf) {
+  if (!/^QA-COURSE-[a-f0-9-]{36}$/.test(String(runId))) throw new Error('拒絕非課程驗收編號');
+  const props = PropertiesService.getScriptProperties();
+  const key = 'KPI_COURSE_QA_PENDING_' + runId;
+  if (!props.getProperty(key)) throw new Error('找不到此課程驗收登記');
+  const registration = JSON.parse(props.getProperty(key));
+  if (!registration || typeof registration !== 'object') throw new Error('課程驗收登記格式不正確');
+  const errors = [];
+  let rowAbsent = false;
+  let retainedPdf = false;
+  let filesTrashed = 0;
+  try {
+    const result = withRecordWriteLock_(function () {
+      SpreadsheetApp.flush();
+      const row = findObject(SHEET_NAMES.LOGS, 'log_id', runId);
+      if (row) {
+        if (row.nickname !== runId) throw new Error('拒絕清除非本次合成資料列');
+        deleteRow(SHEET_NAMES.LOGS, row._row);
+      }
+      SpreadsheetApp.flush();
+      return { ok: findRow(SHEET_NAMES.LOGS, 'log_id', runId) < 0 };
+    });
+    if (!result || !result.ok) throw new Error('QA 日報清理未完成');
+    rowAbsent = true;
+  } catch (error) { errors.push(String(error && error.message || error)); }
+  [['photo', '-photo.png'], ['pdf', '-review.pdf']].forEach(function (entry) {
+    const kind = entry[0];
+    const expectedName = runId + entry[1];
+    const idKey = kind + '_id';
+    if (registration.version === 2 && registration[kind + '_attempted'] === false && !registration[idKey]) return;
+    try {
+      if (!registration[idKey]) {
+        // Only interrupted/legacy runs need search recovery. Include trashed
+        // originals; an empty search cannot prove a file was never created.
+        const matches = [];
+        const files = DriveApp.searchFiles("title contains '" + runId + "'");
+        while (files.hasNext()) {
+          const candidate = files.next();
+          if (candidate.getName() === expectedName) matches.push(candidate);
+        }
+        if (matches.length !== 1) throw new Error('QA ' + kind + ' 原檔編號尚未確認，保留清理登記');
+        registration[idKey] = matches[0].getId();
+        props.setProperty(key, JSON.stringify(registration));
+      }
+      const file = DriveApp.getFileById(registration[idKey]);
+      if (!file || file.getId() !== registration[idKey] || file.getName() !== expectedName) throw new Error('拒絕清除編號或檔名不符的 QA 原檔');
+      if (file.isTrashed()) return;
+      if (keepPdf && rowAbsent && kind === 'pdf') { retainedPdf = true; return; }
+      file.setTrashed(true);
+      if (!file.isTrashed()) throw new Error('QA 檔案清理未完成');
+      filesTrashed++;
+    } catch (error) { errors.push(String(error && error.message || error)); }
+  });
+  if (!errors.length && !retainedPdf) {
+    try { props.deleteProperty(key); }
+    catch (error) { errors.push(String(error && error.message || error)); }
+  }
+  return { ok: errors.length === 0, row_absent: rowAbsent, files_trashed: filesTrashed, pdf_retained_for_review: retainedPdf, cleanup_pending: retainedPdf || errors.length > 0, errors: errors };
+}
+
+/** After downloading the synthetic PDF, remove only registered exact QA artifacts. */
+function cleanupCourseRecordDeliveryFromEditor() {
+  courseRecordQaAdmin_();
+  const prefix = 'KPI_COURSE_QA_PENDING_';
+  const properties = PropertiesService.getScriptProperties().getProperties();
+  const runs = Object.keys(properties).filter(function (key) { return key.indexOf(prefix) === 0; }).map(function (key) {
+    const runId = key.slice(prefix.length);
+    return { run_id: runId, cleanup: cleanupCourseRecordQaRun_(runId, false) };
+  });
+  const result = { ok: runs.every(function (run) { return run.cleanup.ok; }), runs: runs };
+  console.log(JSON.stringify(result));
+  return result;
+}
+
 /** 管理員一鍵補齊每日 PDF 與事項提醒排程。 */
 function setupSystemAutomation(params) {
   const user = systemMaintenanceUser_(params);
@@ -5703,6 +5938,16 @@ function pdfLogCard_(l) {
   const legacyStudentTracking = (Array.isArray(k5.special_students) && k5.special_students.length ? k5.special_students.join('、') + '：' : '') + (k5.student_special || '');
   if (legacyStudentTracking) h += pdfRow_('📦 舊版學生追蹤（歷史）', legacyStudentTracking);
 
+  const courseRecord = k6.v2_snapshot && k6.v2_snapshot.submission && k6.v2_snapshot.submission.courseRecord;
+  if (courseRecord) {
+    const channels = Array.isArray(courseRecord.channels) ? courseRecord.channels : [];
+    const sharedTo = [channels.indexOf('group') >= 0 ? '群組' : '', channels.indexOf('parent_app') >= 0 ? '家長通' : ''].filter(Boolean);
+    h += pdfRow_('📷 課程紀錄', sharedTo.length ? '今日課程照片已分享到' + sharedTo.join('、') : '尚未確認分享管道');
+    const screenshotCount = anqinCourseScreenshots_(courseRecord, attachments).length;
+    h += pdfRow_('分享截圖佐證', screenshotCount ? screenshotCount + ' 張（見下方照片與成果附件）' : '尚未附上已上傳的截圖');
+    h += pdfRow_('課程紀錄備註', courseRecord.note);
+  }
+
   // 工作紀錄
   h += pdfRow_('✔️ 今日完成', k6.today_done);
   h += pdfRow_('📌 明日待辦', k6.tomorrow_todo);
@@ -5726,7 +5971,7 @@ function pdfLogCard_(l) {
         if (index > 0 && index % 4 === 0) h += '</tr><tr>';
         h += '<td style="padding:3px; vertical-align:top; text-align:center;">'
            + '<img src="' + item.uri + '" style="width:150px; border-radius:6px;"><br>'
-           + '<span style="font-size:9px; color:#999;">' + (KPI_LABEL[item.photo.kpi] || '') + '</span></td>';
+           + '<span style="font-size:9px; color:#999;">' + (item.photo.forType === 'v2-course-record' ? '課程紀錄截圖' : (KPI_LABEL[item.photo.kpi] || '')) + '</span></td>';
       });
       h += '</tr></table>';
     }
