@@ -953,6 +953,11 @@ input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; min-hei
 .evidence-attachment-main { min-width: 0; display: grid; gap: 6px; }
 .evidence-attachment-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .evidence-attachment-head strong { min-width: 0; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.upload-state { width: fit-content; padding: 2px 7px; border-radius: 999px; font-size: 11px; font-weight: 800; }
+.upload-state.is-ready { color: var(--green); background: var(--green-soft); }
+.upload-state.is-uploading { color: var(--blue); background: var(--blue-soft); }
+.upload-state.is-retry { color: var(--yellow); background: var(--yellow-soft); }
+.upload-state.is-warning { color: var(--red); background: var(--red-soft); }
 .evidence-attachment-main input { min-height: 38px; font-size: 12px; }
 .evidence-attachment-remove { width: 32px; height: 32px; }
 

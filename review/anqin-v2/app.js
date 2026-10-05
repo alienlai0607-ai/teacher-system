@@ -3623,13 +3623,20 @@
         ? `<img src="${esc(previewUrl)}"${cloudPreviewImageAttrs(attachment)} alt="${esc(attachment.fileName)}">`
         : `<span class="evidence-attachment-file">${icon(attachment.mimeType === 'application/pdf' ? 'file-text' : 'file-check-2', 24)}</span>`;
       const cloudUrl = materialCloudUrl(attachment);
+      const uploadState = cloudUrl
+        ? '<small class="upload-state is-ready">已完成雲端上傳</small>'
+        : attachment.uploadStatus === 'uploading'
+          ? '<small class="upload-state is-uploading">正在背景上傳，可繼續填寫其他內容。</small>'
+          : attachment.uploadStatus === 'retry' || attachment.localMediaSaved
+            ? '<small class="upload-state is-retry">已保留在這台裝置，送出時會自動重試。</small>'
+            : '<small class="upload-state is-warning">附件尚未安全保存，請保留原檔。</small>';
       const fileName = cloudUrl
         ? `<a class="file-name-link" href="${esc(cloudUrl)}" target="_blank" rel="noopener noreferrer"><strong>${esc(attachment.fileName)}</strong>${icon('external-link', 13)}</a>`
         : `<strong>${esc(attachment.fileName)}</strong>`;
       return `<article class="evidence-attachment-item" data-attachment-id="${esc(attachment.id)}">
         <div class="evidence-attachment-preview">${preview}<span class="evidence-attachment-index">${index + 1}</span></div>
         <div class="evidence-attachment-main"><div class="evidence-attachment-head">${fileName}<span class="badge outline">${esc(attachment.size || '已加入')}</span></div>
-        ${attachment.legacyMissing ? '<small>舊附件原檔遺失，不影響儲存或送出。</small>' : !cloudUrl && attachment.localMediaSaved ? '<small>已保留在這台裝置，送出時會重試上傳。</small>' : !cloudUrl ? '<small>附件尚未安全保存，請保留原檔。</small>' : ''}${attachment.note ? `<small>舊版補充說明：${esc(attachment.note)}</small>` : ''}</div>
+        ${attachment.legacyMissing ? '<small>舊附件原檔遺失，不影響儲存或送出。</small>' : uploadState}${attachment.note ? `<small>舊版補充說明：${esc(attachment.note)}</small>` : ''}</div>
         ${editable ? `<button type="button" class="icon-button evidence-attachment-remove" data-action="remove-evidence-attachment" data-attachment-id="${esc(attachment.id)}" aria-label="移除 ${esc(attachment.fileName)}" title="移除">${icon('x', 15)}</button>` : ''}
       </article>`;
     }).join('')}</div>`;
@@ -3673,7 +3680,7 @@
       <div class="mt-16">
           <div class="evidence-upload-zone ${attachmentCount ? 'has-file' : ''}" id="evidence-upload-zone">
             <span class="evidence-upload-icon">${icon(attachmentCount ? 'images' : 'camera', 24)}</span>
-            <div class="evidence-upload-copy"><strong id="evidence-upload-title">${attachmentCount ? `已加入 ${attachmentCount} 份成果` : (isCrossDay ? '上傳今天完成的版本' : '成果照片／檔案')} <span class="required">*</span></strong><small>${isCrossDay ? `可一次選擇多份今日實際完成的教案、教材或版本檔案，最多 ${MAX_EVIDENCE_FILES} 份。` : `可一次選取多張照片，系統會自動壓縮並上傳；最多 ${MAX_EVIDENCE_FILES} 張。`}</small><span id="evidence-file-name">${attachmentCount ? esc(evidenceDraft.attachments.map(item => item.fileName).join('、')) : '尚未選擇檔案 · 單檔上限 25 MB'}</span></div>
+            <div class="evidence-upload-copy"><strong id="evidence-upload-title">${attachmentCount ? `已加入 ${attachmentCount} 份成果` : (isCrossDay ? '上傳今天完成的版本' : '成果照片／檔案')} <span class="required">*</span></strong><small>${isCrossDay ? `可一次選擇多份今日實際完成的教案、教材或版本檔案，最多 ${MAX_EVIDENCE_FILES} 份。` : `可一次選取多張照片，系統會自動壓縮並上傳；最多 ${MAX_EVIDENCE_FILES} 張。照片選好後會立即背景上傳，可繼續填寫其他內容。`}</small><span id="evidence-file-name">${attachmentCount ? esc(evidenceDraft.attachments.map(item => item.fileName).join('、')) : '尚未選擇檔案 · 單檔上限 25 MB'}</span></div>
             <div class="evidence-upload-actions">
               ${isCrossDay ? '' : `<label class="btn btn-primary evidence-file-button">${icon('camera', 16)}直接拍照<input id="evidence-camera" type="file" data-change="evidence-file" accept="image/*" capture="environment" aria-label="直接拍照"></label>`}
               <label class="btn ${isCrossDay ? 'btn-primary' : ''} evidence-file-button">${icon('folder-up', 16)}${isCrossDay ? '選擇版本檔案' : '從相簿／檔案多選'}<input id="evidence-file" type="file" multiple data-change="evidence-file" accept="image/*,.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx" aria-label="${isCrossDay ? '選擇一份或多份版本檔案' : '從相簿或檔案選擇一張或多張'}"></label>
@@ -6712,6 +6719,15 @@
     const activities = state.activities.filter(item => item.date === context.date && item.teacher === context.teacher && item.type !== 'lessonprep');
     const operation = state.operations?.date === context.date && state.operations?.dutyOwner === context.teacher ? state.operations : null;
     const attachments = [];
+    const itemsForProgress = [];
+    activities.forEach(activity => (activity.evidence || []).forEach(evidence => evidenceAttachments(evidence).forEach(item => itemsForProgress.push(item))));
+    if (operation) Object.values(operation.evidenceByCheck || {}).forEach(item => item && itemsForProgress.push(item));
+    const progressCourseRecord = context.date === state.daily.date && context.teacher === state.context.teacher
+      ? state.daily.courseRecord
+      : state.submissions.find(item => item.date === context.date && item.teacher === context.teacher)?.courseRecord;
+    (progressCourseRecord?.attachments || []).forEach(item => itemsForProgress.push(item));
+    const pendingUploadCount = itemsForProgress.filter(item => !item.legacyMissing && !materialCloudUrl(item)).length;
+    let completedUploadCount = 0;
     const upload = async ({ item, kpi, description, forType, activityId = '', evidenceId = '', attachmentId = '' }) => {
       const existingCloudUrl = materialCloudUrl(item);
       const isImage = String(item.mimeType || '').startsWith('image/');
@@ -6725,8 +6741,11 @@
         if (item.legacyMissing) return;
         throw new Error(`${item.fileName || '附件'}尚未上傳，請重新選擇檔案；文字草稿仍保留`);
       }
-      integrationRuntime.cloudMessage = `正在上傳 ${item.fileName || '照片'}`;
+      integrationRuntime.cloudMessage = pendingUploadCount
+        ? `正在確認照片上傳 ${completedUploadCount + 1}/${pendingUploadCount}`
+        : `正在確認 ${item.fileName || '照片'}`;
       updateSaveIndicator('saving', integrationRuntime.cloudMessage);
+      item.uploadStatus = 'uploading';
       const result = isImage
         ? await API.uploadPhoto({ nickname, date: context.date, kpi, mimeType: payload.mimeType, base64: payload.base64, description })
         : await API.uploadFile({ nickname, date: context.date, fileName: item.fileName, mimeType: item.mimeType || payload.mimeType, base64: payload.base64, category: 'evidence' });
@@ -6737,6 +6756,7 @@
       item.dataUrl = '';
       item.placeholder = false;
       item.uploadStatus = 'uploaded';
+      completedUploadCount += 1;
       await confirmLocalAttachmentUploaded(item);
       persist('附件已上傳，送出內容已保留');
       attachments.push({ type: isImage ? 'photo' : 'file', url: result.url, fileId: result.fileId, fileName: item.fileName || '成果附件', mimeType: item.mimeType || payload.mimeType || '', kpi, description, forType, activityId, evidenceId, attachmentId: attachmentId || item.id || '' });
@@ -7512,6 +7532,8 @@
         if (state.integration.cloudSyncEnabled && state.context.teacher === context.teacher) {
           const activity = state.activities.find(item => item.id === draft.activityId);
           updateSaveIndicator('saving', `正在上傳 ${file.name}`);
+          attachment.uploadStatus = 'uploading';
+          saveDraft();
           try {
             const payload = dataUrlPayload(dataUrl);
             const result = isImage
@@ -7897,6 +7919,8 @@
       markDailyNeedsResubmit(context.date, context.teacher);
       persist('班務照片已保留，等待雲端上傳');
       updateSaveIndicator('saving', `正在上傳${OPERATION_CHECKS[key].label}照片`);
+      current.uploadStatus = 'uploading';
+      persist('班務照片正在背景上傳，可繼續填寫');
       try {
         const cloudFile = await uploadCompressedPhoto(dataUrl, { kpi: 6, description: OPERATION_CHECKS[key].label, context });
         if (cloudFile) {

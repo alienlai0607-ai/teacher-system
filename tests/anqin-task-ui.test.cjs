@@ -458,6 +458,9 @@ assert.match(planMaterialUploadSource, /\.jpg`[\s\S]{0,260}mimeType: isImage \? 
 const evidenceUploadSource = source.slice(source.indexOf('async function handleEvidenceFile('), source.indexOf('function placeEvidencePin('));
 assert.match(evidenceUploadSource, /isImage \? await fileToPreview\(file\)[\s\S]*?await API.uploadPhoto\(/, '成果照片需在選取時壓縮並立即上傳');
 assert.ok(evidenceUploadSource.indexOf('saveDraft();') < evidenceUploadSource.indexOf('await API.uploadPhoto('), '成果附件與恢復位置需在上傳等待前先存入草稿');
+assert.match(source, /照片選好後會立即背景上傳，可繼續填寫其他內容/, '老師需清楚知道照片會提早在背景上傳');
+assert.match(source, /正在背景上傳，可繼續填寫其他內容/, '附件卡片需顯示背景上傳狀態');
+assert.match(source, /正在確認照片上傳 \$\{completedUploadCount \+ 1\}\/\$\{pendingUploadCount\}/, '最後送出若仍有照片需顯示明確進度');
 assert.match(evidenceUploadSource, /if \(!result\?\.ok\) throw[\s\S]*?applyCloudPreview\([\s\S]*?attachment.dataUrl = '';[\s\S]*?await confirmLocalAttachmentUploaded\(attachment\)/, '照片成功上傳後需保留當次預覽並清除本機草稿的大型內容，保留可恢復的雲端位置');
 assert.match(evidenceUploadSource, /duplicateIndex >= 0/, '未完成的成果附件必須能由同一原檔重新上傳修復');
 assert.match(source, /const MAX_DOCUMENT_FILE_BYTES = 25 \* 1024 \* 1024/, '文件上限需提高至 25 MB');
