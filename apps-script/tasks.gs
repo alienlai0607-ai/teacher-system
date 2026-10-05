@@ -305,8 +305,9 @@ function verifyPhotoBatchPerformanceFromEditor() {
   const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
   const admin = email ? findUserByEmail(email) : null;
   if (!admin || admin.role !== 'admin' || admin.status !== 'active') throw new Error('須由正式管理員執行驗收');
-  const endpoint = ScriptApp.getService().getUrl();
-  if (!endpoint) throw new Error('找不到已部署的 Web App 網址');
+  // 使用前端正式連線的固定部署網址。ScriptApp.getService().getUrl()
+  // 從編輯器執行時可能指向需要登入的 /dev，無法代表老師實際路徑。
+  const endpoint = 'https://script.google.com/macros/s/AKfycbyCO1dCIJEzTN6k1S-E3-key0T16pwd2P2_Alht76kYp3VocTjJ-_TC3xDqTxQ0bAKm/exec';
   const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL1WQAAAABJRU5ErkJggg==';
   const runId = 'QA-BATCH-' + Utilities.getUuid().slice(0, 8);
   const photos = [];
@@ -325,7 +326,14 @@ function verifyPhotoBatchPerformanceFromEditor() {
       method: 'post', contentType: 'text/plain', followRedirects: true, muteHttpExceptions: true,
       payload: JSON.stringify({ action: 'uploadPhotos', nickname: admin.nickname, date: todayStr(), photos: photos, session_token: issueSessionToken_(admin) }),
     });
-    response = JSON.parse(http.getContentText());
+    const responseText = http.getContentText();
+    try { response = JSON.parse(responseText); }
+    catch (error) {
+      response = {
+        ok: false,
+        error: 'HTTP ' + http.getResponseCode() + ': ' + responseText.slice(0, 160),
+      };
+    }
   } catch (error) {
     response = { ok: false, error: String(error && error.message || error) };
   } finally {
