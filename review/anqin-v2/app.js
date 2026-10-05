@@ -278,7 +278,7 @@
     { key: 'course-record', label: '課程紀錄', icon: 'camera' },
   ];
 
-  const COURSE_RECORD_NOTE = '請務必多拍攝今日上課過程，確保每位孩子都有入鏡，並盡可能從不同活動、互動與學習時刻留下多張照片。過程紀錄非常重要，請完整呈現孩子的參與與學習，不要只拍最後成果。完成後請將照片分享到群組或家長通，並在此附上已發布的截圖作為證據。';
+  const COURSE_RECORD_NOTE = '請務必多拍攝當日上課過程，確保每位孩子都有入鏡，並盡可能從不同活動、互動與學習時刻留下多張照片。過程紀錄非常重要，請完整呈現孩子的參與與學習，不要只拍最後成果。完成後請將照片分享到群組或家長通，並在此附上已發布的截圖作為證據。';
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -1283,7 +1283,130 @@
     }
   }
 
-  function rollWorkspaceToToday() {
+  function previousKpiWorkday(date = todayIso()) {
+    let previous = addDays(date, -1);
+    while (dailyKpiOptional(previous)) previous = addDays(previous, -1);
+    return previous;
+  }
+
+  function isNextWorkdayGraceDate(date = state.daily.date, today = todayIso()) {
+    return String(date || '') === previousKpiWorkday(today) && !dailyKpiOptional(date);
+  }
+
+  function activeGraceBackfill() {
+    return state.ui.role === 'teacher' && isNextWorkdayGraceDate(state.daily.date) && !state.daily.submittedAt;
+  }
+
+  function graceBackfillSubmission() {
+    const graceDate = previousKpiWorkday();
+    if (dailyKpiOptional(graceDate)) return null;
+    if (state.daily.date === graceDate && !state.daily.submittedAt) return { date: graceDate, active: true };
+    const submission = state.submissions.find(item => item.teacher === state.context.teacher && item.date === graceDate && item.status === 'draft');
+    return submission ? { ...submission, active: false } : null;
+  }
+
+  function operationHasDailyContent(operation) {
+    return Boolean(operation && (operation.confirmedAt || operation.exception || operation.action
+      || Object.values(operation.evidenceByCheck || {}).some(item => item?.fileName || item?.dataUrl || materialCloudUrl(item))));
+  }
+
+  function saveActiveDailyWorkspace() {
+    const date = String(state.daily?.date || '');
+    if (!date) return;
+    state.integration.dailyWorkspaces = state.integration.dailyWorkspaces || {};
+    state.integration.dailyWorkspaces[date] = {
+      daily: clone(state.daily),
+      operation: state.operations?.date === date ? clone(state.operations) : null,
+      weekly: clone(state.weekly),
+    };
+    const submission = state.submissions.find(item => item.teacher === state.context.teacher && item.date === date && item.status === 'draft');
+    if (submission) Object.assign(submission, {
+      activityIds: todayActivities().map(item => item.id),
+      contactIds: state.contacts.filter(item => item.teacher === state.context.teacher && item.date === date).map(item => item.id),
+      activitySnapshots: todayActivities().map(clone),
+      contactSnapshots: state.contacts.filter(item => item.teacher === state.context.teacher && item.date === date).map(clone),
+      keyResult: state.daily.summary?.keyResult || '',
+      followup: state.daily.summary?.followup || '',
+      tomorrowPriority: state.daily.summary?.tomorrowPriority || '',
+      teacherNote: state.daily.summary?.teacherNote || '',
+      parentStatus: state.daily.parentStatus || '',
+      parentHandoffConfirmed: Boolean(state.daily.parentHandoffConfirmed),
+      parentHandoffNote: state.daily.parentHandoffNote || '',
+      courseRecord: clone(state.daily.courseRecord || { channels: [], attachments: [], note: '' }),
+    });
+  }
+
+  function dailyWorkspaceFromSubmission(date) {
+    const seed = createSeed();
+    const submission = state.submissions.find(item => item.teacher === state.context.teacher && item.date === date);
+    if (!submission) return {
+      daily: { ...clone(seed.daily), date },
+      operation: { ...clone(seed.operations), id: `op_${date}_${state.context.teacher}`, date, room: state.context.department, dutyOwner: state.context.teacher },
+    };
+    const submitted = submission.status !== 'draft' && Boolean(submission.submittedAt);
+    const historicalOperation = (state.operationHistory || []).find(item => item.date === date && item.dutyOwner === state.context.teacher);
+    return {
+      daily: {
+        ...clone(seed.daily), date, status: submitted ? 'submitted' : 'draft', submittedAt: submitted ? submission.submittedAt : '',
+        summary: { keyResult: submission.keyResult || '', followup: submission.followup || '', tomorrowPriority: submission.tomorrowPriority || '', teacherNote: submission.teacherNote || '' },
+        parentStatus: submission.parentStatus || '', parentHandoffConfirmed: Boolean(submission.parentHandoffConfirmed), parentHandoffNote: submission.parentHandoffNote || '',
+        courseRecord: normalizeCourseRecord(clone(submission.courseRecord || {})),
+      },
+      operation: historicalOperation
+        ? clone(historicalOperation)
+        : { ...clone(seed.operations), id: `op_${date}_${state.context.teacher}`, date, room: state.context.department, dutyOwner: state.context.teacher },
+    };
+  }
+
+  function switchTeacherDailyDate(date) {
+    const today = todayIso();
+    const graceDate = previousKpiWorkday(today);
+    if (state.ui.role !== 'teacher' || ![today, graceDate].includes(date) || (date === graceDate && dailyKpiOptional(date))) return false;
+    if (dailySubmitInFlight || state.integration.pendingDailySubmission) {
+      toast('目前送出結果仍在確認，完成後才能切換日期', 'warning');
+      return false;
+    }
+    persistCurrentDrawerDraft(true);
+    if (date === today && state.daily.date < today) {
+      saveActiveDailyWorkspace();
+      const savedToday = state.integration.dailyWorkspaces?.[today]
+        ? clone(state.integration.dailyWorkspaces[today])
+        : null;
+      rollWorkspaceToToday(true);
+      if (savedToday) {
+        state.daily = savedToday.daily;
+        state.operations = savedToday.operation || dailyWorkspaceFromSubmission(today).operation;
+        state.weekly = savedToday.weekly || state.weekly;
+        state.operationHistory = (state.operationHistory || []).filter(item => item.id !== state.operations.id);
+      }
+      persist('已保留上個工作日的 KPI，並切回今天');
+      renderApp();
+      return true;
+    }
+    saveActiveDailyWorkspace();
+    const currentOperation = state.operations;
+    if (currentOperation?.date !== date && operationHasDailyContent(currentOperation)) {
+      const index = (state.operationHistory || []).findIndex(item => item.id === currentOperation.id);
+      if (index >= 0) state.operationHistory[index] = clone(currentOperation);
+      else state.operationHistory.unshift(clone(currentOperation));
+    }
+    const saved = state.integration.dailyWorkspaces?.[date];
+    const workspace = saved ? clone(saved) : dailyWorkspaceFromSubmission(date);
+    if (date === graceDate && !saved && !state.submissions.some(item => item.teacher === state.context.teacher && item.date === date && item.status === 'draft')) {
+      toast('上個工作日沒有可補寫的草稿', 'warning');
+      return false;
+    }
+    state.daily = workspace.daily;
+    state.operations = workspace.operation || dailyWorkspaceFromSubmission(date).operation;
+    state.operationHistory = (state.operationHistory || []).filter(item => item.id !== state.operations.id);
+    state.ui.route = 'today';
+    state.ui.todayTab = 'activities';
+    persist(date === graceDate ? '已開啟上個工作日的 KPI 草稿' : '已切回今天的 KPI');
+    renderApp();
+    return true;
+  }
+
+  function rollWorkspaceToToday(force = false) {
     const today = todayIso();
     const previousDate = String(state.daily?.date || '');
     if (!previousDate || previousDate >= today) return '';
@@ -1292,7 +1415,14 @@
     const cases = state.studentCases.filter(item => item.teacher === teacher && item.date === previousDate);
     const contacts = state.contacts.filter(item => item.teacher === teacher && item.date === previousDate);
     const existingSubmission = state.submissions.find(item => item.teacher === teacher && item.date === previousDate);
-    if (!existingSubmission && (activities.length || cases.length || contacts.length || state.daily.submittedAt || state.daily.courseRecord?.channels?.length || state.daily.courseRecord?.attachments?.length || state.daily.courseRecord?.note)) {
+    const alreadySubmitted = Boolean(state.daily.submittedAt || (existingSubmission?.status !== 'draft' && existingSubmission?.submittedAt));
+    const graceEligible = isNextWorkdayGraceDate(previousDate, today) && !alreadySubmitted;
+    if (graceEligible && !force) {
+      state.ui.route = 'today';
+      state.integration.graceDraftDate = previousDate;
+      return '';
+    }
+    if (!existingSubmission && (graceEligible || activities.length || cases.length || contacts.length || state.daily.submittedAt || state.daily.courseRecord?.channels?.length || state.daily.courseRecord?.attachments?.length || state.daily.courseRecord?.note)) {
       state.submissions.unshift({
         id: `draft_${previousDate.replaceAll('-', '')}_${backendNickname(teacher)}`,
         date: previousDate,
@@ -1317,7 +1447,7 @@
         feedback: '',
       });
     } else if (existingSubmission && ((state.integration.pendingDailySubmission?.teacher === teacher && state.integration.pendingDailySubmission?.date === previousDate)
-      || (existingSubmission.status === 'draft' && existingSubmission.previousStatus))) {
+      || existingSubmission.status === 'draft')) {
       // Keep newer local edits at rollover, including after an older send was confirmed.
       Object.assign(existingSubmission, {
         activityIds: activities.map(item => item.id),
@@ -1337,7 +1467,7 @@
       });
     }
     const operation = state.operations;
-    const hasOperationContent = operation?.date === previousDate && (operation.confirmedAt || Object.values(operation.evidenceByCheck || {}).some(item => item?.fileName));
+    const hasOperationContent = operation?.date === previousDate && operationHasDailyContent(operation);
     if (hasOperationContent && !(state.operationHistory || []).some(item => item.id === operation.id)) {
       state.operationHistory.unshift(clone(operation));
     }
@@ -1354,6 +1484,8 @@
     if (isoWeekString(previousDate) !== isoWeekString(today)) state.weekly = clone(seed.weekly);
     state.ui.todayTab = 'activities';
     state.ui.lastRolloverFrom = previousDate;
+    if (graceEligible) state.integration.graceDraftDate = previousDate;
+    else if (state.integration.graceDraftDate && state.integration.graceDraftDate !== previousKpiWorkday(today)) delete state.integration.graceDraftDate;
     return previousDate;
   }
 
@@ -2475,17 +2607,31 @@
     const completion = dailyCompletion();
     const needsResubmit = dailyNeedsResubmit();
     const tabStatus = todaySectionStatus();
-    const actions = `<button type="button" class="btn" data-action="open-contact">${icon('message-circle-plus', 16)}<span class="btn-label-mobile-hide">記錄孩子狀況</span></button><button type="button" class="btn" data-action="open-activity" data-type="lessonprep">${icon('notebook-tabs', 16)}<span class="btn-label-mobile-hide">新增備課檔案</span></button>`;
+    const graceActive = activeGraceBackfill();
+    const graceDraft = graceBackfillSubmission();
+    const dayWord = graceActive ? '上個工作日' : '今日';
+    const switchAction = graceActive
+      ? `<button type="button" class="btn" data-action="switch-daily-date" data-date="${todayIso()}">${icon('calendar-days', 16)}<span>先進入今天</span></button>`
+      : graceDraft && !graceDraft.active
+        ? `<button type="button" class="btn btn-primary" data-action="switch-daily-date" data-date="${esc(graceDraft.date)}">${icon('history', 16)}<span>補完上個工作日 KPI</span></button>`
+        : '';
+    const actions = `${switchAction}<button type="button" class="btn" data-action="open-contact">${icon('message-circle-plus', 16)}<span class="btn-label-mobile-hide">記錄孩子狀況</span></button><button type="button" class="btn" data-action="open-activity" data-type="lessonprep">${icon('notebook-tabs', 16)}<span class="btn-label-mobile-hide">新增備課檔案</span></button>`;
+    const graceNotice = graceActive
+      ? `<div class="notice-band warning next-workday-grace-notice">${icon('clock-3', 20)}<div><div class="notice-title">正在補寫上個工作日的 KPI，今天仍可正常交付</div><div class="notice-copy">寬限至今天結束；週五可於週一完成，不列補繳、不扣補繳分。照片與證據責任不順延，若當日未拍到必要照片，仍由老師自行負責。</div></div><button type="button" class="btn btn-small" data-action="switch-daily-date" data-date="${todayIso()}">先進入今天</button></div>`
+      : graceDraft && !graceDraft.active
+        ? `<div class="notice-band warning next-workday-grace-notice">${icon('clock-alert', 20)}<div><div class="notice-title">上個工作日的 KPI 尚未完成</div><div class="notice-copy">可在今天結束前補完；週五可於週一補交，不列補繳。照片與證據仍須符合原規則。</div></div><button type="button" class="btn btn-small btn-primary" data-action="switch-daily-date" data-date="${esc(graceDraft.date)}">現在補完</button></div>`
+        : '';
     return `<div class="page">
-      ${pageHead('今日工作紀錄', `${formatDate(state.daily.date)} · ${state.context.department} · ${state.context.teacher}`, actions)}
+      ${pageHead(graceActive ? '補寫上個工作日 KPI' : '今日工作紀錄', `${formatDate(state.daily.date)} · ${state.context.department} · ${state.context.teacher}`, actions)}
       ${renderGuideInvite()}
+      ${graceNotice}
       <div class="status-strip">
-        <div class="status-cell"><div class="status-label">${dailyKpiOptional() ? '今日填報' : '今日完成度'}</div><div class="status-value">${dailyKpiOptional() ? '免填' : `${completion}%`}</div><div class="status-note">${dailyKpiOptional() ? '週六、週日不需填 KPI' : state.daily.status === 'submitted' ? '已送出' : needsResubmit ? '待重新送出' : '草稿'}</div></div>
-        <div class="status-cell"><div class="status-label">今日課程</div><div class="status-value">${dailyKpiOptional() ? activities.length : `${Number(tracks.academic.covered || tracks.enrichment.covered)}/1`}</div><div class="status-note">${dailyKpiOptional() ? '自願記錄，不列缺交' : '學科內／學科外擇一'}</div></div>
+        <div class="status-cell"><div class="status-label">${dailyKpiOptional() ? `${dayWord}填報` : `${dayWord}完成度`}</div><div class="status-value">${dailyKpiOptional() ? '免填' : `${completion}%`}</div><div class="status-note">${dailyKpiOptional() ? '週六、週日不需填 KPI' : state.daily.status === 'submitted' ? '已送出' : needsResubmit ? '待重新送出' : graceActive ? '下個工作日正常交付' : '草稿'}</div></div>
+        <div class="status-cell"><div class="status-label">${dayWord}課程</div><div class="status-value">${dailyKpiOptional() ? activities.length : `${Number(tracks.academic.covered || tracks.enrichment.covered)}/1`}</div><div class="status-note">${dailyKpiOptional() ? '自願記錄，不列缺交' : '學科內／學科外擇一'}</div></div>
         <div class="status-cell"><div class="status-label">備課／成果</div><div class="status-value">${prepReady}/${prepRequired.length}</div><div class="status-note">成果 ${evidenceReadyCount}/${evidenceRequired.length} 筆</div></div>
         <div class="status-cell"><div class="status-label">待辦事項</div><div class="status-value">${openTasks().length}</div><div class="status-note">${openTasks().filter(item => item.priority === 'high').length} 項優先</div></div>
       </div>
-      <div class="workflow-tabs" role="tablist" aria-label="今日紀錄步驟">
+      <div class="workflow-tabs" role="tablist" aria-label="${dayWord}紀錄步驟">
         ${TODAY_TABS.map((tab, index) => `<button type="button" role="tab" aria-selected="${state.ui.todayTab === tab.key}" class="workflow-tab ${state.ui.todayTab === tab.key ? 'active' : ''} ${tabStatus[tab.key] ? 'complete' : ''}" data-action="today-tab" data-tab="${tab.key}"><span class="step-dot">${tabStatus[tab.key] ? icon('check', 13) : index + 1}</span><span>${esc(tab.label)}</span></button>`).join('')}
       </div>
       ${renderTodayTab()}
@@ -2506,6 +2652,7 @@
     const activities = todayActivities();
     const tracks = dailyTrackStatus(activities);
     const ready = activities.filter(activityComplete).length;
+    const dayWord = activeGraceBackfill() ? '當日' : '今天';
     return `<div class="content-grid">
       <section class="panel">
         <div class="panel-head"><div><div class="panel-title">${icon('clipboard-list')}工作紀錄</div><div class="panel-subtitle">${dailyKpiOptional() ? '週末免填，可自願記錄' : '學科內或學科外每天至少記錄一筆'} · 完整 ${ready}/${activities.length || 0}</div></div></div>
@@ -2525,7 +2672,7 @@
             return `<article class="daily-track-row ${status.covered ? 'is-covered' : ''} ${fullyComplete ? 'is-complete' : ''}"><span class="daily-track-icon">${icon(meta.icon, 20)}</span><div><strong>${esc(meta.label)}</strong><div class="daily-track-progress">${esc(progress)}</div></div><button type="button" class="btn btn-small ${buttonClass}" data-action="open-activity" data-track="${track}">${icon(status.covered ? 'plus' : 'plus-circle', 14)}${buttonLabel}</button></article>`;
           }).join('')}</div>
           <div class="section-divider"></div>
-          ${activities.length ? `<div class="activity-list">${activities.map(renderActivityRow).join('')}</div>` : renderEmpty('clipboard-plus', dailyKpiOptional() ? '週末免填 KPI' : '尚無工作紀錄', dailyKpiOptional() ? '不列缺交，備課檔案與歷史紀錄仍可開啟。' : '請依今天實際內容，新增一筆學科內或學科外紀錄。', '', '')}
+          ${activities.length ? `<div class="activity-list">${activities.map(renderActivityRow).join('')}</div>` : renderEmpty('clipboard-plus', dailyKpiOptional() ? '週末免填 KPI' : '尚無工作紀錄', dailyKpiOptional() ? '不列缺交，備課檔案與歷史紀錄仍可開啟。' : `請依${dayWord}實際內容，新增一筆學科內或學科外紀錄。`, '', '')}
         </div>
       </section>
       <aside class="stack">
@@ -2637,16 +2784,17 @@
   function renderTodayParents() {
     const contacts = state.contacts.filter(item => item.date === state.daily.date && item.teacher === state.context.teacher);
     const handoffMode = state.daily.parentStatus === 'handoff';
+    const dayWord = activeGraceBackfill() ? '當日' : '今日';
     return `<div class="content-grid teacher-single-panel">
       <section class="panel">
         <div class="panel-head"><div><div class="panel-title">${icon('messages-square')}親師溝通</div><div class="panel-subtitle">記錄孩子狀況、老師處理，以及家長回應與共同決定</div></div><button type="button" class="btn btn-small" data-action="open-contact">${icon('plus', 15)}新增溝通紀錄</button></div>
         <div class="panel-body">
-          <div class="segmented" aria-label="今日親師聯繫狀態">
+          <div class="segmented" aria-label="${dayWord}親師聯繫狀態">
             <button type="button" class="${state.daily.parentStatus === 'recorded' ? 'active' : ''}" data-action="set-parent-status" data-status="recorded">有需溝通事項</button>
             <button type="button" class="${handoffMode ? 'active' : ''}" data-action="set-parent-status" data-status="handoff">今日無重要事項</button>
           </div>
           <div class="section-divider"></div>
-          ${handoffMode ? `<section class="activity-form-section"><div class="activity-section-title"><span>${icon('hand-heart', 18)}</span><div><strong>今日門口交接</strong></div></div><div class="form-grid"><div class="form-field span-2"><label class="choice-chip"><input type="checkbox" data-change="parent-handoff-confirmed" ${state.daily.parentHandoffConfirmed ? 'checked' : ''}>${icon('circle-check', 15)}已親自在門口攜帶並交接孩子給家長 <span class="required">*</span></label></div><div class="form-field span-2"><label class="form-label" for="parent-handoff-note">特殊交接備註（選填）</label><textarea id="parent-handoff-note" data-input="parent-handoff-note" placeholder="只有代接、延後接送或其他特殊情況才需要填寫。">${esc(state.daily.parentHandoffNote || '')}</textarea></div></div></section>` : contacts.length ? `<div class="activity-list">${contacts.map(renderContactRow).join('')}</div>` : renderEmpty('message-circle-off', state.daily.parentStatus === 'recorded' ? '尚未新增溝通紀錄' : '請選擇今天的親師狀態', state.daily.parentStatus === 'recorded' ? '填寫孩子狀況與老師處理，再記下家長回應與共同決定。' : '若沒有重要事項，仍需確認已親自在門口交接孩子。', '新增溝通紀錄', 'open-contact')}
+          ${handoffMode ? `<section class="activity-form-section"><div class="activity-section-title"><span>${icon('hand-heart', 18)}</span><div><strong>${dayWord}門口交接</strong></div></div><div class="form-grid"><div class="form-field span-2"><label class="choice-chip"><input type="checkbox" data-change="parent-handoff-confirmed" ${state.daily.parentHandoffConfirmed ? 'checked' : ''}>${icon('circle-check', 15)}已親自在門口攜帶並交接孩子給家長 <span class="required">*</span></label></div><div class="form-field span-2"><label class="form-label" for="parent-handoff-note">特殊交接備註（選填）</label><textarea id="parent-handoff-note" data-input="parent-handoff-note" placeholder="只有代接、延後接送或其他特殊情況才需要填寫。">${esc(state.daily.parentHandoffNote || '')}</textarea></div></div></section>` : contacts.length ? `<div class="activity-list">${contacts.map(renderContactRow).join('')}</div>` : renderEmpty('message-circle-off', state.daily.parentStatus === 'recorded' ? '尚未新增溝通紀錄' : `請選擇${dayWord}的親師狀態`, state.daily.parentStatus === 'recorded' ? '填寫孩子狀況與老師處理，再記下家長回應與共同決定。' : '若沒有重要事項，仍需確認已親自在門口交接孩子。', '新增溝通紀錄', 'open-contact')}
         </div>
       </section>
     </div>`;
@@ -2720,7 +2868,8 @@
 
   function renderTodayCourseRecord() {
     const record = state.daily.courseRecord || { channels: [], attachments: [], note: '' };
-    return `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('camera')}課程紀錄 <span class="badge ${courseRecordRequired() ? 'red' : 'outline'}">${courseRecordRequired() ? '必填' : '選填'}</span></div><div class="panel-subtitle">將今日上課照片分享到群組或家長通，再附上已發布的截圖。</div></div></div><div class="panel-body"><div class="notice-band info"><div><div class="notice-title">備註｜課程過程紀錄很重要</div><div class="notice-copy">${esc(COURSE_RECORD_NOTE)}</div></div></div><form id="course-record-form" data-form="course-record"><fieldset class="course-record-channels mt-16"><legend class="form-label">已完成照片分享（至少擇一）${courseRecordRequired() ? ' <span class="required">*</span>' : ''}</legend><div class="flex gap-8"><label class="choice-chip"><input type="checkbox" name="channels" value="group" data-change="course-record-channel" ${record.channels.includes('group') ? 'checked' : ''}>已分享到群組</label><label class="choice-chip"><input type="checkbox" name="channels" value="parent_app" data-change="course-record-channel" ${record.channels.includes('parent_app') ? 'checked' : ''}>已分享到家長通</label></div></fieldset><div class="form-field mt-16"><label class="form-label" for="course-record-files">分享截圖證據${courseRecordRequired() ? ' <span class="required">*</span>' : ''}</label><div class="text-small muted mb-8">請附上可辨識今日照片已發布到群組或家長通的截圖，至少 1 張；可分次加入，最多 ${MAX_EVIDENCE_FILES} 張。</div><input id="course-record-files" type="file" accept="image/*" multiple data-change="course-record-files" ${integrationRuntime.courseRecordUploading ? 'disabled' : ''}><div id="course-record-attachments" class="mt-12">${renderCourseRecordAttachments(record, true)}</div><p id="course-record-upload-status" class="text-small muted" role="status">${integrationRuntime.courseRecordUploading ? '正在保存截圖，請稍候…' : ''}</p></div><div class="form-field mt-16"><label class="form-label" for="course-record-note">補充備註（選填）</label><textarea id="course-record-note" name="note" data-input="course-record-note" placeholder="如有特殊情況，可在此補充。">${esc(record.note)}</textarea></div><button type="button" class="btn btn-primary mt-16" data-action="today-tab" data-tab="submit">${icon('send', 16)}前往確認送出</button></form></div></section>`;
+    const dayWord = activeGraceBackfill() ? '當日' : '今天';
+    return `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('camera')}課程紀錄 <span class="badge ${courseRecordRequired() ? 'red' : 'outline'}">${courseRecordRequired() ? '必填' : '選填'}</span></div><div class="panel-subtitle">將${dayWord}上課照片分享到群組或家長通，再附上已發布的截圖。</div></div></div><div class="panel-body"><div class="notice-band info"><div><div class="notice-title">備註｜課程過程紀錄很重要</div><div class="notice-copy">${esc(COURSE_RECORD_NOTE)}</div></div></div><form id="course-record-form" data-form="course-record"><fieldset class="course-record-channels mt-16"><legend class="form-label">已完成照片分享（至少擇一）${courseRecordRequired() ? ' <span class="required">*</span>' : ''}</legend><div class="flex gap-8"><label class="choice-chip"><input type="checkbox" name="channels" value="group" data-change="course-record-channel" ${record.channels.includes('group') ? 'checked' : ''}>已分享到群組</label><label class="choice-chip"><input type="checkbox" name="channels" value="parent_app" data-change="course-record-channel" ${record.channels.includes('parent_app') ? 'checked' : ''}>已分享到家長通</label></div></fieldset><div class="form-field mt-16"><label class="form-label" for="course-record-files">分享截圖證據${courseRecordRequired() ? ' <span class="required">*</span>' : ''}</label><div class="text-small muted mb-8">請附上可辨識${dayWord}照片已發布到群組或家長通的截圖，至少 1 張；可分次加入，最多 ${MAX_EVIDENCE_FILES} 張。</div><input id="course-record-files" type="file" accept="image/*" multiple data-change="course-record-files" ${integrationRuntime.courseRecordUploading ? 'disabled' : ''}><div id="course-record-attachments" class="mt-12">${renderCourseRecordAttachments(record, true)}</div><p id="course-record-upload-status" class="text-small muted" role="status">${integrationRuntime.courseRecordUploading ? '正在背景保存並上傳截圖，可繼續填寫其他內容…' : ''}</p></div><div class="form-field mt-16"><label class="form-label" for="course-record-note">補充備註（選填）</label><textarea id="course-record-note" name="note" data-input="course-record-note" placeholder="如有特殊情況，可在此補充。">${esc(record.note)}</textarea></div><button type="button" class="btn btn-primary mt-16" data-action="today-tab" data-tab="submit">${icon('send', 16)}前往確認送出</button></form></div></section>`;
   }
 
   function saveCourseRecordForm(form) {
@@ -2752,7 +2901,7 @@
     integrationRuntime.courseRecordUploading = true;
     input.disabled = true;
     const status = $('#course-record-upload-status');
-    if (status) status.textContent = '正在保存並上傳截圖，請稍候…';
+    if (status) status.textContent = '正在背景保存並上傳截圖，可繼續填寫其他內容…';
     try {
       for (const file of files.slice(0, slots)) {
         try {
@@ -2774,7 +2923,7 @@
           persist('課程截圖已保留在這台裝置');
           if (state.integration.cloudSyncEnabled) {
             try {
-              const uploaded = await uploadCompressedPhoto(dataUrl, { kpi: 2, description: '今日課程照片分享截圖', context });
+              const uploaded = await uploadCompressedPhoto(dataUrl, { kpi: 2, description: '當日課程照片分享截圖', context });
               if (uploaded) {
                 Object.assign(item, uploaded, { dataUrl: '', uploadStatus: 'uploaded', placeholder: false });
                 applyCloudPreview(item.cloudFileId, dataUrl);
@@ -2803,6 +2952,7 @@
     const completion = dailyCompletion();
     const submitting = integrationRuntime.cloudStatus === 'submitting';
     const needsResubmit = dailyNeedsResubmit();
+    const graceActive = activeGraceBackfill();
     const status = todaySectionStatus();
     const tracks = dailyTrackStatus();
     const summary = buildDailySummary();
@@ -2810,25 +2960,26 @@
     if (!dailyKpiOptional() && !dailyRequiredTracksReady()) blockers.push('新增一筆學科內或學科外紀錄');
     if (!dailyKpiOptional() && dailyRequiredTracksReady() && !status.activities) blockers.push('已新增的課程需選擇備課檔案並完成課後回饋；班級經營只需工作欄位及可判讀成果證據');
     if (!dailyKpiOptional() && !status.parents) blockers.push('新增一筆親師溝通紀錄，或確認已完成門口交接');
-    if (!dailyKpiOptional() && !status.operations) blockers.push('今日值日班務尚未確認');
+    if (!dailyKpiOptional() && !status.operations) blockers.push(`${graceActive ? '當日' : '今日'}值日班務尚未確認`);
     if (courseRecordRequired() && !status['course-record']) blockers.push('完成第 5 項課程紀錄：確認照片已分享，並附上截圖證據');
     if (dailyKpiOptional() && !todayActivities().every(activityComplete)) blockers.push('已新增的工作紀錄尚未完整');
     return `<div class="content-grid wide-aside">
       <section class="panel">
         <div class="panel-head"><div><div class="panel-title">${icon(needsResubmit ? 'refresh-cw' : 'send')}${needsResubmit ? '確認並重新送出' : '確認並送出'}</div></div><span class="badge ${dailyKpiOptional() || completion === 100 ? 'green' : 'yellow'}">${dailyKpiOptional() ? '週末自願記錄' : `完成度 ${completion}%`}</span></div>
         <div class="panel-body">
+          ${graceActive ? `<div class="notice-band warning">${icon('camera-off', 19)}<div><div class="notice-title">下個工作日交付不放寬照片規則</div><div class="notice-copy">請確認當日應拍的照片與截圖都已備妥；若當日沒有拍到，須由老師自行負責並主動向主管說明。</div></div></div>` : ''}
           ${pendingSubmission ? `<div class="notice-band warning">${icon('refresh-cw', 19)}<div><div class="notice-title">${esc(pendingSubmission.date)} 送出結果待確認</div><div class="notice-copy">按下「確認上次送出」會先確認該次紀錄。確認完成後，才會送出目前的新內容。</div></div></div>` : ''}
           ${state.daily.submittedAt ? `<div class="notice-band success">${icon('circle-check', 19)}<div><div class="notice-title">已於 ${formatTime(state.daily.submittedAt)} 送出</div><div class="notice-copy">${state.integration.cloudSyncEnabled ? '修改後需重新送出，主管才會收到最新版本。' : '目前為審查紀錄，未通知真人主管。'}</div></div></div>` : ''}
           ${needsResubmit ? `<div class="notice-band warning">${icon('refresh-cw', 19)}<div><div class="notice-title">內容已修改，尚未重新送出</div><div class="notice-copy">主管目前看到的是前一版；按下重新送出後才會更新。</div></div></div>` : ''}
           <form id="daily-summary-form" data-form="daily-summary">
             <div class="summary-list">
-              <div class="summary-line"><span class="summary-index">1</span><div><div class="summary-title">今日成果</div><div class="summary-copy">${esc(summary.keyResult)}</div></div></div>
+              <div class="summary-line"><span class="summary-index">1</span><div><div class="summary-title">${graceActive ? '當日' : '今日'}成果</div><div class="summary-copy">${esc(summary.keyResult)}</div></div></div>
               <div class="summary-line"><span class="summary-index">2</span><div><div class="summary-title">孩子狀況與課程問題</div><div class="summary-copy">${esc(summary.followup)}</div></div></div>
               <div class="summary-line"><span class="summary-index">3</span><div><div class="summary-title">目前待辦（即時）</div><div class="summary-copy">${esc(summary.tomorrowPriority)}</div><div class="text-tiny muted mt-4">此處會依目前未完成事項即時更新。</div></div></div>
             </div>
             <div class="form-field mt-16"><label class="form-label" for="summary-teacher-note">給主管補充（選填）</label><textarea id="summary-teacher-note" name="teacherNote" placeholder="補充紀錄未呈現的背景或需要主管協助的事項。">${esc(state.daily.summary.teacherNote || '')}</textarea></div>
-            <div class="flex gap-8 mt-16"><button type="button" class="btn btn-primary" data-action="submit-daily" ${(!pendingSubmission && blockers.length) || submitting ? 'disabled' : ''}>${icon(submitting || state.daily.submittedAt || needsResubmit || pendingSubmission ? 'refresh-cw' : 'send', 16)}${submitting ? '正在送出' : pendingSubmission ? '確認上次送出' : needsResubmit ? '重新送出' : state.daily.submittedAt ? '更新送出' : '確認送出'}</button></div>
-            ${submitting ? `<p class="text-small muted mt-12" data-submit-progress role="status" aria-live="polite">${esc(integrationRuntime.cloudMessage || '正在確認並送出今日紀錄')}</p>` : ''}
+            <div class="flex gap-8 mt-16"><button type="button" class="btn btn-primary" data-action="submit-daily" ${(!pendingSubmission && blockers.length) || submitting ? 'disabled' : ''}>${icon(submitting || state.daily.submittedAt || needsResubmit || pendingSubmission ? 'refresh-cw' : 'send', 16)}${submitting ? '正在送出' : pendingSubmission ? '確認上次送出' : needsResubmit ? '重新送出' : state.daily.submittedAt ? '更新送出' : graceActive ? '確認補交上個工作日 KPI' : '確認送出'}</button></div>
+            ${submitting ? `<p class="text-small muted mt-12" data-submit-progress role="status" aria-live="polite">${esc(integrationRuntime.cloudMessage || `正在確認並送出${graceActive ? '上個工作日' : '今日'}紀錄`)}</p>` : ''}
           </form>
         </div>
       </section>
@@ -4692,13 +4843,16 @@
     await flushTaskCloudSync();
     const taskSync = await syncTasksFromCloud(session);
     const threads = await syncCloudFeedback(session);
+    const advancedFromSubmittedGrace = state.daily.date < todayIso() && state.daily.submittedAt
+      ? rollWorkspaceToToday(true)
+      : '';
     integrationRuntime.cloudStatus = 'saved';
     integrationRuntime.cloudErrorContext = '';
     integrationRuntime.prepSyncStatus = prepSync.ok ? 'saved' : 'error';
     integrationRuntime.prepSyncMessage = prepSync.ok ? `已更新 ${prepSync.imported || 0} 份備課檔案` : (prepSync.error || '備課檔案讀取失敗');
     integrationRuntime.taskSyncStatus = taskSync.ok ? 'saved' : 'error';
     integrationRuntime.taskSyncMessage = taskSync.ok ? `已更新 ${taskSync.imported || 0} 項待辦事項` : (taskSync.error || '待辦事項讀取失敗');
-    integrationRuntime.cloudMessage = `已更新 ${imported} 筆紀錄、${prepSync.imported || 0} 份備課、${taskSync.imported || 0} 項追蹤與 ${threads} 組對話`;
+    integrationRuntime.cloudMessage = `${advancedFromSubmittedGrace ? '上個工作日已送出，已切回今天；' : ''}已更新 ${imported} 筆紀錄、${prepSync.imported || 0} 份備課、${taskSync.imported || 0} 項追蹤與 ${threads} 組對話`;
     state.integration.lastCloudSaveAt = new Date().toISOString();
     persist('雲端紀錄已更新');
     renderApp();
@@ -6777,7 +6931,7 @@
     }
     const courseRecord = context.date === state.daily.date && context.teacher === state.context.teacher ? state.daily.courseRecord : state.submissions.find(item => item.date === context.date && item.teacher === context.teacher)?.courseRecord;
     for (const item of courseRecord?.attachments || []) {
-      await upload({ item, kpi: 2, description: '今日課程照片分享截圖', forType: 'v2-course-record', attachmentId: item.id });
+      await upload({ item, kpi: 2, description: '當日課程照片分享截圖', forType: 'v2-course-record', attachmentId: item.id });
     }
     return attachments;
   }
@@ -6943,7 +7097,7 @@
     if (form) saveDailySummaryForm(form, false);
     dailySubmitInFlight = true;
     integrationRuntime.cloudStatus = 'submitting';
-    integrationRuntime.cloudMessage = '正在確認並送出今日紀錄';
+    integrationRuntime.cloudMessage = `正在確認並送出${activeGraceBackfill() ? '上個工作日' : '今日'}紀錄`;
     updateSaveIndicator('saving', '正在送出');
     renderApp();
     try {
@@ -6963,10 +7117,11 @@
 
   function showDailySubmissionReceipt(submission, message, type = 'success') {
     const isWarning = type === 'warning';
+    const isGraceSubmission = submission.date === previousKpiWorkday();
     openDialog({
-      title: isWarning ? '已送出，尚有後續提醒' : '今日紀錄已成功送出',
+      title: isWarning ? '已送出，尚有後續提醒' : isGraceSubmission ? '上個工作日 KPI 已成功補交' : '今日紀錄已成功送出',
       body: `<div class="notice-band ${isWarning ? 'warning' : 'success'}">${icon(isWarning ? 'triangle-alert' : 'circle-check', 22)}<div><div class="notice-title">${isWarning ? '資料已送出，請查看後續提醒' : '主管已可查看本次紀錄'}</div><div class="notice-copy">${esc(message)}</div></div></div><div class="metadata-list mt-16"><div class="metadata-row"><div class="metadata-label">送出日期</div><div class="metadata-value">${formatDate(submission.date)}</div></div><div class="metadata-row"><div class="metadata-label">送出時間</div><div class="metadata-value">${formatTime(submission.submittedAt)}</div></div><div class="metadata-row"><div class="metadata-label">目前狀態</div><div class="metadata-value">待主管審查</div></div></div>`,
-      footer: '<button type="button" class="btn" data-action="view-daily-submission-status">查看送出狀態</button><button type="button" class="btn btn-primary" data-action="close-dialog">我知道了</button>',
+      footer: `<button type="button" class="btn" data-action="view-daily-submission-status">查看送出狀態</button>${isGraceSubmission ? `<button type="button" class="btn btn-primary" data-action="switch-daily-date" data-date="${todayIso()}">開始填寫今天 KPI</button>` : '<button type="button" class="btn btn-primary" data-action="close-dialog">我知道了</button>'}`,
     });
   }
 
@@ -8185,6 +8340,11 @@
     else if (action === 'today-tab') {
       state.ui.todayTab = control.dataset.tab;
       persist(); renderApp();
+    }
+    else if (action === 'switch-daily-date') {
+      closeDialog();
+      closeDrawer();
+      switchTeacherDailyDate(control.dataset.date);
     }
     else if (action === 'view-daily-submission-status') {
       state.ui.todayTab = 'submit';

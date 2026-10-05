@@ -2360,10 +2360,16 @@ function canViewDepartment_(user, department) {
  */
 
 /**
- * 儲存日誌（同日重複呼叫會覆蓋，過了 24h 鎖定後拒絕）
+ * 儲存日誌（工作日當天或下一個工作日皆可正常交付；更早日期沿用補繳規則）
  */
 function saveLog(params) {
   return withRecordWriteLock_(function () { return saveLogRecord_(params); }, true);
+}
+
+function previousKpiWorkday_(dateStr) {
+  let date = addDaysStr_(dateStr, -1);
+  while (isKpiWeekend_(date)) date = addDaysStr_(date, -1);
+  return date;
 }
 
 function saveLogRecord_(params) {
@@ -2390,10 +2396,12 @@ function saveLogRecord_(params) {
   ensureHeaders(getSheet(SHEET_NAMES.LOGS), ['record_revision', 'last_request_id', 'delivery_state', 'delivery_error', 'evidence_state', 'delivery_attempted_at']);
 
   // ===== 補繳判定 =====
-  // 回填過去日期，且（該日沒有日誌 或 日誌已鎖定）→ 視為補繳：限當月、每月 3 次、評核時每次扣 2 分
+  // 前一個工作日是正式交付寬限期，不列補繳、不扣分；週五可於週一完成。
+  // 照片與課程證據規則不因跨工作日交付而放寬。
   const today = todayStr();
   const isBackdated = String(date) < today;
-  const needMakeup = isBackdated && (!existing || existing.locked === true);
+  const isNextDayGrace = String(date) === previousKpiWorkday_(today);
+  const needMakeup = isBackdated && !isNextDayGrace && (!existing || existing.locked === true);
   let makeupRemaining = null;
   if (needMakeup) {
     if (String(date).slice(0, 7) !== today.slice(0, 7)) {
@@ -2405,11 +2413,11 @@ function saveLogRecord_(params) {
       return { ok: false, error: '本月 3 次補繳機會已用完' };
     }
     makeupRemaining = Math.max(0, 3 - used - (alreadyMakeup ? 0 : 1));
-  } else if (existing && existing.locked === true) {
+  } else if (existing && existing.locked === true && !isNextDayGrace) {
     // 鎖定檢查（補繳模式可越過鎖定）
     return { ok: false, error: '日誌已鎖定（過 24 小時），無法修改' };
   }
-  const isMakeup = needMakeup || (existing && existing.is_makeup === true);
+  const isMakeup = isNextDayGrace ? false : (needMakeup || (existing && existing.is_makeup === true));
 
   // ===== 空白覆蓋防護 =====
   // 自動存檔（非正式提交）若內容幾乎全空，而雲端已有實質內容（文字/照片），
@@ -2494,6 +2502,8 @@ function saveLogRecord_(params) {
     revision: data.record_revision,
     msg: '已儲存',
     is_makeup: isMakeup === true,
+    next_day_grace: isNextDayGrace,
+    next_workday_grace: isNextDayGrace,
     makeup_remaining: makeupRemaining,
     report_queued: reportQueued,
   };
@@ -2536,7 +2546,7 @@ function validateAnqinCourseRecord_(params, user) {
   if (!isAnqinUser(user) && (!snapshot || snapshot.schema !== 'anqin-v2')) return null;
   const submission = snapshot && snapshot.schema === 'anqin-v2' && snapshot.submission;
   const record = submission && submission.courseRecord;
-  const failure = { ok: false, code: 'COURSE_RECORD_REQUIRED', error: '請完成課程紀錄：確認今日課程照片已分享到群組或家長通，並上傳至少一張分享截圖後再送出' };
+  const failure = { ok: false, code: 'COURSE_RECORD_REQUIRED', error: '請完成課程紀錄：確認當日課程照片已分享到群組或家長通，並上傳至少一張分享截圖後再送出' };
   if (!submission || submission.date !== params.date || !record || !Array.isArray(record.channels)
       || !record.channels.length || !record.channels.every(function (channel) { return channel === 'group' || channel === 'parent_app'; })) return failure;
   const screenshots = Array.isArray(record.attachments) ? record.attachments : [];
@@ -6039,10 +6049,10 @@ function buildDailyKpiHtml_(dateStr) {
      + '<b style="color:#2C3E50;">📊 今日總覽</b>　'
      + '✅ 已提交 ' + submittedNames.length + ' 人'
      + '　✏️ 草稿 ' + draftNames.length + ' 人'
-     + '　❌ 未填 ' + missingNames.length + ' 人'
+     + '　⏳ 下個工作日待補 ' + missingNames.length + ' 人'
      + (helpNames.length ? '　🚨 求助 ' + helpNames.length + ' 人' : '')
      + (draftNames.length ? '<br><span style="color:#C77A12;">草稿：' + draftNames.join('、') + '</span>' : '')
-     + (missingNames.length ? '<br><span style="color:#E63946;">未填：' + missingNames.join('、') + '</span>' : '')
+     + (missingNames.length ? '<br><span style="color:#A85A26;">下個工作日待補：' + missingNames.join('、') + '（週五可於週一完成；照片責任不順延）</span>' : '')
      + (helpNames.length ? '<br><span style="color:#E63946; font-weight:bold;">求助：' + helpNames.join('、') + '</span>' : '')
      + '</td></tr></table>';
 
@@ -6085,8 +6095,8 @@ function kpiPdfMsg_(dateStr, r) {
   let t = '📄 KPI 日報 ' + dateStr + '\n'
     + '✅ 已提交 ' + r.summary.submitted + '/' + r.summary.total
     + '｜✏️ 草稿 ' + r.summary.draft
-    + '｜❌ 未填 ' + r.summary.missing;
-  if (r.summary.missingNames && r.summary.missingNames.length) t += '\n未填：' + r.summary.missingNames.join('、');
+    + '｜⏳ 下個工作日待補 ' + r.summary.missing;
+  if (r.summary.missingNames && r.summary.missingNames.length) t += '\n下個工作日待補：' + r.summary.missingNames.join('、') + '（週五可於週一完成；照片責任不順延）';
   if (r.summary.help && r.summary.help.length) t += '\n🚨 求助：' + r.summary.help.join('、');
   t += '\n\n完整報告（含照片）👇\n' + r.url;
   return t;

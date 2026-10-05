@@ -101,6 +101,11 @@ fs.mkdirSync(dir, { recursive: true });
     // Old verified low counts trigger warnings; merely opening or editing UI cannot clear them.
     await admin.evaluate(() => {
       const shared = JSON.parse(localStorage.getItem('bp_admin_marketing_v1_shared'));
+      // Keep this scenario deterministic as the seed data ages: only 北02 should
+      // have an established low-enrollment period in this assertion.
+      shared.classRoster.classes
+        .filter(item => Number(item.count || 0) < 4)
+        .forEach(item => { item.createdAt = new Date().toISOString(); });
       const low = shared.classRoster.classes.find(item => item.code === '北02');
       low.createdAt = new Date(Date.now() - 36 * 86400000).toISOString();
       localStorage.setItem('bp_admin_marketing_v1_shared', JSON.stringify(shared));

@@ -28,6 +28,12 @@ async function main() {
     parseJsonField: value => typeof value === 'string' ? (value ? JSON.parse(value) : null) : value,
     normalizeDepartment_: value => value, isGlobalManager_: () => false,
     todayStr: () => '2026-09-06', nowIso: () => '2026-09-06T12:00:00', logSystem() {},
+    addDaysStr_: (date, amount) => {
+      const value = new Date(`${date}T00:00:00Z`);
+      value.setUTCDate(value.getUTCDate() + amount);
+      return value.toISOString().slice(0, 10);
+    },
+    isKpiWeekend_: date => [0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay()),
   });
   vm.runInContext(helpers + read('apps-script/logs.gs') + read('apps-script/courseprep.gs'), context);
   context.replaceEvidenceForLog_ = () => {};

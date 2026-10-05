@@ -223,10 +223,10 @@ function buildDailyKpiHtml_(dateStr) {
      + '<b style="color:#2C3E50;">📊 今日總覽</b>　'
      + '✅ 已提交 ' + submittedNames.length + ' 人'
      + '　✏️ 草稿 ' + draftNames.length + ' 人'
-     + '　❌ 未填 ' + missingNames.length + ' 人'
+     + '　⏳ 下個工作日待補 ' + missingNames.length + ' 人'
      + (helpNames.length ? '　🚨 求助 ' + helpNames.length + ' 人' : '')
      + (draftNames.length ? '<br><span style="color:#C77A12;">草稿：' + draftNames.join('、') + '</span>' : '')
-     + (missingNames.length ? '<br><span style="color:#E63946;">未填：' + missingNames.join('、') + '</span>' : '')
+     + (missingNames.length ? '<br><span style="color:#A85A26;">下個工作日待補：' + missingNames.join('、') + '（週五可於週一完成；照片責任不順延）</span>' : '')
      + (helpNames.length ? '<br><span style="color:#E63946; font-weight:bold;">求助：' + helpNames.join('、') + '</span>' : '')
      + '</td></tr></table>';
 
@@ -269,8 +269,8 @@ function kpiPdfMsg_(dateStr, r) {
   let t = '📄 KPI 日報 ' + dateStr + '\n'
     + '✅ 已提交 ' + r.summary.submitted + '/' + r.summary.total
     + '｜✏️ 草稿 ' + r.summary.draft
-    + '｜❌ 未填 ' + r.summary.missing;
-  if (r.summary.missingNames && r.summary.missingNames.length) t += '\n未填：' + r.summary.missingNames.join('、');
+    + '｜⏳ 下個工作日待補 ' + r.summary.missing;
+  if (r.summary.missingNames && r.summary.missingNames.length) t += '\n下個工作日待補：' + r.summary.missingNames.join('、') + '（週五可於週一完成；照片責任不順延）';
   if (r.summary.help && r.summary.help.length) t += '\n🚨 求助：' + r.summary.help.join('、');
   t += '\n\n完整報告（含照片）👇\n' + r.url;
   return t;

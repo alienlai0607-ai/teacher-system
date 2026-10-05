@@ -32,6 +32,11 @@ function fixture() {
   const context = vm.createContext({
     state, clone: copy, writes,
     uid: prefix => `${prefix}-fixture`, todayIso: () => '2026-09-21', isoWeekString: date => String(date).slice(0, 7),
+    addDays: (date, amount) => {
+      const value = new Date(`${date}T12:00:00Z`);
+      value.setUTCDate(value.getUTCDate() + amount);
+      return value.toISOString().slice(0, 10);
+    },
     backendNickname: value => value.replace(/老師$/, ''), cloudTeacherNickname: value => value.replace(/老師$/, ''),
     cloudLogId: (name, date) => `${name}:${date}`, cloudIdentityReady: () => true,
     dailyNeedsResubmit: () => false, dailySubmitInFlight: false, cloudDraftInFlight: null, cloudDraftGeneration: 0, cloudDraftTimer: null,
@@ -50,7 +55,8 @@ function fixture() {
     'todayActivities', 'todaySectionStatus', 'dailyCompletion', 'hasDailyRecords',
     'createDailySubmissionRecord', 'removeInlineMedia', 'buildCloudSnapshot', 'joinActivityText', 'joinActivityFeedback',
     'buildLegacySubmissionPayload', 'syncDailyDraftRequest', 'dailySubmissionContentSignature', 'normalizeDailySubmissionSignature',
-    'rollWorkspaceToToday', 'preserveAttachmentMedia', 'hydrateCloudSnapshotAttachments', 'importCloudSnapshot',
+    'previousKpiWorkday', 'isNextWorkdayGraceDate', 'operationHasDailyContent', 'rollWorkspaceToToday',
+    'preserveAttachmentMedia', 'hydrateCloudSnapshotAttachments', 'importCloudSnapshot',
   ];
   vm.runInContext(functions.map(fn).join('\n'), context);
   return { state, context, writes };
@@ -140,7 +146,7 @@ test('rollover preserves a course-only draft and starts the new day with no carr
   const { context, state } = fixture();
   state.daily.courseRecord = completeRecord();
   const old = state.daily.courseRecord;
-  assert.equal(context.rollWorkspaceToToday(), '2026-09-18');
+  assert.equal(context.rollWorkspaceToToday(true), '2026-09-18');
   assert.equal(state.daily.date, '2026-09-21');
   assert.equal(state.daily.courseRecord.attachments.length, 0);
   const archived = state.submissions.find(item => item.date === '2026-09-18');
@@ -156,7 +162,7 @@ test('rollover retains newer course edits while an earlier daily submission rema
   state.daily.courseRecord.note = 'newer local share note';
   state.integration.pendingDailySubmission = { teacher, date: '2026-09-18' };
   state.submissions = [{ id: 'existing', teacher, date: '2026-09-18', status: 'draft', previousStatus: 'pending', courseRecord: { channels: ['parent_app'], note: 'older note', attachments: [] } }];
-  context.rollWorkspaceToToday();
+  context.rollWorkspaceToToday(true);
   assert.equal(state.submissions[0].courseRecord.note, 'newer local share note');
   assert.equal(state.submissions[0].previousStatus, 'pending');
   const historicalSignature = context.dailySubmissionContentSignature({ teacher, date: '2026-09-18' });

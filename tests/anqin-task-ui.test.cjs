@@ -271,7 +271,7 @@ assert.match(apiRouter, /'getSessionIdentity': \(\) => getSessionIdentity\(param
 assert.match(authBackend, /function getSessionIdentity\(params\)/, '後端需由驗簽結果回傳目前正式身分');
 assert.match(source, /if \(dailySubmitInFlight\) return/, '日結送出需防止連點產生重複請求');
 const dailySubmitSource = source.slice(source.indexOf('async function submitDaily()'), source.indexOf('async function submitWeekly()'));
-assert.match(dailySubmitSource, /integrationRuntime\.cloudMessage = '正在確認並送出今日紀錄'/, '老師按下送出後需立即顯示送出中狀態');
+assert.match(dailySubmitSource, /integrationRuntime\.cloudMessage = `正在確認並送出\$\{activeGraceBackfill\(\) \? '上個工作日' : '今日'\}紀錄`/, '老師按下送出後需立即顯示正確日期的送出中狀態');
 assert.match(dailySubmitSource, /finally \{[\s\S]*dailySubmitInFlight = false;[\s\S]*renderApp\(\);/, '送出完成或失敗後都必須重新恢復可操作畫面');
 assert.match(dailySubmitSource, /function showDailySubmissionReceipt\(/, '日結送出後需顯示固定的送出收據');
 assert.match(dailySubmitSource, /今日紀錄已成功送出/, '送出收據需清楚宣告成功');
@@ -461,6 +461,10 @@ assert.ok(evidenceUploadSource.indexOf('saveDraft();') < evidenceUploadSource.in
 assert.match(source, /照片選好後會立即背景上傳，可繼續填寫其他內容/, '老師需清楚知道照片會提早在背景上傳');
 assert.match(source, /正在背景上傳，可繼續填寫其他內容/, '附件卡片需顯示背景上傳狀態');
 assert.match(source, /正在確認照片上傳 \$\{completedUploadCount \+ 1\}\/\$\{pendingUploadCount\}/, '最後送出若仍有照片需顯示明確進度');
+assert.match(source, /while \(dailyKpiOptional\(previous\)\) previous = addDays\(previous, -1\)/, '隔日寬限需略過週六、週日，讓週五可於週一補交');
+assert.match(source, /data-action="switch-daily-date"/, '老師需能在上個工作日與今天的 KPI 之間切換');
+assert.match(source, /週五可於週一完成，不列補繳、不扣補繳分/, '畫面需清楚說明工作日寬限規則');
+assert.match(source, /若當日未拍到必要照片，仍由老師自行負責/, '隔日補交不得弱化照片責任提醒');
 assert.match(evidenceUploadSource, /if \(!result\?\.ok\) throw[\s\S]*?applyCloudPreview\([\s\S]*?attachment.dataUrl = '';[\s\S]*?await confirmLocalAttachmentUploaded\(attachment\)/, '照片成功上傳後需保留當次預覽並清除本機草稿的大型內容，保留可恢復的雲端位置');
 assert.match(evidenceUploadSource, /duplicateIndex >= 0/, '未完成的成果附件必須能由同一原檔重新上傳修復');
 assert.match(source, /const MAX_DOCUMENT_FILE_BYTES = 25 \* 1024 \* 1024/, '文件上限需提高至 25 MB');

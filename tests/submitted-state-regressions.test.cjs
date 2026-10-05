@@ -41,7 +41,11 @@ function harness(logs, options = {}) {
     operationRecordById: () => null, sameReviewIdentity: (a, b) => a === b,
     ensureCloudTeacherIdentity: async () => ({ ok: true }),
     legacySession: () => ({ role: options.manager ? 'manager' : 'teacher', nickname: teacher }),
-    integrationRuntime: {}, renderApp() {}, addDays: value => value, toast() {}, persist() {},
+    integrationRuntime: {}, renderApp() {},
+    todayIso: () => '2026-09-16',
+    addDays: (value, amount) => { const date = new Date(`${value}T12:00:00Z`); date.setUTCDate(date.getUTCDate() + amount); return date.toISOString().slice(0, 10); },
+    dailyKpiOptional: value => [0, 6].includes(new Date(`${value}T00:00:00Z`).getUTCDay()),
+    toast() {}, persist() {}, materialCloudUrl: item => item?.cloudUrl || '',
     window: { API: {} }, API: { listLogs: async () => ({ ok: true, logs: copy(logs) }) },
     syncCoursePrepsFromCloud: async () => ({ ok: true }), flushTaskCloudSync: async () => {},
     pendingTaskSyncIds: new Set(), syncTasksFromCloud: async () => ({ ok: true }),
@@ -216,8 +220,8 @@ test('rollover retains edits made while the previous day submission remains unco
   ctx.todayIso = () => '2026-09-16';
   ctx.isoWeekString = () => '2026-W38';
   ctx.createSeed = () => ({ daily: { summary: {} }, operations: {}, weekly: {} });
-  vm.runInContext(block('  function rollWorkspaceToToday(', '  function sessionRoleLabel('), ctx);
-  assert.equal(ctx.rollWorkspaceToToday(), '2026-09-15');
+  vm.runInContext(block('  function previousKpiWorkday(', '  function sessionRoleLabel('), ctx);
+  assert.equal(ctx.rollWorkspaceToToday(true), '2026-09-15');
   const archived = ctx.state.submissions[0];
   assert.equal(archived.teacherNote, 'QA 送出後新增補充');
   assert.equal(archived.parentHandoffNote, 'QA 送出後修改交接');
@@ -241,8 +245,8 @@ test('rollover keeps newer edits after an older in-flight submission is confirme
   ctx.todayIso = () => '2026-09-16';
   ctx.isoWeekString = () => '2026-W38';
   ctx.createSeed = () => ({ daily: { summary: {} }, operations: {}, weekly: {} });
-  vm.runInContext(block('  function rollWorkspaceToToday(', '  function sessionRoleLabel('), ctx);
-  assert.equal(ctx.rollWorkspaceToToday(), '2026-09-15');
+  vm.runInContext(block('  function previousKpiWorkday(', '  function sessionRoleLabel('), ctx);
+  assert.equal(ctx.rollWorkspaceToToday(true), '2026-09-15');
   const archived = ctx.state.submissions[0];
   assert.equal(archived.teacherNote, 'QA 等待送出回應時新增的補充');
   assert.equal(archived.parentHandoffNote, 'QA 等待送出回應時更新的交接');
@@ -251,4 +255,19 @@ test('rollover keeps newer edits after an older in-flight submission is confirme
   assert.equal(archived.previousStatus, 'pending');
   assert.equal(archived.previousSubmittedAt, '2026-09-15T12:00:00.000Z');
   assert.equal(archived.cloudSavedAt, '2026-09-15T12:00:00.000Z');
+});
+
+test('an unfinished Friday workspace remains editable on Monday', () => {
+  const ctx = harness([]);
+  ctx.state.daily.date = '2026-09-11';
+  ctx.state.daily.summary.teacherNote = 'QA 週五尚未完成';
+  ctx.state.activities = [{ id: 'QA-friday', teacher, date: '2026-09-11', type: 'tutoring', result: 'QA 週五內容' }];
+  ctx.todayIso = () => '2026-09-14';
+  ctx.isoWeekString = () => '2026-W38';
+  ctx.createSeed = () => ({ daily: { summary: {} }, operations: {}, weekly: {} });
+  vm.runInContext(block('  function previousKpiWorkday(', '  function sessionRoleLabel('), ctx);
+  assert.equal(ctx.rollWorkspaceToToday(), '', 'Monday must not archive an unfinished Friday KPI automatically');
+  assert.equal(ctx.state.daily.date, '2026-09-11');
+  assert.equal(ctx.activeGraceBackfill(), true);
+  assert.equal(ctx.state.integration.graceDraftDate, '2026-09-11');
 });

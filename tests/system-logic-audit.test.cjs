@@ -315,6 +315,37 @@ test('daily logs reject impossible and future work dates before writing', ({ c, 
   assert.equal(c.sheetToObjects('DailyLogs').length, 0);
 });
 
+test('Friday can be delivered on Monday without makeup penalty', ({ c, request }) => {
+  c.todayStr = () => '2026-09-14';
+  c.ensureHeaders(c.getSheet('DailyLogs'), ['locked', 'is_makeup', 'submitted_at', 'record_revision', 'last_request_id']);
+  const result = request('north', 'saveLog', { nickname: 'north', date: '2026-09-11', submitted: true, reflection: 'QA 週一補完週五', request_id: 'grace-one' });
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.next_day_grace, true);
+  assert.equal(result.next_workday_grace, true);
+  assert.equal(result.is_makeup, false);
+  assert.equal(c.findObject('DailyLogs', 'log_id', result.log_id).is_makeup, false);
+  assert.equal(c.getMakeupQuota({ nickname: 'north' }).used, 0);
+});
+
+test('next-day grace remains valid across a month boundary', ({ c, request }) => {
+  c.todayStr = () => '2026-09-01';
+  c.ensureHeaders(c.getSheet('DailyLogs'), ['locked', 'is_makeup', 'submitted_at', 'record_revision', 'last_request_id']);
+  const result = request('north', 'saveLog', { nickname: 'north', date: '2026-08-31', submitted: true, reflection: 'QA 跨月隔日完成', request_id: 'grace-month' });
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.next_day_grace, true);
+  assert.equal(result.is_makeup, false);
+});
+
+test('dates earlier than the previous workday still use the existing makeup policy', ({ c, request }) => {
+  c.todayStr = () => '2026-09-14';
+  c.ensureHeaders(c.getSheet('DailyLogs'), ['locked', 'is_makeup', 'submitted_at', 'record_revision', 'last_request_id']);
+  const result = request('north', 'saveLog', { nickname: 'north', date: '2026-09-10', submitted: true, reflection: 'QA 較早補繳', request_id: 'older-makeup' });
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.next_day_grace, false);
+  assert.equal(result.is_makeup, true);
+  assert.equal(c.getMakeupQuota({ nickname: 'north' }).used, 1);
+});
+
 test('daily locking handles actual Sheet Date cells', ({ c }) => {
   c.ensureHeaders(c.getSheet('DailyLogs'), ['locked']);
   c.appendRow('DailyLogs', { log_id: 'old', nickname: 'north', date: new Date('2020-01-01T00:00:00+08:00'), locked: false });

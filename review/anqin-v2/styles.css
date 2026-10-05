@@ -960,6 +960,7 @@ input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; min-hei
 .upload-state.is-warning { color: var(--red); background: var(--red-soft); }
 .evidence-attachment-main input { min-height: 38px; font-size: 12px; }
 .evidence-attachment-remove { width: 32px; height: 32px; }
+.next-workday-grace-notice { margin-bottom: 16px; }
 
 .evidence-detail-files { display: grid; gap: 8px; margin-top: 12px; }
 .evidence-detail-file { min-width: 0; display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
