@@ -36,6 +36,12 @@ vm.runInContext([
   block('  async function confirmLocalAttachmentUploaded(', '  function walkLocalAttachments('),
   block('  function dataUrlPayload(', '  function joinActivityText('),
 ].join('\n'), runtime);
+runtime.uploadCompressedPhotos = async entries => Promise.all(entries.map(async entry => {
+  const payload = runtime.dataUrlPayload(entry.dataUrl);
+  if (!payload) throw new Error(`${entry.fileName || '附件'}尚未上傳，請重新選擇檔案；文字草稿仍保留`);
+  const result = await runtime.API.uploadPhoto({ base64: payload.base64, mimeType: payload.mimeType });
+  return { ok: result.ok, clientId: entry.clientId, cloudUrl: result.url, cloudFileId: result.fileId };
+}));
 (async () => {
   items = [{ fileName: 'old.jpg', legacyMissing: true, mimeType: 'image/jpeg' }];
   assert.equal((await runtime.uploadFormalEvidence()).length, 0);

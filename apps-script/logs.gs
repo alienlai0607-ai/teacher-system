@@ -536,49 +536,79 @@ function dailyLockOldLogs() {
  * 資料夾結構：KPI證據 / 部門 / 暱稱 / 年月
  * 權限：資料本人、所屬主管、全域主管與管理員
  */
-function uploadPhoto(params) {
-  const { nickname, date, kpi, mimeType, base64 } = params;
-  if (!nickname || !base64) return { ok: false, error: 'missing nickname or base64' };
-  if (String(base64).length > 12 * 1024 * 1024) return { ok: false, error: '照片內容過大，請壓縮後再上傳' };
-
-  const user = findUserByNickname(nickname);
-  if (!user) return { ok: false, error: 'user not found' };
-
-  const dateStr = String(date || todayStr());
-  const ym = dateStr.slice(0, 7); // YYYY-MM
-  const mt = mimeType || 'image/jpeg';
-  const ext = mt.indexOf('png') >= 0 ? 'png'
-    : mt.indexOf('webp') >= 0 ? 'webp'
-    : mt.indexOf('gif') >= 0 ? 'gif'
-    : mt.indexOf('heif') >= 0 ? 'heif'
-    : mt.indexOf('heic') >= 0 ? 'heic'
-    : 'jpg';
-
-  // 資料夾：KPI證據 / 部門 / 暱稱 / 年月
-  const scopeKey = String(kpi || '');
-  const scope = scopeKey.indexOf('talent-') === 0 ? 'talent'
-    : scopeKey.indexOf('admin-marketing') === 0 ? 'admin-marketing'
+function photoUploadScope_(kpi) {
+  const key = String(kpi || '');
+  return key.indexOf('talent-') === 0 ? 'talent'
+    : key.indexOf('admin-marketing') === 0 ? 'admin-marketing'
     : 'anqin';
-  const root = getEvidenceRootFolder_();
-  const deptF = getOrCreateChildFolder_(root, normalizeDepartment_(user.department) || '未分部門');
-  const userF = getOrCreateChildFolder_(deptF, nickname);
+}
+
+function photoUploadFolder_(cache, user, nickname, dateStr, scope) {
+  const ym = dateStr.slice(0, 7);
+  const cacheKey = scope + '|' + ym;
+  if (cache[cacheKey]) return cache[cacheKey];
+  const root = cache.root || (cache.root = getEvidenceRootFolder_());
+  const deptF = cache.department || (cache.department = getOrCreateChildFolder_(root, normalizeDepartment_(user.department) || '未分部門'));
+  const userF = cache.user || (cache.user = getOrCreateChildFolder_(deptF, nickname));
   const workLabel = scope === 'talent' ? '才藝' : scope === 'admin-marketing' ? '行政美宣' : '安親';
   const workF = getOrCreateChildFolder_(userF, workLabel);
-  const ymF = getOrCreateChildFolder_(workF, ym);
+  const monthF = getOrCreateChildFolder_(workF, ym);
+  secureKpiReportPath_(root, deptF, userF, workF, monthF, user, scope, []);
+  return cache[cacheKey] = { folder: monthF, scope: scope };
+}
 
-  const bytes = Utilities.base64Decode(base64);
-  const filename = `K${kpi || 0}-${dateStr}.${ext}`;
-  const blob = Utilities.newBlob(bytes, mt, filename);
-  const file = createOrResumeKpiUpload_(ymF, blob, nickname, scopeKey, dateStr, base64);
-  secureKpiReportPath_(root, deptF, userF, workF, ymF, user, scope, []);
-  secureKpiDriveItem_(file, user, scope, []);
-  assertKpiFileReadable_(file, user, scope);
-
+function savePhotoBatchItem_(item, context) {
+  const base64 = String(item.base64 || '');
+  if (!base64) throw new Error('missing base64');
+  if (base64.length > 12 * 1024 * 1024) throw new Error('照片內容過大，請壓縮後再上傳');
+  const scopeKey = String(item.kpi || '');
+  const scope = photoUploadScope_(scopeKey);
+  const target = photoUploadFolder_(context.folders, context.user, context.nickname, context.date, scope);
+  const mimeType = String(item.mimeType || 'image/jpeg');
+  const ext = mimeType.indexOf('png') >= 0 ? 'png'
+    : mimeType.indexOf('webp') >= 0 ? 'webp'
+    : mimeType.indexOf('gif') >= 0 ? 'gif'
+    : mimeType.indexOf('heif') >= 0 ? 'heif'
+    : mimeType.indexOf('heic') >= 0 ? 'heic'
+    : 'jpg';
+  const blob = Utilities.newBlob(Utilities.base64Decode(base64), mimeType, 'K' + (item.kpi || 0) + '-' + context.date + '.' + ext);
+  const file = createOrResumeKpiUpload_(target.folder, blob, context.nickname, scopeKey, context.date, base64);
+  secureKpiDriveItem_(file, context.user, scope, []);
+  assertKpiFileReadable_(file, context.user, scope);
   const fileId = file.getId();
-  const url = 'https://drive.google.com/file/d/' + fileId + '/view';
+  return { ok: true, clientId: String(item.clientId || ''), url: 'https://drive.google.com/file/d/' + fileId + '/view', fileId: fileId };
+}
 
-  logSystem(nickname, 'upload_photo', fileId, { kpi, date: dateStr });
-  return { ok: true, url, fileId };
+/** 一次儲存多張壓縮照片，共用登入、資料夾與權限檢查，避免 8 張照片做 8 次完整連線。 */
+function uploadPhotos(params) {
+  const nickname = String(params.nickname || '');
+  const photos = Array.isArray(params.photos) ? params.photos.slice(0, 12) : [];
+  if (!nickname || !photos.length) return { ok: false, error: 'missing nickname or photos' };
+  if (photos.length !== params.photos.length) return { ok: false, error: '單次最多上傳 12 張照片' };
+  const totalLength = photos.reduce(function (sum, item) { return sum + String(item && item.base64 || '').length; }, 0);
+  if (totalLength > 18 * 1024 * 1024) return { ok: false, error: '這批照片過大，請分批上傳' };
+  const user = findUserByNickname(nickname);
+  if (!user) return { ok: false, error: 'user not found' };
+  const context = { nickname: nickname, date: String(params.date || todayStr()), user: user, folders: {} };
+  const results = photos.map(function (item) {
+    try { return savePhotoBatchItem_(item || {}, context); }
+    catch (error) { return { ok: false, clientId: String(item && item.clientId || ''), code: String(error && error.code || ''), error: String(error && error.message || '照片上傳失敗') }; }
+  });
+  const uploaded = results.filter(function (item) { return item.ok; });
+  if (uploaded.length) logSystem(nickname, 'upload_photo_batch', uploaded.map(function (item) { return item.fileId; }).join(','), { date: context.date, count: uploaded.length });
+  return { ok: true, results: results, uploaded: uploaded.length, failed: results.length - uploaded.length };
+}
+
+function uploadPhoto(params) {
+  const result = uploadPhotos({
+    nickname: params.nickname,
+    date: params.date,
+    photos: [{ clientId: 'single', kpi: params.kpi, mimeType: params.mimeType, base64: params.base64, description: params.description }]
+  });
+  if (!result.ok) return result;
+  const photo = result.results[0];
+  if (!photo || !photo.ok) return { ok: false, code: photo && photo.code || '', error: photo && photo.error || '照片上傳失敗' };
+  return { ok: true, url: photo.url, fileId: photo.fileId };
 }
 
 /**

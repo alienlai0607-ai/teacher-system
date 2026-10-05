@@ -5,7 +5,7 @@ window.API = (function () {
   const READ_RETRY_DELAYS_MS = [700, 1400];
   const WRITE_RECEIPT_DELAYS_MS = [0, 700, 1400];
   const WRITE_BUSY_DELAYS_MS = [1500, 3500];
-  const RESUMABLE_UPLOADS = new Set(['uploadPhoto', 'uploadFile']);
+  const RESUMABLE_UPLOADS = new Set(['uploadPhoto', 'uploadPhotos', 'uploadFile']);
   const RECEIPTED_ACTIONS = new Set([
     'saveLog', 'saveCoursePrep', 'deleteCoursePrep', 'saveTalentLesson', 'saveTalentDraft',
     'saveTalentPrep', 'deleteTalentPrep', 'reviewTalentPrep', 'updateTalentAppStatus',
@@ -170,7 +170,7 @@ window.API = (function () {
       if (!identity.ok) return ['AUTH_INVALID', 'AUTH_EXPIRED'].includes(identity.code) ? identity : uncertain;
       if (action === 'getSessionIdentity') return { ...identity, recovered_auth_response: true };
       // Only reads and content-addressed uploads are safe to replay here.
-      if (isRetryableRead(action) || ['uploadPhoto', 'uploadFile'].includes(action)) {
+      if (isRetryableRead(action) || ['uploadPhoto', 'uploadPhotos', 'uploadFile'].includes(action)) {
         const retry = await requestJson(payload);
         return retry.code === 'AUTH_REQUIRED' ? uncertain : { ...retry, recovered_auth_response: retry.ok === true };
       }
@@ -381,6 +381,7 @@ window.API = (function () {
       return { ok: false, code: 'INCOMPLETE_HISTORY', error: '紀錄尚未全部讀取，請縮小日期範圍後再試；原有內容仍保留' };
     },
     uploadPhoto: (data) => call('uploadPhoto', data),
+    uploadPhotos: (data) => call('uploadPhotos', data),
     uploadFile: (data) => call('uploadFile', data),
     getAttachmentPreviews: (fileIds) => call('getAttachmentPreviews', { file_ids: fileIds }),
     getEvidenceLog: (params) => call('getEvidenceLog', params),

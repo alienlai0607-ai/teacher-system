@@ -300,6 +300,57 @@ function verifyProductionDeliveryFromEditor() {
   return result;
 }
 
+/** 管理員手動執行：以一次 HTTP 請求實測 8 張照片批次上傳，完成後立即清理測試檔。 */
+function verifyPhotoBatchPerformanceFromEditor() {
+  const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  const admin = email ? findUserByEmail(email) : null;
+  if (!admin || admin.role !== 'admin' || admin.status !== 'active') throw new Error('須由正式管理員執行驗收');
+  const endpoint = ScriptApp.getService().getUrl();
+  if (!endpoint) throw new Error('找不到已部署的 Web App 網址');
+  const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL1WQAAAABJRU5ErkJggg==';
+  const runId = 'QA-BATCH-' + Utilities.getUuid().slice(0, 8);
+  const photos = [];
+  for (let index = 0; index < 8; index += 1) photos.push({
+    clientId: runId + '-' + index,
+    kpi: index + 1,
+    mimeType: 'image/png',
+    base64: tinyPng,
+    description: '批次照片效能驗收 ' + (index + 1),
+  });
+  const started = Date.now();
+  let response = null;
+  let cleanupComplete = true;
+  try {
+    const http = UrlFetchApp.fetch(endpoint, {
+      method: 'post', contentType: 'text/plain', followRedirects: true, muteHttpExceptions: true,
+      payload: JSON.stringify({ action: 'uploadPhotos', nickname: admin.nickname, date: todayStr(), photos: photos, session_token: issueSessionToken_(admin) }),
+    });
+    response = JSON.parse(http.getContentText());
+  } catch (error) {
+    response = { ok: false, error: String(error && error.message || error) };
+  } finally {
+    const results = response && Array.isArray(response.results) ? response.results : [];
+    results.forEach(function (item) {
+      if (!item.fileId) return;
+      try { DriveApp.getFileById(item.fileId).setTrashed(true); }
+      catch (error) { cleanupComplete = false; }
+    });
+  }
+  const result = {
+    ok: Boolean(response && response.ok && response.uploaded === 8 && response.failed === 0 && cleanupComplete),
+    release: KPI_RELEASE_VERSION_,
+    photos: 8,
+    requests: 1,
+    elapsed_ms: Date.now() - started,
+    uploaded: Number(response && response.uploaded || 0),
+    failed: Number(response && response.failed || 0),
+    cleanup_complete: cleanupComplete,
+    error: response && response.error || '',
+  };
+  console.log(JSON.stringify(result));
+  return result;
+}
+
 function runProductionIntegrityCheck(params) {
   const actor = params && params.__actor ? params.__actor : systemMaintenanceUser_(params);
   if (!actor || actor.role !== 'admin' || actor.status !== 'active') {

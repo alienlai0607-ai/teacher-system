@@ -1079,6 +1079,7 @@
   let restoredDraftAt = '';
   let lastStorageToastAt = 0;
   let dailySubmitInFlight = false;
+  const activePhotoSaveTasks = new Set();
   let weeklySubmitInFlight = false;
   const cloudPreviewCache = new Map();
   const cloudPreviewPending = new Set();
@@ -2898,6 +2899,7 @@
     const slots = Math.max(0, MAX_EVIDENCE_FILES - record.attachments.length);
     const errors = files.length > slots ? [`最多可加入 ${MAX_EVIDENCE_FILES} 張截圖`] : [];
     let added = 0;
+    const uploadQueue = [];
     integrationRuntime.courseRecordUploading = true;
     input.disabled = true;
     const status = $('#course-record-upload-status');
@@ -2918,21 +2920,40 @@
           await preserveLocalAttachment(item);
           if (!isCurrent()) throw new Error('已切換日期或老師，請回原日期重新選擇截圖');
           record.attachments.push(item);
+          uploadQueue.push({ clientId: item.id, item, dataUrl, fileName: file.name, kpi: 2, description: '當日課程照片分享截圖' });
           added += 1;
           markDailyNeedsResubmit(context.date, context.teacher);
           persist('課程截圖已保留在這台裝置');
-          if (state.integration.cloudSyncEnabled) {
-            try {
-              const uploaded = await uploadCompressedPhoto(dataUrl, { kpi: 2, description: '當日課程照片分享截圖', context });
-              if (uploaded) {
-                Object.assign(item, uploaded, { dataUrl: '', uploadStatus: 'uploaded', placeholder: false });
-                applyCloudPreview(item.cloudFileId, dataUrl);
-                await confirmLocalAttachmentUploaded(item);
-                persist('課程截圖已上傳');
-              }
-            } catch (error) { item.uploadStatus = 'retry'; item.uploadError = error.message; errors.push(`${file.name} 上傳未完成，已保留在這台裝置，送出時會重試`); persist(); }
-          }
         } catch (error) { errors.push(error.message || '截圖保存失敗，請保留原檔並重試'); }
+      }
+      if (state.integration.cloudSyncEnabled && uploadQueue.length) {
+        uploadQueue.forEach(entry => { entry.item.uploadStatus = 'uploading'; });
+        persist('課程截圖正在批次上傳');
+        try {
+          const results = await uploadCompressedPhotos(uploadQueue, context);
+          for (const entry of uploadQueue) {
+            const result = results.find(item => item.clientId === entry.clientId);
+            if (result?.ok) {
+              Object.assign(entry.item, result, { dataUrl: '', uploadStatus: 'uploaded', uploadError: '', placeholder: false });
+              delete entry.item.ok;
+              delete entry.item.clientId;
+              applyCloudPreview(entry.item.cloudFileId, entry.dataUrl);
+              await confirmLocalAttachmentUploaded(entry.item);
+            } else {
+              entry.item.uploadStatus = 'retry';
+              entry.item.uploadError = result?.error || '雲端上傳未完成';
+              errors.push(`${entry.fileName} 上傳未完成，已保留在這台裝置，送出時會重試`);
+            }
+          }
+          persist('課程截圖批次上傳已完成');
+        } catch (error) {
+          uploadQueue.forEach(entry => {
+            entry.item.uploadStatus = 'retry';
+            entry.item.uploadError = error.message || '雲端上傳未完成';
+            errors.push(`${entry.fileName} 上傳未完成，已保留在這台裝置，送出時會重試`);
+          });
+          persist();
+        }
       }
     } finally {
       integrationRuntime.courseRecordUploading = false;
@@ -6882,6 +6903,53 @@
     (progressCourseRecord?.attachments || []).forEach(item => itemsForProgress.push(item));
     const pendingUploadCount = itemsForProgress.filter(item => !item.legacyMissing && !materialCloudUrl(item)).length;
     let completedUploadCount = 0;
+    const pendingImageUploads = [];
+    activities.forEach(activity => (activity.evidence || []).forEach(evidence => evidenceAttachments(evidence).forEach(item => {
+      if (!item.legacyMissing && !materialCloudUrl(item) && String(item.mimeType || '').startsWith('image/')) pendingImageUploads.push({
+        clientId: item.id, item, dataUrl: item.dataUrl, fileName: item.fileName,
+        kpi: activityKpiNumber(activity), description: item.note || evidence.observation || evidence.title,
+      });
+    })));
+    if (operation) Object.entries(OPERATION_CHECKS).forEach(([key, config]) => {
+      const item = operation.evidenceByCheck?.[key];
+      if (item && !item.legacyMissing && !materialCloudUrl(item) && String(item.mimeType || '').startsWith('image/')) pendingImageUploads.push({
+        clientId: item.id || `env_${key}`, item, dataUrl: item.dataUrl, fileName: item.fileName,
+        kpi: 6, description: `${config.label}${item.action ? `：${item.action}` : ''}`,
+      });
+    });
+    (progressCourseRecord?.attachments || []).forEach(item => {
+      if (!item.legacyMissing && !materialCloudUrl(item) && String(item.mimeType || '').startsWith('image/')) pendingImageUploads.push({
+        clientId: item.id, item, dataUrl: item.dataUrl, fileName: item.fileName,
+        kpi: 2, description: '當日課程照片分享截圖',
+      });
+    });
+    if (pendingImageUploads.length) {
+      integrationRuntime.cloudMessage = `正在批次確認 ${pendingImageUploads.length} 張照片`;
+      updateSaveIndicator('saving', integrationRuntime.cloudMessage);
+      pendingImageUploads.forEach(entry => { entry.item.uploadStatus = 'uploading'; });
+      const results = await uploadCompressedPhotos(pendingImageUploads, context);
+      let firstError = '';
+      for (const entry of pendingImageUploads) {
+        const result = results.find(item => item.clientId === entry.clientId);
+        if (result?.ok && (result.cloudUrl || result.cloudFileId)) {
+          entry.item.cloudUrl = result.cloudUrl || '';
+          entry.item.cloudFileId = result.cloudFileId || '';
+          applyCloudPreview(entry.item.cloudFileId, entry.dataUrl);
+          entry.item.dataUrl = '';
+          entry.item.placeholder = false;
+          entry.item.uploadStatus = 'uploaded';
+          entry.item.uploadError = '';
+          completedUploadCount += 1;
+          await confirmLocalAttachmentUploaded(entry.item);
+        } else {
+          entry.item.uploadStatus = 'retry';
+          entry.item.uploadError = result?.error || '照片上傳失敗';
+          if (!firstError) firstError = `${entry.fileName || '照片'}：${entry.item.uploadError}`;
+        }
+      }
+      persist('照片批次上傳狀態已保留');
+      if (firstError) throw new Error(firstError);
+    }
     const upload = async ({ item, kpi, description, forType, activityId = '', evidenceId = '', attachmentId = '' }) => {
       const existingCloudUrl = materialCloudUrl(item);
       const isImage = String(item.mimeType || '').startsWith('image/');
@@ -7091,16 +7159,20 @@
   }
 
   async function submitDaily() {
-    if (integrationRuntime.courseRecordUploading) { toast('正在保存課程截圖，請完成後再送出', 'warning'); return; }
     if (dailySubmitInFlight) return;
-    const form = $('#daily-summary-form');
-    if (form) saveDailySummaryForm(form, false);
     dailySubmitInFlight = true;
     integrationRuntime.cloudStatus = 'submitting';
-    integrationRuntime.cloudMessage = `正在確認並送出${activeGraceBackfill() ? '上個工作日' : '今日'}紀錄`;
-    updateSaveIndicator('saving', '正在送出');
+    integrationRuntime.cloudMessage = activePhotoSaveTasks.size
+      ? `正在等待 ${activePhotoSaveTasks.size} 批照片完成上傳`
+      : `正在確認並送出${activeGraceBackfill() ? '上個工作日' : '今日'}紀錄`;
+    updateSaveIndicator('saving', integrationRuntime.cloudMessage);
     renderApp();
     try {
+      if (activePhotoSaveTasks.size) await waitForActivePhotoSaves();
+      integrationRuntime.cloudMessage = `正在確認並送出${activeGraceBackfill() ? '上個工作日' : '今日'}紀錄`;
+      updateSaveIndicator('saving', integrationRuntime.cloudMessage);
+      const form = $('#daily-summary-form');
+      if (form) saveDailySummaryForm(form, false);
       return await submitDailyRequest();
     } catch (error) {
       integrationRuntime.cloudStatus = 'error';
@@ -7602,6 +7674,49 @@
     };
   }
 
+  async function uploadCompressedPhotos(items, context = { date: state.daily.date, teacher: state.context.teacher }) {
+    if (!items.length) return [];
+    if (!state.integration.cloudSyncEnabled) return items.map(item => ({ ok: false, clientId: item.clientId, error: '雲端同步未啟用' }));
+    const identity = await ensureCloudTeacherIdentity();
+    if (!identity.ok) throw new Error(identity.error || '登入狀態已失效，請重新登入後再選擇照片');
+    if (state.context.teacher !== context.teacher) throw new Error('老師帳號已切換，原附件已保留');
+    const nickname = cloudTeacherNickname(context.teacher);
+    const photos = items.map(item => {
+      const payload = dataUrlPayload(item.dataUrl);
+      if (!payload) throw new Error(`${item.fileName || '照片'}無法讀取，請改選原始照片`);
+      return { clientId: item.clientId, kpi: item.kpi, mimeType: payload.mimeType || 'image/jpeg', base64: payload.base64, description: item.description || '' };
+    });
+    if (window.API?.uploadPhotos && photos.length > 1) {
+      const response = await API.uploadPhotos({ nickname, date: context.date, photos });
+      if (!response?.ok) throw new Error(response?.error || '批次照片上傳失敗');
+      const byId = new Map((response.results || []).map(item => [String(item.clientId || ''), item]));
+      return photos.map(photo => {
+        const result = byId.get(String(photo.clientId || ''));
+        return result?.ok
+          ? { ok: true, clientId: photo.clientId, cloudUrl: result.url || '', cloudFileId: result.fileId || '', mimeType: photo.mimeType }
+          : { ok: false, clientId: photo.clientId, code: result?.code || '', error: result?.error || '照片上傳失敗' };
+      });
+    }
+    return Promise.all(items.map(async item => {
+      try {
+        const uploaded = await uploadCompressedPhoto(item.dataUrl, { kpi: item.kpi, description: item.description, context });
+        return { ok: true, clientId: item.clientId, ...uploaded };
+      } catch (error) {
+        return { ok: false, clientId: item.clientId, code: error.code || '', error: error.message || '照片上傳失敗' };
+      }
+    }));
+  }
+
+  function trackPhotoSaveTask(task) {
+    activePhotoSaveTasks.add(task);
+    task.then(() => activePhotoSaveTasks.delete(task), () => activePhotoSaveTasks.delete(task));
+    return task;
+  }
+
+  async function waitForActivePhotoSaves() {
+    while (activePhotoSaveTasks.size) await Promise.allSettled(Array.from(activePhotoSaveTasks));
+  }
+
   function refreshEvidenceAttachmentUI() {
     if (!evidenceDraft) return;
     syncEvidencePrimaryFields(evidenceDraft);
@@ -7652,6 +7767,9 @@
     let skipped = 0;
     let retainedForRetry = 0;
     let unprotected = 0;
+    const preparedAttachments = [];
+    const uploadQueue = [];
+    const activity = state.activities.find(item => item.id === draft.activityId);
     const failed = oversized.map(file => `${file.name}（超過 25 MB）`);
     const saveDraft = () => {
       syncEvidencePrimaryFields(draft);
@@ -7681,48 +7799,75 @@
         if (duplicateIndex >= 0) { draft.attachments.splice(duplicateIndex, 1, attachment); replaced += 1; }
         else draft.attachments.push(attachment);
         if (!draft.primaryAttachmentId) draft.primaryAttachmentId = attachment.id;
+        preparedAttachments.push({ attachmentId: attachment.id, fileName: file.name });
         added += 1;
         // Persist the attachment and its place in the draft before awaiting the network.
         saveDraft();
         if (state.integration.cloudSyncEnabled && state.context.teacher === context.teacher) {
-          const activity = state.activities.find(item => item.id === draft.activityId);
-          updateSaveIndicator('saving', `正在上傳 ${file.name}`);
           attachment.uploadStatus = 'uploading';
+          uploadQueue.push({
+            clientId: attachment.id, attachmentId: attachment.id, dataUrl, fileName: file.name,
+            mimeType: attachment.mimeType, isImage,
+            kpi: activity ? activityKpiNumber(activity) : 5,
+            description: draft.title || activity?.title || file.name,
+          });
           saveDraft();
-          try {
-            const payload = dataUrlPayload(dataUrl);
-            const result = isImage
-              ? await API.uploadPhoto({ nickname: cloudTeacherNickname(context.teacher), date: context.date, kpi: activity ? activityKpiNumber(activity) : 5, mimeType: payload.mimeType, base64: payload.base64, description: draft.title || activity?.title || file.name })
-              : await API.uploadFile({ nickname: cloudTeacherNickname(context.teacher), date: context.date, fileName: file.name, mimeType: attachment.mimeType, base64: payload.base64, category: 'evidence' });
-            attachment = draft.attachments.find(item => item.id === attachment.id);
-            if (!attachment) continue;
-            if (!result?.ok) throw new Error(result?.error || '雲端上傳未完成');
-            attachment.cloudUrl = result.url || '';
-            attachment.cloudFileId = result.fileId || '';
-            if (!attachment.cloudUrl && !attachment.cloudFileId) throw new Error('尚未取得附件保存位置');
-            if (isImage) applyCloudPreview(attachment.cloudFileId, dataUrl);
-            attachment.dataUrl = '';
-            attachment.uploadStatus = 'uploaded';
-            attachment.uploadError = '';
-            await confirmLocalAttachmentUploaded(attachment);
-          } catch (error) {
-            attachment = draft.attachments.find(item => item.id === attachment?.id);
-            if (!attachment) continue;
-            attachment.uploadStatus = 'retry';
-            attachment.uploadError = error.message || '雲端上傳失敗';
-            retainedForRetry += 1;
-          }
         }
         saveDraft();
-        if (!materialCloudUrl(attachment) && !attachment.localMediaSaved) {
-          unprotected += 1;
-          failed.push(`${file.name}（附件尚未安全保存，請勿關閉頁面並保留原檔）`);
-        } else if (attachment.uploadError) failed.push(`${file.name}（已保留在這台裝置，送出時會重試）`);
       } catch (error) {
         unprotected += 1;
         failed.push(`${file.name}（${error.message || '處理失敗'}）`);
       }
     }
+    if (uploadQueue.length) {
+      updateSaveIndicator('saving', `正在批次上傳 ${uploadQueue.length} 份檔案`);
+      const imageQueue = uploadQueue.filter(item => item.isImage);
+      const fileQueue = uploadQueue.filter(item => !item.isImage);
+      let results = [];
+      try {
+        if (imageQueue.length) results = results.concat(await uploadCompressedPhotos(imageQueue, context));
+        if (fileQueue.length) {
+          const fileResults = await Promise.all(fileQueue.map(async entry => {
+            try {
+              const payload = dataUrlPayload(entry.dataUrl);
+              const result = await API.uploadFile({ nickname: cloudTeacherNickname(context.teacher), date: context.date, fileName: entry.fileName, mimeType: entry.mimeType, base64: payload.base64, category: 'evidence' });
+              return result?.ok
+                ? { ok: true, clientId: entry.clientId, cloudUrl: result.url || '', cloudFileId: result.fileId || '' }
+                : { ok: false, clientId: entry.clientId, error: result?.error || '雲端上傳未完成' };
+            } catch (error) { return { ok: false, clientId: entry.clientId, error: error.message || '雲端上傳失敗' }; }
+          }));
+          results = results.concat(fileResults);
+        }
+      } catch (error) {
+        results = uploadQueue.map(entry => ({ ok: false, clientId: entry.clientId, error: error.message || '雲端上傳失敗' }));
+      }
+      for (const entry of uploadQueue) {
+        const attachment = draft.attachments.find(item => item.id === entry.attachmentId);
+        if (!attachment) continue;
+        const result = results.find(item => item.clientId === entry.clientId);
+        if (result?.ok && (result.cloudUrl || result.cloudFileId)) {
+          attachment.cloudUrl = result.cloudUrl || '';
+          attachment.cloudFileId = result.cloudFileId || '';
+          if (entry.isImage) applyCloudPreview(attachment.cloudFileId, entry.dataUrl);
+          attachment.dataUrl = '';
+          attachment.uploadStatus = 'uploaded';
+          attachment.uploadError = '';
+          await confirmLocalAttachmentUploaded(attachment);
+        } else {
+          attachment.uploadStatus = 'retry';
+          attachment.uploadError = result?.error || '雲端上傳失敗';
+          retainedForRetry += 1;
+        }
+      }
+    }
+    preparedAttachments.forEach(entry => {
+      const attachment = draft.attachments.find(item => item.id === entry.attachmentId);
+      if (!attachment) return;
+      if (!materialCloudUrl(attachment) && !attachment.localMediaSaved) {
+        unprotected += 1;
+        failed.push(`${entry.fileName}（附件尚未安全保存，請勿關閉頁面並保留原檔）`);
+      } else if (attachment.uploadError) failed.push(`${entry.fileName}（已保留在這台裝置，送出時會重試）`);
+    });
     saveDraft();
     if (!unprotected) input.value = '';
     const summary = [`已加入 ${added} 份成果`];
@@ -8817,9 +8962,9 @@
       toast(control.checked ? '正式送出已啟用；送出時會核對老師帳號' : '已切回審查模式，不會通知真人主管', 'success');
     }
     if (change === 'prep-files') await handlePrepFiles(control);
-    if (change === 'course-record-files') await handleCourseRecordFiles(control);
+    if (change === 'course-record-files') await trackPhotoSaveTask(handleCourseRecordFiles(control));
     if (change === 'course-record-channel') { saveCourseRecordForm(control.closest('form')); renderApp(); }
-    if (change === 'operation-photo') await handleOperationPhoto(control);
+    if (change === 'operation-photo') await trackPhotoSaveTask(handleOperationPhoto(control));
     if (change === 'operation-status') toggleOperationStatus(control);
     if (change === 'parent-handoff-confirmed') {
       state.daily.parentHandoffConfirmed = control.checked;
@@ -8831,7 +8976,7 @@
       const task = state.tasks.find(item => item.id === control.dataset.taskId);
       if (task) await updateTaskStatusWithCloudFeedback(task, control.checked ? 'done' : 'open');
     }
-    if (change === 'evidence-file') await handleEvidenceFile(control);
+    if (change === 'evidence-file') await trackPhotoSaveTask(handleEvidenceFile(control));
     if (change === 'evidence-privacy') updateEvidenceQualityFromForm();
     if (change === 'plan-review-check') {
       const checks = $$('[data-review-check]');

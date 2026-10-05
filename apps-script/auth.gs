@@ -447,7 +447,7 @@ function authorizeApiAction_(action, params, actor) {
   }
 
   const ownContentActions = [
-    'saveLog', 'uploadPhoto', 'uploadFile', 'saveWeekly', 'saveCoursePrep',
+    'saveLog', 'uploadPhoto', 'uploadPhotos', 'uploadFile', 'saveWeekly', 'saveCoursePrep',
     'saveSelfTask', 'deleteSelfTask', 'addPost', 'saveOKR'
   ];
   if (ownContentActions.indexOf(action) >= 0) {

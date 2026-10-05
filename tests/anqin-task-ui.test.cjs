@@ -132,8 +132,8 @@ assert.match(source, /function applyPreviewReviewContext\(/, '安親審查模式
 assert.match(source, /if \(!applyPreviewReviewContext\(control\.dataset\.role\)\) state\.ui\.role = control\.dataset\.role/, '切換審查角色時必須同步身份範圍');
 assert.match(source, /applyPreviewReviewContext\(LOCAL_REVIEW_ROLE\)/, '網址指定主管視角時首次載入就必須套用正確身份');
 assert.match(source, /GLOBAL_MANAGER_NICKNAMES\.some\(name => sameReviewIdentity\(name, managerNickname\)\)/, '小魚在審查與正式登入都必須擁有全教室檢視範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20261005-background-save-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20261005-background-save-1/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20261005-photo-batch-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20261005-photo-batch-1/, '登入備援路徑也必須避開舊版快取');
 
 const startupSafetySource = source.slice(source.indexOf('function stripEmbeddedMediaJson('), source.indexOf('function loadState()'));
 const startupSafetyContext = vm.createContext({ JSON, Number, Set });
@@ -456,16 +456,22 @@ const planMaterialUploadSource = source.slice(source.indexOf('async function upl
 assert.match(planMaterialUploadSource, /isImage \? await fileToPreview\(file\) : await readFileAsDataUrl\(file\)/, '備課圖片需先壓縮，文件則保留原始內容');
 assert.match(planMaterialUploadSource, /\.jpg`[\s\S]{0,260}mimeType: isImage \? payload\.mimeType/, '壓縮後圖片的檔名與 MIME 類型必須一致');
 const evidenceUploadSource = source.slice(source.indexOf('async function handleEvidenceFile('), source.indexOf('function placeEvidencePin('));
-assert.match(evidenceUploadSource, /isImage \? await fileToPreview\(file\)[\s\S]*?await API.uploadPhoto\(/, '成果照片需在選取時壓縮並立即上傳');
-assert.ok(evidenceUploadSource.indexOf('saveDraft();') < evidenceUploadSource.indexOf('await API.uploadPhoto('), '成果附件與恢復位置需在上傳等待前先存入草稿');
+assert.match(evidenceUploadSource, /isImage \? await fileToPreview\(file\)[\s\S]*?await uploadCompressedPhotos\(imageQueue, context\)/, '成果照片需在選取時壓縮並立即批次上傳');
+assert.ok(evidenceUploadSource.indexOf('saveDraft();') < evidenceUploadSource.indexOf('await uploadCompressedPhotos(imageQueue, context)'), '成果附件與恢復位置需在上傳等待前先存入草稿');
 assert.match(source, /照片選好後會立即背景上傳，可繼續填寫其他內容/, '老師需清楚知道照片會提早在背景上傳');
 assert.match(source, /正在背景上傳，可繼續填寫其他內容/, '附件卡片需顯示背景上傳狀態');
-assert.match(source, /正在確認照片上傳 \$\{completedUploadCount \+ 1\}\/\$\{pendingUploadCount\}/, '最後送出若仍有照片需顯示明確進度');
+assert.match(source, /const activePhotoSaveTasks = new Set\(\)/, '照片背景作業必須可被最後送出正確等待');
+assert.match(source, /if \(activePhotoSaveTasks\.size\) await waitForActivePhotoSaves\(\)/, '最後送出只能等待尚未完成的照片批次');
+assert.match(sharedApi, /uploadPhotos: \(data\) => call\('uploadPhotos', data\)/, '前端 API 需提供批次照片上傳');
+assert.match(apiRouter, /'uploadPhotos': \(\) => uploadPhotos\(params\)/, '後端路由需提供批次照片上傳');
+assert.match(authBackend, /'uploadPhoto', 'uploadPhotos', 'uploadFile'/, '批次照片上傳必須沿用個人資料權限檢查');
+assert.match(logsBackend, /function uploadPhotos\(params\)[\s\S]*photos\.slice\(0, 12\)[\s\S]*upload_photo_batch/, '批次後端需限制張數並保留稽核紀錄');
+assert.match(source, /正在批次確認 \$\{pendingImageUploads\.length\} 張照片/, '最後送出若仍有照片需顯示明確批次進度');
 assert.match(source, /while \(dailyKpiOptional\(previous\)\) previous = addDays\(previous, -1\)/, '隔日寬限需略過週六、週日，讓週五可於週一補交');
 assert.match(source, /data-action="switch-daily-date"/, '老師需能在上個工作日與今天的 KPI 之間切換');
 assert.match(source, /週五可於週一完成，不列補繳、不扣補繳分/, '畫面需清楚說明工作日寬限規則');
 assert.match(source, /若當日未拍到必要照片，仍由老師自行負責/, '隔日補交不得弱化照片責任提醒');
-assert.match(evidenceUploadSource, /if \(!result\?\.ok\) throw[\s\S]*?applyCloudPreview\([\s\S]*?attachment.dataUrl = '';[\s\S]*?await confirmLocalAttachmentUploaded\(attachment\)/, '照片成功上傳後需保留當次預覽並清除本機草稿的大型內容，保留可恢復的雲端位置');
+assert.match(evidenceUploadSource, /applyCloudPreview\([\s\S]*?attachment.dataUrl = '';[\s\S]*?await confirmLocalAttachmentUploaded\(attachment\)/, '照片成功上傳後需保留當次預覽並清除本機草稿的大型內容，保留可恢復的雲端位置');
 assert.match(evidenceUploadSource, /duplicateIndex >= 0/, '未完成的成果附件必須能由同一原檔重新上傳修復');
 assert.match(source, /const MAX_DOCUMENT_FILE_BYTES = 25 \* 1024 \* 1024/, '文件上限需提高至 25 MB');
 assert.match(source, /function sameReviewIdentity\(/, '登入暱稱需忽略老師或主管尾綴後再核對');
@@ -502,7 +508,8 @@ pdfPhotoContext.UrlFetchApp = { fetch: () => ({
 }) };
 assert.equal(pdfPhotoContext.pdfPhotoUri_('html-login-page'), '', 'HTTP 200 的 Google 登入頁不得再被誤當成照片嵌入 PDF');
 assert.match(qaHarness, /此驗收頁只允許在本機使用/, '隔離驗收頁不得在正式網域啟用');
-assert.match(qaHarness, /action === 'uploadFile' \|\| action === 'uploadPhoto'/, '隔離驗收頁需實際走過檔案與照片上傳介面');
+assert.match(qaHarness, /action === 'uploadPhotos'/, '隔離驗收頁需實際走過批次照片上傳介面');
+assert.match(qaHarness, /action === 'uploadFile' \|\| action === 'uploadPhoto'/, '隔離驗收頁需保留單檔附件上傳介面');
 assert.match(qaHarness, /action === 'getAttachmentPreviews'/, '隔離驗收頁需模擬跨裝置私密照片讀回');
 assert.match(qaHarness, /action === 'listArchivedKpiFiles'/, '隔離驗收頁需讓老師實際讀回既有 PDF 檔案');
 assert.match(qaHarness, /action === 'listTeacherReportFolders'/, '隔離驗收頁需讓主管實際讀回老師雲端日報資料夾');

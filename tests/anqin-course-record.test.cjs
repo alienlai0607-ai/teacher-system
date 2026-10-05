@@ -212,6 +212,11 @@ test('formal daily submission uploads screenshot bytes with their own attachment
     uploads.push(copy(payload));
     return { ok: true, fileId: 'course-proof-id', url: 'https://drive.google.com/file/d/course-proof-id/view' };
   };
+  context.uploadCompressedPhotos = async (items, uploadContext) => Promise.all(items.map(async item => {
+    const payload = context.dataUrlPayload(item.dataUrl);
+    const result = await context.API.uploadPhoto({ nickname: teacher.replace(/老師$/, ''), date: uploadContext.date, kpi: item.kpi, mimeType: payload.mimeType, base64: payload.base64, description: item.description });
+    return { ok: result.ok, clientId: item.clientId, cloudFileId: result.fileId, cloudUrl: result.url };
+  }));
   vm.runInContext(['evidenceAttachments', 'evidencePrimaryAttachment', 'syncEvidencePrimaryFields', 'confirmLocalAttachmentUploaded', 'dataUrlPayload', 'uploadFormalEvidence'].map(fn).join('\n'), context);
   const before = context.dailySubmissionContentSignature();
   const attachments = await context.uploadFormalEvidence();
@@ -259,7 +264,7 @@ test('a delayed cloud import cannot detach a screenshot while its local save is 
     hashFile: async () => 'selected-screenshot', fileToPreview: async () => screenshot().dataUrl,
     formatFileSize: () => '12 KB', dataUrlByteLength: () => 12,
     preserveLocalAttachment: async item => { markLocalWriteStarted(); await localWrite; item.localMediaKey = 'durable-local-key'; item.localMediaSaved = true; },
-    uploadCompressedPhoto: async () => { throw new Error('network offline'); },
+    uploadCompressedPhotos: async () => { throw new Error('network offline'); },
     markDailyNeedsResubmit() {}, scheduleDailyCloudDraftSync() {}, renderApp() {}, toast() {},
   });
   vm.runInContext(['saveCourseRecordForm', 'handleCourseRecordFiles'].map(fn).join('\n'), context);

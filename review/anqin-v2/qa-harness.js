@@ -172,6 +172,20 @@
       result = { ok: true, students: [{ student_id: 'qa-student-1', name: '驗收學生', teacher: nickname, department }] };
     }
     else if (action === 'getSystemReadiness') result = { ok: true, services: { productionIntegrity: true } };
+    else if (action === 'uploadPhotos') {
+      const results = (payload.photos || []).map(photo => {
+        const fileCounter = Number(cloudStore.fileCounter || 0) + 1;
+        const fileId = `QAF${Date.now().toString(36)}${crypto.randomUUID().replaceAll('-', '').slice(0, 10)}`;
+        cloudStore.fileCounter = fileCounter;
+        cloudStore.files[fileId] = {
+          action, fileName: `QA-photo-${fileCounter}.jpg`, mimeType: photo.mimeType || 'image/jpeg',
+          base64: String(photo.base64 || ''), createdAt: new Date().toISOString(),
+        };
+        return { ok: true, clientId: photo.clientId || '', fileId, url: `https://drive.google.com/file/d/${fileId}/view` };
+      });
+      persistCloudStore();
+      result = { ok: true, results, uploaded: results.length, failed: 0 };
+    }
     else if (action === 'uploadFile' || action === 'uploadPhoto') {
       const fileCounter = Number(cloudStore.fileCounter || 0) + 1;
       const fileId = `QAF${Date.now().toString(36)}${crypto.randomUUID().replaceAll('-', '').slice(0, 10)}`;
