@@ -213,6 +213,34 @@ function apiSessionSecret_() {
   return secret;
 }
 
+/**
+ * 僅供 Apps Script 編輯器手動執行：輪替登入簽章，讓所有既有 KPI 工作階段失效。
+ * 不會登出 Google 帳號；使用者重新以 Google 登入後會取得新工作階段。
+ */
+function invalidateAllAppSessionsFromEditor() {
+  const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  const operator = email ? findUserByEmail(email) : null;
+  if (!operator || operator.status !== 'active' || operator.role !== 'admin') {
+    throw new Error('只有正式管理員可以強制全員重新登入');
+  }
+
+  const invalidatedAt = nowIso();
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty('API_SESSION_SECRET', Utilities.getUuid() + Utilities.getUuid() + Utilities.getUuid());
+  props.setProperty('API_SESSIONS_INVALIDATED_AT', invalidatedAt);
+  props.setProperty('API_SESSIONS_INVALIDATED_BY', String(operator.nickname || email));
+  logSystem(operator.nickname, 'invalidate_all_app_sessions', '', { invalidated_at: invalidatedAt });
+
+  const result = {
+    ok: true,
+    invalidated_at: invalidatedAt,
+    invalidated_by: operator.nickname,
+    message: '所有既有 KPI 登入已失效，請全員重新登入'
+  };
+  Logger.log(JSON.stringify(result));
+  return result;
+}
+
 function base64UrlText_(text) {
   return Utilities.base64EncodeWebSafe(String(text), Utilities.Charset.UTF_8).replace(/=+$/g, '');
 }

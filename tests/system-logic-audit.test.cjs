@@ -136,6 +136,28 @@ test('live acceptance refuses non-admin editor identities before any API write',
   assert.equal(calls, 0);
 });
 
+test('admin can invalidate every existing app session without blocking fresh login', ({ c }) => {
+  c.Session.getActiveUser = () => ({ getEmail: () => 'boss@example.invalid' });
+  const user = c.findUserByNickname('north');
+  const oldToken = c.issueSessionToken_(user);
+  assert.equal(c.verifySessionToken_(oldToken).ok, true);
+
+  const result = c.invalidateAllAppSessionsFromEditor();
+  assert.equal(result.ok, true);
+  assert.equal(result.invalidated_by, 'boss');
+  assert.equal(c.verifySessionToken_(oldToken).code, 'AUTH_INVALID');
+  assert.equal(c.verifySessionToken_(c.issueSessionToken_(user)).ok, true);
+  assert.equal(c.sheetToObjects('Logs_System').at(-1).action, 'invalidate_all_app_sessions');
+});
+
+test('non-admin cannot invalidate app sessions', ({ c }) => {
+  c.Session.getActiveUser = () => ({ getEmail: () => 'north@example.invalid' });
+  const user = c.findUserByNickname('north');
+  const token = c.issueSessionToken_(user);
+  assert.throws(() => c.invalidateAllAppSessionsFromEditor(), /正式管理員/);
+  assert.equal(c.verifySessionToken_(token).ok, true);
+});
+
 test('live acceptance refuses a stale deployment without creating test records', ({ c }) => {
   c.Session.getActiveUser = () => ({ getEmail: () => 'boss@example.invalid' });
   const requests = [];
