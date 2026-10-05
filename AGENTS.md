@@ -7,7 +7,7 @@
 - **前端**：純靜態網頁，GitHub Pages 部署（repo: `alienlai0607-ai/teacher-system`，網域 `teacher.blockplanetcamp.com`）。push 到 `main` 即上線。
 - **後端**：Google Apps Script Web App + Google Sheets 當資料庫。
 - **目前 API URL**（在 `shared/config.js`）：
-  `https://script.google.com/macros/s/AKfycbyantQSORV8ulYF_LhHvhxOeRxvlwvUV40oFGRY_Hk9O6JxI5EaRXyFg_Vvi6C8K170UQ/exec`
+  `https://script.google.com/macros/s/AKfycbyCO1dCIJEzTN6k1S-E3-key0T16pwd2P2_Alht76kYp3VocTjJ-_TC3xDqTxQ0bAKm/exec`
 - **角色**：admin（柏翰）/ manager（酸酸-永康、小魚-北區、柳丁-才藝）/ teacher / admin_staff（皮皮老師-美編行銷）。三部門：永康教室、北區教室、才藝部門。
 
 ## 目錄結構
