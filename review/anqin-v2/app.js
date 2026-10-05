@@ -6962,19 +6962,13 @@
   }
 
   async function finishDailyDelivery(submission, payload) {
-    const [pdfOutcome, taskOutcome] = await Promise.allSettled([
-      API.sendSubmitPdf(payload.nickname, payload.date),
-      syncAllTasksToCloud(),
-    ]);
-    const pdfResult = pdfOutcome.status === 'fulfilled' ? pdfOutcome.value : { ok: false, error: pdfOutcome.reason?.message || '' };
-    const taskSync = taskOutcome.status === 'fulfilled' ? taskOutcome.value : { ok: false, failed: 1 };
-    const complete = pdfResult?.ok && (!pdfResult.notification || pdfResult.notification.allReached);
-    integrationRuntime.cloudMessage = complete ? '紀錄、PDF 與主管通知已完成' : '紀錄已送出；PDF 或通知待補，不必重送紀錄';
+    const taskSync = await syncAllTasksToCloud().catch(() => ({ ok: false, failed: 1 }));
+    integrationRuntime.cloudMessage = '紀錄已送出；PDF 與主管通知正在背景處理';
     if (!taskSync.ok) integrationRuntime.cloudMessage += `；${taskSync.failed} 項待辦待同步`;
-    state.integration.lastDelivery = { logId: cloudLogId(submission.teacher, submission.date), complete: Boolean(complete), at: new Date().toISOString(), error: pdfResult?.error || '' };
+    state.integration.lastDelivery = { logId: cloudLogId(submission.teacher, submission.date), complete: false, background: true, at: new Date().toISOString(), error: '' };
     persist('紀錄已送出');
     refreshSystemStatusNotice();
-    toast(integrationRuntime.cloudMessage, complete && taskSync.ok ? 'success' : 'warning');
+    if (!taskSync.ok) toast(integrationRuntime.cloudMessage, 'warning');
   }
 
   function dailySubmissionContentSignature(context = { date: state.daily.date, teacher: state.context.teacher }) {

@@ -126,7 +126,20 @@ function saveLogRecord_(params) {
 
   logSystem(nickname, 'save_log', log_id, { date });
 
-  return { ok: true, log_id, revision: data.record_revision, msg: '已儲存', is_makeup: isMakeup === true, makeup_remaining: makeupRemaining };
+  let reportQueued = false;
+  if (params.submitted === true && typeof queueDeferredTeacherReport_ === 'function') {
+    reportQueued = queueDeferredTeacherReport_({ type: 'kpi', nickname: nickname, date: date }).queued;
+  }
+
+  return {
+    ok: true,
+    log_id,
+    revision: data.record_revision,
+    msg: '已儲存',
+    is_makeup: isMakeup === true,
+    makeup_remaining: makeupRemaining,
+    report_queued: reportQueued,
+  };
 }
 
 /** Course-sharing proof uses the same uploaded originals as the daily PDF. */

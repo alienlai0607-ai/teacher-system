@@ -1839,7 +1839,7 @@
     persist('紀錄已送出');
     closeDrawer();
     renderApp();
-    toast(result.warning || '本堂紀錄已送出並歸檔', result.warning ? 'warning' : 'success');
+    toast(result.warning || '本堂紀錄已送出；日報正在背景產生，現在可以離開', result.warning ? 'warning' : 'success');
     if (!PREVIEW_MODE && result.reportStatus === 'pending') {
       refreshTalentReportAfterSave(item.id, '紀錄已送出');
     }

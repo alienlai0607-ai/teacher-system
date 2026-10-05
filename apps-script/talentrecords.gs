@@ -475,17 +475,19 @@ function saveTalentLesson(params) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return { ok: false, error: '系統正在儲存另一筆紀錄，請稍後再送出' };
   let saved;
+  let duplicateSubmission = false;
   try {
     const existing = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lesson.id);
     if (existing && existing.record_type === 'lesson' && existing.nickname === nickname && existing.status === 'submitted') {
-      if (params.request_id && talentRecordObject_(existing).lastRequestId === params.request_id) return { ok: true, lesson: talentRecordObject_(existing), duplicate: true };
-      if (!String(lesson.updatedAt || '').trim()) return { ok: true, lesson: talentRecordObject_(existing), duplicate: true };
-      const latestContentRevision = String(talentRecordObject_(existing).contentRevision || '');
-      if (baseContentRevision ? baseContentRevision !== latestContentRevision : String(lesson.updatedAt) !== String(existing.updated_at || '')) {
+      const existingLesson = talentRecordObject_(existing);
+      if ((params.request_id && existingLesson.lastRequestId === params.request_id) || !String(lesson.updatedAt || '').trim()) {
+        saved = existingLesson;
+        duplicateSubmission = true;
+      } else if (baseContentRevision ? baseContentRevision !== String(existingLesson.contentRevision || '') : String(lesson.updatedAt) !== String(existing.updated_at || '')) {
         return { ok: false, code: 'RECORD_CONFLICT', error: '這筆紀錄已在其他裝置更新，您的草稿仍保留；請先查看最新紀錄再補充' };
       }
     }
-    if (!existing && employment === 'pt') {
+    if (!duplicateSubmission && !existing && employment === 'pt') {
       const firstScheduleKey = dateSchedules.length ? dateSchedules[0].scheduleKey : '';
       const duplicate = sheetToObjects(SHEET_NAMES.TALENT_RECORDS).some(function (row) {
         if (row.record_type !== 'lesson' || row.nickname !== nickname || String(row.record_date || '') !== lesson.date || row.status !== 'submitted') return false;
@@ -494,43 +496,27 @@ function saveTalentLesson(params) {
       });
       if (duplicate) return { ok: false, error: '這個日期與班次已有送出紀錄，不能重複申報' };
     }
-    saved = upsertTalentRecord_('lesson', nickname, lesson, actor.nickname);
-    removeTalentRecord_('talent-lesson-draft-' + nickname, nickname);
+    if (!duplicateSubmission) {
+      saved = upsertTalentRecord_('lesson', nickname, lesson, actor.nickname);
+      removeTalentRecord_('talent-lesson-draft-' + nickname, nickname);
+    }
   } finally {
     lock.releaseLock();
   }
-  if (params.defer_report === true) return { ok: true, lesson: saved, reportStatus: 'pending', warning: '課堂紀錄已存入雲端；日報與通知將接續產生，不必重送。' };
-  let pdf = null;
-  let warning = '';
-  try {
-    pdf = generateTalentLessonPdf_(saved, user);
-    if (pdf && pdf.url) {
-      const pdfLock = LockService.getScriptLock();
-      if (!pdfLock.tryLock(10000)) throw new Error('日報檔案已建立，但連結正在等候系統回寫');
-      try {
-        const latestRow = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lesson.id);
-        if (!latestRow || latestRow.record_type !== 'lesson' || latestRow.nickname !== nickname) throw new Error('找不到剛儲存的課堂紀錄');
-        const latest = talentRecordObject_(latestRow);
-        latest.reportUrl = pdf.url;
-        latest.reportFileId = pdf.fileId;
-        latest.reportFolderUrl = pdf.folderUrl || latest.reportFolderUrl || '';
-        latest.reportGeneratedAt = nowIso();
-        latest.reportRevision = saved.contentRevision;
-        const persisted = upsertTalentRecord_('lesson', nickname, latest, actor.nickname);
-        saved = persisted;
-        if (String(persisted.contentRevision || '') !== String(persisted.reportRevision || '')) {
-          warning = '課堂內容已在另一台裝置更新；文字已保留，PDF 將由系統自動補成最新版本。';
-        }
-      } finally {
-        pdfLock.releaseLock();
-      }
-      notifyTalentLesson_(saved, user, pdf.url);
-    }
-  } catch (error) {
-    warning = '課堂紀錄已儲存，但 PDF／通知稍後需重試：' + String(error.message || error);
-  }
+  const reportJob = typeof queueDeferredTeacherReport_ === 'function'
+    ? queueDeferredTeacherReport_({ type: 'talent', lessonId: lesson.id })
+    : { queued: false, scheduled: false };
+  const warning = reportJob.queued ? '' : '課堂紀錄已儲存，日報將由系統的例行檢查補建。';
   logSystem(nickname, 'save_talent_lesson', lesson.id, { date: lesson.date, status: lesson.lessonStatus });
-  return { ok: true, lesson: saved, reportUrl: saved && saved.reportUrl || '', warning: warning };
+  return {
+    ok: true,
+    lesson: saved,
+    reportUrl: saved && saved.reportUrl || '',
+    reportPending: true,
+    reportQueued: reportJob.queued,
+    duplicate: duplicateSubmission,
+    warning: warning,
+  };
 }
 
 function saveTalentPrep(params) {
@@ -895,7 +881,22 @@ function regenerateTalentLessonReportRequest_(params) {
   return result;
 }
 
-/** 每晚補齊因 Drive 短暫錯誤而缺少的才藝日報；每次限量避免超過 Apps Script 執行時間。 */
+function repairTalentLessonReportById_(lessonId) {
+  const row = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', String(lessonId || ''));
+  if (!row || row.record_type !== 'lesson' || row.status !== 'submitted') {
+    return { ok: true, skipped: true, current: true };
+  }
+  const result = regenerateTalentLessonReport({
+    __actor: { nickname: 'system', role: 'admin', status: 'active' },
+    lesson_id: row.record_id,
+  });
+  if (!result || !result.ok) throw new Error(result && result.error || '日報待重試');
+  const lesson = result.lesson || {};
+  const current = String(lesson.reportRevision || '') === String(lesson.contentRevision || lesson.updatedAt || '');
+  return Object.assign({}, result, { current: current });
+}
+
+/** 補齊因 Drive 短暫錯誤而缺少的才藝日報；每次限量避免超過 Apps Script 執行時間。 */
 function repairMissingTalentLessonReportsAuto() {
   ensureTalentRecordsSheet_();
   const rows = sheetToObjects(SHEET_NAMES.TALENT_RECORDS).filter(function (row) {
@@ -909,9 +910,8 @@ function repairMissingTalentLessonReportsAuto() {
   const errors = [];
   rows.forEach(function (row) {
     try {
-      const result = regenerateTalentLessonReport({ __actor: { nickname: 'system', role: 'admin', status: 'active' }, lesson_id: row.record_id });
-      if (!result.ok) throw new Error(result.error || '日報待重試');
-      repaired += 1;
+      const result = repairTalentLessonReportById_(row.record_id);
+      if (result.ok && result.current) repaired += 1;
     } catch (error) {
       errors.push({ id: row.record_id, error: String(error.message || error) });
     }
@@ -921,9 +921,12 @@ function repairMissingTalentLessonReportsAuto() {
 
 function setupTalentReportRepairTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (trigger) {
-    if (trigger.getHandlerFunction() === 'repairMissingTalentLessonReportsAuto') ScriptApp.deleteTrigger(trigger);
+    if (['repairMissingTalentLessonReportsAuto', 'processDeferredTeacherReportsAuto'].indexOf(trigger.getHandlerFunction()) >= 0) {
+      ScriptApp.deleteTrigger(trigger);
+    }
   });
   ScriptApp.newTrigger('repairMissingTalentLessonReportsAuto').timeBased().everyDays(1).atHour(22).nearMinute(15).create();
+  ScriptApp.newTrigger('processDeferredTeacherReportsAuto').timeBased().everyDays(1).atHour(22).nearMinute(45).create();
 }
 
 function notifyTalentLesson_(lesson, user, pdfUrl) {

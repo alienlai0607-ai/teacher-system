@@ -243,7 +243,7 @@ test('student and bonus writes honor the shared lock instead of racing', ({ requ
 test('every registered authenticated route has an authorization branch', ({ c }) => {
   const routes = [...source('Code').matchAll(/^\s+'([^']+)': \(\) =>/gm)].map(m => m[1]);
   const absent = [];
-  for (const action of routes.filter(a => !['ping', 'whoami'].includes(a))) {
+  for (const action of routes.filter(a => !['ping', 'whoami', 'externalData'].includes(a))) {
     try { c.authorizeApiAction_(action, { nickname: 'north', teacher: 'north', assignees: ['north'], to_nickname: 'north' }, c.findUserByNickname('boss')); }
     catch (error) { if (error.message === '此功能尚未設定安全權限') absent.push(action); }
   }

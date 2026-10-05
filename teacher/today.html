@@ -974,13 +974,7 @@ async function submitLog() {
     UI.toast('送出失敗：' + (res.error || ''), 'danger');
     return;
   }
-  const pdfResult = await API.sendSubmitPdf(session.nickname, currentDateStr());
   UI.loading(false);
-  if (!pdfResult?.ok) {
-    UI.toast('日誌已儲存，但 PDF／主管通知尚未完成：' + (pdfResult?.error || '請稍後重試'), 'warn');
-  } else if (pdfResult.notification && !pdfResult.notification.allReached) {
-    UI.toast('日誌與 PDF 已完成；尚未通知：' + (pdfResult.notification.pending || []).join('、'), 'warn');
-  }
   if (makeupDate) {
     sessionStorage.removeItem(MK_KEY);
     if (res.is_makeup) {   // 後端實際判定為補繳才顯示扣分訊息（24h 內修改不算補繳）
@@ -998,7 +992,7 @@ async function submitLog() {
     return;   // 更新不跳頁，留在原地繼續改
   }
   markSubmittedUI(new Date().toISOString());
-  UI.toast('日報已提交！', 'success');
+  UI.toast('日報已提交！PDF 與主管通知會在背景完成', 'success');
   setTimeout(() => window.location.href = 'mylog.html', 1000);
 }
 

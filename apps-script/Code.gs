@@ -10,7 +10,7 @@
  * 5. 把網址貼到前端 shared/config.js 的 API_URL
  */
 
-const KPI_RELEASE_VERSION_ = '20260918-course-record-1';
+const KPI_RELEASE_VERSION_ = '20261005-background-save-1';
 
 // ============ 路由 ============
 function doGet(e) {
@@ -45,9 +45,14 @@ function handleRequest(e, method) {
 
     const action = params.action || '';
 
-    // 除了健康檢查與 Google 登入交換之外，所有 API 都必須帶後端簽發的工作階段。
+    // AICEO 使用獨立的唯讀金鑰，不能取得任何既有寫入路由。
+    if (action === 'externalData') {
+      const externalAuth = authenticateExternalDataRequest_(params, method);
+      if (!externalAuth.ok) return jsonOut(externalAuth);
+      params.__external_authenticated = true;
+    // 除了健康檢查與 Google 登入交換之外，所有一般 API 都必須帶後端簽發的工作階段。
     // 權限不可只靠前端傳來的 nickname / viewer / operator，否則改寫請求即可冒用他人。
-    if (action !== 'ping' && action !== 'whoami') {
+    } else if (action !== 'ping' && action !== 'whoami') {
       const authResult = authenticateApiRequest_(params);
       if (!authResult.ok) return reply(authResult);
       params.__actor = authResult.user;
@@ -61,6 +66,9 @@ function handleRequest(e, method) {
       'getSessionIdentity': () => getSessionIdentity(params),
       'getMutationReceipt': () => getMutationReceipt(params),
       'reportClientMetrics': () => reportClientMetrics(params),
+
+      // AICEO 專用唯讀資料介面（獨立金鑰，不共用人員工作階段）
+      'externalData': () => externalData(params),
 
       // 使用者管理（admin）
       'listUsers': () => listUsers(params),

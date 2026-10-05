@@ -503,6 +503,138 @@ function repairRecentTalentReportsAuto() {
   return repairMissingTalentLessonReportsAuto();
 }
 
+const DEFERRED_TEACHER_REPORT_PREFIX_ = 'DEFERRED_TEACHER_REPORT_JOB_V1_';
+const DEFERRED_TEACHER_REPORT_SCHEDULED_AT_ = 'DEFERRED_TEACHER_REPORT_SCHEDULED_AT_V1';
+const DEFERRED_TEACHER_REPORT_RUNNING_AT_ = 'DEFERRED_TEACHER_REPORT_RUNNING_AT_V1';
+
+function deferredTeacherReportJobKey_(job) {
+  const identity = job.type === 'talent'
+    ? String(job.lessonId || '')
+    : String(job.date || '') + '|' + String(job.nickname || '');
+  const encoded = Utilities.base64EncodeWebSafe(identity, Utilities.Charset.UTF_8).replace(/=+$/g, '');
+  return DEFERRED_TEACHER_REPORT_PREFIX_ + job.type + '_' + encoded;
+}
+
+function scheduleDeferredTeacherReportWorker_(delayMs) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2000)) return false;
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const now = Date.now();
+    const delay = Math.max(60 * 1000, Number(delayMs || 60 * 1000));
+    const runAt = now + delay;
+    const scheduledFor = Number(props.getProperty(DEFERRED_TEACHER_REPORT_SCHEDULED_AT_) || 0);
+    if (scheduledFor > now && scheduledFor <= runAt) return true;
+    ScriptApp.newTrigger('processDeferredTeacherReportsAuto').timeBased().after(delay).create();
+    props.setProperty(DEFERRED_TEACHER_REPORT_SCHEDULED_AT_, String(runAt));
+    return true;
+  } catch (error) {
+    return false;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** 先持久化後台工作，再排程；即使觸發器一時建立失敗，下次排程仍會接手。 */
+function queueDeferredTeacherReport_(job) {
+  const type = String(job && job.type || '');
+  if (['kpi', 'talent'].indexOf(type) < 0) return { queued: false, scheduled: false };
+  const normalized = type === 'talent'
+    ? { type: type, lessonId: String(job.lessonId || ''), queuedAt: nowIso() }
+    : { type: type, nickname: String(job.nickname || ''), date: String(job.date || ''), queuedAt: nowIso() };
+  if ((type === 'talent' && !normalized.lessonId) || (type === 'kpi' && (!normalized.nickname || !normalized.date))) {
+    return { queued: false, scheduled: false };
+  }
+  try {
+    PropertiesService.getScriptProperties().setProperty(deferredTeacherReportJobKey_(normalized), JSON.stringify(normalized));
+    return { queued: true, scheduled: scheduleDeferredTeacherReportWorker_() };
+  } catch (error) {
+    return { queued: false, scheduled: false, error: String(error && error.message || error) };
+  }
+}
+
+function claimDeferredTeacherReportWorker_() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return false;
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const now = Date.now();
+    const runningAt = Number(props.getProperty(DEFERRED_TEACHER_REPORT_RUNNING_AT_) || 0);
+    if (runningAt && now - runningAt < 10 * 60 * 1000) return false;
+    props.setProperty(DEFERRED_TEACHER_REPORT_RUNNING_AT_, String(now));
+    return true;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** 觸發器入口：單次處理有限筆數，未完成的工作保留並自動續排。 */
+function processDeferredTeacherReportsAuto() {
+  const props = PropertiesService.getScriptProperties();
+  props.deleteProperty(DEFERRED_TEACHER_REPORT_SCHEDULED_AT_);
+  if (!claimDeferredTeacherReportWorker_()) return { ok: true, skipped: true, reason: 'already_running' };
+  const completed = [];
+  const errors = [];
+  try {
+    const snapshot = props.getProperties();
+    const now = Date.now();
+    const jobs = Object.keys(snapshot).filter(function (key) {
+      if (key.indexOf(DEFERRED_TEACHER_REPORT_PREFIX_) !== 0) return false;
+      try {
+        const job = JSON.parse(snapshot[key] || '{}');
+        return Number(job.nextAttemptAt || 0) <= now;
+      } catch (error) {
+        return true;
+      }
+    }).sort().slice(0, 12);
+    jobs.forEach(function (key) {
+      const raw = snapshot[key];
+      try {
+        const job = JSON.parse(raw || '{}');
+        const result = job.type === 'talent'
+          ? repairTalentLessonReportById_(job.lessonId)
+          : sendSubmitPdf({ nickname: job.nickname, date: job.date });
+        if (!result || !result.ok || result.current === false) {
+          throw new Error(result && result.error || '背景工作尚未完成');
+        }
+        if (props.getProperty(key) === raw) props.deleteProperty(key);
+        completed.push({ type: job.type, id: job.lessonId || (job.date + '|' + job.nickname) });
+      } catch (error) {
+        try {
+          const failedJob = JSON.parse(raw || '{}');
+          failedJob.attempts = Number(failedJob.attempts || 0) + 1;
+          const retryMinutes = Math.min(30, Math.pow(2, Math.min(5, failedJob.attempts - 1)));
+          failedJob.nextAttemptAt = Date.now() + retryMinutes * 60 * 1000;
+          failedJob.lastError = String(error && error.message || error).slice(0, 500);
+          if (props.getProperty(key) === raw) props.setProperty(key, JSON.stringify(failedJob));
+        } catch (ignored) {
+          if (props.getProperty(key) === raw) props.deleteProperty(key);
+        }
+        errors.push({ key: key, error: String(error && error.message || error) });
+      }
+    });
+  } finally {
+    props.deleteProperty(DEFERRED_TEACHER_REPORT_RUNNING_AT_);
+    const remainingSnapshot = props.getProperties();
+    const remainingKeys = Object.keys(remainingSnapshot).filter(function (key) {
+      return key.indexOf(DEFERRED_TEACHER_REPORT_PREFIX_) === 0;
+    });
+    if (remainingKeys.length) {
+      const nextAttemptAt = remainingKeys.reduce(function (earliest, key) {
+        try {
+          const job = JSON.parse(remainingSnapshot[key] || '{}');
+          const candidate = Number(job.nextAttemptAt || 0);
+          return candidate > 0 && (!earliest || candidate < earliest) ? candidate : earliest;
+        } catch (error) {
+          return 0;
+        }
+      }, 0);
+      scheduleDeferredTeacherReportWorker_(Math.max(60 * 1000, nextAttemptAt - Date.now()));
+    }
+  }
+  return { ok: errors.length === 0, completed: completed, errors: errors };
+}
+
 /** API：手動生成＋推播給所有 admin（?action=sendDailyKpiPdf&operator=柏翰&date=…） */
 function sendDailyKpiPdf(params) {
   const u = params.operator ? findUserByNickname(params.operator) : null;
