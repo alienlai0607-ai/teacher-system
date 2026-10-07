@@ -55,7 +55,17 @@ assert.deepEqual({ rate: pay({ present: 8 }).rate, amount: pay({ present: 8 }).a
 assert.equal(pay({ present: 1, makeup: 1, trial: 50 }).rate, 500, '補課計薪、體驗不計薪');
 assert.deepEqual({ rate: pay({ present: 11 }).rate, amount: pay({ present: 11 }).amount, review: pay({ present: 11 }).requiresReview }, { rate: 0, amount: 0, review: true });
 assert.deepEqual({ rate: pay({ present: 0, siteType: 'partner' }).rate, amount: pay({ present: 0, siteType: 'partner' }).amount }, { rate: 600, amount: 900 });
+assert.deepEqual({ rate: pay({ present: 8, siteType: 'partner', lessonKind: 'coverage', duration: 2 }).rate, amount: pay({ present: 8, siteType: 'partner', lessonKind: 'coverage', duration: 2 }).amount }, { rate: 800, amount: 1600 }, '帶班須依實際時數與人數計薪，不套固定合作校堂費');
+assert.deepEqual({
+  rate: pay({ present: 11, lessonKind: 'coverage', adminPayOverrideApproved: true, adminPayOverrideRate: 800, adminPayOverrideAmount: 1200 }).rate,
+  amount: pay({ present: 11, lessonKind: 'coverage', adminPayOverrideApproved: true, adminPayOverrideRate: 800, adminPayOverrideAmount: 1200 }).amount,
+  review: pay({ present: 11, lessonKind: 'coverage', adminPayOverrideApproved: true, adminPayOverrideRate: 800, adminPayOverrideAmount: 1200 }).requiresReview,
+}, { rate: 800, amount: 1200, review: false }, '主管核定的 11 人歷史帶班須強制列入 1,200 元');
 assert.equal(pay({ lessonStatus: 'cancelled' }).amount, 0);
+
+const coverageSchedule = context.talentCoverageSchedule_({ date: '2026-09-19', coverageStart: '10:40', coverageEnd: '12:10', coverageSiteType: 'self', coverageSite: '東橋教室' });
+assert.deepEqual({ label: coverageSchedule.scheduleLabel, time: coverageSchedule.scheduleTime, duration: coverageSchedule.duration, site: coverageSchedule.site }, { label: '帶班', time: '10:40–12:10', duration: 1.5, site: '東橋教室' });
+assert.throws(() => context.talentCoverageSchedule_({ date: '2026-09-19', coverageStart: '10:40', coverageEnd: '12:20', coverageSite: '東橋教室' }), /0.5 小時倍數/);
 
 const adminActor = { nickname: '柏翰', role: 'admin', status: 'active', department: '總部' };
 const deletedTeacher = { nickname: '離職老師', role: 'teacher', status: 'deleted', department: '才藝部門', employment_type: 'pt', work_assignments: ['talent-pt'] };
@@ -136,6 +146,7 @@ assert.equal(logCompleteContext.logComplete(completeLog), true, '親師溝通已
 assert.equal(logCompleteContext.logComplete({ ...completeLog, parentStatus: 'followup' }), true, '親師溝通待追蹤時，本堂紀錄仍應判定完整');
 assert.equal(logCompleteContext.logComplete({ ...completeLog, parentStatus: 'pending' }), false, '尚未選擇親師狀態不得被誤判為完整');
 assert.equal(logCompleteContext.logComplete({ ...completeLog, parentStatus: '' }), false, '空白親師狀態不得被誤判為完整');
+assert.equal(logCompleteContext.logComplete({ lessonStatus: 'held', lessonKind: 'coverage', adminBackfillApproved: true }), true, '管理員核定的歷史帶班不得被誤判為缺件');
 assert.match(archiveSource, /function listTeacherReportFolders\(/);
 assert.match(archiveSource, /item\.removeViewer\(/, '應移除已失效的舊查看權限');
 assert.match(archiveSource, /item\.removeEditor\(/, '主管只能查看，不保留舊編輯權限');
@@ -283,12 +294,19 @@ assert.match(talentUiSource, /\.\.\.values,[\s\S]*id: editingId \|\| existingLog
 assert.match(talentUiSource, /state\.logs = \(Array\.isArray\(state\.logs\)[\s\S]*id: uid\('log'\)/, '舊本機課堂缺少編號時需自動修復');
 assert.match(talentUiSource, /class="record-actions"[\s\S]*data-action="edit-log"[\s\S]*data-action="view-log"/, '編輯與查看按鈕需放入獨立動作列，避免疊在同一座標');
 assert.match(talentStyleSource, /\.record-actions \{ display: flex;[\s\S]*gap: 6px;/, '編輯與查看按鈕需保留可點擊間距');
-assert.match(talentIndexSource, /app\.js\?v=20261005-background-save-1/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
+assert.match(talentIndexSource, /app\.js\?v=20261007-talent-coverage-1/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
 const saveTalentLessonSource = backendSource.slice(backendSource.indexOf('function saveTalentLesson('), backendSource.indexOf('function saveTalentPrep('));
 assert.doesNotMatch(saveTalentLessonSource, /generateTalentLessonPdf_/, '才藝正式儲存不得同步等待 PDF');
 assert.match(saveTalentLessonSource, /queueDeferredTeacherReport_\(\{ type: 'talent'/, '才藝日報需放入背景佇列');
 assert.match(talentUiSource, /completed: String\(values\.issue \|\| ''\)\.trim\(\), response: String\(values\.issue \|\| ''\)\.trim\(\)/, '簡化後的才藝表單需相容尚未更新的舊後端驗證');
 assert.match(talentUiSource, /function talentSubmissionError\(/, '才藝送出錯誤不得直接顯示內部欄位名稱');
+assert.match(talentUiSource, /name="lessonStatus" value="coverage"/, '才藝 PT 表單需提供帶班選項');
+assert.match(talentUiSource, /name="coverageStart"[\s\S]*name="coverageEnd"/, '帶班需讓老師選擇開始與結束時間');
+assert.match(talentUiSource, /帶班可選實際授課日期/, '帶班日期需開放選擇實際授課日');
+assert.match(backendSource, /function talentCoverageSchedule_\(/, '後端需獨立驗證帶班時間與地點');
+assert.match(backendSource, /!initialExisting && lesson\.lessonStatus === 'held' && !isCoverage/, '只有帶班可跨日新增，固定課程限制不得被放寬');
+assert.match(backendSource, /function backfillHongdouCoverage20260919FromEditor\(/, '需提供一次性補入紅豆 9\/19 帶班鐘點的管理員函式');
+assert.match(backendSource, /adminPayOverrideAmount: 1200/, '紅豆 9\/19 帶班須核定 1,200 元');
 const talentPaySource = talentUiSource.slice(talentUiSource.indexOf('function renderPay()'), talentUiSource.indexOf('function renderPayRow('));
 assert.match(talentPaySource, /normalizeName\(currentUser\.nickname\) === normalizeName\('黑豹老師'\)[\s\S]*黑豹／善化/, '黑豹合作校鐘點卡只能由黑豹本人條件顯示');
 assert.doesNotMatch(talentPaySource, /<div class="partner"><strong>黑豹／善化<\/strong><span>每堂固定 900，無續報獎金<\/span><\/div><\/section>/, '黑豹特殊規則不得無條件顯示給其他 PT');

@@ -744,6 +744,34 @@ async function talentWorkflow(browser) {
     await pageHealth(page, label, 'reload');
     await page.screenshot({ path: path.join(artifactDir, 'talent-pt-workflow.png'), fullPage: true });
 
+    await clickRoute(page, 'today');
+    await clickAction(page, 'new-log');
+    await page.check('#log-form input[name="lessonStatus"][value="coverage"]');
+    const coverageDate = await page.evaluate(() => {
+      const date = new Date();
+      date.setDate(date.getDate() - 1);
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    });
+    await page.fill('#log-form input[name="date"]', coverageDate);
+    await page.fill('#log-form input[name="coverageStart"]', '10:30');
+    await page.fill('#log-form input[name="coverageEnd"]', '12:00');
+    await page.selectOption('#log-form select[name="coverageSiteType"]', 'self');
+    await page.fill('#log-form input[name="coverageSite"]', '東橋教室');
+    await page.waitForTimeout(600);
+    const coverageControls = await page.evaluate(() => {
+      const form = document.querySelector('#log-form');
+      return {
+        dateReadOnly: form?.elements.date?.readOnly,
+        scheduleDisabled: form?.elements.scheduleKey?.disabled,
+        startDisabled: form?.elements.coverageStart?.disabled,
+        endDisabled: form?.elements.coverageEnd?.disabled,
+        duration: form?.elements.coverageDuration?.value,
+      };
+    });
+    check('才藝 PT 帶班可選過去日期、時間與地點', coverageControls.dateReadOnly === false && coverageControls.scheduleDisabled === true && coverageControls.startDisabled === false && coverageControls.endDisabled === false);
+    check('才藝 PT 帶班依時間自動計算時數', coverageControls.duration === '1.5');
+    await closeDrawer(page);
+
     await page.evaluate(() => {
       const key = 'bp_talent_kpi_v14_shared';
       const shared = JSON.parse(localStorage.getItem(key) || 'null');

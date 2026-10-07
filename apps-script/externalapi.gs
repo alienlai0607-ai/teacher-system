@@ -268,6 +268,8 @@ function externalOperationalSummary_() {
           site_type: String(lesson.siteType || ''),
           schedule_label: String(lesson.scheduleLabel || ''),
           schedule_time: String(lesson.scheduleTime || ''),
+          lesson_kind: String(lesson.lessonKind || 'scheduled'),
+          duration_hours: Number(lesson.duration || 0),
           latest_lesson_date: String(lesson.date || row.record_date || ''),
           latest_status: String(lesson.lessonStatus || 'held'),
           expected_students: Number(lesson.expected || 0),

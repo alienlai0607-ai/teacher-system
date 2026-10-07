@@ -298,13 +298,46 @@ function talentLessonPay_(lesson, user) {
   }
   const duration = Number(lesson.duration || 0);
   const count = Number(lesson.present || 0) + Number(lesson.makeup || 0);
-  const isPartner = String(lesson.siteType || '') === 'partner';
+  if (lesson.adminPayOverrideApproved === true && Number(lesson.adminPayOverrideAmount || 0) > 0) {
+    return {
+      count: count,
+      rate: Number(lesson.adminPayOverrideRate || 0),
+      amount: Math.round(Number(lesson.adminPayOverrideAmount || 0)),
+      tier: String(lesson.adminPayOverrideTier || '管理員核定'),
+      requiresReview: false
+    };
+  }
+  const isPartner = String(lesson.siteType || '') === 'partner' && String(lesson.lessonKind || 'scheduled') !== 'coverage';
   if (isPartner) return { count: count, rate: 600, amount: 900, tier: '合作校固定 1.5 小時', requiresReview: false };
   if (count < 2) return { count: count, rate: 0, amount: 0, tier: '低於開班人數', requiresReview: true };
   if (count <= 4) return { count: count, rate: 500, amount: Math.round(500 * duration), tier: '2-4 人', requiresReview: false };
   if (count <= 7) return { count: count, rate: 600, amount: Math.round(600 * duration), tier: '5-7 人', requiresReview: false };
   if (count <= 10) return { count: count, rate: 800, amount: Math.round(800 * duration), tier: '8-10 人', requiresReview: false };
   return { count: count, rate: 0, amount: 0, tier: '超過 10 人待主管確認', requiresReview: true };
+}
+
+function talentCoverageSchedule_(lesson) {
+  const start = String(lesson.coverageStart || '').trim();
+  const end = String(lesson.coverageEnd || '').trim();
+  if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) throw new Error('請選擇帶班開始與結束時間');
+  const startParts = start.split(':').map(Number);
+  const endParts = end.split(':').map(Number);
+  if (startParts[0] > 23 || endParts[0] > 23 || startParts[1] > 59 || endParts[1] > 59) throw new Error('帶班時間不正確');
+  const minutes = endParts[0] * 60 + endParts[1] - startParts[0] * 60 - startParts[1];
+  if (minutes < 30 || minutes > 240 || minutes % 30 !== 0) throw new Error('帶班時數須為 0.5 小時倍數，且介於 0.5～4 小時');
+  const siteType = String(lesson.siteType || lesson.coverageSiteType || 'self') === 'partner' ? 'partner' : 'self';
+  const site = String(lesson.site || lesson.coverageSite || '').trim();
+  if (!site) throw new Error('請填寫帶班地點');
+  return {
+    scheduleKey: ['coverage', lesson.date, start, end, siteType, site].map(function (value) { return encodeURIComponent(String(value || '')); }).join('__'),
+    scheduleLabel: '帶班',
+    scheduleTime: start + '–' + end,
+    coverageStart: start,
+    coverageEnd: end,
+    duration: minutes / 60,
+    siteType: siteType,
+    site: site
+  };
 }
 
 function saveTalentDraft(params) {
@@ -353,15 +386,20 @@ function saveTalentLesson(params) {
   const baseContentRevision = String(lesson.contentRevision || '');
   if (!lesson.id) return { ok: false, error: '課堂紀錄編號遺失' };
   lesson.teacher = nickname;
-  lesson.employment = talentEmployment_(user);
-  lesson.date = String(lesson.date || '').slice(0, 10);
-  lesson.lessonStatus = lesson.lessonStatus === 'cancelled' ? 'cancelled' : 'held';
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(lesson.date) || lesson.date > todayStr()) return { ok: false, error: '課程日期不正確' };
   const employment = talentEmployment_(user);
+  lesson.employment = employment;
+  lesson.date = String(lesson.date || '').slice(0, 10);
+  const requestedLessonStatus = String(lesson.lessonStatus || 'held');
+  lesson.lessonKind = lesson.lessonKind === 'coverage' || requestedLessonStatus === 'coverage' ? 'coverage' : 'scheduled';
+  lesson.lessonStatus = requestedLessonStatus === 'cancelled' ? 'cancelled' : 'held';
+  if (lesson.lessonKind === 'coverage' && employment !== 'pt') return { ok: false, error: '帶班紀錄只適用才藝 PT' };
+  if (lesson.lessonStatus === 'cancelled') lesson.lessonKind = 'scheduled';
+  const isCoverage = employment === 'pt' && lesson.lessonKind === 'coverage';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(lesson.date) || lesson.date > todayStr()) return { ok: false, error: '課程日期不正確' };
   const userSchedules = employment === 'pt' ? normalizeUserSchedule_(user.schedule_json) : [];
   const dateSchedules = employment === 'pt' ? talentSchedulesForDate_(user, lesson.date) : [];
   let matchedSchedule = null;
-  if (employment === 'pt') {
+  if (employment === 'pt' && !isCoverage) {
     if (!userSchedules.length) return { ok: false, error: '此 PT 帳號尚未設定固定排班，請先聯絡管理員' };
     const requestedScheduleKey = String(lesson.scheduleKey || '').trim();
     matchedSchedule = dateSchedules.filter(function (item) { return item.scheduleKey === requestedScheduleKey; })[0] || null;
@@ -372,6 +410,9 @@ function saveTalentLesson(params) {
     lesson.scheduleTime = matchedSchedule.time;
     lesson.siteType = matchedSchedule.siteType;
     lesson.site = matchedSchedule.site;
+  } else if (isCoverage) {
+    const coverageSchedule = talentCoverageSchedule_(lesson);
+    Object.keys(coverageSchedule).forEach(function (key) { lesson[key] = coverageSchedule[key]; });
   }
   const initialExisting = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lesson.id);
   const initialLesson = initialExisting && initialExisting.record_type === 'lesson' && initialExisting.nickname === nickname
@@ -380,7 +421,16 @@ function saveTalentLesson(params) {
     lesson[key] = initialLesson ? initialLesson[key] || '' : '';
   });
   if (initialLesson && initialLesson.createdAt) lesson.createdAt = initialLesson.createdAt;
-  if (!initialExisting && lesson.lessonStatus === 'held' && lesson.date !== todayStr()) {
+  if (initialLesson && initialLesson.adminPayOverrideApproved === true) {
+    ['adminPayOverrideApproved', 'adminPayOverrideAmount', 'adminPayOverrideRate', 'adminPayOverrideTier', 'adminPayOverrideReason', 'adminPayOverrideBy', 'adminPayOverrideAt'].forEach(function (key) {
+      lesson[key] = initialLesson[key];
+    });
+  } else if (!actor || actor.role !== 'admin') {
+    ['adminPayOverrideApproved', 'adminPayOverrideAmount', 'adminPayOverrideRate', 'adminPayOverrideTier', 'adminPayOverrideReason', 'adminPayOverrideBy', 'adminPayOverrideAt'].forEach(function (key) {
+      delete lesson[key];
+    });
+  }
+  if (!initialExisting && lesson.lessonStatus === 'held' && !isCoverage && lesson.date !== todayStr()) {
     return { ok: false, error: lesson.employment === 'pt' ? 'PT 正常課程只能在上課當日送出' : '正常課程請於上課當日送出' };
   }
   if (initialLesson && initialExisting.status === 'submitted') {
@@ -388,6 +438,7 @@ function saveTalentLesson(params) {
     if (String(initialLesson.date || '') !== lesson.date || initialLesson.lessonStatus !== lesson.lessonStatus) {
       return { ok: false, error: '補充紀錄時不可更換日期或上課狀態' };
     }
+    if (String(initialLesson.lessonKind || 'scheduled') !== lesson.lessonKind) return { ok: false, error: '補充紀錄時不可更換固定課程或帶班類型' };
     if (employment === 'pt' && String(initialLesson.scheduleKey || '') && initialLesson.scheduleKey !== lesson.scheduleKey) {
       return { ok: false, error: '補充紀錄時不可更換原班次' };
     }
@@ -417,8 +468,8 @@ function saveTalentLesson(params) {
     });
     if (lesson.expected !== lesson.present + lesson.leave + lesson.absent) throw new Error('應到正式人數必須等於正式實到、請假與未請假缺席合計');
     lesson.duration = Number(lesson.duration || 0);
-    if (lesson.siteType === 'partner') lesson.duration = 1.5;
-    if ([1, 1.5].indexOf(lesson.duration) < 0) throw new Error('授課時數只可選 1 或 1.5 小時');
+    if (lesson.siteType === 'partner' && !isCoverage) lesson.duration = 1.5;
+    if (!isCoverage && [1, 1.5].indexOf(lesson.duration) < 0) throw new Error('授課時數只可選 1 或 1.5 小時');
     const prepRow = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', String(lesson.prepId || ''));
     if (!prepRow || prepRow.record_type !== 'prep' || prepRow.nickname !== nickname) {
       throw new Error('請選擇本人的備課檔案');
@@ -437,13 +488,13 @@ function saveTalentLesson(params) {
     if (lesson.parentStatus === 'followup' && !String(lesson.parentFollowup || '').trim()) throw new Error('請填寫個別追蹤與下一步');
     if (lesson.parentStatus !== 'followup') lesson.parentFollowup = '';
     lesson.newCount = lesson.siteType === 'self' && lesson.employment === 'fulltime' ? Math.max(0, Math.floor(Number(lesson.newCount || 0))) : 0;
-    lesson.renewalCount = lesson.siteType === 'self' ? Math.max(0, Math.floor(Number(lesson.renewalCount || 0))) : 0;
+    lesson.renewalCount = lesson.siteType === 'self' && !isCoverage ? Math.max(0, Math.floor(Number(lesson.renewalCount || 0))) : 0;
     const pay = talentLessonPay_(lesson, user);
     lesson.pay = pay.amount;
     lesson.payRate = pay.rate;
     lesson.payTier = pay.tier;
     lesson.payRequiresReview = pay.requiresReview;
-    if (lesson.siteType === 'partner') {
+    if (lesson.siteType === 'partner' || isCoverage) {
       lesson.appStatus = 'not_required';
       lesson.appFiles = [];
       lesson.appUpdatedAt = '';
@@ -454,7 +505,7 @@ function saveTalentLesson(params) {
       lesson.appUpdatedAt = initialLesson && initialLesson.appUpdatedAt || lesson.appUpdatedAt || '';
       lesson.appPublishedAt = initialLesson && initialLesson.appPublishedAt || lesson.appPublishedAt || '';
     }
-    lesson.backfilled = false;
+    lesson.backfilled = isCoverage && lesson.date !== todayStr();
     const bonusCountsChanged = initialLesson && (
       Number(initialLesson.newCount || 0) !== lesson.newCount || Number(initialLesson.renewalCount || 0) !== lesson.renewalCount
     );
@@ -507,7 +558,7 @@ function saveTalentLesson(params) {
     ? queueDeferredTeacherReport_({ type: 'talent', lessonId: lesson.id })
     : { queued: false, scheduled: false };
   const warning = reportJob.queued ? '' : '課堂紀錄已儲存，日報將由系統的例行檢查補建。';
-  logSystem(nickname, 'save_talent_lesson', lesson.id, { date: lesson.date, status: lesson.lessonStatus });
+  logSystem(nickname, 'save_talent_lesson', lesson.id, { date: lesson.date, status: lesson.lessonStatus, lesson_kind: lesson.lessonKind });
   return {
     ok: true,
     lesson: saved,
@@ -517,6 +568,98 @@ function saveTalentLesson(params) {
     duplicate: duplicateSubmission,
     warning: warning,
   };
+}
+
+/**
+ * 僅供 Apps Script 編輯器手動執行：依柏翰確認，補入紅豆 2026/09/19 代酸酸帶 WEDO 班。
+ * 11 人由管理員按最高既有級距 800 元／小時核定，10:40–12:10 共 1.5 小時，合計 1,200 元。
+ */
+function backfillHongdouCoverage20260919FromEditor() {
+  const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  const operator = email ? findUserByEmail(email) : null;
+  if (!operator || operator.status !== 'active' || operator.role !== 'admin') {
+    throw new Error('只有正式管理員可以補入帶班鐘點');
+  }
+  const teacher = findTalentUser_('紅豆');
+  if (!teacher || teacher.status !== 'active' || talentEmployment_(teacher) !== 'pt') throw new Error('找不到紅豆的才藝 PT 帳號');
+  const recordId = 'talent-coverage-hongdou-20260919-wedo-1040';
+  ensureTalentRecordsSheet_();
+  const rows = sheetToObjects(SHEET_NAMES.TALENT_RECORDS);
+  const duplicateRow = rows.find(function (row) {
+    if (row.record_type !== 'lesson' || row.nickname !== teacher.nickname || row.status !== 'submitted') return false;
+    const existingLesson = talentRecordObject_(row);
+    if (String(existingLesson.date || '') !== '2026-09-19') return false;
+    return String(row.record_id || '') === recordId || (existingLesson.lessonKind === 'coverage' && existingLesson.scheduleTime === '10:40–12:10' && /wedo/i.test(String(existingLesson.courseName || '')));
+  });
+  let saved;
+  let duplicate = false;
+  if (duplicateRow) {
+    saved = talentRecordObject_(duplicateRow);
+    duplicate = true;
+  } else {
+    const now = nowIso();
+    const lesson = {
+      id: recordId,
+      teacher: teacher.nickname,
+      employment: 'pt',
+      lessonStatus: 'held',
+      lessonKind: 'coverage',
+      date: '2026-09-19',
+      scheduleKey: 'coverage__2026-09-19__10%3A40__12%3A10__self__%E6%9D%B1%E6%A9%8B%E6%95%99%E5%AE%A4',
+      scheduleLabel: '帶班',
+      scheduleTime: '10:40–12:10',
+      coverageStart: '10:40',
+      coverageEnd: '12:10',
+      courseType: 'WeDo 機器人',
+      courseName: 'WEDO（代酸酸帶班）',
+      siteType: 'self',
+      site: '東橋教室',
+      duration: 1.5,
+      expected: 11,
+      present: 11,
+      leave: 0,
+      absent: 0,
+      makeup: 0,
+      trial: 0,
+      prepId: '',
+      issue: '行政依老師回報補登：代酸酸帶 WEDO 班。',
+      parentStatus: 'complete',
+      attendanceFiles: [],
+      learningFiles: [],
+      roomFiles: [],
+      roomDone: false,
+      appStatus: 'not_required',
+      appFiles: [],
+      newCount: 0,
+      renewalCount: 0,
+      bonusApproval: 'not_required',
+      status: 'submitted',
+      pay: 1200,
+      payRate: 800,
+      payTier: '11 人（管理員核定最高級距）',
+      payRequiresReview: false,
+      adminPayOverrideApproved: true,
+      adminPayOverrideAmount: 1200,
+      adminPayOverrideRate: 800,
+      adminPayOverrideTier: '11 人（管理員核定最高級距）',
+      adminPayOverrideReason: '柏翰依老師 2026/09/19 LINE 回報確認補入計算',
+      adminPayOverrideBy: operator.nickname,
+      adminPayOverrideAt: now,
+      adminBackfillApproved: true,
+      adminBackfillNote: '紅豆代酸酸上 WEDO，共 11 人；未補登 2026/09/10 加班。',
+      backfilled: true,
+      contentRevision: now + '-' + Utilities.getUuid().slice(0, 8)
+    };
+    saved = upsertTalentRecord_('lesson', teacher.nickname, lesson, operator.nickname);
+    logSystem(operator.nickname, 'backfill_talent_coverage', recordId, { teacher: teacher.nickname, date: lesson.date, amount: lesson.pay });
+  }
+  const septemberTotal = sheetToObjects(SHEET_NAMES.TALENT_RECORDS).filter(function (row) {
+    if (row.record_type !== 'lesson' || row.nickname !== teacher.nickname || row.status !== 'submitted') return false;
+    return String(talentRecordObject_(row).date || '').slice(0, 7) === '2026-09';
+  }).reduce(function (sum, row) { return sum + Number(talentRecordObject_(row).pay || 0); }, 0);
+  const result = { ok: true, duplicate: duplicate, record_id: saved.id || recordId, teacher: teacher.nickname, date: '2026-09-19', time: '10:40–12:10', students: 11, amount: Number(saved.pay || 0), september_wage_total: septemberTotal };
+  Logger.log(JSON.stringify(result));
+  return result;
 }
 
 function saveTalentPrep(params) {
@@ -611,7 +754,7 @@ function updateTalentAppStatus(params) {
     if (requestId && lesson.lastRequestId === requestId) {
       return { ok: true, lesson: lesson, duplicate: true, reportStatus: params.defer_report === true ? 'pending' : '' };
     }
-    if (lesson.lessonStatus === 'cancelled' || lesson.siteType === 'partner') {
+    if (lesson.lessonStatus === 'cancelled' || lesson.siteType === 'partner' || lesson.lessonKind === 'coverage') {
       lesson.appStatus = 'not_required';
       lesson.appFiles = [];
       lesson.appUpdatedAt = '';
@@ -815,7 +958,9 @@ function generateTalentLessonPdf_(lesson, user) {
     if (prep) html += talentAttachmentLinks_('備課附件', prep.materials);
     html += '<h3>課程問題及下次優化</h3><div class="box">' + talentHtmlEsc_(lesson.issue) + '</div>';
     html += '<h3>親師溝通</h3><div class="box">' + talentHtmlEsc_(lesson.parentStatus === 'complete' ? '全班回報完成' : lesson.parentStatus === 'followup' ? '有個別追蹤' : '尚未完成') + (lesson.parentFollowup ? '<br>' + talentHtmlEsc_(lesson.parentFollowup) : '') + '</div>';
-    if (lesson.siteType === 'partner') {
+    if (lesson.lessonKind === 'coverage') {
+      html += '<h3>家長 APP 發布確認</h3><div class="box">帶班免發布，不列入缺件。</div>';
+    } else if (lesson.siteType === 'partner') {
       html += '<h3>家長 APP 發布確認</h3><div class="box">合作校課程免發布，不列入缺件。</div>';
     } else {
       html += '<h3>家長 APP 發布確認</h3><div class="box">' + (lesson.appStatus === 'published' && Array.isArray(lesson.appFiles) && lesson.appFiles.length ? '已上傳發布完成截圖' : '尚未上傳發布完成截圖') + '</div>';
