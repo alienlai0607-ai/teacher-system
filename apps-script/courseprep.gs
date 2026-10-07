@@ -48,10 +48,13 @@ function saveCoursePrep(params) {
     return /^https:\/\/drive\.google\.com\//i.test(String(item && (item.cloudUrl || item.url) || ''));
   });
   if (!hasArchivedMaterial) return { ok: false, error: '請至少上傳一份教案或教材資料' };
+  const requestedDate = String(prep.date || todayStr()).slice(0, 10);
+  const parsedDate = new Date(requestedDate + 'T00:00:00Z');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate) || isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== requestedDate || requestedDate > todayStr()) {
+    return { ok: false, error: '備課建立日期不正確' };
+  }
   const now = nowIso();
   ensureCoursePrepSheet_();
-  const dataJson = JSON.stringify({ schema: 'anqin-course-prep-v1', prep: prep, plan: plan });
-  if (dataJson.length > 45000) return { ok: false, error: '備課內容過大，請移除內嵌圖片後再試' };
   const normalizedTitle = String(prep.title || '').trim().replace(/\s+/g, ' ').toLowerCase();
   const normalizedCourseType = String(prep.details && prep.details.targetCourse || '').trim().replace(/\s+/g, ' ').toLowerCase();
   const lock = LockService.getScriptLock();
@@ -64,6 +67,13 @@ function saveCoursePrep(params) {
     if (existing && existing.status === 'deleted') return { ok: false, code: 'RECORD_DELETED', error: '這份備課檔案已被刪除；本機內容仍保留，請另建新檔' };
     if (existing && params.request_id && existing.last_request_id === params.request_id) return { ok: true, prep_id: prep.id, updated_at: existing.updated_at, revision: existing.record_revision, duplicate: true };
     if (existing && recordConflict_(prep.cloudRevision || prep.cloudUpdatedAt, existing.record_revision || existing.updated_at)) return recordConflictResult_();
+    const today = todayStr();
+    if (!existing && requestedDate !== today && requestedDate !== previousKpiWorkday_(today)) {
+      return { ok: false, error: '建立日期只能選今天或上一個工作日' };
+    }
+    prep.date = existing ? String(cellDateStr_(existing.created_date || requestedDate)).slice(0, 10) : requestedDate;
+    const dataJson = JSON.stringify({ schema: 'anqin-course-prep-v1', prep: prep, plan: plan });
+    if (dataJson.length > 45000) return { ok: false, error: '備課內容過大，請移除內嵌圖片後再試' };
     const duplicate = sheetToObjects(SHEET_NAMES.COURSE_PREP).some(function (row) {
       return row.status !== 'deleted' && row.nickname === nickname
         && String(row.prep_id || '') !== String(prep.id)
@@ -78,7 +88,7 @@ function saveCoursePrep(params) {
       department: normalizeDepartment_(user.department),
       title: String(prep.title || '').trim(),
       course_type: String(prep.details && prep.details.targetCourse || ''),
-      created_date: String(prep.date || todayStr()).slice(0, 10),
+      created_date: prep.date,
       status: String(prep.status || 'draft'),
       data_json: dataJson,
       created_at: existing ? existing.created_at : now,

@@ -65,6 +65,10 @@ async function main() {
   const prep = { id: 'prep-1', type: 'lessonprep', title: 'QA course', details: { targetCourse: 'QA' }, prepEvidence: [{ url: 'https://drive.google.com/file/d/qa/view' }] };
   const saved = context.saveCoursePrep({ nickname: 'QA', prep, request_id: 'prep-req' });
   check(saved.ok, 'prep save');
+  const previousWorkdayPrep = { ...prep, id: 'prep-previous-workday', title: 'Previous workday course', date: '2026-09-04' };
+  check(context.saveCoursePrep({ nickname: 'QA', prep: previousWorkdayPrep, request_id: 'prep-previous-workday-req' }).ok, 'prep accepts previous workday including Friday before a weekend');
+  const tooOldPrep = { ...prep, id: 'prep-too-old', title: 'Too old course', date: '2026-09-03' };
+  check(/上一個工作日/.test(context.saveCoursePrep({ nickname: 'QA', prep: tooOldPrep }).error), 'prep rejects dates older than the previous workday');
   check(context.saveCoursePrep({ nickname: 'QA', prep, request_id: 'prep-req' }).duplicate, 'prep retries are idempotent');
   check(context.saveCoursePrep({ nickname: 'QA', prep }).code === 'RECORD_CONFLICT', 'prep rejects stale update');
   check(context.deleteCoursePrep({ operator: 'QA', prep_id: prep.id, confirmation_name: 'QA' }).ok, 'soft delete');

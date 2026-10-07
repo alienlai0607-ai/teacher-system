@@ -132,8 +132,8 @@ assert.match(source, /function applyPreviewReviewContext\(/, '安親審查模式
 assert.match(source, /if \(!applyPreviewReviewContext\(control\.dataset\.role\)\) state\.ui\.role = control\.dataset\.role/, '切換審查角色時必須同步身份範圍');
 assert.match(source, /applyPreviewReviewContext\(LOCAL_REVIEW_ROLE\)/, '網址指定主管視角時首次載入就必須套用正確身份');
 assert.match(source, /GLOBAL_MANAGER_NICKNAMES\.some\(name => sameReviewIdentity\(name, managerNickname\)\)/, '小魚在審查與正式登入都必須擁有全教室檢視範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20261005-photo-batch-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20261005-photo-batch-1/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20261007-prep-date-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20261007-prep-date-1/, '登入備援路徑也必須避開舊版快取');
 
 const startupSafetySource = source.slice(source.indexOf('function stripEmbeddedMediaJson('), source.indexOf('function loadState()'));
 const startupSafetyContext = vm.createContext({ JSON, Number, Set });
@@ -174,6 +174,8 @@ const prepFormSource = source.slice(source.indexOf('function renderCoursePrepFor
 assert.match(prepFormSource, /課程類型 <span class="required">\*<\/span>/, '備課檔案只需先辨識課程類型');
 assert.match(prepFormSource, /課程名稱 <span class="required">\*<\/span>/, '備課檔案只需先辨識課程名稱');
 assert.match(prepFormSource, /教案或教材附件 <span class="required">\*<\/span>/, '備課檔案必須明確標示教案或教材必填');
+assert.match(prepFormSource, /previousKpiWorkday\(prepToday\)[\s\S]*id="course-prep-date" name="date"/, '新增備課可選今天或上一個工作日');
+assert.match(prepFormSource, /週一可選上週五/, '建立日期需清楚說明週末的工作日規則');
 assert.doesNotMatch(prepFormSource, /學習者背景與先備能力|可觀察學習目標|課程流程|學習檢核與達成標準/, '輕量備課不得再要求舊版教案段落');
 assert.doesNotMatch(prepFormSource, /renderActivityPlanField/, '備課表單不得再開啟第二層教案表單');
 assert.doesNotMatch(source, /教案、教材或參考資料皆為選填|附件可視需要補充|沒有附件；附件為選填/, '安親各頁不得殘留附件選填的舊文案');
@@ -181,6 +183,9 @@ const prepReadinessSource = source.slice(source.indexOf('function prepSourceRead
 assert.doesNotMatch(prepReadinessSource, /directPlanReady|planReadiness|建立日不可晚於授課日/, '備課檔案不得因完成百分比、主管審核或日期被阻擋');
 assert.match(prepReadinessSource, /缺少教案或教材附件/, '工作紀錄不得選取缺附件的備課檔案');
 const prepSaveSource = source.slice(source.indexOf('async function saveCoursePrepForm('), source.indexOf('function saveActivityForm('));
+const prepCaptureSource = source.slice(source.indexOf('function captureCoursePrepFormDraft('), source.indexOf('function captureActivityFormDraft('));
+assert.match(prepCaptureSource, /date: String\(data\.get\('date'\)/, '備課草稿需保留老師選取的建立日期');
+assert.match(prepSaveSource, /date: existing\?\.date \|\| selectedDate/, '新備課需以老師選取的日期寫入');
 assert.match(prepSaveSource, /status: 'complete'/, '完成基本建檔後應直接可供工作紀錄選用');
 assert.doesNotMatch(prepSaveSource, /directPlanReady\(planId\)/, '儲存備課不得依賴舊版教案完成度');
 assert.match(prepSaveSource, /some\(item => materialCloudUrl\(item\) \|\| item\.dataUrl \|\| item\.localMediaKey\)/, '備課需有已歸檔附件或可接續上傳的原檔');
@@ -195,6 +200,7 @@ assert.match(prepLibrarySource, /calendar-clock[\s\S]*更新/, '備課清單只�
 assert.doesNotMatch(prepLibrarySource, /data-action="edit-activity"/, '清單點選應先安全查看，再由內容頁選擇是否編輯');
 assert.match(coursePrepBackend, /hasArchivedMaterial/, '後端也必須驗證教案或教材附件');
 assert.match(coursePrepBackend, /請至少上傳一份教案或教材資料/, '後端缺附件時需回傳清楚訊息');
+assert.match(coursePrepBackend, /建立日期只能選今天或上一個工作日/, '後端需拒絕超出可選範圍的備課建立日期');
 assert.match(coursePrepBackend, /LockService\.getScriptLock\(\)/, '雲端儲存需加鎖，避免連點請求同時建立重複檔案');
 assert.match(coursePrepBackend, /請直接編輯原檔案/, '後端也需拒絕同名同類型的重複備課');
 assert.match(coursePrepBackend, /confirmation_name/, '刪除備課前後端必須驗證姓名');

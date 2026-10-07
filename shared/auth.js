@@ -170,7 +170,7 @@ window.AUTH = (function () {
     const anqinDepartments = ['東橋教室', '永康教室', '北區教室'];
     const usesAnqinWorkspace = role === 'admin'
       || (['manager', 'teacher'].includes(role) && anqinDepartments.includes(session.department));
-    if (usesAnqinWorkspace) window.location.href = root + 'review/anqin-v2/index.html?v=20261005-photo-batch-1';
+    if (usesAnqinWorkspace) window.location.href = root + 'review/anqin-v2/index.html?v=20261007-prep-date-1';
     else if (role === 'manager') window.location.href = root + 'manager/dashboard.html';
     else window.location.href = root + 'teacher/today.html';
   }

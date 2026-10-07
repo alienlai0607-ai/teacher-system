@@ -3586,6 +3586,13 @@
       id: '', type: 'lessonprep', title: '', details: activityDetailDefaults('lessonprep'), planId: '', prep: { summary: '', adjustment: '' }, prepEvidence: [],
     };
     const details = { ...activityDetailDefaults('lessonprep'), ...(value.details || {}) };
+    const prepToday = todayIso();
+    const prepPreviousWorkday = previousKpiWorkday(prepToday);
+    const requestedPrepDate = String(value.date || state.daily.date || prepToday).slice(0, 10);
+    const selectedPrepDate = [prepToday, prepPreviousWorkday].includes(requestedPrepDate) ? requestedPrepDate : prepToday;
+    const prepDateControl = value.id
+      ? `<div class="course-prep-date">${icon('calendar-days', 16)}${formatDate(value.date || prepToday)}</div>`
+      : `<select id="course-prep-date" name="date" required><option value="${prepToday}" ${selectedPrepDate === prepToday ? 'selected' : ''}>${formatDate(prepToday)}（今天）</option><option value="${prepPreviousWorkday}" ${selectedPrepDate === prepPreviousWorkday ? 'selected' : ''}>${formatDate(prepPreviousWorkday)}（上一個工作日）</option></select>`;
     return `<form id="course-prep-form" data-form="course-prep">
       <input type="hidden" name="id" value="${esc(value.id)}">
       <input type="hidden" name="type" value="lessonprep">
@@ -3594,7 +3601,7 @@
         <div class="activity-section-title"><span>${icon('folder-open', 18)}</span><div><strong>課程資料</strong><small>只記錄這份備課用於哪門課</small></div></div>
         <div class="form-grid">
           <div class="form-field"><label class="form-label" for="course-prep-type">課程類型 <span class="required">*</span></label><select id="course-prep-type" name="targetCourse" required><option value="">請選擇課程</option>${ACTIVITY_DETAIL_SCHEMAS.lessonprep[0].options.map(option => `<option value="${esc(option)}" ${details.targetCourse === option ? 'selected' : ''}>${esc(option)}</option>`).join('')}</select></div>
-          <div class="form-field"><div class="form-label">建立日期</div><div class="course-prep-date">${icon('calendar-days', 16)}${formatDate(value.date || state.daily.date)}</div></div>
+          <div class="form-field">${value.id ? '<div class="form-label">建立日期</div>' : '<label class="form-label" for="course-prep-date">建立日期</label>'}${prepDateControl}${value.id ? '' : '<div class="field-hint">可選今天或上一個工作日；週一可選上週五。</div>'}</div>
           <div class="form-field span-2"><label class="form-label" for="course-prep-title">課程名稱 <span class="required">*</span></label><input id="course-prep-title" name="title" value="${esc(value.title || '')}" placeholder="例：9/1 數學小挑戰" required></div>
           <div class="form-field span-2"><label class="form-label" for="course-prep-note">上課內容或使用提醒（選填）</label><textarea id="course-prep-note" name="prepSummary" placeholder="需要補充時再填寫；沒有可留白。">${esc(value.prep?.summary || '')}</textarea></div>
           <div class="form-field span-2"><div class="form-label">教案或教材附件 <span class="required">*</span></div><label class="file-drop" for="activity-prep-files">${icon('upload-cloud', 21)}<span><strong>加入附件</strong><small>至少一份，可一次選多份；文件保留原檔，單檔上限 25 MB</small></span></label><input class="sr-only" id="activity-prep-files" type="file" multiple data-change="prep-files" accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.key,image/*,video/*"><div id="prep-file-list">${renderSimplePrepFiles(value.prepEvidence || [])}</div></div>
@@ -5911,6 +5918,7 @@
     const data = new FormData(form);
     Object.assign(activityDraft, {
       id: String(data.get('id') || activityDraft.id || ''),
+      date: String(data.get('date') || activityDraft.date || state.daily.date || todayIso()).slice(0, 10),
       type: 'lessonprep',
       title: String(data.get('title') || '').trim(),
       className: '',
@@ -5981,6 +5989,7 @@
     if (form.elements.id) form.elements.id.value = id;
     if (activityDraft) activityDraft.id = id;
     const existing = state.activities.find(item => item.id === id && item.type === 'lessonprep');
+    const selectedDate = String(data.get('date') || existing?.date || draft?.date || state.daily.date || todayIso()).slice(0, 10);
     const normalizedTitle = String(data.get('title') || '').trim().replace(/\s+/g, ' ').toLowerCase();
     const normalizedCourseType = String(data.get('targetCourse') || '').trim().replace(/\s+/g, ' ').toLowerCase();
     const duplicate = state.activities.find(item => item.type === 'lessonprep'
@@ -5995,7 +6004,7 @@
     const planId = String(data.get('planId') || draft?.planId || '');
     const item = {
       id,
-      date: existing?.date || state.daily.date,
+      date: existing?.date || selectedDate,
       updatedAt: new Date().toISOString(),
       teacher: existing?.teacher || state.context.teacher,
       type: 'lessonprep',

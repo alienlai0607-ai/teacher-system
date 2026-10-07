@@ -899,6 +899,10 @@ async function anqinWorkflow(browser) {
 
     await clickAction(page, 'open-activity');
     await page.selectOption('#course-prep-type', '安親課業指導');
+    const prepDateOptions = await page.locator('#course-prep-date option').evaluateAll(options => options.map(option => option.value));
+    check('安親新增備課可選今天或上一個工作日', prepDateOptions.length === 2 && prepDateOptions[0] !== prepDateOptions[1]);
+    const selectedPrepDate = prepDateOptions[1];
+    await page.selectOption('#course-prep-date', selectedPrepDate);
     await page.fill('#course-prep-title', '端到端安親教材');
     await page.fill('#course-prep-note', '直式加減法練習單');
     await page.setInputFiles('#activity-prep-files', [largePdfFile, largeImage]);
@@ -917,6 +921,7 @@ async function anqinWorkflow(browser) {
     await page.screenshot({ path: path.join(artifactDir, 'anqin-prep-library-mobile.png'), fullPage: true });
     await prepLibraryItem.click();
     check('老師可隨時開啟備課檔案查看與下載', (await page.locator('.drawer-panel').innerText()).includes('qa-material-16mb.pdf') && await page.locator('[data-action="edit-activity"]').count() === 1);
+    check('備課檔案保存老師選取的上一個工作日', (await page.locator('.drawer-panel').innerText()).includes(`${selectedPrepDate.replace(/-/g, '/')} 建立`));
     await closeDrawer(page);
 
     await clickRoute(page, 'today');
