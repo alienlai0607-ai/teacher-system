@@ -668,15 +668,50 @@ async function talentWorkflow(browser) {
     await clickRoute(page, 'today');
     const beforeCount = await page.locator('.record-row').count();
     await clickAction(page, 'new-log');
-    check('才藝新表單只顯示課程、人數、續抱與整潔照片', (
+    check('才藝新表單清楚區分正式總數、其中新生續報與體驗另計', (
       await page.locator('#log-form input[name="present"]').count() === 1
+      && await page.locator('#log-form input[name="newCount"]').count() === 1
       && await page.locator('#log-form input[name="renewalCount"]').count() === 1
+      && await page.locator('#log-form input[name="trial"]').count() === 1
+      && await page.locator('#log-form .formal-count-group').count() === 1
+      && await page.locator('#log-form .trial-count-group').count() === 1
+      && await page.locator('#log-form [data-count-summary]').count() === 1
       && await page.locator('#log-form input[data-upload-category="room"]').count() === 1
       && await page.locator('#log-form [name="prepId"], #log-form [name="issue"], #log-form [name="parentStatus"], #log-form [data-upload-category="attendance"], #log-form [data-upload-category="learning"], #log-form [data-upload-category="app"]').count() === 0
     ));
+    await page.setViewportSize({ width: 320, height: 700 });
+    check('才藝人數新版在 320px 手機不會橫向溢出', await page.evaluate(() => {
+      const drawerBody = document.querySelector('.drawer-body');
+      return document.documentElement.scrollWidth <= document.documentElement.clientWidth
+        && (!drawerBody || drawerBody.scrollWidth <= drawerBody.clientWidth);
+    }));
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.fill('#log-form input[name="courseName"]', '端到端才藝課');
-    await page.fill('#log-form input[name="present"]', '5');
+    await page.fill('#log-form input[name="present"]', '2');
+    await page.fill('#log-form input[name="newCount"]', '2');
     await page.fill('#log-form input[name="renewalCount"]', '1');
+    await page.fill('#log-form input[name="trial"]', '7');
+    check('新生續報合計超額會立即顯示紅色警示', (
+      await page.locator('#log-form [data-count-summary]').evaluate(node => node.classList.contains('is-invalid'))
+      && (await page.locator('#log-form [data-formal-breakdown-summary]').innerText()).includes('不可超過正式總數 2')
+      && (await page.locator('#log-form [data-other-formal-count]').innerText()).includes('超出 1 人')
+    ));
+    await clickAction(page, 'submit-log');
+    await page.waitForTimeout(100);
+    check('新生續報合計超過正式總數時送出會被阻擋', (
+      await page.locator('.toast').last().innerText()).includes('兩者合計不可超過正式學員到課總數')
+      && await page.locator('.record-row').count() === beforeCount
+    );
+    await page.fill('#log-form input[name="present"]', '5');
+    await page.fill('#log-form input[name="newCount"]', '1');
+    await page.fill('#log-form input[name="renewalCount"]', '1');
+    await page.fill('#log-form input[name="trial"]', '3');
+    check('合法人數會顯示正式分類與體驗另計摘要', (
+      (await page.locator('#log-form [data-formal-count-summary]').innerText()) === '5 位正式學員'
+      && (await page.locator('#log-form [data-formal-breakdown-summary]').innerText()).includes('其他正式學員 3')
+      && (await page.locator('#log-form [data-trial-count-summary]').innerText()) === '3 位體驗學生'
+      && !(await page.locator('#log-form [data-count-summary]').evaluate(node => node.classList.contains('is-invalid')))
+    ));
     await page.setInputFiles('#log-form input[data-upload-category="room"]', [imageA, imageB]);
     await page.waitForFunction(() => document.querySelectorAll('[data-file-items="room"] .selected-file').length === 2, null, { timeout: 12000 });
     check('才藝整潔照片可多選並逐張移除', await page.locator('[data-file-items="room"] .selected-file').count() === 2);
@@ -685,7 +720,7 @@ async function talentWorkflow(browser) {
     await clickAction(page, 'submit-log');
     await page.waitForTimeout(400);
     const pageText = await page.locator('body').innerText();
-    check('才藝 PT 可正式送出', pageText.includes('端到端才藝課') && pageText.includes('正式 5') && pageText.includes('續抱 1'));
+    check('才藝 PT 可正式送出且紀錄標示正式總數與體驗另計', pageText.includes('端到端才藝課') && pageText.includes('正式總數 5') && pageText.includes('續報 1') && pageText.includes('體驗另計 3'));
     check('才藝送出不再顯示 completed 內部欄位', !/\bcompleted\b/i.test(pageText));
     check('才藝送出只新增一筆', await page.locator('.record-row').count() === beforeCount + 1);
 
@@ -800,7 +835,7 @@ async function talentWorkflow(browser) {
     check('才藝主管可看到老師已送出的工作紀錄', await talentLog.count() === 1);
     await talentLog.locator('[data-action="view-log"]').click();
     const logDetailText = await manager.locator('.drawer').innerText();
-    check('才藝主管可查看正式、新生、續抱、體驗與整潔照片', ['正式上課', '新生', '續抱', '體驗', '教室整潔照片'].every(label => logDetailText.includes(label)));
+    check('才藝主管可查看正式總數、其中新生續報、體驗另計與整潔照片', ['正式總數', '其中新生', '其中續報', '體驗另計', '教室整潔照片'].every(label => logDetailText.includes(label)));
     await closeDrawer(manager);
 
     await clickRoute(manager, 'scoring');

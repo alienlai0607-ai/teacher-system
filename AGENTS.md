@@ -7,7 +7,7 @@
 - **前端**：純靜態網頁，GitHub Pages 部署（repo: `alienlai0607-ai/teacher-system`，網域 `teacher.blockplanetcamp.com`）。push 到 `main` 即上線。
 - **後端**：Google Apps Script Web App + Google Sheets 當資料庫。
 - **目前 API URL**（在 `shared/config.js`）：
-  `https://script.google.com/macros/s/AKfycbwokrIgJZMKZWO5XyvsBlW0OK3UcvyS100W5Xn-orT4jk_nRju-uHC6U7An06MkrS3bZQ/exec`
+  `https://script.google.com/macros/s/AKfycby5VHuQjERpbVh9qnVlMsO2zDHegnP4F_9_mld9E51f3PxbpE9ZowRyEG6sV7RPGh9h6g/exec`
 - **角色**：admin（柏翰）/ manager（酸酸-永康、小魚-北區、柳丁-才藝）/ teacher / admin_staff（皮皮老師-美編行銷）。三部門：永康教室、北區教室、才藝部門。
 
 ## 目錄結構
@@ -60,7 +60,8 @@
 
 ## 未完成／待觀察
 
-- 2026-10-08 `20261008-release-3` 已正式部署為 Apps Script v82，API 改為 `AKfycbwokrIgJZMKZWO5XyvsBlW0OK3UcvyS100W5Xn-orT4jk_nRju-uHC6U7An06MkrS3bZQ`，`ping` 已回 HTTP 200 與正確 release。安親主管月度總覽移除重複的「日報明細／班務稽核」導覽，改由月曆當日區塊直接進入日報回饋與教室整潔稽核；所有安親月份改為缺交每次扣 2 分、遲到 0～2 次不扣、3 次含以上固定扣 5 分，2026-09 的缺交與遲到次數由主管手填、不採系統紀錄，另保留 0～5 分九月加分。正式站驗收另修正 Sheets 月份 Date 物件造成的 ISO 月份、慢速「最近評核」覆蓋主管手動選擇，以及評分證據冷啟動卡住整頁：現改為先顯示可填寫評分表、證據背景補齊，直開評核不再同時跑月總覽全量同步；後端每次證據彙整由約 40～50 次 Sheets 操作降為 6 次批次讀取。才藝／才藝 PT 新制只填正式、新生、續抱、體驗四項人數與教室整潔照片；酸酸已獲才藝 PT 權限並可切換月份查看鐘點，已執行 `backfillSuansuanTalentPtSeptember2026FromEditor()`，新增 5 筆、0 重複，9 月鐘點合計 5,250 元、8 位續抱待主管審核，2026/09/10 加班未處理。月底照片經主管查證不完整時可永久取消當月獎金（PT 鐘點費不受影響）。最終 release gate 2,185 項瀏覽器檢查、50/50 故障情境及上傳／暫存復原全部通過，0 失敗。
+- 2026-10-08 `20261008-release-4` 已正式部署為 Apps Script v83，API 改為 `AKfycby5VHuQjERpbVh9qnVlMsO2zDHegnP4F_9_mld9E51f3PxbpE9ZowRyEG6sV7RPGh9h6g`。才藝／才藝 PT 人數介面明確分為「正式學員到課總數」、其中的「新生／續報」及另計的「體驗學生」；即時顯示其他正式學員，且前端、送出後端與主管獎金核定皆拒絕「新生＋續報超過正式人數」。列表、明細、薪資說明、CSV 與 PDF 同步釐清名稱，既有欄位與資料無須搬移。完整 release gate 2,189／2,189 項瀏覽器檢查、50／50 故障情境、320／390／1440px、上傳與草稿復原全部通過，0 失敗。
+- 2026-10-08 `20261008-release-3` 已正式部署為 Apps Script v82，API 改為 `AKfycbwokrIgJZMKZWO5XyvsBlW0OK3UcvyS100W5Xn-orT4jk_nRju-uHC6U7An06MkrS3bZQ`，`ping` 已回 HTTP 200 與正確 release。安親主管月度總覽移除重複的「日報明細／班務稽核」導覽，改由月曆當日區塊直接進入日報回饋與教室整潔稽核；所有安親月份改為缺交每次扣 2 分、遲到 0～2 次不扣、3 次含以上固定扣 5 分，2026-09 的缺交與遲到次數由主管手填、不採系統紀錄，另保留 0～5 分九月加分。正式站驗收另修正 Sheets 月份 Date 物件造成的 ISO 月份、慢速「最近評核」覆蓋主管手動選擇，以及評分證據冷啟動卡住整頁：現改為先顯示可填寫評分表、證據背景補齊，直開評核不再同時跑月總覽全量同步；後端每次證據彙整由約 40～50 次 Sheets 操作降為 6 次批次讀取。才藝／才藝 PT 新制只填正式、新生、續報、體驗四項人數與教室整潔照片；酸酸已獲才藝 PT 權限並可切換月份查看鐘點，已執行 `backfillSuansuanTalentPtSeptember2026FromEditor()`，新增 5 筆、0 重複，9 月鐘點合計 5,250 元、8 位續報待主管審核，2026/09/10 加班未處理。月底照片經主管查證不完整時可永久取消當月獎金（PT 鐘點費不受影響）。最終 release gate 2,185 項瀏覽器檢查、50/50 故障情境及上傳／暫存復原全部通過，0 失敗。
 - 2026-10-07 才藝 PT 新增「帶班」：老師可選實際授課日期、開始／結束時間與地點；時數限 0.5 小時倍數、0.5～4 小時，按實際時數與計薪人數計算。帶班不抵固定班次、不要求家長 APP、不列新生／續報獎金；固定課程仍只能當日送出。版本 `20261007-talent-coverage-1` 已部署為 Apps Script v78（穩定網址不變）。紅豆 2026/09/19 代酸酸上東橋 WEDO（10:40–12:10、11 人）已由柏翰核定最高既有級距 800 元／小時並補入 1,200 元；防重驗證 `duplicate:true`，9 月鐘點合計 7,650 元。2026/09/10 加班 1 小時依柏翰指示完全未處理。本機瀏覽器 2,572 項檢查、50 種故障情境與後端規則測試全數通過。
 - 2026-10-07 安親「新增備課檔案」建立日期可選今天或上一個工作日：週一回推週五；既有備課日期維持唯讀，後端拒絕更早或未來日期。版本 `20261007-prep-date-1` 已部署為 Apps Script v75（穩定網址不變），本機 2,570 項介面檢查及 50 種故障情境全數通過。已於 2026-10-07 19:09:09 執行全員登入失效；此操作只輪替伺服器 Session 簽章，不清除裝置內 KPI 草稿、待上傳照片或附件。
 - 2026-10-05「下一個工作日交付」與第一版背景照片上傳已上線：Apps Script v70，前端 main `e14ab3f`。週五可於週一完成，不列補繳、不扣分；照片與證據責任不順延。

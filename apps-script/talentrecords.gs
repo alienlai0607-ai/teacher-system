@@ -574,11 +574,12 @@ function normalizeTalentSimpleLesson_(lesson, user, matchedSchedule, isCoverage)
   const rawTrial = hasOwn.call(lesson, 'trial') ? lesson.trial
     : hasOwn.call(lesson, 'trialCount') ? lesson.trialCount : '';
   const present = talentRequiredCount_(rawPresent, '本堂正式上課人數');
-  const renewal = talentRequiredCount_(rawRenewal, '續抱人數');
+  const renewal = talentRequiredCount_(rawRenewal, '續報人數');
   const newCount = talentRequiredCount_(rawNew, '新生人數');
   const trial = talentRequiredCount_(rawTrial, '體驗人數');
-  if (renewal > present) throw new Error('續抱人數不可大於本堂正式上課人數');
-  if (newCount > present) throw new Error('新生人數不可大於本堂正式上課人數');
+  if (newCount + renewal > present) {
+    throw new Error('新生與續報都包含在正式總數內，兩者合計不可超過正式學員到課總數');
+  }
   const bonusExempt = isCoverage || String(lesson.siteType || '') === 'partner';
 
   if (matchedSchedule) {
@@ -748,7 +749,7 @@ function saveTalentLesson(params) {
       if (lesson.parentStatus !== 'followup') lesson.parentFollowup = '';
       lesson.newCount = lesson.siteType === 'self' && lesson.employment === 'fulltime' ? Math.max(0, Math.floor(Number(lesson.newCount || 0))) : 0;
       lesson.renewalCount = lesson.siteType === 'self' && !isCoverage ? Math.max(0, Math.floor(Number(lesson.renewalCount || 0))) : 0;
-      if (lesson.renewalCount > lesson.present) throw new Error('續抱人數不可大於上課人數');
+      if (lesson.renewalCount > lesson.present) throw new Error('續報人數不可大於上課人數');
     }
     const pay = talentLessonPay_(lesson, user);
     lesson.pay = pay.amount;
@@ -1017,7 +1018,7 @@ function validateSuansuanSeptemberBackfillDuplicate_(row, expected) {
   requireNumber('缺席人數', actual.absent, expected.absent);
   requireNumber('補課人數', actual.makeup, expected.makeup);
   requireNumber('體驗人數', actual.trial, expected.trial);
-  requireNumber('續抱人數', actual.renewalCount, expected.renewalCount);
+  requireNumber('續報人數', actual.renewalCount, expected.renewalCount);
   requireNumber('鐘點', actual.pay, expected.pay);
   requireNumber('時薪', actual.payRate, expected.payRate);
   requireText('鐘點級距', actual.payTier, expected.payTier);
@@ -1030,7 +1031,7 @@ function validateSuansuanSeptemberBackfillDuplicate_(row, expected) {
   requireBoolean('歷史回填核定', actual.adminBackfillApproved, true);
   requireText('歷史回填核定人', actual.adminBackfillApprovedBy, expected.adminBackfillApprovedBy);
   requireBoolean('歷史回填', actual.backfilled, true);
-  requireText('續抱審核', actual.bonusApproval, expected.bonusApproval);
+  requireText('續報審核', actual.bonusApproval, expected.bonusApproval);
   if (differences.length) {
     throw new Error(expected.date + ' ' + expected.courseName + ' 已有正式紀錄，但 ' + differences.join('、') + ' 不一致；未寫入任何回填資料');
   }
@@ -1516,6 +1517,9 @@ function approveTalentBonus(params) {
     if (approvedNew > declaredNew || approvedRenewal > declaredRenewal) {
       return { ok: false, error: '核准人數不可高於老師申報人數' };
     }
+    if (approvedNew + approvedRenewal > Number(lesson.present || 0)) {
+      return { ok: false, error: '核准的新生與續報合計不可超過正式學員到課總數' };
+    }
     const different = approvedNew !== declaredNew || approvedRenewal !== declaredRenewal;
     if (different && !note) return { ok: false, error: '調整人數時必須填寫原因' };
     lesson.approvedNewCount = approvedNew;
@@ -1581,7 +1585,7 @@ function generateTalentLessonPdf_(lesson, user) {
   } else {
     html += '<h2>' + talentHtmlEsc_(lesson.courseName || lesson.courseType) + '</h2><div class="muted">' + talentHtmlEsc_(lesson.courseType || '') + '　' + talentHtmlEsc_(lesson.duration || '') + ' 小時</div>';
     if (talentLessonEntryVersion_(lesson) >= TALENT_SIMPLE_ENTRY_VERSION_) {
-      html += '<div class="grid"><div class="box">正式上課<br><strong>' + Number(lesson.present || 0) + '</strong></div><div class="box">新生<br><strong>' + Number(lesson.newCount || 0) + '</strong></div><div class="box">續抱<br><strong>' + Number(lesson.renewalCount || 0) + '</strong></div><div class="box">體驗<br><strong>' + Number(lesson.trial || 0) + '</strong></div><div class="box">教室整潔<br><strong>' + (Array.isArray(lesson.roomFiles) && lesson.roomFiles.length ? '已拍照' : lesson.adminBackfillApproved ? '歷史回填' : '未附照') + '</strong></div></div>';
+      html += '<div class="grid"><div class="box">正式到課總數<br><strong>' + Number(lesson.present || 0) + '</strong></div><div class="box">其中新生<br><strong>' + Number(lesson.newCount || 0) + '</strong></div><div class="box">其中續報<br><strong>' + Number(lesson.renewalCount || 0) + '</strong></div><div class="box">體驗另計<br><strong>' + Number(lesson.trial || 0) + '</strong></div><div class="box">教室整潔<br><strong>' + (Array.isArray(lesson.roomFiles) && lesson.roomFiles.length ? '已拍照' : lesson.adminBackfillApproved ? '歷史回填' : '未附照') + '</strong></div></div>';
       if (lesson.adminBackfillApproved && (!Array.isArray(lesson.roomFiles) || !lesson.roomFiles.length)) {
         html += '<div class="box warning">此筆為管理員核定的歷史課程；當時無整潔照，系統未偽造附件。</div>';
       }
@@ -1604,7 +1608,7 @@ function generateTalentLessonPdf_(lesson, user) {
       html += talentAttachmentLinks_('點名簿', lesson.attendanceFiles);
       html += talentAttachmentLinks_('學習過程與成果', lesson.learningFiles);
     }
-    if (lesson.employment === 'pt') html += '<h3>本堂鐘點試算</h3><div class="box">計薪人數 ' + Number(lesson.present || 0) + '＋補課 ' + Number(lesson.makeup || 0) + '；' + talentHtmlEsc_(lesson.payTier || '') + '；本堂 NT$' + Number(lesson.pay || 0).toLocaleString('en-US') + '</div>';
+    if (lesson.employment === 'pt') html += '<h3>本堂鐘點試算</h3><div class="box">計薪只採正式學員到課總數 ' + Number(lesson.present || 0) + '＋補課 ' + Number(lesson.makeup || 0) + '（體驗另計、不列入）；' + talentHtmlEsc_(lesson.payTier || '') + '；本堂 NT$' + Number(lesson.pay || 0).toLocaleString('en-US') + '</div>';
     if (lesson.siteType === 'self' && (Number(lesson.newCount || 0) || Number(lesson.renewalCount || 0))) html += '<h3>新生／續報申報</h3><div class="box">新生 ' + Number(lesson.newCount || 0) + ' 人；續報 ' + Number(lesson.renewalCount || 0) + ' 人；狀態：' + talentHtmlEsc_(lesson.bonusApproval === 'approved' ? '已核准' : '待核准') + '</div>';
     html += talentAttachmentLinks_('課後教室整潔', lesson.roomFiles);
   }

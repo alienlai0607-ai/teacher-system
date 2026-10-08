@@ -317,15 +317,16 @@ assert.deepEqual({
   newCount: 2,
   roomDone: true,
   appStatus: 'not_required',
-}, '新版保留正式、新生、續抱、體驗與教室整潔證據，課名由固定班次帶入');
+}, '新版保留正式、新生、續報、體驗與教室整潔證據，課名由固定班次帶入');
 assert.equal(simpleLesson.prepId, '', '新版不得再依賴備課檔案');
 assert.equal(simpleLesson.issue, '', '新版不得再要求課後問題文字');
 assert.equal(simpleLesson.parentStatus, 'not_required', '新版不得再要求親師溝通狀態');
 assert.equal(simpleLesson.roomFiles.length, 1);
 const validSimpleCounts = { entryVersion: 2, date: '2026-10-08', courseName: '簡易', present: 4, newCount: 1, renewalCount: 2, trial: 7, roomFiles: [roomPhoto] };
 assert.throws(() => context.normalizeTalentSimpleLesson_({ ...validSimpleCounts, roomFiles: [] }, suansuan, suansuanSchedules[0], false), /教室整潔|必填附件/, '新版教室整潔照片必填');
-assert.throws(() => context.normalizeTalentSimpleLesson_({ ...validSimpleCounts, renewalCount: 5 }, suansuan, suansuanSchedules[0], false), /續抱人數/, '續抱不得大於正式上課人數');
-assert.throws(() => context.normalizeTalentSimpleLesson_({ ...validSimpleCounts, newCount: 5 }, suansuan, suansuanSchedules[0], false), /新生人數/, '新生不得大於正式上課人數');
+assert.throws(() => context.normalizeTalentSimpleLesson_({ ...validSimpleCounts, newCount: 3, renewalCount: 2 }, suansuan, suansuanSchedules[0], false), /兩者合計不可超過正式學員到課總數/, '新生與續報合計不得大於正式上課人數');
+const exactSimpleCounts = { ...validSimpleCounts, newCount: 1, renewalCount: 3 };
+assert.doesNotThrow(() => context.normalizeTalentSimpleLesson_(exactSimpleCounts, suansuan, suansuanSchedules[0], false), '新生與續報合計等於正式總數時應允許送出');
 assert.throws(() => context.normalizeTalentSimpleLesson_({ ...validSimpleCounts, present: 4.5 }, suansuan, suansuanSchedules[0], false), /正式上課人數/, '正式上課人數必須是非負整數');
 assert.throws(() => context.normalizeTalentSimpleLesson_({ ...validSimpleCounts, trial: -1 }, suansuan, suansuanSchedules[0], false), /體驗人數/, '體驗人數不得為負數');
 assert.throws(() => context.normalizeTalentSimpleLesson_({ ...validSimpleCounts, trial: 1.5 }, suansuan, suansuanSchedules[0], false), /體驗人數/, '體驗人數不得以小數靜默截斷');
@@ -358,14 +359,14 @@ const freshBonusState = { ...forgedServerFields, newCount: 0, renewalCount: 4 };
 context.preserveTalentAdminBackfillState_(freshBonusState, null);
 context.applyTalentBonusState_(freshBonusState, null);
 assert.equal(freshBonusState.adminBackfillApproved, undefined, '老師新建紀錄不得偽造管理員歷史補登核定');
-assert.deepEqual({ approval: freshBonusState.bonusApproval, approved: freshBonusState.approvedRenewalCount, by: freshBonusState.bonusApprovedBy }, { approval: 'pending', approved: 0, by: '' }, '老師新建紀錄不得自行核准續抱獎金');
+assert.deepEqual({ approval: freshBonusState.bonusApproval, approved: freshBonusState.approvedRenewalCount, by: freshBonusState.bonusApprovedBy }, { approval: 'pending', approved: 0, by: '' }, '老師新建紀錄不得自行核准續報獎金');
 const approvedServerLesson = { newCount: 0, renewalCount: 4, bonusApproval: 'approved', approvedNewCount: 0, approvedRenewalCount: 4, bonusApprovedBy: '柏翰', bonusApprovedAt: '2026-10-08T10:00:00Z', bonusApprovalNote: '已核對' };
 const forgedUpdate = { newCount: 0, renewalCount: 4, bonusApproval: 'pending', approvedRenewalCount: 0 };
 context.applyTalentBonusState_(forgedUpdate, approvedServerLesson);
 assert.deepEqual({ approval: forgedUpdate.bonusApproval, approved: forgedUpdate.approvedRenewalCount, by: forgedUpdate.bonusApprovedBy }, { approval: 'approved', approved: 4, by: '柏翰' }, '老師更新時不得覆蓋伺服器既有的獎金核准狀態');
 const changedRenewal = { newCount: 0, renewalCount: 3, bonusApproval: 'approved', approvedRenewalCount: 3 };
 context.applyTalentBonusState_(changedRenewal, approvedServerLesson);
-assert.deepEqual({ approval: changedRenewal.bonusApproval, approved: changedRenewal.approvedRenewalCount }, { approval: 'pending', approved: 0 }, '申報續抱人數變更後必須重新待核准');
+assert.deepEqual({ approval: changedRenewal.bonusApproval, approved: changedRenewal.approvedRenewalCount }, { approval: 'pending', approved: 0 }, '申報續報人數變更後必須重新待核准');
 
 let storedLesson = {
   id: 'lesson-app-qa', teacher: 'QA老師', entryVersion: 1, lessonStatus: 'held', siteType: 'self', status: 'submitted',
@@ -436,7 +437,7 @@ context.nowIso = () => '2026-10-08T12:00:00.000Z';
 context.logSystem = () => {};
 context.Logger = { log: () => {} };
 const firstSuansuanBackfill = context.backfillSuansuanTalentPtSeptember2026FromEditor();
-assert.deepEqual({ created: firstSuansuanBackfill.created, duplicates: firstSuansuanBackfill.duplicates, wage: firstSuansuanBackfill.september_wage_total, pendingRenewals: firstSuansuanBackfill.pending_renewal_approval }, { created: 5, duplicates: 0, wage: 5250, pendingRenewals: 8 }, '酸酸五筆歷史課堂的鐘點與待核准續抱必須正確');
+assert.deepEqual({ created: firstSuansuanBackfill.created, duplicates: firstSuansuanBackfill.duplicates, wage: firstSuansuanBackfill.september_wage_total, pendingRenewals: firstSuansuanBackfill.pending_renewal_approval }, { created: 5, duplicates: 0, wage: 5250, pendingRenewals: 8 }, '酸酸五筆歷史課堂的鐘點與待核准續報必須正確');
 assert.equal(backfillRows.length, 5);
 assert.equal(atomicBackfillWrites, 1, '五筆回填必須以單一批次原子寫入，不可逐筆追加');
 assert.deepEqual(
@@ -448,7 +449,7 @@ assert.deepEqual(
     { id: 'talent-admin-backfill-suansuan-20260905-wedo', date: '2026-09-05', course: 'WeDo', present: 10, renewal: 4, pay: 1200 },
     { id: 'talent-admin-backfill-suansuan-20260912-wedo', date: '2026-09-12', course: 'WeDo', present: 10, renewal: 4, pay: 1200 },
   ],
-  '回填日期、班別、人數、續抱與鐘點不得有誤',
+  '回填日期、班別、人數、續報與鐘點不得有誤',
 );
 backfillRows.forEach(row => {
   assert.equal(row.data.entryVersion, 2);
@@ -652,12 +653,12 @@ assert.match(navSource, /fulltime:[\s\S]*route: 'today'[\s\S]*route: 'class-rost
 assert.match(navSource, /pt:[\s\S]*route: 'today'[\s\S]*route: 'class-roster'[\s\S]*route: 'pay'[\s\S]*route: 'records'/, '才藝 PT 仍需保留填寫、班級、鐘點與歷史紀錄');
 const navItemsSource = talentUiSource.slice(talentUiSource.indexOf('  function navItems()'), talentUiSource.indexOf('  function routeTitle()', talentUiSource.indexOf('  function navItems()')));
 assert.match(navItemsSource, /return NAV\[modeRole\(\)\] \|\| \[\]/, '所有已授權才藝 PT 都必須取得完整 PT 導覽');
-assert.doesNotMatch(navItemsSource, /route !== 'pay'|黑豹老師/, '不得依老師姓名隱藏 PT 的鐘點與續抱頁');
+assert.doesNotMatch(navItemsSource, /route !== 'pay'|黑豹老師/, '不得依老師姓名隱藏 PT 的鐘點與續報頁');
 const renderPaySource = talentUiSource.slice(talentUiSource.indexOf('  function renderPay()'), talentUiSource.indexOf('  function renderPayRow(', talentUiSource.indexOf('  function renderPay()')));
 assert.match(renderPaySource, /pageHead\('鐘點與續報',[\s\S]*monthControl\(\)\)/, 'PT 鐘點頁必須能切換月份，才能查看九月歷史回填');
 const renderPerformanceSource = talentUiSource.slice(talentUiSource.indexOf('  function renderPerformance()'), talentUiSource.indexOf('  function renderScoreRow(', talentUiSource.indexOf('  function renderPerformance()')));
 assert.match(renderPerformanceSource, /displayedKpiBonus = bonusForfeited \? 0[\s\S]*displayedEnrollmentBonus = bonusForfeited \? 0/, '整月獎金取消後，摘要拆分金額也必須歸零');
-assert.match(renderPerformanceSource, /<small>KPI \$\{bonusForfeited \|\| published \? formatMoney\(displayedKpiBonus\) : '待公布'\} ＋ 新生／續報 \$\{formatMoney\(displayedEnrollmentBonus\)\}<\/small>/, '摘要畫面必須使用取消後的 KPI 與新生續抱金額');
+assert.match(renderPerformanceSource, /<small>KPI \$\{bonusForfeited \|\| published \? formatMoney\(displayedKpiBonus\) : '待公布'\} ＋ 新生／續報 \$\{formatMoney\(displayedEnrollmentBonus\)\}<\/small>/, '摘要畫面必須使用取消後的 KPI 與新生續報金額');
 assert.match(backendSource, /prep\.status = 'ready'/, '備課檔案儲存後應立即成為可用資料');
 assert.match(backendSource, /talentAttachments_\(prep\.materials, true\)/, '備課檔案必須至少有一份已上傳的教案或教材');
 assert.match(backendSource, /function deleteTalentPrep\(/, '才藝備課必須提供正式刪除流程');
@@ -694,13 +695,14 @@ assert.match(talentUiSource, /route: 'records', label: '我的紀錄'/, '才藝�
 assert.match(talentUiSource, /const teacherPriority = \['today', 'class-roster', 'records'/, '才藝手機底部需直接顯示我的紀錄，不得藏到更多');
 assert.match(talentUiSource, /aria-label="編輯今日紀錄"/, '才藝老師需能從我的紀錄直接編輯當日內容');
 const logEditorSource = talentUiSource.slice(talentUiSource.indexOf('function openLogEditor('), talentUiSource.indexOf('function field('));
-assert.match(logEditorSource, /numberField\('正式上課人數', 'present'[\s\S]*numberField\('新生人數', 'newCount'[\s\S]*numberField\('續抱人數', 'renewalCount'[\s\S]*numberField\('體驗人數', 'trial'/, '新版表單需保留四種必填人數');
+assert.match(logEditorSource, /numberField\('正式學員到課總數', 'present'[\s\S]*numberField\('其中：新生', 'newCount'[\s\S]*numberField\('其中：續報', 'renewalCount'[\s\S]*numberField\('體驗學生人數', 'trial'/, '新版表單需以正式總數、內含分類及體驗另計呈現四種必填人數');
+assert.match(logEditorSource, /data-other-formal-count[\s\S]*data-count-summary[\s\S]*data-formal-count-summary[\s\S]*data-trial-count-summary/, '人數表單需顯示其他正式學員與正式／體驗即時摘要');
 assert.match(logEditorSource, /uploadField\('課後教室整潔照片', 'room'/, '新版表單必須要求教室整潔照片');
 assert.doesNotMatch(logEditorSource, /name="prepId"|textareaField\('課程問題|uploadField\('點名|uploadField\('學習|uploadField\('家長 APP|parentStatus/, '新版表單不得再顯示備課、點名、學習、問題、親師或 APP 欄位');
 assert.match(backendSource, /function validateTalentLessonRequiredFields_\(lesson\)/, '才藝後端必填規則需可獨立驗證');
 assert.match(backendSource, /courseType: '課程類型'[\s\S]*issue: '課程問題及下次優化'[\s\S]*parentStatus: '親師溝通狀態'/, '舊版資料的必填與中文錯誤訊息仍需保留');
 const talentPdfSource = backendSource.slice(backendSource.indexOf('function generateTalentLessonPdf_('), backendSource.indexOf('function regenerateTalentLessonReport('));
-assert.match(talentPdfSource, /talentLessonEntryVersion_\(lesson\) >= TALENT_SIMPLE_ENTRY_VERSION_[\s\S]*正式上課[\s\S]*新生[\s\S]*續抱[\s\S]*體驗[\s\S]*教室整潔[\s\S]*\} else \{[\s\S]*課程問題及下次優化/, '日報必須依版本輸出：新版四種人數與整潔照片、舊版保留原資料');
+assert.match(talentPdfSource, /talentLessonEntryVersion_\(lesson\) >= TALENT_SIMPLE_ENTRY_VERSION_[\s\S]*正式到課總數[\s\S]*其中新生[\s\S]*其中續報[\s\S]*體驗另計[\s\S]*教室整潔[\s\S]*\} else \{[\s\S]*課程問題及下次優化/, '日報必須依版本清楚輸出正式總數、其中新生／續報、體驗另計與整潔照片');
 assert.match(talentUiSource, /const draft = existing \|\| state\.draftLog \|\| \{ id: uid\('log'\) \}/, '新增課堂編輯器一開啟就必須取得非空白紀錄編號');
 assert.match(talentUiSource, /\.\.\.values,[\s\S]*id: editingId \|\| existingLog\?\.id \|\| uid\('log'\)/, '表單內的空白隱藏欄位不可覆蓋系統產生的課堂編號');
 assert.match(talentUiSource, /state\.logs = \(Array\.isArray\(state\.logs\)[\s\S]*id: uid\('log'\)/, '舊本機課堂缺少編號時需自動修復');
@@ -712,7 +714,8 @@ assert.equal((saveTalentLessonSource.match(/talentLessonSaveVersionError_\(/g) |
 assert.doesNotMatch(saveTalentLessonSource, /generateTalentLessonPdf_/, '才藝正式儲存不得同步等待 PDF');
 assert.match(saveTalentLessonSource, /queueDeferredTeacherReport_\(\{ type: 'talent'/, '才藝日報需放入背景佇列');
 const submitLogSource = talentUiSource.slice(talentUiSource.indexOf('async function submitLog('), talentUiSource.indexOf('function openPrepEditor('));
-assert.match(submitLogSource, /entryVersion: 2[\s\S]*expected: present, present, leave: 0, absent: 0, makeup: 0, trial,[\s\S]*newCount: siteType === 'self' && !isCoverage \? newCount : 0,[\s\S]*renewalCount:/, '新版送出必須標記版本、保留體驗，且只在獎金適用場域保留新生與續抱');
+assert.match(submitLogSource, /newCount \+ renewalCount > present[\s\S]*兩者合計不可超過正式學員到課總數/, '前端送出前必須阻擋新生與續報合計超過正式總數');
+assert.match(submitLogSource, /entryVersion: 2[\s\S]*expected: present, present, leave: 0, absent: 0, makeup: 0, trial,[\s\S]*newCount: siteType === 'self' && !isCoverage \? newCount : 0,[\s\S]*renewalCount:/, '新版送出必須標記版本、保留體驗，且只在獎金適用場域保留新生與續報');
 assert.doesNotMatch(submitLogSource, /pendingFiles\.attendance\.length|pendingFiles\.learning\.length|pendingFiles\.app\.length/, '新版送出不得再等待點名、學習或 APP 附件');
 assert.match(talentUiSource, /function talentSubmissionError\(/, '才藝送出錯誤不得直接顯示內部欄位名稱');
 assert.match(talentUiSource, /name="lessonStatus" value="coverage"/, '才藝 PT 表單需提供帶班選項');
@@ -728,6 +731,8 @@ assert.doesNotMatch(talentPaySource, /<div class="partner"><strong>黑豹／善�
 assert.match(talentUiSource, /PREVIEW_MODE && state\.ui\.route === 'cloud-reports'[\s\S]*loadCloudFolders/, '審查模式重新整理雲端日報頁時不得無限停在載入中');
 assert.match(talentUiSource, /window\.setTimeout\(\(\) => URL\.revokeObjectURL\(url\), 1000\)/, 'CSV 下載需延後釋放 Blob，避免 Safari 或內嵌瀏覽器下載空檔');
 assert.match(talentUiSource, /statusBadge\('bonus-approved'\).*statusBadge\('bonus-pending'\)/, '獎金核准狀態不可誤用舊版備課狀態文案');
+assert.match(backendSource, /approvedNew \+ approvedRenewal > Number\(lesson\.present \|\| 0\)[\s\S]*合計不可超過正式學員到課總數/, '獎金核准端也必須阻擋新生與續報合計超過正式總數');
+assert.match(talentUiSource, /'正式到課總數', '其中新生', '其中續報', '體驗另計'/, '才藝匯出欄位需清楚標示正式總數、內含分類與體驗另計');
 assert.match(talentUiSource, /'bonus-approved': \['已核准'.*'bonus-pending': \['待核准'/, '獎金狀態需明確顯示已核准或待核准');
 assert.match(backendSource, /function updateTalentAppStatus\(/, '舊版課堂的 APP 證據 API 仍需保留，避免歷史資料無法補件');
 assert.match(backendSource, /function talentLessonSaveVersionError_[\s\S]*talentLessonEntryVersion_\(existingLesson\) < TALENT_SIMPLE_ENTRY_VERSION_[\s\S]*此歷史紀錄為舊版格式，只能查看/, '後端必須阻擋舊制正式紀錄透過 saveTalentLesson 改寫');

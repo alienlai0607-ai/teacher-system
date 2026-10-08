@@ -11,7 +11,7 @@
       shortLabel: '安親',
       description: '安親工作紀錄與班務',
       icon: 'book-open-check',
-      path: 'review/anqin-v2/index.html?v=20261008-release-3',
+      path: 'review/anqin-v2/index.html?v=20261008-release-4',
     },
     'anqin-manager': {
       id: 'anqin-manager',
@@ -20,16 +20,16 @@
       shortLabel: '安親主管',
       description: '安親審核與主管管理',
       icon: 'clipboard-check',
-      path: 'review/anqin-v2/index.html?v=20261008-release-3',
+      path: 'review/anqin-v2/index.html?v=20261008-release-4',
     },
     'talent-fulltime': {
       id: 'talent-fulltime',
       group: 'talent',
       label: '才藝正職',
       shortLabel: '才藝正職',
-      description: '人數、續抱、整潔照片與 KPI',
+      description: '人數、續報、整潔照片與 KPI',
       icon: 'sparkles',
-      path: 'review/talent-v2/index.html?workspace=talent-fulltime&v=20261008-release-3',
+      path: 'review/talent-v2/index.html?workspace=talent-fulltime&v=20261008-release-4',
     },
     'talent-pt': {
       id: 'talent-pt',
@@ -38,7 +38,7 @@
       shortLabel: '才藝 PT',
       description: '上課紀錄、鐘點與續報',
       icon: 'clock-3',
-      path: 'review/talent-v2/index.html?workspace=talent-pt&v=20261008-release-3',
+      path: 'review/talent-v2/index.html?workspace=talent-pt&v=20261008-release-4',
     },
     'talent-manager': {
       id: 'talent-manager',
@@ -47,7 +47,7 @@
       shortLabel: '才藝主管',
       description: '課堂人數、評分與結算',
       icon: 'chart-no-axes-combined',
-      path: 'review/talent-v2/index.html?workspace=talent-manager&v=20261008-release-3',
+      path: 'review/talent-v2/index.html?workspace=talent-manager&v=20261008-release-4',
     },
     'talent-payroll': {
       id: 'talent-payroll',
@@ -56,7 +56,7 @@
       shortLabel: '才藝薪資',
       description: 'PT 月度鐘點與續報資格',
       icon: 'calculator',
-      path: 'review/talent-v2/index.html?workspace=talent-payroll&v=20261008-release-3',
+      path: 'review/talent-v2/index.html?workspace=talent-payroll&v=20261008-release-4',
     },
     'admin-marketing': {
       id: 'admin-marketing',

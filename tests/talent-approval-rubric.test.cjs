@@ -132,7 +132,7 @@ assert.equal(scoredAfterPenalty.score.appPhotoBonusForfeited, true);
 assert.equal(scoredAfterPenalty.score.appPhotoBonusForfeitedReason, '缺照片');
 assert.equal(scoredAfterPenalty.score.rubricVersion, 1);
 
-// 核心金額：正職全部獎金歸 0；PT 續抱歸 0，但鐘點費保留。
+// 核心金額：正職全部獎金歸 0；PT 續報歸 0，但鐘點費保留。
 const moneyStart = frontend.indexOf('function talentMonthlyMoneyAfterPhotoPolicy(');
 const moneyEnd = frontend.indexOf('\n\n  function renderPerformance(', moneyStart);
 assert.ok(moneyStart >= 0 && moneyEnd > moneyStart);
@@ -141,12 +141,12 @@ vm.runInContext(frontend.slice(moneyStart, moneyEnd), moneyContext);
 assert.deepEqual(
   { ...moneyContext.talentMonthlyMoneyAfterPhotoPolicy(0, 2500, 400, 600, true) },
   { wage: 0, kpi: 0, newBonus: 0, renewalBonus: 0, total: 0 },
-  '正職被查證後 KPI、新生、續抱獎金都必須為 0',
+  '正職被查證後 KPI、新生、續報獎金都必須為 0',
 );
 assert.deepEqual(
   { ...moneyContext.talentMonthlyMoneyAfterPhotoPolicy(5250, 0, 0, 1600, true) },
   { wage: 5250, kpi: 0, newBonus: 0, renewalBonus: 0, total: 5250 },
-  'PT 被查證後仍保留鐘點費，只取消續抱獎金',
+  'PT 被查證後仍保留鐘點費，只取消續報獎金',
 );
 assert.deepEqual(
   { ...moneyContext.talentMonthlyMoneyAfterPhotoPolicy(5250, 0, 0, 1600, false) },
