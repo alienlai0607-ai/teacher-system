@@ -83,6 +83,8 @@ window.UI = (function () {
     const isAdmin = user.role === 'admin';
     const isManager = user.role === 'manager';
     const isTeacher = user.role === 'teacher' || user.role === 'admin_staff';
+    const isAnqinManager = isManager && ['東橋教室', '永康教室', '北區教室'].includes(user.department);
+    const managerDashboard = isAnqinManager ? `${root}review/anqin-v2/index.html?v=20261008-manager-month-1` : `${root}manager/dashboard.html`;
     return `
       <header class="top-bar">
         <div class="brand"><img src="${root}shared/icons/logo.png" class="brand-logo" alt="布拉克星球"> KPI 系統</div>
@@ -97,9 +99,9 @@ window.UI = (function () {
             <a href="${root}teacher/rules.html">規則</a>
           ` : ''}
           ${isManager ? `
-            <a href="${root}manager/dashboard.html">部門儀表板</a>
+            <a href="${managerDashboard}">部門儀表板</a>
             <a href="${root}teacher/tasks.html">事項</a>
-            <a href="${root}manager/teachers.html">老師列表</a>
+            <a href="${managerDashboard}">老師列表</a>
             <a href="${root}manager/eval.html">月度評核</a>
             <a href="${root}manager/report.html">列印報表</a>
             <a href="${root}manager/observe.html">觀課紀錄</a>
@@ -158,10 +160,10 @@ window.UI = (function () {
   // 離開切換身份 → 依真實角色（admin / manager）回到對應 dashboard
   function exitImpersonateBack() {
     const realRole = AUTH.getRealRole();
+    const realSession = AUTH.getRealSession?.();
     AUTH.exitImpersonate();
-    const root = AUTH.relativeRoot();
-    if (realRole === 'manager') window.location.href = root + 'manager/dashboard.html';
-    else window.location.href = root + 'admin/dashboard.html?v=20260827-test-view-fast-1#test-view'; // 預設 admin
+    if (realRole === 'manager' && AUTH.routeByRole) AUTH.routeByRole(realRole, realSession);
+    else window.location.href = AUTH.relativeRoot() + 'admin/dashboard.html?v=20260827-test-view-fast-1#test-view'; // 預設 admin
   }
 
   return { toast, loading, confirmDialog, modal, formatDate, formatDateTime, renderHeader, mountHeader, roleLabel, exitImpersonateBack };

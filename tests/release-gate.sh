@@ -31,6 +31,7 @@ cd "$ROOT"
 "$NODE_BIN" tests/push-resilience.test.cjs
 "$NODE_BIN" tests/icon-catalog.test.cjs
 "$NODE_BIN" tests/anqin-task-ui.test.cjs
+"$NODE_BIN" tests/anqin-manager-month.test.cjs
 "$NODE_BIN" tests/anqin-photo-batch.test.cjs
 "$NODE_BIN" tests/anqin-course-record.test.cjs
 "$NODE_BIN" tests/anqin-course-record-backend.test.cjs

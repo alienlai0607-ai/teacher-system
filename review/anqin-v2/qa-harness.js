@@ -121,8 +121,12 @@
       result = { ok: true, log, attachments: log?.attachments || [] };
     } else if (action === 'listLogs') {
       const target = normalizeNickname(payload.nickname);
+      const viewer = normalizeNickname(payload.viewer || nickname);
+      const viewerIsGlobal = role === 'admin' || viewer === '小魚' || viewer === '柏翰';
       const logs = Object.values(cloudStore.logs)
+        .filter(log => role === 'teacher' ? normalizeNickname(log.nickname) === viewer : viewerIsGlobal || String(log.department || '') === department)
         .filter(log => !target || normalizeNickname(log.nickname) === target)
+        .filter(log => !payload.department || String(log.department || '') === String(payload.department))
         .filter(log => !payload.from || String(log.date || '') >= String(payload.from))
         .filter(log => !payload.to || String(log.date || '') <= String(payload.to))
         .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));

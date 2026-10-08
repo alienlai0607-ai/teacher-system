@@ -147,13 +147,22 @@ async function closeDrawer(page) {
 }
 
 async function clickRoute(page, route) {
-  const clicked = await page.evaluate(value => {
-    const candidates = Array.from(document.querySelectorAll(`[data-route="${CSS.escape(value)}"]`));
+  const findAndClick = value => page.evaluate(target => {
+    const candidates = Array.from(document.querySelectorAll(`[data-route="${CSS.escape(target)}"]`));
     const node = candidates.find(item => item.offsetParent !== null) || candidates[0];
     if (!node) return false;
     node.click();
     return true;
-  }, route);
+  }, value);
+  let clicked = await findAndClick(route);
+  if (!clicked) {
+    const more = page.locator('[data-action="open-more-nav"]').filter({ visible: true }).first();
+    if (await more.count()) {
+      await more.click();
+      await page.waitForTimeout(80);
+      clicked = await findAndClick(route);
+    }
+  }
   if (!clicked) throw new Error(`route button missing: ${route}`);
   await page.waitForTimeout(120);
 }
@@ -1142,6 +1151,21 @@ async function anqinWorkflow(browser) {
     await waitForApp(page);
     await page.waitForTimeout(1800);
 
+    await page.locator('.manager-month-page').waitFor({ state: 'visible', timeout: 12000 });
+    check('安親主管首頁為月度總覽', (await page.locator('body').innerText()).includes('安親主管｜月度總覽'));
+    check('安親主管手機月曆沒有水平爆版', await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1));
+    await page.locator('[data-action="manager-month-teacher"][data-teacher="江江老師"]').click();
+    await page.locator(`[data-action="manager-month-date"][data-date="${today}"]`).click();
+    const selectedDayText = await page.locator('.manager-day-preview').innerText();
+    check('安親主管可由月曆查看老師當日狀況', selectedDayText.includes('江江老師') && selectedDayText.includes('當日狀況'));
+    check('安親主管可由當日狀況直接回饋', await page.locator('.manager-day-preview [data-action="open-review"]').count() === 1);
+    check('安親主管可由當日狀況進入本月評分', await page.locator('.manager-day-preview [data-action="manager-month-evaluate"]').count() === 1);
+    await page.screenshot({ path: path.join(artifactDir, 'anqin-manager-month-mobile.png'), fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    check('安親主管電腦月度總覽沒有水平爆版', await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1));
+    await page.screenshot({ path: path.join(artifactDir, 'anqin-manager-month-desktop.png'), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+
     await clickRoute(page, 'reviews');
     await page.waitForFunction(() => document.querySelectorAll('[data-action="open-review"]').length > 0, null, { timeout: 12000 });
     const reviewButton = page.locator('[data-action="open-review"]').first();
@@ -1199,6 +1223,15 @@ async function anqinWorkflow(browser) {
     await clickRoute(page, 'evaluation');
     await page.waitForTimeout(700);
     check('安親老師可直接看到主管最新已完成評核', (await page.locator('body').innerText()).includes('本月工作紀錄、照片與後續調整'));
+
+    await page.goto(`${baseUrl}/review/anqin-v2/qa-harness.html?nickname=%E9%85%B8%E9%85%B8%E4%B8%BB%E7%AE%A1&role=manager&department=%E6%9D%B1%E6%A9%8B%E6%95%99%E5%AE%A4`, { waitUntil: 'domcontentloaded' });
+    await waitForApp(page);
+    await page.waitForSelector('.manager-month-page', { timeout: 12000 });
+    await page.waitForTimeout(900);
+    const acidDashboardText = await page.locator('.manager-month-page').innerText();
+    check('酸酸主管月度總覽只顯示東橋範圍', acidDashboardText.includes('東橋教室') && !acidDashboardText.includes('江江老師'));
+    check('酸酸主管不能切換到北區教室', await page.locator('[data-action="manager-month-department"]').count() === 0);
+    check('酸酸主管手機月曆沒有水平爆版', await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1));
   } finally {
     await context.close();
   }

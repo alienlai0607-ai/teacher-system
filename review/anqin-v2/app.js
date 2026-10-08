@@ -258,16 +258,16 @@
   ];
 
   const MANAGER_NAV = [
-    { route: 'dashboard', label: '管理總覽', icon: 'layout-dashboard' },
-    { route: 'reviews', label: '日報審查', icon: 'messages-square', count: () => pendingReviews().length },
-    { route: 'evidence', label: '證據中心', icon: 'scan-search', count: () => allEvidence().filter(item => item.evidence.status !== 'accepted').length },
+    { route: 'dashboard', label: '月度總覽', icon: 'calendar-days' },
+    { route: 'reviews', label: '日報明細', icon: 'messages-square', count: () => pendingReviews().length },
     { route: 'operations-review', label: '班務稽核', icon: 'school', count: () => operationRecords().filter(item => item.confirmedAt && item.reviewStatus !== 'accepted').length },
-    { route: 'plans-review', label: '備課檔案', icon: 'notebook-tabs' },
-    { route: 'team', label: '團隊狀態', icon: 'users-round' },
     { route: 'evaluations', label: '月度評核', icon: 'chart-no-axes-column-increasing' },
-    { route: 'scoring', label: '評分標準', icon: 'scale' },
-    { route: 'cloud-reports', label: '雲端日報', icon: 'folder-open' },
-    { route: 'settings', label: '系統設定', icon: 'settings-2' },
+    { route: 'evidence', label: '證據中心', icon: 'scan-search', moreOnly: true, count: () => allEvidence().filter(item => item.evidence.status !== 'accepted').length },
+    { route: 'plans-review', label: '備課檔案', icon: 'notebook-tabs', moreOnly: true },
+    { route: 'team', label: '團隊狀態', icon: 'users-round', moreOnly: true },
+    { route: 'scoring', label: '評分標準', icon: 'scale', moreOnly: true },
+    { route: 'cloud-reports', label: '雲端日報', icon: 'folder-open', moreOnly: true },
+    { route: 'settings', label: '系統設定', icon: 'settings-2', moreOnly: true },
   ];
 
   const TODAY_TABS = [
@@ -453,6 +453,7 @@
         filters: {
           plans: { status: 'all' }, tasks: { status: 'open' }, records: { period: '30d', status: 'all', query: '' },
           reviews: { status: 'open', teacher: 'all', date: '', query: '' },
+          managerMonth: { month: today.slice(0, 7), department: '', teacher: '', date: '' },
           evidence: { type: 'all', status: 'open', kpi: 'all', query: '' },
           planReview: { status: 'review', teacher: 'all', query: '' },
           operationsReview: { status: 'open', owner: 'all' },
@@ -1127,6 +1128,8 @@
     managerSyncStatus: 'idle',
     managerSyncMessage: '',
     managerSyncAt: '',
+    managerLogIndex: [],
+    managerActiveTeachers: [],
     pushStatus: null,
     pushStatusState: 'unknown',
     legacyArchiveStatus: 'idle',
@@ -2215,6 +2218,9 @@
       department: person.department,
     };
     const workspaceId = state.ui.role === 'manager' ? 'anqin-manager' : 'anqin-teacher';
+    const quickWorkspaceSwitcher = state.ui.role === 'manager' && state.ui.route === 'dashboard'
+      ? ''
+      : (window.KPI_WORKSPACES?.renderQuickSwitcher?.(workspaceUser, { currentId: workspaceId }) || '');
     window.KPI_REVIEW_USER = workspaceUser;
     app.innerHTML = `
       <header class="topbar">
@@ -2256,7 +2262,7 @@
         </div>
       </aside>
 
-      <main class="app-main" id="main-content"><div id="system-status-root">${renderSystemStatusNotice()}</div>${window.KPI_WORKSPACES?.renderQuickSwitcher?.(workspaceUser, { currentId: workspaceId }) || ''}${renderRoute()}</main>
+      <main class="app-main" id="main-content"><div id="system-status-root">${renderSystemStatusNotice()}</div>${quickWorkspaceSwitcher}${renderRoute()}</main>
 
       <nav class="mobile-bottom-nav" aria-label="行動版主要導覽">
         ${renderMobileNav(primaryNav, nav)}
@@ -4766,10 +4772,11 @@
         .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
       state.feedbackThreads[key] = merged;
       const latestManagerRow = rows.filter(row => row.from_nickname !== backendNickname(submission.teacher)).at(-1);
+      const latestDecisionRow = rows.filter(row => row.from_nickname !== backendNickname(submission.teacher) && ['已知悉', '需改進'].includes(row.tag)).at(-1);
       if (latestManagerRow) {
         submission.feedback = latestManagerRow.content || '';
-        if (submission.status !== 'draft' && submission.submittedAt && cloudDecisionIsCurrent(latestManagerRow.created_at, submission.submittedAt)) {
-          submission.status = latestManagerRow.tag === '需改進' ? 'clarify' : 'accepted';
+        if (latestDecisionRow && submission.status !== 'draft' && submission.submittedAt && cloudDecisionIsCurrent(latestDecisionRow.created_at, submission.submittedAt)) {
+          submission.status = latestDecisionRow.tag === '需改進' ? 'clarify' : 'accepted';
         }
       }
       updated += 1;
@@ -4906,7 +4913,10 @@
       window.API?.listUsers ? API.listUsers(session.nickname) : Promise.resolve({ ok: false }),
       window.API?.listStudents ? API.listStudents({ department: managerScopeDepartment() ? expectedBackendDepartment(managerScopeDepartment()) : '' }) : Promise.resolve({ ok: false }),
     ]);
-    if (usersResult?.ok) mergeCloudRoster(usersResult.users || []);
+    if (usersResult?.ok) {
+      mergeCloudRoster(usersResult.users || []);
+      integrationRuntime.managerActiveTeachers = (usersResult.users || []).filter(user => user?.nickname && user.role === 'teacher' && !['pending', 'suspended', 'deleted'].includes(String(user.status || '').toLowerCase())).map(user => displayNameForBackend(user.nickname));
+    }
     if (studentsResult?.ok) mergeCloudStudents(studentsResult.students || []);
     if (!result?.ok) {
       integrationRuntime.managerSyncStatus = 'error';
@@ -4915,6 +4925,18 @@
       if (notify) toast(`更新失敗：${integrationRuntime.managerSyncMessage}`, 'danger');
       return;
     }
+    integrationRuntime.managerLogIndex = (result.logs || []).filter(log => {
+      const teacher = displayNameForBackend(log.nickname || log?.kpi6_data?.v2_snapshot?.submission?.teacher || '');
+      return teacher && managerScopeMatches(teacher, log.department || log?.kpi6_data?.v2_snapshot?.submission?.department || '');
+    }).map(log => ({
+      logId: String(log.log_id || ''),
+      teacher: displayNameForBackend(log.nickname || log?.kpi6_data?.v2_snapshot?.submission?.teacher || ''),
+      department: String(log.department || log?.kpi6_data?.v2_snapshot?.submission?.department || '').trim() === '永康教室' ? '東橋教室' : String(log.department || log?.kpi6_data?.v2_snapshot?.submission?.department || '').trim(),
+      date: String(log.date || log?.kpi6_data?.v2_snapshot?.submission?.date || '').slice(0, 10),
+      submittedAt: String(log.submitted_at || log?.kpi6_data?.v2_snapshot?.submission?.submittedAt || ''),
+      isMakeup: [true, 'TRUE', 'true', 1, '1'].includes(log.is_makeup),
+      hasV2Snapshot: Boolean(log?.kpi6_data?.v2_snapshot?.submission),
+    })).filter(log => log.teacher && /^\d{4}-\d{2}-\d{2}$/.test(log.date));
     let imported = 0;
     (result.logs || []).forEach(log => {
       const snapshot = log?.kpi6_data?.v2_snapshot;
@@ -4933,59 +4955,194 @@
     if (notify) toast(integrationRuntime.managerSyncMessage, 'success');
   }
 
+  function normalizeManagerMonth(value = '') {
+    const month = String(value || '').slice(0, 7);
+    return /^\d{4}-(0[1-9]|1[0-2])$/.test(month) ? month : todayIso().slice(0, 7);
+  }
+
+  function shiftManagerMonth(value, amount) {
+    const month = normalizeManagerMonth(value);
+    const [year, monthNumber] = month.split('-').map(Number);
+    const shifted = new Date(year, monthNumber - 1 + Number(amount || 0), 15, 12, 0, 0);
+    return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  function managerMonthBounds() {
+    const current = todayIso().slice(0, 7);
+    return { min: shiftManagerMonth(current, -1), max: current };
+  }
+
+  function clampManagerMonth(value) {
+    const month = normalizeManagerMonth(value);
+    const bounds = managerMonthBounds();
+    return month < bounds.min ? bounds.min : month > bounds.max ? bounds.max : month;
+  }
+
+  function managerMonthWeeks(value) {
+    const month = normalizeManagerMonth(value);
+    const [year, monthNumber] = month.split('-').map(Number);
+    const lastDay = new Date(year, monthNumber, 0, 12, 0, 0).getDate();
+    const dates = [];
+    for (let day = 1; day <= lastDay; day += 1) {
+      const date = `${month}-${String(day).padStart(2, '0')}`;
+      if (!dailyKpiOptional(date)) dates.push(date);
+    }
+    if (!dates.length) return [];
+    const first = dates[0];
+    const last = dates[dates.length - 1];
+    const firstWeekday = new Date(`${first}T12:00:00`).getDay();
+    const lastWeekday = new Date(`${last}T12:00:00`).getDay();
+    const start = addDays(first, -(firstWeekday - 1));
+    const end = addDays(last, 5 - lastWeekday);
+    const weeks = [];
+    for (let cursor = start; cursor <= end; cursor = addDays(cursor, 7)) {
+      weeks.push(Array.from({ length: 5 }, (_, index) => {
+        const date = addDays(cursor, index);
+        return date.slice(0, 7) === month ? date : '';
+      }));
+    }
+    return weeks;
+  }
+
+  function managerRawLogFor(teacher, date) {
+    return (integrationRuntime.managerLogIndex || []).find(log => sameReviewIdentity(log.teacher, teacher) && log.date === date) || null;
+  }
+
+  function managerSubmissionFor(teacher, date) {
+    return state.submissions.find(item => sameReviewIdentity(item.teacher, teacher) && item.date === date && item.status !== 'draft' && Boolean(item.submittedAt)) || null;
+  }
+
+  function managerDayState(teacher, date, today = todayIso()) {
+    if (!date || dailyKpiOptional(date)) return { key: 'exempt', label: '免填', tone: 'muted', submission: null, rawLog: null };
+    const submission = managerSubmissionFor(teacher, date);
+    const rawLog = managerRawLogFor(teacher, date);
+    if (submission || rawLog?.submittedAt) {
+      const makeup = Boolean(rawLog?.isMakeup);
+      return { key: makeup ? 'makeup' : 'complete', label: makeup ? '已補交' : '已完成', tone: makeup ? 'makeup' : 'complete', submission, rawLog };
+    }
+    if (date > today) return { key: 'future', label: '未到期', tone: 'future', submission: null, rawLog };
+    if (date === today) return { key: 'today', label: '今日待交', tone: 'pending', submission: null, rawLog };
+    if (date === previousKpiWorkday(today)) return { key: 'grace', label: '期限內待補', tone: 'pending', submission: null, rawLog };
+    return { key: 'missing', label: '缺交', tone: 'missing', submission: null, rawLog };
+  }
+
+  function managerMonthModel(teacher, month) {
+    const today = todayIso();
+    const days = managerMonthWeeks(month).flat().filter(Boolean).map(date => ({ date, ...managerDayState(teacher, date, today) }));
+    const due = days.filter(day => day.date <= today);
+    return {
+      days,
+      required: due.length,
+      completed: due.filter(day => ['complete', 'makeup'].includes(day.key)).length,
+      missing: due.filter(day => day.key === 'missing').length,
+      pending: due.filter(day => ['today', 'grace'].includes(day.key)).length,
+      makeup: due.filter(day => day.key === 'makeup').length,
+    };
+  }
+
+  function managerDayFacts(teacher, date, dayState) {
+    const submission = dayState?.submission || managerSubmissionFor(teacher, date);
+    const activities = submission
+      ? resolveSubmissionItems(submission.activityIds, submission.activitySnapshots, state.activities)
+      : state.activities.filter(item => sameReviewIdentity(item.teacher, teacher) && item.date === date && item.type !== 'lessonprep');
+    const contacts = submission
+      ? resolveSubmissionItems(submission.contactIds, submission.contactSnapshots, state.contacts)
+      : state.contacts.filter(item => sameReviewIdentity(item.teacher, teacher) && item.date === date);
+    const evidencePhotos = activities.reduce((total, activity) => total + (activity.evidence || []).reduce((count, evidence) => count + evidenceAttachments(evidence).filter(attachmentRecorded).length, 0), 0);
+    const coursePhotos = (submission?.courseRecord?.attachments || []).filter(attachmentRecorded).length;
+    const operation = operationRecords().find(item => sameReviewIdentity(item.dutyOwner, teacher) && item.date === date) || null;
+    const feedbackCount = submission ? feedbackThreadMessages(feedbackThreadKey('submission', submission.id)).length : 0;
+    return { submission, activities, contacts, photoCount: evidencePhotos + coursePhotos, operation, feedbackCount };
+  }
+
+  function renderManagerDayPreview(teacher, date, dayState, month) {
+    if (!teacher || !date || !dayState) return `<section class="manager-day-preview"><div class="empty-state"><div><div class="empty-icon">${icon('calendar-search', 22)}</div><div class="empty-title">請先選擇老師與日期</div><div class="empty-copy">點月曆中的日期即可查看當日狀況。</div></div></div></section>`;
+    const facts = managerDayFacts(teacher, date, dayState);
+    const submission = facts.submission;
+    const operationCopy = facts.operation ? `${operationProofCount(facts.operation)}/4 張整潔照片` : '尚無班務紀錄';
+    const reviewCopy = submission ? (submission.status === 'accepted' ? '主管已完成' : submission.status === 'clarify' ? '已要求老師補充' : '等待主管查看') : '沒有可審查日報';
+    const legacyCopy = dayState.rawLog?.submittedAt && !submission ? `<div class="notice-band info manager-day-legacy">${icon('archive', 18)}<div><div class="notice-title">此日為舊版已送出紀錄</div><div class="notice-copy">不列為缺交；完整內容可到「雲端日報」查看。</div></div></div>` : '';
+    return `<section class="manager-day-preview" aria-label="${esc(`${teacher} ${formatDate(date)} 當日狀況`)}">
+      <div class="manager-day-preview-head"><div><span class="manager-day-kicker">${esc(teacher)} · ${formatDate(date)}</span><h2>當日狀況</h2></div><span class="manager-day-state is-${esc(dayState.tone)}">${esc(dayState.label)}</span></div>
+      ${legacyCopy}
+      <div class="manager-day-facts">
+        <div><span>${icon('clipboard-list', 17)}工作紀錄</span><strong>${facts.activities.length} 筆</strong></div>
+        <div><span>${icon('images', 17)}課程照片</span><strong>${facts.photoCount} 張</strong></div>
+        <div><span>${icon('sparkles', 17)}教室整潔</span><strong>${esc(operationCopy)}</strong></div>
+        <div><span>${icon('messages-square', 17)}親師溝通</span><strong>${facts.contacts.length} 筆</strong></div>
+        <div><span>${icon('message-square-heart', 17)}主管與老師對話</span><strong>${facts.feedbackCount ? `${facts.feedbackCount} 則` : reviewCopy}</strong></div>
+      </div>
+      <div class="manager-day-actions">
+        ${submission ? `<button type="button" class="btn btn-primary" data-action="open-review" data-submission-id="${esc(submission.id)}">${icon('message-square-heart', 16)}查看當日並給回饋</button>` : dayState.rawLog?.submittedAt ? `<button type="button" class="btn" data-action="navigate" data-route="cloud-reports">${icon('folder-open', 16)}查看舊版日報</button>` : `<span class="manager-day-empty-note">${dayState.key === 'missing' ? '此日沒有找到正式送出紀錄。' : '老師正式送出後即可查看與回饋。'}</span>`}
+        <button type="button" class="btn" data-action="manager-month-evaluate" data-teacher="${esc(teacher)}" data-month="${esc(month)}">${icon('chart-no-axes-column-increasing', 16)}本月評分</button>
+      </div>
+    </section>`;
+  }
+
   function renderManagerDashboard() {
     const syncing = integrationRuntime.managerSyncStatus === 'loading';
-    const pending = pendingReviews();
-    const todayContacts = state.contacts.filter(item => managerScopeMatches(item.teacher) && item.date === state.daily.date);
-    const prepFiles = state.activities.filter(activity => activity.type === 'lessonprep' && managerScopeMatches(activity.teacher));
-    const evidenceAttention = allEvidence().filter(item => item.evidence.status !== 'accepted');
-    const pendingOperations = operationRecords().filter(item => item.confirmedAt && item.reviewStatus !== 'accepted');
-    const teachers = teachingStaff();
-    const teacherRows = teachers.map(person => {
-      const name = person.nickname;
-      const activities = state.activities.filter(item => item.teacher === name && item.date === state.daily.date && item.type !== 'lessonprep');
-      const submission = state.submissions.find(item => item.teacher === name && item.date === state.daily.date);
-      const submitted = Boolean(submission || (name === state.context.teacher && state.daily.submittedAt));
-      const quality = activities.length ? Math.round(activities.filter(activityComplete).length / activities.length * 100) : null;
-      const queue = pending.filter(item => item.teacher === name).length
-        + evidenceAttention.filter(item => item.activity.teacher === name).length
-        + pendingOperations.filter(item => item.dutyOwner === name).length;
-      return {
-        name, department: person.department, studentCount: (person.students || []).length, note: person.note || '', quality, queue,
-        submit: submitted ? '已交' : activities.length ? '草稿' : '未開始',
-        submitTone: submitted ? 'green' : activities.length ? 'yellow' : 'outline',
-        contacts: state.contacts.filter(item => item.teacher === name && item.date === state.daily.date).length,
-      };
-    });
-    const queueItems = [
-      ...pending.map(submission => `<div class="risk-row"><span class="risk-level ${submission.status === 'clarify' ? 'high' : 'low'}"></span><div><div class="risk-title">日報${submission.status === 'clarify' ? '待補充' : '待審'}｜${esc(submission.teacher)}</div><div class="risk-meta">${formatDate(submission.date)} · ${esc(truncate(submission.followup || submission.keyResult || '等待主管判讀', 58))}</div></div><button type="button" class="btn btn-small" data-action="open-review" data-submission-id="${submission.id}">查看</button></div>`),
-      ...pendingOperations.map(operation => `<div class="risk-row"><span class="risk-level ${operation.reviewStatus === 'clarify' ? 'high' : 'low'}"></span><div><div class="risk-title">班務${operation.reviewStatus === 'clarify' ? '待補充' : '待稽核'}｜${formatShortDate(operation.date)} ${esc(operation.room)}</div><div class="risk-meta">${esc(operation.dutyOwner)} · ${operationProofCount(operation)}/4 已附照片 · ${operationExceptionCount(operation)} 項異常</div></div><button type="button" class="btn btn-small" data-action="review-operation" data-operation-id="${operation.id}">稽核</button></div>`),
-    ].slice(0, 8);
-    const dueTasks = openTasks().slice().sort((a, b) => String(a.dueDate || '').localeCompare(String(b.dueDate || ''))).slice(0, 4);
-    const start = addDays(state.daily.date, -6);
-    const weeklyActivities = state.activities.filter(item => managerScopeMatches(item.teacher) && item.type !== 'lessonprep' && item.date >= start && item.date <= state.daily.date);
-    const structure = [
-      { label: '學科內（含班級經營）', track: 'academic' },
-      { label: '特色課程', track: 'enrichment' },
-    ].map(item => ({ ...item, count: weeklyActivities.filter(activity => activityTrack(activity.type) === item.track).length })).filter(item => item.count);
-    return `<div class="page">
-      ${pageHead('管理總覽', `${managerScopeLabel()} · ${formatDate(state.daily.date)}${integrationRuntime.managerSyncAt ? ` · ${formatTime(integrationRuntime.managerSyncAt)} 更新` : ''}`, `<button type="button" class="btn" data-action="manager-refresh" ${syncing ? 'disabled' : ''}>${icon('refresh-cw', 16)}<span>${syncing ? '更新中' : '更新狀態'}</span></button>`)}
+    const syncButton = `<button type="button" class="btn" data-action="manager-refresh" ${syncing ? 'disabled' : ''}>${icon('refresh-cw', 16)}<span>${syncing ? '更新中' : '更新資料'}</span></button>`;
+    if (!integrationRuntime.managerSyncAt && integrationRuntime.managerSyncStatus !== 'saved') {
+      const failed = integrationRuntime.managerSyncStatus === 'error';
+      return `<div class="page manager-month-page">
+        ${pageHead('安親主管｜月度總覽', managerScopeLabel(), syncButton)}
+        <section class="panel"><div class="panel-body"><div class="integration-empty-state">${icon(failed ? 'cloud-alert' : 'loader-circle', 24)}<div><strong>${failed ? '月度資料尚未讀取完成' : '正在整理老師本月狀況'}</strong><small>${esc(failed ? (integrationRuntime.managerSyncMessage || '請重新讀取，既有資料不會被標成缺交。') : '完成後才會計算已交、缺交與期限內待補。')}</small></div>${failed ? '<button type="button" class="btn btn-small" data-action="manager-refresh">重新讀取</button>' : ''}</div></div></section>
+      </div>`;
+    }
+    const filters = getFilters('managerMonth', { month: todayIso().slice(0, 7), department: '', teacher: '', date: '' });
+    const month = clampManagerMonth(filters.month);
+    const scope = managerScopeDepartment();
+    const globalManager = !scope;
+    const allowedDepartments = ['東橋教室', '北區教室'];
+    const defaultDepartment = allowedDepartments.includes(normalizeDepartmentScope(state.context.department)) ? normalizeDepartmentScope(state.context.department) : 'all';
+    const department = scope || (['all', ...allowedDepartments].includes(filters.department) && filters.department ? filters.department : defaultDepartment);
+    const activeTeacherNames = integrationRuntime.managerActiveTeachers || [];
+    const teachers = teachingStaff().filter(person => person.role === 'teacher'
+      && (!activeTeacherNames.length || activeTeacherNames.some(name => sameReviewIdentity(name, person.nickname)))
+      && (department === 'all' || normalizeDepartmentScope(person.department) === department));
+    const teacherModels = teachers.map(person => ({ person, model: managerMonthModel(person.nickname, month) }));
+    let teacher = teacherModels.some(item => item.person.nickname === filters.teacher) ? filters.teacher : '';
+    if (!teacher && teacherModels.length) {
+      teacher = teacherModels.slice().sort((a, b) => (b.model.missing + b.model.pending) - (a.model.missing + a.model.pending))[0].person.nickname;
+    }
+    const model = teacherModels.find(item => item.person.nickname === teacher)?.model || { days: [], required: 0, completed: 0, missing: 0, pending: 0, makeup: 0 };
+    let selectedDate = model.days.some(day => day.date === filters.date) ? filters.date : '';
+    if (!selectedDate) selectedDate = model.days.filter(day => day.key === 'missing').at(-1)?.date
+      || model.days.find(day => ['today', 'grace'].includes(day.key))?.date
+      || model.days.filter(day => ['complete', 'makeup'].includes(day.key)).at(-1)?.date
+      || model.days[0]?.date || '';
+    const selectedDay = model.days.find(day => day.date === selectedDate) || null;
+    filters.month = month;
+    filters.department = department;
+    filters.teacher = teacher;
+    filters.date = selectedDate;
+    const bounds = managerMonthBounds();
+    const monthLabel = new Date(`${month}-15T12:00:00`).toLocaleDateString('zh-TW', { year: 'numeric', month: 'long' });
+    const campusSwitch = globalManager ? `<div class="manager-campus-switch" aria-label="教室篩選">${[
+      ['all', '全部'], ['東橋教室', '東橋'], ['北區教室', '北區'],
+    ].map(([value, label]) => `<button type="button" class="${department === value ? 'active' : ''}" data-action="manager-month-department" data-department="${value}" aria-pressed="${department === value}">${label}</button>`).join('')}</div>` : `<span class="manager-scope-chip">${icon('map-pin', 14)}${esc(scope)}</span>`;
+    const teacherCards = teacherModels.map(({ person, model: item }) => `<button type="button" class="manager-teacher-card ${teacher === person.nickname ? 'active' : ''}" data-action="manager-month-teacher" data-teacher="${esc(person.nickname)}" aria-pressed="${teacher === person.nickname}"><span class="manager-teacher-avatar">${esc((person.initials || person.nickname).slice(0, 2))}</span><span><strong>${esc(person.nickname)}</strong><small>${esc(person.department)} · ${(person.students || []).length} 位學生</small></span><span class="manager-teacher-counts"><b class="is-complete">${item.completed} 完成</b>${item.missing ? `<b class="is-missing">${item.missing} 缺交</b>` : '<b>無缺交</b>'}</span></button>`).join('');
+    const dayMap = new Map(model.days.map(day => [day.date, day]));
+    const calendarRows = managerMonthWeeks(month).map(week => `<div class="manager-calendar-week">${week.map(date => {
+      if (!date) return '<span class="manager-calendar-day is-empty" aria-hidden="true"></span>';
+      const day = dayMap.get(date);
+      const selected = date === selectedDate;
+      return `<button type="button" class="manager-calendar-day is-${esc(day.tone)} ${selected ? 'selected' : ''}" data-action="manager-month-date" data-date="${date}" aria-pressed="${selected}" aria-label="${esc(`${formatDate(date)}，${day.label}`)}"><span>${Number(date.slice(-2))}</span><small>${esc(day.label)}</small></button>`;
+    }).join('')}</div>`).join('');
+    return `<div class="page manager-month-page">
+      ${pageHead('安親主管｜月度總覽', `${managerScopeLabel()}${integrationRuntime.managerSyncAt ? ` · ${formatTime(integrationRuntime.managerSyncAt)} 更新` : ''}`, syncButton)}
       ${integrationRuntime.managerSyncStatus === 'error' ? `<div class="notice-band danger">${icon('cloud-alert', 19)}<div><div class="notice-title">雲端資料更新失敗</div><div class="notice-copy">${esc(integrationRuntime.managerSyncMessage)}</div></div></div>` : ''}
-      <div class="status-strip">
-        <div class="status-cell"><div class="status-label">待審日報</div><div class="status-value">${pending.length}</div><div class="status-note">含 ${pending.filter(item => item.status === 'clarify').length} 件待老師補充</div></div>
-        <div class="status-cell"><div class="status-label">今日親師溝通</div><div class="status-value">${todayContacts.length}</div><div class="status-note">孩子狀況與家長共識紀錄</div></div>
-        <div class="status-cell"><div class="status-label">備課檔案</div><div class="status-value">${prepFiles.length}</div><div class="status-note">只供查閱，不需核准</div></div>
-        <div class="status-cell"><div class="status-label">成果證據／班務</div><div class="status-value">${evidenceAttention.length}/${pendingOperations.length}</div><div class="status-note">待判讀證據 / 待稽核班務</div></div>
+      <div class="manager-month-toolbar">
+        ${campusSwitch}
+        <div class="manager-month-switch" aria-label="月份切換"><button type="button" data-action="manager-month-shift" data-delta="-1" ${month <= bounds.min ? 'disabled' : ''} aria-label="上個月">${icon('chevron-left', 18)}</button><strong>${esc(monthLabel)}</strong><button type="button" data-action="manager-month-shift" data-delta="1" ${month >= bounds.max ? 'disabled' : ''} aria-label="下個月">${icon('chevron-right', 18)}</button></div>
       </div>
-      <div class="content-grid wide-aside">
-        <div class="stack">
-          <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('triangle-alert')}今日需處理</div><div class="panel-subtitle">依日期與待處理狀態排序</div></div><button type="button" class="btn btn-small" data-action="navigate" data-route="reviews">全部審查</button></div><div class="panel-body">${queueItems.length ? `<div class="risk-list">${queueItems.join('')}</div>` : '<div class="text-small muted">目前沒有待處理內容。</div>'}</div></section>
-          <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('users-round')}老師工作狀態</div><div class="panel-subtitle">今日送出、親師溝通與待審狀態</div></div></div><div class="panel-body flush"><div class="table-wrap"><table class="data-table"><thead><tr><th>老師</th><th>日報</th><th>資料完整度</th><th>親師溝通</th><th>待審</th></tr></thead><tbody>${teacherRows.map(row => `<tr><td><div class="teacher-status"><span class="status-avatar">${esc(row.name.slice(0, 2))}</span><div><div class="table-primary">${esc(row.name)}</div><div class="table-secondary">${esc(row.department)} · ${row.studentCount} 位學生${row.note ? ` · ${esc(row.note)}` : ''}</div></div></div></td><td><span class="badge ${row.submitTone}">${row.submit}</span></td><td>${row.quality == null ? '—' : `<div class="metric-row"><span class="metric-value">${row.quality}</span><div class="progress-track"><div class="progress-fill ${row.quality < 70 ? 'danger' : row.quality < 85 ? 'warn' : ''}" style="width:${row.quality}%"></div></div></div>`}</td><td>${row.contacts}</td><td>${row.queue ? `<span class="badge red">${row.queue}</span>` : '—'}</td></tr>`).join('')}</tbody></table></div></div></section>
+      ${teacher ? `<div class="manager-month-summary" aria-label="${esc(`${teacher} ${monthLabel}統計`)}"><div><span>截至今天應填</span><strong>${model.required}</strong></div><div class="is-complete"><span>已完成</span><strong>${model.completed}</strong></div><div class="is-missing"><span>缺交</span><strong>${model.missing}</strong></div><div class="is-pending"><span>期限內待補</span><strong>${model.pending}</strong></div></div>` : ''}
+      <div class="manager-month-layout">
+        <aside class="manager-teacher-panel"><div class="manager-section-head"><div><strong>選擇老師</strong><small>${teachers.length} 位</small></div></div><div class="manager-teacher-list">${teacherCards || '<div class="manager-list-empty">此教室目前沒有可查看的老師。</div>'}</div></aside>
+        <div class="manager-month-main">
+          <section class="manager-calendar-panel"><div class="manager-section-head"><div><strong>${esc(teacher || '尚未選擇老師')}</strong><small>點日期查看當日狀況</small></div><div class="manager-calendar-legend"><span class="is-complete">已完成</span><span class="is-pending">待補</span><span class="is-missing">缺交</span><span class="is-future">未到期</span></div></div><div class="manager-calendar" role="grid" aria-label="${esc(`${monthLabel}工作日月曆`)}"><div class="manager-calendar-head" aria-hidden="true"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span></div>${calendarRows}</div></section>
+          ${renderManagerDayPreview(teacher, selectedDate, selectedDay, month)}
         </div>
-        <aside class="stack">
-          <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('calendar-clock')}即將到期</div></div></div><div class="panel-body">${dueTasks.length ? `<div class="timeline">${dueTasks.map(task => `<div class="timeline-item"><div class="timeline-date">${formatShortDate(task.dueDate)}</div><span class="timeline-dot"></span><div class="timeline-content"><div class="text-small text-strong">${esc(task.title)}</div><div class="text-tiny muted">${esc(task.owner)} · ${esc(task.source)}</div></div></div>`).join('')}</div>` : '<div class="text-small muted">目前沒有即將到期事項。</div>'}</div></section>
-          <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('activity')}本週結構</div></div></div><div class="panel-body">${structure.length ? `<div class="summary-list">${structure.map((item, index) => `<div class="summary-line"><span class="summary-index">${index + 1}</span><div><div class="summary-title">${item.label} ${Math.round(item.count / weeklyActivities.length * 100)}%</div><div class="summary-copy">${item.count} 筆工作紀錄</div></div></div>`).join('')}</div>` : '<div class="text-small muted">有真人工作紀錄後才會顯示。</div>'}</div></section>
-        </aside>
       </div>
     </div>`;
   }
@@ -8756,9 +8913,12 @@
     else if (action === 'exit-impersonation') {
       persistCurrentDrawerDraft(true);
       const realRole = window.AUTH?.getRealRole?.();
+      const realSession = window.AUTH?.getRealSession?.();
       window.AUTH?.exitImpersonate?.();
       const root = window.AUTH?.relativeRoot?.() || '../../';
-      window.location.href = realRole === 'admin' ? `${root}admin/dashboard.html?v=20260827-test-view-fast-1#test-view` : `${root}manager/dashboard.html`;
+      if (realRole === 'admin') window.location.href = `${root}admin/dashboard.html?v=20260827-test-view-fast-1#test-view`;
+      else if (window.AUTH?.routeByRole) window.AUTH.routeByRole(realRole, realSession);
+      else window.location.href = `${root}review/anqin-v2/index.html?v=20261008-manager-month-1`;
     }
     else if (action === 'open-test-view') {
       const root = window.AUTH?.relativeRoot?.() || '../../';
@@ -8927,6 +9087,49 @@
     else if (action === 'retry-prep-sync') await refreshCoursePrepCloudData(true);
     else if (action === 'retry-task-sync') await refreshTaskCloudData(true);
     else if (action === 'export-monthly-archive') await exportMonthlyArchive();
+    else if (action === 'manager-month-shift') {
+      const filters = getFilters('managerMonth', { month: todayIso().slice(0, 7), department: '', teacher: '', date: '' });
+      filters.month = clampManagerMonth(shiftManagerMonth(filters.month, Number(control.dataset.delta || 0)));
+      filters.date = '';
+      persist(); renderApp();
+    }
+    else if (action === 'manager-month-department') {
+      if (managerScopeDepartment()) return;
+      const department = control.dataset.department;
+      if (!['all', '東橋教室', '北區教室'].includes(department)) return;
+      const filters = getFilters('managerMonth', { month: todayIso().slice(0, 7), department: '', teacher: '', date: '' });
+      filters.department = department;
+      filters.teacher = '';
+      filters.date = '';
+      persist(); renderApp();
+    }
+    else if (action === 'manager-month-teacher') {
+      const teacher = control.dataset.teacher;
+      const person = teachingStaff().find(item => item.role === 'teacher' && sameReviewIdentity(item.nickname, teacher));
+      if (!person || !managerScopeMatches(person.nickname, person.department)) return;
+      const filters = getFilters('managerMonth', { month: todayIso().slice(0, 7), department: '', teacher: '', date: '' });
+      filters.teacher = person.nickname;
+      filters.date = '';
+      persist(); renderApp();
+    }
+    else if (action === 'manager-month-date') {
+      const date = String(control.dataset.date || '');
+      const filters = getFilters('managerMonth', { month: todayIso().slice(0, 7), department: '', teacher: '', date: '' });
+      if (!managerMonthWeeks(filters.month).flat().includes(date)) return;
+      filters.date = date;
+      persist(); renderApp();
+    }
+    else if (action === 'manager-month-evaluate') {
+      const teacher = control.dataset.teacher;
+      const month = clampManagerMonth(control.dataset.month);
+      const person = teachingStaff().find(item => item.role === 'teacher' && sameReviewIdentity(item.nickname, teacher));
+      if (!person || !ensureManagerScope(person.nickname, person.department)) return;
+      integrationRuntime.managerEvaluationTeacher = person.nickname;
+      integrationRuntime.managerEvaluationMonth = month;
+      state.ui.route = 'evaluations';
+      persist();
+      await loadManagerEvaluation(person.nickname, month);
+    }
     else if (action === 'manager-refresh') {
       await syncManagerCloudData();
     }
