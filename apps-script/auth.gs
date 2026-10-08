@@ -103,9 +103,16 @@ function normalizeUserSchedule_(value) {
     const time = String(item.time || '').trim().slice(0, 80);
     const siteType = String(item.siteType || 'self').trim();
     const site = String(item.site || '').trim().slice(0, 100);
+    const courseName = String(item.courseName || '').trim().slice(0, 120);
+    const courseType = String(item.courseType || '').trim().slice(0, 120);
+    const effectiveFrom = String(item.effectiveFrom || '').trim().slice(0, 10);
+    const effectiveUntil = String(item.effectiveUntil || '').trim().slice(0, 10);
     if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) throw new Error('固定排班星期不正確');
     if (!time || !site) throw new Error('固定排班必須包含時間與地點');
     if (['self', 'partner'].indexOf(siteType) < 0) throw new Error('固定排班場域不正確');
+    if (effectiveFrom && !/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) throw new Error('固定排班生效日不正確');
+    if (effectiveUntil && !/^\d{4}-\d{2}-\d{2}$/.test(effectiveUntil)) throw new Error('固定排班結束日不正確');
+    if (effectiveFrom && effectiveUntil && effectiveFrom > effectiveUntil) throw new Error('固定排班生效日不可晚於結束日');
     const normalized = {
       weekday: weekday,
       label: String(item.label || weekdayLabels[weekday]).trim().slice(0, 20),
@@ -113,10 +120,39 @@ function normalizeUserSchedule_(value) {
       siteType: siteType,
       site: site
     };
+    if (courseName) normalized.courseName = courseName;
+    if (courseType) normalized.courseType = courseType;
+    if (effectiveFrom) normalized.effectiveFrom = effectiveFrom;
+    if (effectiveUntil) normalized.effectiveUntil = effectiveUntil;
     normalized.scheduleKey = userScheduleKey_(Object.assign({}, normalized, { scheduleKey: item.scheduleKey || item.key || '' }));
     if (!normalized.scheduleKey || seen[normalized.scheduleKey]) throw new Error('固定排班有重複班次，請確認星期、時間與地點');
     seen[normalized.scheduleKey] = true;
     return normalized;
+  });
+}
+
+function mergeUserScheduleMetadata_(existingValue, incomingValue) {
+  const existing = normalizeUserSchedule_(existingValue);
+  const incomingRaw = parseUserListField_(incomingValue);
+  const incoming = normalizeUserSchedule_(incomingRaw);
+  const existingByKey = {};
+  existing.forEach(function (item) {
+    existingByKey[item.scheduleKey] = item;
+  });
+  const metadataKeys = ['courseName', 'courseType', 'effectiveFrom', 'effectiveUntil'];
+  const hasOwn = Object.prototype.hasOwnProperty;
+  return incoming.map(function (item, index) {
+    const previous = existingByKey[item.scheduleKey];
+    const raw = incomingRaw[index] && typeof incomingRaw[index] === 'object' ? incomingRaw[index] : {};
+    if (!previous) return item;
+    metadataKeys.forEach(function (key) {
+      const incomingHasValue = hasOwn.call(raw, key) && String(raw[key] == null ? '' : raw[key]).trim() !== '';
+      // 既有班次的課程 metadata 以伺服器保存的 scheduleKey 為準。
+      // 舊管理頁會把當時畫面的列號 metadata 一併送回，排序／刪除後不能讓它覆蓋到別班。
+      if (previous[key]) item[key] = previous[key];
+      else if (!incomingHasValue) delete item[key];
+    });
+    return item;
   });
 }
 
@@ -463,7 +499,7 @@ function authorizeApiAction_(action, params, actor) {
     return;
   }
 
-  if (['reviewTalentPrep', 'saveTalentScore'].indexOf(action) >= 0) {
+  if (['reviewTalentPrep', 'saveTalentScore', 'forfeitTalentMonthlyBonus'].indexOf(action) >= 0) {
     requireApiRole_(actor, ['admin', 'manager']);
     params.operator = actor.nickname;
     return;
@@ -814,7 +850,7 @@ function updateUser(params) {
     if (assignments.some(function (item) { return allowed.indexOf(item) < 0; })) return { ok: false, error: 'invalid work_assignments' };
     updates.work_assignments = assignments;
   }
-  if (updates.schedule_json !== undefined) updates.schedule_json = normalizeUserSchedule_(updates.schedule_json);
+  if (updates.schedule_json !== undefined) updates.schedule_json = mergeUserScheduleMetadata_(user.schedule_json, updates.schedule_json);
   if (updates.rest_days !== undefined) updates.rest_days = normalizeRestDays_(updates.rest_days);
   const resultingRole = updates.role !== undefined ? updates.role : user.role;
   const resultingEmployment = updates.employment_type !== undefined ? updates.employment_type : user.employment_type;

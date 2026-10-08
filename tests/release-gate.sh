@@ -30,6 +30,9 @@ cd "$ROOT"
 "$NODE_BIN" tests/session-continuity.test.cjs
 "$NODE_BIN" tests/push-resilience.test.cjs
 "$NODE_BIN" tests/icon-catalog.test.cjs
+"$NODE_BIN" tests/anqin-lateness-score.test.cjs
+"$NODE_BIN" tests/anqin-september-bonus-score.test.cjs
+"$NODE_BIN" tests/anqin-evaluation-load-race.test.cjs
 "$NODE_BIN" tests/anqin-task-ui.test.cjs
 "$NODE_BIN" tests/anqin-manager-month.test.cjs
 "$NODE_BIN" tests/anqin-photo-batch.test.cjs
@@ -42,6 +45,7 @@ cd "$ROOT"
 "$NODE_BIN" tests/submitted-state-regressions.test.cjs
 "$NODE_BIN" tests/anqin-submit-recovery.test.cjs
 "$NODE_BIN" tests/talent-rules.test.cjs
+"$NODE_BIN" tests/talent-approval-rubric.test.cjs
 "$NODE_BIN" tests/admin-marketing-rules.test.cjs
 "$NODE_BIN" tests/secondary-save-safety.test.cjs
 "$NODE_BIN" tests/local-drafts.test.cjs

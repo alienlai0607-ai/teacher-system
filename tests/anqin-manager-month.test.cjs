@@ -7,6 +7,8 @@ const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'review/anqin-v2/app.js'), 'utf8');
 const styles = fs.readFileSync(path.join(root, 'review/anqin-v2/styles.css'), 'utf8');
 const helperSource = source.slice(source.indexOf('  function normalizeManagerMonth('), source.indexOf('  function renderManagerDayPreview('));
+const managerNavSource = source.slice(source.indexOf('  const MANAGER_NAV = ['), source.indexOf('  const TODAY_TABS = ['));
+const dayPreviewSource = source.slice(source.indexOf('  function renderManagerDayPreview('), source.indexOf('  function renderManagerDashboard('));
 
 assert.ok(helperSource.length > 1000, '月度總覽 helper 必須存在');
 
@@ -67,8 +69,11 @@ assert.equal(model.pending, 2);
 assert.equal(model.makeup, 1);
 
 assert.match(source, /安親主管｜月度總覽/, '主管首頁需清楚標示月度總覽');
+assert.doesNotMatch(managerNavSource, /route:\s*['"]reviews['"]/, '主管主導覽不得重複顯示日報明細');
+assert.doesNotMatch(managerNavSource, /route:\s*['"]operations-review['"]/, '主管主導覽不得重複顯示班務稽核');
 assert.match(source, /data-action="manager-month-date"/, '月曆日期需可直接點選');
-assert.match(source, /查看當日並給回饋/, '當日詳情需直接連到主管回饋流程');
+assert.match(dayPreviewSource, /data-action="open-review"[^>]*data-submission-id=/, '月度總覽仍需能直接開啟當日日報明細');
+assert.match(dayPreviewSource, /data-action="review-operation"[^>]*data-operation-id=/, '月度總覽仍需能直接開啟當日班務稽核');
 assert.match(source, /data-action="manager-month-evaluate"/, '當日區塊需直接連到同老師同月份評分');
 assert.match(source, /await loadManagerEvaluation\(person\.nickname, month\)/, '本月評分不得載入錯誤老師或月份');
 assert.match(source, /\['已知悉', '需改進'\]\.includes\(row\.tag\)/, '一般對話不可誤改日報審查狀態');

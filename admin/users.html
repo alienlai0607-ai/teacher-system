@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>人員管理</title>
 <link rel="stylesheet" href="../shared/style.css?v=20260624k">
-<script src="../shared/config.js?v=20261008-admin-load-1"></script>
-<script src="../shared/auth.js?v=20261007-talent-coverage-1"></script>
-<script src="../shared/api.js?v=20260916-reliability-2"></script>
-<script src="../shared/ui.js?v=20260825-production-audit-2"></script>
+<script src="../shared/config.js?v=20261008-release-1"></script>
+<script src="../shared/auth.js?v=20261008-release-1"></script>
+<script src="../shared/api.js?v=20261008-release-1"></script>
+<script src="../shared/ui.js?v=20261008-release-1"></script>
 <script src="../shared/pwa.js?v=20260825-production-audit-2"></script>
 <script src="../shared/push.js?v=20260912-push-resilience-2"></script>
 <style>
@@ -170,6 +170,30 @@ function safeText(value) {
 
 function safeInlineArgument(value) {
   return safeText(JSON.stringify(String(value == null ? '' : value)).replace(/</g, '\\u003c'));
+}
+
+function scheduleContentKey(item) {
+  return [
+    Number(item && item.weekday),
+    String(item && item.time || '').trim(),
+    String(item && item.siteType || 'self').trim(),
+    String(item && item.site || '').trim(),
+  ].join('|');
+}
+
+function matchOriginalSchedule(originalSchedule, incoming, suppliedScheduleKey, usedScheduleKeys) {
+  const suppliedKey = String(suppliedScheduleKey || '').trim();
+  const available = originalSchedule.filter(item => !usedScheduleKeys.has(String(item.scheduleKey || '')));
+  let matched = suppliedKey
+    ? available.find(item => String(item.scheduleKey || '') === suppliedKey)
+    : null;
+  if (!matched) {
+    const contentKey = scheduleContentKey(incoming);
+    const contentMatches = available.filter(item => scheduleContentKey(item) === contentKey);
+    if (contentMatches.length === 1) matched = contentMatches[0];
+  }
+  if (matched && matched.scheduleKey) usedScheduleKeys.add(String(matched.scheduleKey));
+  return matched || null;
 }
 
 function talentConfigSummary(user) {
@@ -362,18 +386,35 @@ async function editUser(nickname) {
   payload.employment_type = newEmployment.trim();
   payload.work_assignments = newAssignments.split(/[,、;|]/).map(item => item.trim()).filter(Boolean);
   if (payload.employment_type === 'pt') {
-    const currentSchedule = (Array.isArray(u.schedule_json) ? u.schedule_json : []).map(item => `${item.label || ''}|${item.time || ''}|${item.siteType || 'self'}|${item.site || ''}`).join('\n');
-    const scheduleText = prompt('固定排班，每行一堂：\n週一|19:00–20:30|self|布拉克自營教室\n場域請填 self 或 partner', currentSchedule);
+    const originalSchedule = Array.isArray(u.schedule_json) ? u.schedule_json : [];
+    const weekdayLabels = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
+    const currentSchedule = originalSchedule.map(item => `${weekdayLabels[Number(item.weekday)] || ''}|${item.time || ''}|${item.siteType || 'self'}|${item.site || ''}|${item.label || ''}|${item.scheduleKey || ''}`).join('\n');
+    const scheduleText = prompt('固定排班，每行一堂：\n週一|19:00–20:30|self|布拉克自營教室|班次名稱|系統識別碼\n場域請填 self 或 partner；班次名稱可留空。既有班次最後的系統識別碼請保留，新增班次不必填。', currentSchedule);
     if (scheduleText === null) return;
     const weekdayMap = { 週日:0, 週一:1, 週二:2, 週三:3, 週四:4, 週五:5, 週六:6 };
     try {
+      const usedScheduleKeys = new Set();
       payload.schedule_json = scheduleText.split(/\n+/).map(line => line.trim()).filter(Boolean).map(line => {
-        const [label, time, siteType, site] = line.split('|').map(item => String(item || '').trim());
-        if (!(label in weekdayMap) || !time || !['self', 'partner'].includes(siteType) || !site) throw new Error('排班格式不正確');
-        return { weekday: weekdayMap[label], label, time, siteType, site };
+        const [weekdayLabel, time, siteType, site, customLabel, suppliedScheduleKey] = line.split('|').map(item => String(item || '').trim());
+        if (!(weekdayLabel in weekdayMap) || !time || !['self', 'partner'].includes(siteType) || !site) throw new Error('排班格式不正確');
+        const incoming = { weekday: weekdayMap[weekdayLabel], time, siteType, site };
+        const previous = matchOriginalSchedule(originalSchedule, incoming, suppliedScheduleKey, usedScheduleKeys) || {};
+        const schedule = {
+          weekday: weekdayMap[weekdayLabel],
+          label: customLabel || previous.label || weekdayLabel,
+          time,
+          siteType,
+          site,
+          courseName: previous.courseName || '',
+          courseType: previous.courseType || '',
+          effectiveFrom: previous.effectiveFrom || '',
+          effectiveUntil: previous.effectiveUntil || '',
+        };
+        if (previous.scheduleKey) schedule.scheduleKey = previous.scheduleKey;
+        return schedule;
       });
     } catch (error) {
-      UI.toast('固定排班格式不正確，請依每行四欄填寫', 'warn');
+      UI.toast('固定排班格式不正確，請依每行五至六欄填寫', 'warn');
       return;
     }
     payload.rest_days = [];

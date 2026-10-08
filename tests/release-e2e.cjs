@@ -660,96 +660,39 @@ async function talentWorkflow(browser) {
     await page.evaluate(() => localStorage.clear());
     await page.reload({ waitUntil: 'domcontentloaded' });
     await waitForApp(page);
-    check('非黑豹才藝老師不顯示特殊鐘點頁', await page.locator('[data-route="pay"]').count() === 0);
-
-    await clickRoute(page, 'prep');
-    await clickAction(page, 'new-prep');
-    await page.selectOption('#prep-form select[name="courseType"]', '樂高小創客');
-    await page.fill('#prep-form input[name="courseName"]', '端到端才藝教材');
-    await page.fill('#prep-form textarea[name="notes"]', '本堂使用齒輪與簡易馬達材料');
-    await page.setInputFiles('#prep-form input[data-upload-category="prep"]', [largePdfFile, largeImage]);
-    await page.waitForFunction(() => document.querySelectorAll('[data-file-items="prep"] .selected-file').length === 2, null, { timeout: 12000 });
-    check('才藝備課可上傳 16 MB 文件並自動壓縮大型圖片', await page.locator('[data-file-items="prep"] .selected-file').count() === 2);
-    await clickAction(page, 'save-prep');
-    await page.waitForTimeout(250);
-    check('才藝備課可一次加入多份教材', (await page.locator('body').innerText()).includes('端到端才藝教材'));
+    check('才藝 PT 導覽已移除備課與家長 APP', (
+      await page.locator('[data-route="prep"]').count() === 0
+      && await page.locator('[data-route="weekly"]').count() === 0
+    ));
 
     await clickRoute(page, 'today');
     const beforeCount = await page.locator('.record-row').count();
     await clickAction(page, 'new-log');
-    await page.selectOption('#log-form select[name="prepId"]', { label: '端到端才藝教材 · 樂高小創客' });
-    check('才藝選擇備課後自動帶入課程資料', (
-      await page.inputValue('#log-form input[name="courseType"]') === '樂高小創客'
-      && await page.inputValue('#log-form input[name="courseName"]') === '端到端才藝教材'
+    check('才藝新表單只顯示課程、人數、續抱與整潔照片', (
+      await page.locator('#log-form input[name="present"]').count() === 1
+      && await page.locator('#log-form input[name="renewalCount"]').count() === 1
+      && await page.locator('#log-form input[data-upload-category="room"]').count() === 1
+      && await page.locator('#log-form [name="prepId"], #log-form [name="issue"], #log-form [name="parentStatus"], #log-form [data-upload-category="attendance"], #log-form [data-upload-category="learning"], #log-form [data-upload-category="app"]').count() === 0
     ));
+    await page.fill('#log-form input[name="courseName"]', '端到端才藝課');
     await page.fill('#log-form input[name="present"]', '5');
-    await page.fill('#log-form input[name="leave"]', '0');
-    await page.fill('#log-form input[name="absent"]', '0');
-    await page.fill('#log-form input[name="makeup"]', '0');
-    await page.fill('#log-form input[name="trial"]', '0');
-    check('才藝應到人數由點名自動計算', await page.inputValue('#log-form input[name="expected"]') === '5');
-    check('才藝課後教室復原只看照片，不再要求重複勾選', await page.locator('#log-form input[name="roomDone"]').count() === 0);
-    await page.fill('#log-form textarea[name="issue"]', '本堂齒輪安裝較慢，下次先依顏色分盒並示範卡榫方向。');
-    await page.selectOption('#log-form select[name="parentStatus"]', 'followup');
-    await page.fill('#log-form textarea[name="parentFollowup"]', '這段切換後不應保存');
-    await page.selectOption('#log-form select[name="parentStatus"]', 'complete');
-    check('才藝親師狀態切回完成會清除隱藏追蹤文字', await page.evaluate(() => {
-      const form = document.querySelector('#log-form');
-      const field = form?.querySelector('.followup-field');
-      return Boolean(field?.hidden && form?.elements.parentFollowup?.value === '' && !form?.elements.parentFollowup?.required);
-    }));
-    await page.setInputFiles('#log-form input[data-upload-category="attendance"]', imageA);
-    await page.setInputFiles('#log-form input[data-upload-category="learning"]', [imageA, largeImage]);
-    await page.waitForFunction(() => {
-      const input = document.querySelector('#log-form input[data-upload-category="learning"]');
-      return input && !input.disabled && document.querySelectorAll('[data-file-items="learning"] .selected-file').length === 2;
-    }, null, { timeout: 30000 });
-    check('才藝成果照片可一次多選', await page.locator('[data-file-items="learning"] .selected-file').count() === 2);
-    await page.locator('[data-file-items="learning"] [data-action="remove-upload"]').first().click();
-    check('才藝成果照片選錯可逐張移除', await page.locator('[data-file-items="learning"] .selected-file').count() === 1);
-    await page.setInputFiles('#log-form input[data-upload-category="learning"]', imageA);
-    await page.waitForFunction(() => document.querySelectorAll('[data-file-items="learning"] .selected-file').length === 2, null, { timeout: 12000 });
-    check('才藝移除後可重新加入且其餘照片不被覆蓋', await page.locator('[data-file-items="learning"] .selected-file').count() === 2);
-    await page.setInputFiles('#log-form input[data-upload-category="room"]', imageB);
-    const renewalInput = page.locator('#log-form input[name="renewalCount"]');
-    if (await renewalInput.count()) await renewalInput.fill('1');
+    await page.fill('#log-form input[name="renewalCount"]', '1');
+    await page.setInputFiles('#log-form input[data-upload-category="room"]', [imageA, imageB]);
+    await page.waitForFunction(() => document.querySelectorAll('[data-file-items="room"] .selected-file').length === 2, null, { timeout: 12000 });
+    check('才藝整潔照片可多選並逐張移除', await page.locator('[data-file-items="room"] .selected-file').count() === 2);
+    await page.locator('[data-file-items="room"] [data-action="remove-upload"]').first().click();
+    check('才藝整潔照片移除後仍保留其他照片', await page.locator('[data-file-items="room"] .selected-file').count() === 1);
     await clickAction(page, 'submit-log');
     await page.waitForTimeout(400);
     const pageText = await page.locator('body').innerText();
-    check('才藝 PT 可正式送出', pageText.includes('端到端才藝教材'));
+    check('才藝 PT 可正式送出', pageText.includes('端到端才藝課') && pageText.includes('正式 5') && pageText.includes('續抱 1'));
     check('才藝送出不再顯示 completed 內部欄位', !/\bcompleted\b/i.test(pageText));
     check('才藝送出只新增一筆', await page.locator('.record-row').count() === beforeCount + 1);
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await waitForApp(page);
     await clickRoute(page, 'today');
-    check('才藝紀錄重新整理後仍存在', (await page.locator('body').innerText()).includes('端到端才藝教材'));
-
-    await clickRoute(page, 'weekly');
-    let appEvidenceRow = page.locator('.app-evidence-row', { hasText: '端到端才藝教材' }).first();
-    await appEvidenceRow.locator('input[data-app-evidence-id]').setInputFiles(imageA);
-    await page.waitForFunction(courseName => {
-      const row = Array.from(document.querySelectorAll('.app-evidence-row')).find(item => item.textContent.includes(courseName));
-      return row?.textContent.includes('已確認') && row.querySelectorAll('.app-evidence-files > *').length === 1;
-    }, '端到端才藝教材', { timeout: 12000 });
-    check('才藝老師可在上課當日從家長 APP 頁補傳截圖', true);
-
-    appEvidenceRow = page.locator('.app-evidence-row', { hasText: '端到端才藝教材' }).first();
-    await appEvidenceRow.locator('input[data-app-evidence-id]').setInputFiles(imageB);
-    await page.waitForFunction(courseName => {
-      const row = Array.from(document.querySelectorAll('.app-evidence-row')).find(item => item.textContent.includes(courseName));
-      return row?.querySelectorAll('.app-evidence-files > *').length === 2;
-    }, '端到端才藝教材', { timeout: 12000 });
-    check('才藝家長 APP 補傳新截圖會保留原有截圖', await appEvidenceRow.locator('.app-evidence-files > *').count() === 2);
-
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await waitForApp(page);
-    await clickRoute(page, 'weekly');
-    appEvidenceRow = page.locator('.app-evidence-row', { hasText: '端到端才藝教材' }).first();
-    check('才藝家長 APP 截圖重新整理後仍完整存在', (
-      (await appEvidenceRow.innerText()).includes('已確認')
-      && await appEvidenceRow.locator('.app-evidence-files > *').count() === 2
-    ));
+    check('才藝紀錄重新整理後仍存在', (await page.locator('body').innerText()).includes('端到端才藝課'));
     await pageHealth(page, label, 'reload');
     await page.screenshot({ path: path.join(artifactDir, 'talent-pt-workflow.png'), fullPage: true });
 
@@ -797,79 +740,67 @@ async function talentWorkflow(browser) {
     const fulltime = trackPage(await context.newPage(), '才藝正職完整流程');
     await fulltime.goto(`${baseUrl}/review/talent-v2/index.html?workspace=talent-fulltime&reviewUser=RITA%E8%80%81%E5%B8%AB`, { waitUntil: 'domcontentloaded' });
     await waitForApp(fulltime);
-    await clickRoute(fulltime, 'prep');
-    await clickAction(fulltime, 'new-prep');
-    await fulltime.selectOption('#prep-form select[name="courseType"]', '科學實驗');
-    await fulltime.fill('#prep-form input[name="courseName"]', '端到端正職教材');
-    await fulltime.setInputFiles('#prep-form input[data-upload-category="prep"]', [imageA, imageB]);
-    await fulltime.waitForFunction(() => document.querySelectorAll('[data-file-items="prep"] .selected-file').length === 2, null, { timeout: 12000 });
-    check('才藝正職備課可一次加入多份教材', await fulltime.locator('[data-file-items="prep"] .selected-file').count() === 2);
-    await clickAction(fulltime, 'save-prep');
-    await fulltime.waitForTimeout(250);
-    check('才藝正職備課可儲存', (await fulltime.locator('body').innerText()).includes('端到端正職教材'));
+    check('才藝正職導覽也已移除備課與家長 APP', (
+      await fulltime.locator('[data-route="prep"]').count() === 0
+      && await fulltime.locator('[data-route="weekly"]').count() === 0
+    ));
 
     await clickRoute(fulltime, 'today');
     const fulltimeBeforeCount = await fulltime.locator('.record-row').count();
     await clickAction(fulltime, 'new-log');
-    await fulltime.selectOption('#log-form select[name="prepId"]', { label: '端到端正職教材 · 科學實驗' });
-    await fulltime.selectOption('#log-form select[name="siteType"]', 'self');
-    await fulltime.fill('#log-form input[name="site"]', '北區教室');
+    await fulltime.fill('#log-form input[name="courseName"]', '端到端正職才藝課');
     await fulltime.fill('#log-form input[name="present"]', '4');
-    await fulltime.fill('#log-form input[name="leave"]', '0');
-    await fulltime.fill('#log-form input[name="absent"]', '0');
-    await fulltime.fill('#log-form input[name="makeup"]', '0');
-    await fulltime.fill('#log-form input[name="trial"]', '0');
-    await fulltime.fill('#log-form textarea[name="issue"]', '本堂材料分發較慢，下次課前依組別完成分裝。');
-    await fulltime.selectOption('#log-form select[name="parentStatus"]', 'complete');
-    await fulltime.setInputFiles('#log-form input[data-upload-category="attendance"]', imageA);
-    await fulltime.setInputFiles('#log-form input[data-upload-category="learning"]', [imageA, imageB]);
+    await fulltime.fill('#log-form input[name="renewalCount"]', '0');
     await fulltime.setInputFiles('#log-form input[data-upload-category="room"]', imageB);
-    await fulltime.setInputFiles('#log-form input[data-upload-category="app"]', [imageA, imageB]);
-    await fulltime.waitForFunction(() => (
-      document.querySelectorAll('[data-file-items="learning"] .selected-file').length === 2
-      && document.querySelectorAll('[data-file-items="app"] .selected-file').length === 2
-    ), null, { timeout: 12000 });
-    check('才藝正職成果與家長 APP 照片皆可複選', (
-      await fulltime.locator('[data-file-items="learning"] .selected-file').count() === 2
-      && await fulltime.locator('[data-file-items="app"] .selected-file').count() === 2
-    ));
+    await fulltime.waitForFunction(() => document.querySelectorAll('[data-file-items="room"] .selected-file').length === 1, null, { timeout: 12000 });
     await clickAction(fulltime, 'submit-log');
     await fulltime.waitForTimeout(400);
     check('才藝正職可正式送出且只新增一筆', (
-      (await fulltime.locator('body').innerText()).includes('端到端正職教材')
+      (await fulltime.locator('body').innerText()).includes('端到端正職才藝課')
       && await fulltime.locator('.record-row').count() === fulltimeBeforeCount + 1
     ));
 
     await fulltime.reload({ waitUntil: 'domcontentloaded' });
     await waitForApp(fulltime);
     await clickRoute(fulltime, 'today');
-    check('才藝正職紀錄重新整理後仍存在', (await fulltime.locator('body').innerText()).includes('端到端正職教材'));
+    check('才藝正職紀錄重新整理後仍存在', (await fulltime.locator('body').innerText()).includes('端到端正職才藝課'));
     await pageHealth(fulltime, '才藝正職完整流程', 'reload');
     await fulltime.screenshot({ path: path.join(artifactDir, 'talent-fulltime-workflow.png'), fullPage: true });
     await fulltime.close();
 
+    const suansuanPage = trackPage(await context.newPage(), '酸酸才藝 PT 雙身分');
+    await suansuanPage.clock.install({ time: new Date('2026-10-10T12:00:00+08:00') });
+    await suansuanPage.goto(`${baseUrl}/review/talent-v2/index.html?workspace=talent-pt&reviewUser=%E9%85%B8%E9%85%B8%E4%B8%BB%E7%AE%A1`, { waitUntil: 'domcontentloaded' });
+    await waitForApp(suansuanPage);
+    check('酸酸保留安親主管並開通才藝 PT', await suansuanPage.evaluate(() => {
+      const assignments = window.KPI_REVIEW_USER?.work_assignments || [];
+      return assignments.includes('anqin-manager') && assignments.includes('talent-pt');
+    }));
+    await clickRoute(suansuanPage, 'today');
+    await clickAction(suansuanPage, 'new-log');
+    const suansuanScheduleOptions = await suansuanPage.locator('#log-form select[name="scheduleKey"] option').allTextContents();
+    check('酸酸從 10/10 起可選週六簡易與 WeDo 兩班', suansuanScheduleOptions.length === 2 && suansuanScheduleOptions.some(text => text.includes('簡易')) && suansuanScheduleOptions.some(text => text.includes('WeDo')));
+    const wedoOption = suansuanPage.locator('#log-form select[name="scheduleKey"] option', { hasText: 'WeDo' });
+    await suansuanPage.selectOption('#log-form select[name="scheduleKey"]', await wedoOption.getAttribute('value'));
+    await suansuanPage.waitForTimeout(100);
+    check('酸酸選 WeDo 班會自動帶入課名與時段', (
+      await suansuanPage.inputValue('#log-form input[name="courseName"]') === 'WeDo'
+      && suansuanScheduleOptions.some(text => text.includes('10:40–12:10'))
+    ));
+    await closeDrawer(suansuanPage);
+    await suansuanPage.close();
+
     const manager = trackPage(await context.newPage(), '才藝主管完整流程');
     await manager.goto(`${baseUrl}/review/talent-v2/index.html?workspace=talent-manager&reviewUser=%E6%9F%B3%E4%B8%81%E4%B8%BB%E7%AE%A1`, { waitUntil: 'domcontentloaded' });
     await waitForApp(manager);
-
-    await clickRoute(manager, 'prep-review');
-    const prepTeacher = manager.locator('[data-action="select-prep-review-teacher"]', { hasText: '皮皮老師' }).first();
-    check('才藝主管可依老師選擇備課檔案', await prepTeacher.count() === 1);
-    await prepTeacher.click();
-    const prepRow = manager.locator('[data-action="view-prep-review"]', { hasText: '端到端才藝教材' }).first();
-    check('才藝主管可看到老師的課程與兩份教材', await prepRow.count() === 1 && (await prepRow.innerText()).includes('2 份附件'));
-    await prepRow.click();
-    const prepDetailText = await manager.locator('.drawer').innerText();
-    check('才藝主管可開啟大型文件與圖片教材', prepDetailText.includes('qa-material-16mb.pdf') && prepDetailText.includes('qa-large.jpg'));
-    check('才藝備課查閱不要求主管核准或退回', !/核准|退回/.test(prepDetailText));
-    await closeDrawer(manager);
+    check('才藝主管導覽已移除備課審查', await manager.locator('[data-route="prep-review"]').count() === 0);
 
     await clickRoute(manager, 'log-review');
-    const talentLog = manager.locator('.record-row', { hasText: '端到端才藝教材' }).first();
+    const talentLog = manager.locator('.record-row', { hasText: '端到端才藝課' }).first();
     check('才藝主管可看到老師已送出的工作紀錄', await talentLog.count() === 1);
     await talentLog.locator('[data-action="view-log"]').click();
     const logDetailText = await manager.locator('.drawer').innerText();
-    check('才藝主管可查看課程問題與成果附件', logDetailText.includes('本堂齒輪安裝較慢') && logDetailText.includes('學習證據'));
+    check('才藝主管可查看正式、新生、續抱、體驗與整潔照片', ['正式上課', '新生', '續抱', '體驗', '教室整潔照片'].every(label => logDetailText.includes(label)));
     await closeDrawer(manager);
 
     await clickRoute(manager, 'scoring');
@@ -1159,6 +1090,7 @@ async function anqinWorkflow(browser) {
     const selectedDayText = await page.locator('.manager-day-preview').innerText();
     check('安親主管可由月曆查看老師當日狀況', selectedDayText.includes('江江老師') && selectedDayText.includes('當日狀況'));
     check('安親主管可由當日狀況直接回饋', await page.locator('.manager-day-preview [data-action="open-review"]').count() === 1);
+    check('安親主管可由當日狀況直接稽核教室整潔', await page.locator('.manager-day-preview [data-action="review-operation"]').count() === 1);
     check('安親主管可由當日狀況進入本月評分', await page.locator('.manager-day-preview [data-action="manager-month-evaluate"]').count() === 1);
     await page.screenshot({ path: path.join(artifactDir, 'anqin-manager-month-mobile.png'), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -1166,9 +1098,7 @@ async function anqinWorkflow(browser) {
     await page.screenshot({ path: path.join(artifactDir, 'anqin-manager-month-desktop.png'), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
 
-    await clickRoute(page, 'reviews');
-    await page.waitForFunction(() => document.querySelectorAll('[data-action="open-review"]').length > 0, null, { timeout: 12000 });
-    const reviewButton = page.locator('[data-action="open-review"]').first();
+    const reviewButton = page.locator('.manager-day-preview [data-action="open-review"]').first();
     check('安親主管可看到老師正式送出的日報', await reviewButton.count() === 1);
     await reviewButton.click();
     await clickAction(page, 'accept-submission');
@@ -1189,8 +1119,10 @@ async function anqinWorkflow(browser) {
     await page.waitForTimeout(450);
     check('安親主管可採認成果證據', (await page.locator('body').innerText()).includes('審查已完成'));
 
-    await clickRoute(page, 'operations-review');
-    const operationReview = page.locator('[data-action="review-operation"]:not([disabled])').first();
+    await clickRoute(page, 'dashboard');
+    await page.locator('[data-action="manager-month-teacher"][data-teacher="江江老師"]').click();
+    await page.locator(`[data-action="manager-month-date"][data-date="${today}"]`).click();
+    const operationReview = page.locator('.manager-day-preview [data-action="review-operation"]:not([disabled])').first();
     await operationReview.waitFor({ state: 'visible', timeout: 12000 });
     await operationReview.click();
     await clickAction(page, 'accept-operation');
@@ -1207,6 +1139,12 @@ async function anqinWorkflow(browser) {
       const input = managerScoreInputs.nth(index);
       await input.fill(await input.getAttribute('max') || '0');
     }
+    await page.fill('#manager-eval-late', '2');
+    check('安親主管填寫遲到 2 次不扣分', await page.locator('#manager-eval-total').innerText() === '100');
+    check('安親主管可直接看到未達門檻不扣分', (await page.locator('#manager-eval-late-note').innerText()).includes('不扣分'));
+    await page.fill('#manager-eval-late', '3');
+    check('安親主管填寫遲到 3 次會固定扣 5 分', await page.locator('#manager-eval-total').innerText() === '95');
+    check('安親主管可直接看到固定遲到扣分', (await page.locator('#manager-eval-late-note').innerText()).includes('固定扣 5 分'));
     await page.fill('#manager-eval-comment', '本月工作紀錄、照片與後續調整皆可清楚查閱。');
     await page.locator('[data-action="save-manager-evaluation"][data-status="submitted"]').click();
     await page.waitForTimeout(650);
@@ -1222,7 +1160,10 @@ async function anqinWorkflow(browser) {
     await waitForApp(page);
     await clickRoute(page, 'evaluation');
     await page.waitForTimeout(700);
-    check('安親老師可直接看到主管最新已完成評核', (await page.locator('body').innerText()).includes('本月工作紀錄、照片與後續調整'));
+    const teacherEvaluationText = await page.locator('body').innerText();
+    check('安親老師可直接看到主管最新已完成評核', teacherEvaluationText.includes('本月工作紀錄、照片與後續調整'));
+    check('安親老師已公布評核顯示扣分後總分', teacherEvaluationText.includes('95 / 100'));
+    check('安親老師已公布評核顯示遲到 3 次固定扣 5 分', teacherEvaluationText.includes('遲到') && teacherEvaluationText.includes('3 次，固定扣 5 分'));
 
     await page.goto(`${baseUrl}/review/anqin-v2/qa-harness.html?nickname=%E9%85%B8%E9%85%B8%E4%B8%BB%E7%AE%A1&role=manager&department=%E6%9D%B1%E6%A9%8B%E6%95%99%E5%AE%A4`, { waitUntil: 'domcontentloaded' });
     await waitForApp(page);

@@ -10,7 +10,7 @@
  * 5. 把網址貼到前端 shared/config.js 的 API_URL
  */
 
-const KPI_RELEASE_VERSION_ = '20261008-admin-load-1';
+const KPI_RELEASE_VERSION_ = '20261008-release-1';
 
 // ============ 路由 ============
 function doGet(e) {
@@ -114,6 +114,7 @@ function handleRequest(e, method) {
       'saveTalentScore': () => saveTalentScore(params),
       'addTalentMessage': () => addTalentMessage(params),
       'approveTalentBonus': () => approveTalentBonus(params),
+      'forfeitTalentMonthlyBonus': () => forfeitTalentMonthlyBonus(params),
 
       // 行政美宣：皮皮執行、小魚主管審查
       'getAdminMarketingWorkspaceData': () => getAdminMarketingWorkspaceData(params),
@@ -242,7 +243,10 @@ const ADMIN_STAFF_SUBTYPES = ['general', 'marketing'];
 
 const INITIAL_USERS = [
   { nickname: '柏翰',     role: 'admin',       department: '總部',     status: 'active', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'] },
-  { nickname: '酸酸',     role: 'manager',     department: '東橋教室', status: 'active', employment_type: 'manager', work_assignments: ['anqin-manager'] },
+  { nickname: '酸酸',     role: 'manager',     department: '東橋教室', status: 'active', employment_type: 'pt', work_assignments: ['anqin-manager', 'talent-pt'], schedule_json: [
+    { weekday: 6, label: '簡易', courseName: '簡易', courseType: '樂高簡易積木', time: '09:00–10:30', siteType: 'self', site: '東橋教室', effectiveFrom: '2026-10-10' },
+    { weekday: 6, label: 'WeDo', courseName: 'WeDo', courseType: 'WeDo 機器人', time: '10:40–12:10', siteType: 'self', site: '東橋教室', effectiveFrom: '2026-10-10' }
+  ] },
   { nickname: '小魚',     role: 'manager',     department: '北區教室', status: 'active', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'] },
   { nickname: '柳丁',     role: 'manager',     department: '才藝部門', status: 'pending', employment_type: 'manager', work_assignments: ['talent-manager', 'class-roster-manager'] },
   { nickname: '松鼠',     role: 'teacher',     department: '東橋教室', status: 'active' },

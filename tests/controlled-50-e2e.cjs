@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..');
 const origin = 'https://kpi-controlled.test';
 const output = process.env.KPI_MATRIX_OUTPUT || '/private/tmp/kpi-controlled-50';
 const methods = ['normal', 'separate-selection', 'double-submit', 'upload-response-lost', 'upload-503', 'partial-upload', 'save-response-lost', 'save-and-receipt-lost', 'read-503-reload', 'write-lock'];
-const flows = ['admin-work', 'talent-prep', 'pt-prep', 'pt-app', 'anqin-log-contract'];
+const flows = ['admin-work', 'talent-fulltime-lesson', 'talent-pt-lesson', 'talent-pt-coverage', 'anqin-log-contract'];
 const sizes = [[96, 72], [640, 480], [1200, 900], [1920, 1080], [3024, 4032]];
 const widths = [320, 375, 390, 768, 1440];
 const exclusions = ['Real Google infrastructure and latency', 'Actual Google/LINE employee login', 'Safari and Android/LINE WebView engines', 'PDF conversion and rendered PDF photo verification', 'Concurrent-user capacity and long-duration soak testing', 'HEIC/HEIF, videos and office-document boundary cases'];
@@ -55,18 +55,28 @@ async function scenario(browser, spec) {
   const { c, files, today } = service;
   const photos = await photosFor(spec);
   const nickname = `QA${String(spec.id).padStart(2, '0')}`;
-  const assignment = spec.flow === 'admin-work' ? 'admin-marketing' : spec.flow === 'talent-prep' ? 'talent-fulltime' : 'talent-pt';
-  const user = { nickname, role: spec.flow === 'admin-work' ? 'admin_staff' : 'teacher', status: 'active', department: spec.campus, email: nickname + '@example.invalid', work_assignments: spec.flow.startsWith('anqin') ? [] : [assignment] };
+  const talentLesson = spec.flow.startsWith('talent-');
+  const talentPt = spec.flow === 'talent-pt-lesson' || spec.flow === 'talent-pt-coverage';
+  const talentCoverage = spec.flow === 'talent-pt-coverage';
+  const lessonTitle = talentLesson ? `${spec.title}｜${spec.text.replace(/\s*\n\s*/g, '／')}` : spec.title;
+  const assignment = spec.flow === 'admin-work' ? 'admin-marketing' : spec.flow === 'talent-fulltime-lesson' ? 'talent-fulltime' : 'talent-pt';
+  const weekday = new Date(`${today}T12:00:00+08:00`).getDay();
+  const schedule = talentPt ? [{ weekday, label: 'QA 班', time: '19:00–20:30', siteType: 'self', site: spec.campus }] : [];
+  const user = {
+    nickname, role: spec.flow === 'admin-work' ? 'admin_staff' : 'teacher', status: 'active', department: spec.campus,
+    email: nickname + '@example.invalid', work_assignments: spec.flow.startsWith('anqin') ? [] : [assignment],
+    employment_type: talentPt ? 'pt' : talentLesson ? 'fulltime' : '', schedule_json: schedule, rest_days: [],
+  };
+  c.ensureHeaders(c.getSheet('Users'), ['employment_type', 'schedule_json', 'rest_days']);
   c.appendRow('Users', user);
   const session = { ...user, session_token: c.issueSessionToken_(user), t: Date.now() };
-  if (spec.flow === 'pt-app') c.upsertTalentRecord_('lesson', nickname, { id: 'lesson-' + spec.id, teacher: nickname, date: today, courseName: spec.title, issue: spec.text, courseType: '樂高小創客', siteType: 'self', appStatus: 'pending', appFiles: [], status: 'submitted' }, nickname);
   const context = await browser.newContext({ viewport: { width: spec.width, height: 844 }, timezoneId: 'Asia/Taipei', serviceWorkers: 'block', reducedMotion: 'reduce' });
   const page = await context.newPage();
   page.setDefaultTimeout(16000);
-  const errors = [], requests = [], faultEvents = [];
+  const errors = [], requests = [], faultEvents = [], targetPayloads = [];
   let uploadCount = 0, saveCount = 0, writeSucceeded = 0, blockedReceipt = false, faultEnabled = true;
   const uploadedHashes = new Map();
-  const target = spec.flow === 'admin-work' ? 'saveAdminMarketingRecord' : spec.flow === 'pt-app' ? 'updateTalentAppStatus' : spec.flow.startsWith('anqin') ? 'saveLog' : 'saveTalentPrep';
+  const target = spec.flow === 'admin-work' ? 'saveAdminMarketingRecord' : spec.flow.startsWith('anqin') ? 'saveLog' : 'saveTalentLesson';
   let businessExecutions = 0;
   const originalMutation = c[target];
   c[target] = function (...args) { businessExecutions++; return originalMutation.apply(this, args); };
@@ -102,7 +112,10 @@ async function scenario(browser, spec) {
       faultEvents.push('503 before read'); event.result = 'injected-503'; return route.fulfill({ status: 503, body: '<html>Read unavailable</html>' });
     }
     const isTarget = p.action === target;
-    if (isTarget) saveCount++;
+    if (isTarget) {
+      saveCount++;
+      if (talentLesson) targetPayloads.push(JSON.parse(JSON.stringify(p.lesson)));
+    }
     if (isTarget && spec.method === 'write-lock' && saveCount === 1) service.denyLock(true);
     let result;
     try { result = service.dispatch(p); } finally { service.denyLock(false); }
@@ -128,10 +141,6 @@ async function scenario(browser, spec) {
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify(result) });
   });
   const click = action => page.locator(`[data-action="${action}"]`).filter({ visible: true }).first().click();
-  const nav = async name => {
-    if (!await page.locator(`[data-route="${name}"]`).filter({ visible: true }).count()) await click('more-nav');
-    await page.locator(`[data-route="${name}"]`).filter({ visible: true }).first().click();
-  };
   const waitFor = async predicate => {
     for (let i = 0; i < 180; i++) { if (predicate()) return; await sleep(100); }
     assert.ok(predicate(), 'backend did not reach expected state');
@@ -139,8 +148,11 @@ async function scenario(browser, spec) {
   const inputFiles = photos.map(({ name, mimeType, buffer }) => ({ name, mimeType, buffer }));
   const read = () => spec.flow === 'admin-work' ? service.request(nickname, 'getAdminMarketingWorkspaceData').records
     : spec.flow.startsWith('anqin') ? [service.request(nickname, 'getLog', { nickname, date: today }).log].filter(Boolean)
-    : service.request(nickname, 'getTalentWorkspaceData')[spec.flow === 'pt-app' ? 'lessons' : 'preps'];
-  const attachments = record => spec.flow === 'admin-work' ? record.items[0].evidence : spec.flow === 'pt-app' ? record.appFiles : spec.flow.startsWith('anqin') ? record.attachments : record.materials;
+    : service.request(nickname, 'getTalentWorkspaceData').lessons;
+  const attachments = record => spec.flow === 'admin-work' ? record.items[0].evidence : spec.flow.startsWith('anqin') ? record.attachments : record.roomFiles;
+  const lessonCounts = talentCoverage
+    ? { present: 6, newCount: 0, renewalCount: 0, trial: 3 }
+    : { present: 6, newCount: 1, renewalCount: 2, trial: 3 };
   let result;
   try {
     if (spec.flow.startsWith('anqin')) {
@@ -178,51 +190,60 @@ async function scenario(browser, spec) {
         await page.fill('#completed-today', spec.text);
         await page.selectOption('#work-status', 'completed');
         selector = '#work-evidence';
-      } else if (spec.flow === 'pt-app') {
-        await nav('weekly'); selector = `[data-app-evidence-id="lesson-${spec.id}"]`;
       } else {
-        await nav('prep'); await click('new-prep');
-        await page.selectOption('#prep-form select[name="courseType"]', '樂高小創客');
-        await page.fill('#prep-form input[name="courseName"]', spec.title);
-        const notes = page.locator('#prep-form textarea');
-        if (await notes.count()) await notes.first().fill(spec.text);
-        selector = '[data-upload-category="prep"]';
+        await click('new-log');
+        await page.fill('#log-form input[name="courseName"]', lessonTitle);
+        await page.fill('#log-form input[name="present"]', String(lessonCounts.present));
+        await page.fill('#log-form input[name="newCount"]', '1');
+        await page.fill('#log-form input[name="renewalCount"]', '2');
+        await page.fill('#log-form input[name="trial"]', String(lessonCounts.trial));
+        if (talentCoverage) {
+          await page.check('#log-form input[name="lessonStatus"][value="coverage"]');
+          await page.fill('#log-form input[name="date"]', today);
+          await page.fill('#log-form input[name="coverageStart"]', '10:40');
+          await page.fill('#log-form input[name="coverageEnd"]', '12:10');
+          await page.selectOption('#log-form select[name="coverageSiteType"]', 'self');
+          await page.fill('#log-form input[name="coverageSite"]', spec.campus);
+          assert.equal(await page.locator('#log-form input[name="newCount"]').inputValue(), '0');
+          assert.equal(await page.locator('#log-form input[name="renewalCount"]').inputValue(), '0');
+        }
+        selector = '[data-upload-category="room"]';
       }
       const submit = async () => {
+        if (talentLesson) {
+          const invalid = await page.locator('#log-form').evaluate(form => Array.from(form.elements)
+            .filter(control => !control.disabled && typeof control.checkValidity === 'function' && !control.checkValidity())
+            .map(control => ({ name: control.name, type: control.type, value: control.value, message: control.validationMessage })));
+          assert.deepEqual(invalid, [], `lesson form is invalid: ${JSON.stringify(invalid)}`);
+        }
         const button = spec.flow === 'admin-work' ? page.locator('#work-item-form button[type="submit"]')
-          : page.locator(`[data-action="${spec.flow === 'pt-app' ? 'retry-app-evidence' : 'save-prep'}"]`).filter({ visible: true }).first();
+          : page.locator('[data-action="submit-log"]').filter({ visible: true }).first();
         if (spec.method === 'double-submit') await button.evaluate(element => { element.click(); element.click(); });
         else await button.click();
       };
-      const separated = spec.method === 'separate-selection' && spec.flow !== 'pt-app';
+      const separated = spec.method === 'separate-selection';
       if (separated) {
         for (const file of inputFiles) {
           await page.setInputFiles(selector, file);
           if (spec.flow !== 'admin-work') await waitFor(() => files.size >= inputFiles.indexOf(file) + 1);
           await sleep(120);
         }
-      } else if (spec.method === 'separate-selection' && spec.flow === 'pt-app') {
-        for (let n = 0; n < inputFiles.length; n++) {
-          await page.setInputFiles(selector, inputFiles[n]);
-          await waitFor(() => attachments(read()[0])?.length === n + 1);
-        }
       } else await page.setInputFiles(selector, inputFiles);
       if (spec.flow === 'admin-work') await submit();
-      else if (spec.flow !== 'pt-app') {
+      else {
         await waitFor(() => files.size === photos.length || faultEvents.filter(value => value === 'partial upload unavailable').length === 3);
         await page.waitForFunction(() => !document.querySelector('[data-uploading="true"]'));
         if (spec.method !== 'partial-upload') await submit();
       }
       if (spec.method === 'partial-upload') {
-        const retry = spec.flow === 'admin-work' ? null : spec.flow === 'pt-app' ? 'retry-app-evidence' : 'retry-upload';
-        if (retry) await page.locator(`[data-action="${retry}"]`).waitFor();
+        const retry = spec.flow === 'admin-work' ? null : 'retry-upload';
+        const retryButton = retry ? page.locator('[data-file-items="room"] [data-action="retry-upload"][data-category="room"]') : null;
+        if (retryButton) await retryButton.waitFor();
         else await page.getByText('表單與選檔仍保留', { exact: false }).waitFor();
-        assert.equal(spec.flow === 'pt-app' ? read()[0].appStatus : read().length, spec.flow === 'pt-app' ? 'pending' : 0, 'partial upload must not save a completed record');
+        assert.equal(read().length, 0, 'partial upload must not save a completed record');
         faultEnabled = false;
-        if (retry) await click(retry); else await submit();
-        if (spec.flow.endsWith('prep')) {
-          await page.locator('[data-action="retry-upload"]').waitFor({ state: 'detached' }); await submit();
-        }
+        if (retryButton) { await retryButton.click(); await retryButton.waitFor({ state: 'detached' }); await submit(); }
+        else await submit();
       }
       if (spec.method === 'save-and-receipt-lost') {
         await page.getByText('尚未取得儲存確認', { exact: false }).first().waitFor();
@@ -231,14 +252,8 @@ async function scenario(browser, spec) {
       }
       await waitFor(() => read().length === 1 && attachments(read()[0])?.length === photos.length);
       if (spec.flow === 'admin-work') await page.locator('#work-item-form').waitFor({ state: 'detached' });
-      else if (spec.flow.endsWith('prep')) await page.locator('#prep-form').waitFor({ state: 'detached' });
+      else await page.locator('#log-form').waitFor({ state: 'detached' });
       if (spec.method === 'double-submit') {
-        if (spec.flow === 'pt-app') {
-          // Re-select the same evidence after confirmation. Content identity must deduplicate it.
-          await page.setInputFiles(selector, inputFiles);
-          await page.getByText('相同截圖已存在，不需重複上傳', { exact: false }).waitFor();
-          assert.equal(saveCount, 1, 'duplicate screenshot should not issue another save');
-        }
         const receipt = c.sheetToObjects('ApiReceipts').find(row => row.action === target);
         assert.ok(receipt, 'missing durable receipt');
         const confirmed = service.request(nickname, 'getMutationReceipt', { mutation_action: target, mutation_id: receipt.request_id });
@@ -257,8 +272,6 @@ async function scenario(browser, spec) {
       assert.equal(course.attachments.length, 1, 'course screenshot survives saved-log reload');
     } else {
       await page.waitForFunction(() => document.querySelector('#app')?.children.length > 0 && !document.body.innerText.includes('正在讀取正式資料'));
-      if (spec.flow.endsWith('prep')) await nav('prep');
-      if (spec.flow === 'pt-app') await nav('weekly');
       await page.getByText(spec.title, { exact: false }).first().waitFor();
     }
     const records = read();
@@ -266,8 +279,26 @@ async function scenario(browser, spec) {
     const record = records[0], evidence = attachments(record);
     assert.equal(evidence.length, photos.length, 'missing attachment');
     assert.equal(files.size, photos.length, 'orphaned or duplicate upload');
-    const text = spec.flow === 'admin-work' ? record.items[0].completedToday : spec.flow.startsWith('anqin') ? record.reflection : spec.flow.endsWith('prep') ? record.notes : record.issue;
-    if (text !== null) assert.equal(text, spec.text, 'saved text changed or truncated');
+    const text = spec.flow === 'admin-work' ? record.items[0].completedToday : spec.flow.startsWith('anqin') ? record.reflection : record.courseName;
+    assert.equal(text, talentLesson ? lessonTitle : spec.text, 'saved text changed or truncated');
+    if (talentLesson) {
+      assert.equal(record.entryVersion, 2);
+      assert.equal(record.present, lessonCounts.present);
+      assert.equal(record.newCount, lessonCounts.newCount);
+      assert.equal(record.renewalCount, lessonCounts.renewalCount);
+      assert.equal(record.trial, lessonCounts.trial);
+      assert.equal(record.lessonKind, talentCoverage ? 'coverage' : 'scheduled');
+      assert.equal(record.appStatus, 'not_required');
+      assert.equal(record.roomDone, true);
+      assert.equal(record.status, 'submitted');
+      assert.equal(record.attendanceFiles.length, 0);
+      assert.equal(record.learningFiles.length, 0);
+      if (talentCoverage) {
+        assert.equal(record.coverageStart, '10:40');
+        assert.equal(record.coverageEnd, '12:10');
+        assert.equal(record.site, spec.campus);
+      }
+    }
     const ids = evidence.map(item => item.fileId || item.file_id);
     if (spec.method === 'write-lock') {
       assert.equal(saveCount, 2, 'One automatic retry after confirmed zero-write rejection');
@@ -291,8 +322,14 @@ async function scenario(browser, spec) {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2), false, 'horizontal overflow');
     assert.deepEqual(errors, []);
     if (!['normal', 'separate-selection', 'double-submit'].includes(spec.method)) assert.ok(faultEvents.length, 'planned fault was not injected');
-    if (spec.method === 'save-and-receipt-lost') assert.equal(new Set(requests.filter(item => item.action === target).map(item => item.request_id)).size, 1, 'manual retry changed operation ID');
-    if (!(spec.flow === 'pt-app' && spec.method === 'separate-selection')) assert.equal(businessExecutions, 1, 'write callback executed more than once');
+    if (spec.method === 'save-and-receipt-lost') {
+      assert.equal(new Set(requests.filter(item => item.action === target).map(item => item.request_id)).size, 1, 'manual retry changed operation ID');
+      if (talentLesson) {
+        assert.equal(targetPayloads.length, 2, 'manual lesson retry must issue exactly two save requests');
+        assert.deepEqual(targetPayloads[1], targetPayloads[0], 'manual lesson retry changed the saved payload');
+      }
+    }
+    assert.equal(businessExecutions, 1, 'write callback executed more than once');
     const expectedFailures = new Set(['injected-abort', 'injected-503', 'injected-404', 'committed-response-lost', 'WRITE_BUSY', 'QA_PDF_CONVERSION_UNAVAILABLE']);
     assert.deepEqual(requests.filter(item => item.result !== 'ok' && !expectedFailures.has(item.result)), [], 'unexpected backend response');
     await page.screenshot({ path: path.join(output, `${String(spec.id).padStart(2, '0')}-result.png`), fullPage: true, animations: 'disabled' });
@@ -311,7 +348,7 @@ async function scenario(browser, spec) {
     const id = group * 10 + index + 1;
     return { id, flow, method, width: widths[(index + group) % widths.length], campus: id % 2 ? '北區教室' : '東橋教室', count: index === 5 ? 2 : index === 1 ? 3 : [1, 2, 3, 4][id % 4], title: `QA-${String(id).padStart(2, '0')} ${flow} ${method}`, text: `第 ${id} 組驗收紀錄\n${descriptions[index]}` };
   }));
-  fs.writeFileSync(path.join(output, 'matrix.json'), JSON.stringify({ seed: 'fixed-20260913-v1', sourceDigests, exclusions, cases: specs, scope: '40 real UI + 10 browser shared-API log contracts; real Apps Script router and modules; isolated typed Sheets and Drive services; NOT production Google acceptance' }, null, 2));
+  fs.writeFileSync(path.join(output, 'matrix.json'), JSON.stringify({ seed: 'fixed-20261008-simple-lessons-v2', sourceDigests, exclusions, cases: specs, scope: '40 real UI + 10 browser shared-API log contracts; real Apps Script router and modules; isolated typed Sheets and Drive services; NOT production Google acceptance' }, null, 2));
   const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
   const results = [];
   try {
@@ -324,7 +361,7 @@ async function scenario(browser, spec) {
   const hashes = results.flatMap(item => (item.photos || []).map(photo => photo.sha256));
   assert.equal(new Set(hashes).size, hashes.length, 'test images must have different binary contents');
   for (const [name, digest] of Object.entries(sourceDigests)) assert.equal(sha(fs.readFileSync(path.join(root, name))), digest, 'production source changed during the run: ' + name);
-  const scopeNames = { 'admin-work': '行政工作表單', 'talent-prep': '才藝備課表單', 'pt-prep': '才藝 PT 備課表單', 'pt-app': '才藝 PT APP 截圖', 'anqin-log-contract': '安親日誌 API 契約' };
+  const scopeNames = { 'admin-work': '行政工作表單', 'talent-fulltime-lesson': '才藝正職新版課堂', 'talent-pt-lesson': '才藝 PT 固定課新版課堂', 'talent-pt-coverage': '才藝 PT 帶班新版課堂', 'anqin-log-contract': '安親日誌 API 契約' };
   const lines = [
     '# 50 組控制變因驗收紀錄', '',
     `執行時間：${new Date().toISOString()}`, '',

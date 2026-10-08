@@ -11,10 +11,10 @@ const modules = [
   'adminmarketing.gs', 'externalapi.gs',
 ];
 const header = `/**
- * 布拉克星球 KPI 系統 - 合併版（All-in-One v10）
+ * 布拉克星球 KPI 系統 - 合併版（All-in-One v11）
  * 觸發詞：kpi系統
  * 此檔由 apps-script 各模組機械式合併，請勿單獨修改。
- * 合併日期：2026-10-05
+ * 合併日期：2026-10-08
  */
 
 `;

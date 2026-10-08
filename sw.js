@@ -1,6 +1,6 @@
 // 布拉克星球 KPI 系統 — Service Worker
 // 策略：網路優先（避免舊快取問題），離線時才用快取備援
-const CACHE = 'bp-kpi-20260918-course-record-1';
+const CACHE = 'bp-kpi-20261008-release-1';
 const SHELL = ['/index.html', '/shared/style.css', '/shared/icons/icon-192.png'];
 
 self.addEventListener('install', e => {

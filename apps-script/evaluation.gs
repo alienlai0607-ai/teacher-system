@@ -180,6 +180,10 @@ function saveEval(params) {
   const sheetName = isManager ? SHEET_NAMES.MANAGER_EVAL : SHEET_NAMES.TEACHER_EVAL;
   const prefix = isManager ? 'MEVAL' : 'EVAL';
   const eval_id = `${prefix}-${year_month}-${nickname}`;
+  // 正式環境可能仍是舊版 TeacherEval 表頭；儲存前補欄，避免資料有值卻無欄可寫。
+  if (!isManager) ensureHeaders(getSheet(sheetName), [
+    'september_missing_count', 'september_missing_penalty', 'september_bonus_points'
+  ]);
   const existing = findObject(sheetName, 'eval_id', eval_id);
 
   const prefixK = isManager ? 'm' : 'k';
@@ -210,34 +214,83 @@ function saveEval(params) {
     return { ok: false, error: '完成評核前，主管評語至少需要 8 字' };
   }
 
-  // ===== 日報補繳扣分：每次補繳扣 2 分（依當月日誌 is_makeup 自動統計，不吃前端參數）=====
-  const makeupCount = sheetToObjects(SHEET_NAMES.LOGS).filter(l =>
-    l.nickname === nickname && String(l.date).slice(0, 7) === year_month && l.is_makeup === true).length;
+  // ===== 缺交扣分 =====
+  // 2026-09 安親因當月系統不穩，不能用系統日誌推定缺交；改由主管手動填寫。
+  // 其他月份維持依日誌 is_makeup 自動統計的既有資料來源；每次一律扣 2 分。
+  const septemberManualPenaltyEligible = anqin && !isManager && year_month === '2026-09';
+  const septemberMissingSupplied = Object.prototype.hasOwnProperty.call(params, 'september_missing_count') &&
+    params.september_missing_count !== undefined && params.september_missing_count !== null &&
+    params.september_missing_count !== '';
+  let septemberMissingCount = 0;
+  if (septemberManualPenaltyEligible) {
+    if (septemberMissingSupplied) {
+      septemberMissingCount = Number(params.september_missing_count);
+      if (!Number.isInteger(septemberMissingCount) || septemberMissingCount < 0) {
+        return { ok: false, error: '九月缺交次數需為 0 以上的整數' };
+      }
+    } else if (existing) {
+      // 舊快取未帶新欄位時保留主管已存值；新評核未帶則預設 0，絕不回抓日誌。
+      const savedMissingCount = Number(existing.september_missing_count || 0);
+      septemberMissingCount = Number.isInteger(savedMissingCount) && savedMissingCount >= 0 ? savedMissingCount : 0;
+    }
+  } else if (septemberMissingSupplied) {
+    const unexpectedMissingCount = Number(params.september_missing_count);
+    if (!Number.isFinite(unexpectedMissingCount) || unexpectedMissingCount !== 0) {
+      return { ok: false, error: '九月缺交次數僅適用於 2026-09 安親評核' };
+    }
+  }
+  const septemberMissingPenalty = septemberMissingCount * 2;
+  let makeupCount = 0;
+  if (!septemberManualPenaltyEligible) {
+    makeupCount = sheetToObjects(SHEET_NAMES.LOGS).filter(l =>
+      l.nickname === nickname && String(l.date).slice(0, 7) === year_month && l.is_makeup === true).length;
+  }
   const makeupPenalty = makeupCount * 2;
-  const kpiEffective = Math.max(0, kpiTotal - makeupPenalty);
 
-  const totalScore = kpiEffective + okrScore;
-
-  // 等第與獎金（安親看 100 分級距，其餘看 70 分級距）
-  let tier = calcBonusForUser(kpiEffective, user);
-
-  // ===== 安親遲到扣分（獨立於 100 分之外）=====
-  // 當月遲到累計 ≥3 次：自 KPI 總分「每次額外扣 5 分」或「直接降一個獎金等級」，擇重者
+  // ===== 安親遲到扣分 =====
+  // 所有安親月份皆為 0–2 次不扣、3 次含以上固定扣 5 分。
+  // 2026-09 的次數因系統不穩由主管手動確認；扣分只在總分層套用一次，不回改 score_k1…score_k6。
   let lateCount = 0, latePenalty = 0;
   if (anqin) {
     lateCount = Number(params.score_late_count || 0);
     if (!Number.isInteger(lateCount) || lateCount < 0) {
       return { ok: false, error: '遲到次數需為 0 以上的整數' };
     }
-    if (lateCount >= 3) {
-      const penaltyPoints = (lateCount - 2) * 5; // 第 3 次起才扣，每次 5 分
-      const tierByPoints = calcBonusForUser(Math.max(0, kpiEffective - penaltyPoints), user); // 方案A：扣分
-      const tierByDrop = bonusAfterDrop(tier.grade, 1, user);                              // 方案B：降一級
-      // 擇重者＝獎金較低者
-      tier = (tierByPoints.bonus <= tierByDrop.bonus) ? tierByPoints : tierByDrop;
-      latePenalty = penaltyPoints;
+    latePenalty = lateCount >= 3 ? 5 : 0;
+  }
+
+  // ===== 2026 年 9 月安親一次性加分 =====
+  // 舊版前端不會傳這個欄位：更新既有九月評核時必須沿用已保存值；
+  // 新版前端明確傳 0 才代表主管要清除。其他月份若夾帶非 0 值則拒絕。
+  const septemberBonusSupplied = Object.prototype.hasOwnProperty.call(params, 'september_bonus_points') &&
+    params.september_bonus_points !== undefined && params.september_bonus_points !== null &&
+    params.september_bonus_points !== '';
+  const septemberBonusEligible = anqin && !isManager && year_month === '2026-09';
+  let septemberBonusPoints = 0;
+  if (septemberBonusEligible) {
+    if (septemberBonusSupplied) {
+      septemberBonusPoints = Number(params.september_bonus_points);
+      if (!Number.isInteger(septemberBonusPoints) || septemberBonusPoints < 0 || septemberBonusPoints > 5) {
+        return { ok: false, error: '九月加分需為 0–5 的整數' };
+      }
+    } else if (existing) {
+      const savedSeptemberBonus = Number(existing.september_bonus_points || 0);
+      septemberBonusPoints = Number.isInteger(savedSeptemberBonus) && savedSeptemberBonus >= 0 && savedSeptemberBonus <= 5
+        ? savedSeptemberBonus : 0;
+    }
+  } else if (septemberBonusSupplied) {
+    const unexpectedSeptemberBonus = Number(params.september_bonus_points);
+    if (!Number.isFinite(unexpectedSeptemberBonus) || unexpectedSeptemberBonus !== 0) {
+      return { ok: false, error: '九月加分僅適用於 2026-09 安親評核' };
     }
   }
+
+  const kpiEffective = Math.min(100, Math.max(0,
+    kpiTotal + septemberBonusPoints - septemberMissingPenalty - makeupPenalty - latePenalty));
+  const totalScore = Math.min(100, kpiEffective + okrScore);
+
+  // 等第與獎金（安親看扣分後的 100 分級距，其餘看 70 分級距）
+  const tier = calcBonusForUser(kpiEffective, user);
   // 主管核發決定：未帶＝預設核發（true）
   const bonusGranted = (params.bonus_granted === undefined || params.bonus_granted === '')
     ? true : (params.bonus_granted === true || params.bonus_granted === 'true');
@@ -252,6 +305,9 @@ function saveEval(params) {
     late_penalty: latePenalty,
     makeup_count: makeupCount,
     makeup_penalty: makeupPenalty,
+    september_missing_count: septemberMissingCount,
+    september_missing_penalty: septemberMissingPenalty,
+    september_bonus_points: septemberBonusPoints,
     bonus_granted: bonusGranted,
     manager_comment: managerComment,
     interview_notes: params.interview_notes || '',

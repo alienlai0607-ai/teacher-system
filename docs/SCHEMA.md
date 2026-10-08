@@ -31,9 +31,13 @@ Apps Script `setupSheets()` 會建立或補齊 16 個資料表。它不刪除既
 
 ## 4. TeacherEval
 
-`eval_id, year_month, nickname, evaluator, self_k1...self_k6, self_summary, score_k1...score_k6, score_okr, total_score, grade, bonus, score_late_count, late_penalty, makeup_count, makeup_penalty, bonus_granted, manager_comment, interview_notes, status, created_at, updated_at`
+`eval_id, year_month, nickname, evaluator, self_k1...self_k6, self_summary, score_k1...score_k6, score_okr, total_score, grade, bonus, score_late_count, late_penalty, makeup_count, makeup_penalty, bonus_granted, september_missing_count, september_missing_penalty, september_bonus_points, manager_comment, interview_notes, status, created_at, updated_at`
 
 - 安親老師使用 100 分制；後端限制各構面上限並重新計算總分、等第與獎金。
+- 所有安親月份皆為缺交每次扣 2 分；遲到 0～2 次不扣、3 次含以上固定扣 5 分，不按次累加。其他月份缺交次數由系統統計並保存於 `makeup_count` / `makeup_penalty`。
+- 安親老師的 `2026-09` 評核因當月系統不穩，缺交與遲到次數都由主管手動填寫，不採用日誌自動扣分。請求欄位 `september_missing_count` 為 0 以上整數，保存於獨立的 `september_missing_count` / `september_missing_penalty`；舊列沒有這兩欄時視為 0，絕不拿既有 `makeup_count` 冒充主管填寫值。
+- `september_bonus_points` 僅適用安親老師的 `2026-09` 評核，為主管填寫的 0～5 整數；其他月份拒絕非 0 值。總分依「六項分數＋九月加分－缺交／補繳扣分－遲到扣分」計算並封頂 100。
+- 舊前端未傳 `september_missing_count` 或 `september_bonus_points` 時，後端保留既有九月值；新版明確傳 `0` 才會清除。舊資料缺欄視為 0，已公布資料讀取時仍以保存的 `total_score` 與加扣分欄位為準，不套用新規則回算。
 - 教師只能查看自己；同教室主管可評核，酸酸不跨北區，小魚可跨教室。
 
 ## 5. ManagerEval

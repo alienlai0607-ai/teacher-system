@@ -481,6 +481,14 @@ input:focus, textarea:focus, select:focus { border-color: var(--blue); outline: 
 .lesson-status-segment input:focus-visible + span { outline: 3px solid rgba(47, 130, 178, 0.28); outline-offset: 2px; }
 .count-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
 .count-field input { text-align: center; font-weight: 900; }
+.simple-entry-intro { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 14px; padding: 13px 14px; color: #6d4a16; background: var(--sun-soft); border: 1px solid #e7cb7b; border-radius: var(--radius); }
+.simple-entry-intro > svg { flex: 0 0 auto; margin-top: 1px; }
+.simple-entry-intro > div { display: grid; gap: 3px; }
+.simple-entry-intro strong { font-size: 12px; }
+.simple-entry-intro span { color: var(--muted); font-size: 10px; line-height: 1.55; }
+.simple-count-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.simple-count-grid .bonus-fields { display: block; }
+.simple-count-grid .bonus-fields[hidden] { display: none; }
 
 .upload-row { position: relative; min-height: 74px; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 10px; margin-top: 12px; padding: 10px; background: #fffdfa; border: 1px dashed #cdbfae; border-radius: 7px; cursor: pointer; }
 .upload-row:hover { background: #fffaf0; border-color: #b89667; }
@@ -612,6 +620,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--blue); outline: 
   .form-section { padding: 13px; }
   .form-grid, .form-grid.three { grid-template-columns: 1fr; }
   .count-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .simple-count-grid { grid-template-columns: 1fr; }
   .upload-row { grid-template-columns: 38px minmax(0, 1fr); }
   .upload-row > .btn { grid-column: 2; width: fit-content; }
   .workspace-menu { top: calc(var(--ribbon) + var(--topbar) + 7px); }

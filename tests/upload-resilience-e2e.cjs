@@ -49,6 +49,11 @@ async function scenario(browser, role, width) {
     else if (p.action === 'saveTalentPrep') {
       store.preps = [{ ...p.prep, status: 'ready' }];
       result = { ok: true, prep: store.preps[0] };
+    } else if (p.action === 'saveTalentLesson') {
+      const saved = { ...p.lesson, status: 'submitted', updatedAt: new Date().toISOString() };
+      const index = store.lessons.findIndex(item => item.id === saved.id);
+      if (index >= 0) store.lessons[index] = saved; else store.lessons.unshift(saved);
+      result = { ok: true, lesson: saved, reportStatus: 'ready' };
     } else if (p.action === 'saveAdminMarketingRecord') {
       saveIds.push(p.request_id);
       if (receipts.has(p.request_id)) result = receipts.get(p.request_id);
@@ -110,44 +115,32 @@ async function scenario(browser, role, width) {
       assert.equal(store.records.length, 1);
       assert.equal(store.records[0].items[0].evidence.length, 2);
     } else {
-      await nav('prep');
-      await click('new-prep');
-      await page.selectOption('#prep-form select[name="courseType"]', '樂高小創客');
-      await page.fill('#prep-form input[name="courseName"]', 'Two-file retry');
-      await page.setInputFiles('[data-upload-category="prep"]', [photo('one.png'), photo('two.png')]);
+      await click('new-log');
+      await page.fill('#log-form input[name="courseName"]', 'Two-file retry');
+      await page.fill('#log-form input[name="present"]', '8');
+      await page.fill('#log-form input[name="renewalCount"]', '2');
+      await page.setInputFiles('[data-upload-category="room"]', [photo('one.png'), photo('two.png')]);
       await page.locator('[data-action="retry-upload"]').waitFor();
-      await click('save-prep');
-      assert.equal(store.preps.length, 0);
+      await click('submit-log');
+      assert.equal(store.lessons.length, 0);
       fail = false;
       await click('retry-upload');
       await page.waitForFunction(() => !document.querySelector('[data-action="retry-upload"]'));
-      await click('save-prep');
-      await page.locator('#prep-form').waitFor({ state: 'detached' });
-      assert.equal(store.preps[0].materials.length, 2);
-      const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
-      store.lessons.push({ id: 'app-retry', teacher: user.nickname, date: today, courseName: 'APP retry', courseType: '樂高小創客', siteType: 'self', appStatus: 'pending', appFiles: [], status: 'submitted' });
-      await page.reload();
-      await nav('weekly');
-      fail = true;
-      uploads.length = 0;
-      await page.locator('[data-app-evidence-id="app-retry"]').setInputFiles([photo('one.png'), photo('two.png')]);
-      await page.locator('[data-action="retry-app-evidence"]').waitFor();
-      assert.equal(store.lessons[0].appStatus, 'pending');
+      await click('submit-log');
+      await page.locator('#log-form').waitFor({ state: 'detached' });
+      assert.equal(store.lessons[0].roomFiles.length, 2);
+      assert.equal(store.lessons[0].present, 8);
+      assert.equal(store.lessons[0].renewalCount, 2);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2), false);
       await page.screenshot({ path: `/private/tmp/kpi-upload-${role}-${width}-retry.png`, fullPage: true });
-      fail = false;
-      await click('retry-app-evidence');
-      await page.locator('[data-action="retry-app-evidence"]').waitFor({ state: 'detached' });
-      assert.equal(store.lessons[0].appFiles.length, 2);
-      assert.equal(store.lessons[0].appStatus, 'published');
     }
     assert.equal(uploads.filter(p => p.base64 === firstPayload).length, 1, 'confirmed file must not upload twice');
     assert.equal(uploads.filter(p => p.base64 !== firstPayload).length, 4, 'three bounded failed attempts plus one explicit retry');
     await page.reload();
     if (role === 'admin-marketing') await page.locator('.record-card', { hasText: 'Two-file retry' }).waitFor();
     else {
-      await page.locator('.app-evidence-row .app-evidence-files > *').first().waitFor();
-      assert.equal(await page.locator('.app-evidence-row .app-evidence-files > *').count(), 2);
+      await page.locator('.record-row', { hasText: 'Two-file retry' }).first().waitFor();
+      assert.equal(store.lessons[0].roomFiles.length, 2);
     }
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2), false);
     assert.deepEqual(errors, []);

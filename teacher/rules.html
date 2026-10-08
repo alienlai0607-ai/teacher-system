@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>KPI 與獎金規則</title>
 <link rel="stylesheet" href="../shared/style.css?v=20260624k">
-<script src="../shared/config.js?v=20261008-admin-load-1"></script>
-<script src="../shared/auth.js?v=20261007-talent-coverage-1"></script>
-<script src="../shared/api.js?v=20260916-reliability-2"></script>
-<script src="../shared/ui.js?v=20260825-production-audit-2"></script>
+<script src="../shared/config.js?v=20261008-release-1"></script>
+<script src="../shared/auth.js?v=20261008-release-1"></script>
+<script src="../shared/api.js?v=20261008-release-1"></script>
+<script src="../shared/ui.js?v=20261008-release-1"></script>
 <script src="../shared/pwa.js?v=20260825-production-audit-2"></script>
 <script src="../shared/push.js?v=20260912-push-resilience-2"></script>
 <style>
@@ -309,10 +309,12 @@ function renderAnqin() {
       <div class="note mt-1">📌 <strong>KPI ≥ 82 分</strong>才開始有獎金；75–81 為基本合格（無獎金）；74 以下需改善追蹤回報。</div>
     </div>
     <div class="card">
-      <div class="rule-h">⏰ 出勤紀律扣分（獨立於 100 分之外）</div>
+      <div class="rule-h">➕➖ KPI 加扣分規則</div>
       <div class="note">
-        遲到列為<strong>重點扣分項目</strong>。<strong>當月遲到累計達 3 次（含）以上</strong>，自 KPI 總分<strong>自第 3 次起每次額外扣 5 分</strong>（前 2 次不扣），或<strong>直接降一個獎金等級</strong>（系統取較重者）。<br>
-        此扣分獨立於各項配分之外，目的在強化基本工作紀律。
+        ・所有月份：缺交每次自 KPI 總分<strong>扣 2 分</strong>；遲到 0～2 次不扣，<strong>3 次含以上固定扣 5 分</strong>（不按次累加）。<br>
+        ・<strong>2026 年 9 月資料來源特例：</strong>因系統不穩，缺交與遲到次數都由主管確認後填寫，不採用系統紀錄自動扣分；其他月份缺交次數由系統統計。<br>
+        ・僅在 <strong>2026 年 9 月評核</strong>，主管可另填寫 <strong>0～5 分「九月加分」</strong>；其他月份不適用。<br>
+        加分與扣分都只在總分計算一次；合併後總分最高 100 分，並依最終總分計算評等與獎金級距。
       </div>
     </div>
 

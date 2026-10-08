@@ -12,12 +12,18 @@ const photo = name => ({ name, mimeType: 'image/png', buffer: Buffer.from(name =
 async function scenario(browser, role, width) {
   const context = await browser.newContext({ viewport: { width, height: 844 }, timezoneId: 'Asia/Taipei', serviceWorkers: 'block' });
   let page = await context.newPage();
-  const user = { nickname: '皮皮老師', role: 'admin_staff', subtype: 'marketing', department: '北區教室', work_assignments: [role], session_token: 'isolated-test-token', t: Date.now() };
-  const store = { preps: [], lessons: [], records: [] };
+  const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
+  const weekday = new Date(`${today}T12:00:00+08:00`).getDay();
+  const schedule = [{ weekday, label: 'QA 班', courseName: 'Simple lesson retry', courseType: '樂高小創客', time: '19:00–20:30', siteType: 'self', site: '北區教室' }];
+  const user = { nickname: '皮皮老師', role: 'admin_staff', subtype: 'marketing', department: '北區教室', employment: 'pt', employment_type: 'pt', work_assignments: [role], schedule, schedule_json: schedule, session_token: 'isolated-test-token', t: Date.now() };
+  const store = { preps: [], lessons: [], records: [], draft: null };
   const uploads = [];
   const receipts = new Map();
+  const receiptSignatures = new Map();
   const saveIds = [];
+  const lessonPayloads = [];
   let recordWrites = 0;
+  let lessonWrites = 0;
   let holdSaveConfirmation = false;
   let loseSaveResponse = false;
   let fail = true;
@@ -41,31 +47,49 @@ async function scenario(browser, role, width) {
       uploads.push(p);
       if (!firstPayload) firstPayload = p.base64;
       if (p.base64 !== firstPayload && fail) return route.fulfill({ status: 404, contentType: 'text/html', body: '<title>Google response unavailable</title>' });
-      result = { ok: true, fileId: p.base64 === firstPayload ? 'file-one' : 'file-two', fileName: p.fileName || 'photo.png', url: 'https://drive.google.com/file/d/fixture/view' };
+      const fileId = p.base64 === firstPayload ? 'fixture-file-one-0001' : 'fixture-file-two-0002';
+      result = { ok: true, fileId, fileName: p.fileName || 'photo.png', url: `https://drive.google.com/file/d/${fileId}/view` };
     } else if (p.action === 'getSessionIdentity') result = { ok: true, user };
-    else if (p.action === 'getTalentWorkspaceData') result = { ok: true, ...store, users: [user] };
+    else if (p.action === 'getTalentWorkspaceData') result = { ok: true, ...store, lessons: holdSaveConfirmation ? [] : store.lessons, users: [user] };
     else if (p.action === 'getAdminMarketingWorkspaceData') result = { ok: true, ...store, records: holdSaveConfirmation ? [] : store.records, users: [user] };
     else if (p.action === 'getClassRosterData') result = { ok: true, classes: [], reminders: [], events: [] };
-    else if (p.action === 'saveTalentPrep') {
-      store.preps = [{ ...p.prep, status: 'ready' }];
-      result = { ok: true, prep: store.preps[0] };
+    else if (p.action === 'saveTalentDraft') {
+      store.draft = p.draft || null;
+      result = { ok: true, draft: store.draft };
+    } else if (p.action === 'saveTalentLesson') {
+      saveIds.push(p.request_id);
+      lessonPayloads.push(JSON.parse(JSON.stringify(p.lesson)));
+      const signature = JSON.stringify(p.lesson);
+      if (receipts.has(p.request_id) && receiptSignatures.get(p.request_id) !== signature) {
+        result = { ok: false, code: 'REQUEST_ID_CONFLICT', error: 'request_id was reused with a different lesson payload' };
+      } else if (receipts.has(p.request_id)) result = receipts.get(p.request_id);
+      else {
+        lessonWrites++;
+        const lesson = { ...p.lesson, lastRequestId: p.request_id, updatedAt: new Date().toISOString() };
+        store.lessons = [lesson];
+        store.draft = null;
+        result = { ok: true, lesson, reportPending: true, reportQueued: true };
+        receiptSignatures.set(p.request_id, signature);
+        receipts.set(p.request_id, result);
+      }
+      if (loseSaveResponse) { loseSaveResponse = false; return route.abort('failed'); }
     } else if (p.action === 'saveAdminMarketingRecord') {
       saveIds.push(p.request_id);
-      if (receipts.has(p.request_id)) result = receipts.get(p.request_id);
+      const signature = JSON.stringify(p.record);
+      if (receipts.has(p.request_id) && receiptSignatures.get(p.request_id) !== signature) {
+        result = { ok: false, code: 'REQUEST_ID_CONFLICT', error: 'request_id was reused with a different record payload' };
+      } else if (receipts.has(p.request_id)) result = receipts.get(p.request_id);
       else {
         recordWrites++;
         store.records = [{ ...p.record, updatedAt: new Date().toISOString() }];
         result = { ok: true, record: store.records[0] };
+        receiptSignatures.set(p.request_id, signature);
         receipts.set(p.request_id, result);
       }
       if (loseSaveResponse) { loseSaveResponse = false; return route.abort('failed'); }
     } else if (p.action === 'getMutationReceipt') {
       if (holdSaveConfirmation) return route.abort('failed');
       result = receipts.has(p.mutation_id) ? { ok: true, state: 'done', result: receipts.get(p.mutation_id) } : { ok: true, state: 'not_found' };
-    } else if (p.action === 'updateTalentAppStatus') {
-      const item = store.lessons.find(item => item.id === p.lesson_id);
-      Object.assign(item, { appStatus: 'published', appFiles: p.app_files });
-      result = { ok: true, lesson: item };
     } else if (p.action === 'getAttachmentPreviews') result = { ok: true, previews: [] };
     else if (p.action === 'reportClientMetrics') result = { ok: true };
     else result = { ok: false, code: 'QA_UNIMPLEMENTED_ACTION', error: p.action };
@@ -82,10 +106,6 @@ async function scenario(browser, role, width) {
     await page.locator('[data-action="restore-local-draft"]').first().click();
   };
   const click = async action => page.locator(`[data-action="${action}"]`).filter({ visible: true }).first().click();
-  const nav = async name => {
-    if (!await page.locator(`[data-route="${name}"]`).filter({ visible: true }).count()) await click('more-nav');
-    await page.locator(`[data-route="${name}"]`).filter({ visible: true }).first().click();
-  };
   try {
     const area = role === 'admin-marketing' ? 'admin-marketing-v1' : 'talent-v2';
     await page.goto(`${origin}/review/${area}/index.html?workspace=${role}`);
@@ -125,55 +145,61 @@ async function scenario(browser, role, width) {
       assert.equal(store.records.length, 1);
       assert.equal(store.records[0].items[0].evidence.length, 2);
     } else {
-      await nav('prep');
-      await click('new-prep');
-      await page.selectOption('#prep-form select[name="courseType"]', '樂高小創客');
-      await page.fill('#prep-form input[name="courseName"]', 'Two-file retry');
-      await page.setInputFiles('[data-upload-category="prep"]', [photo('one.png'), photo('two.png')]);
-      await page.locator('[data-action="retry-upload"]').waitFor();
-      await click('save-prep');
-      assert.equal(store.preps.length, 0);
+      await click('new-log');
+      await page.fill('#log-form input[name="courseName"]', 'Simple lesson retry');
+      await page.fill('#log-form input[name="present"]', '6');
+      await page.fill('#log-form input[name="newCount"]', '1');
+      await page.fill('#log-form input[name="renewalCount"]', '2');
+      await page.fill('#log-form input[name="trial"]', '3');
+      await page.setInputFiles('[data-upload-category="room"]', [photo('one.png'), photo('two.png')]);
+      const roomRetry = () => page.locator('[data-file-items="room"] [data-action="retry-upload"][data-category="room"]');
+      await roomRetry().waitFor();
+      assert.equal(store.lessons.length, 0);
+      assert.equal(await page.locator('[data-file-items="room"] .selected-file').count(), 1);
       await reopen(area);
-      assert.equal(await page.locator('#prep-form input[name="courseName"]').inputValue(), 'Two-file retry');
-      assert.equal(await page.locator('#prep-form').evaluate(el => el.inert), false);
+      assert.equal(await page.locator('#log-form input[name="courseName"]').inputValue(), 'Simple lesson retry');
+      assert.equal(await page.locator('#log-form input[name="present"]').inputValue(), '6');
+      assert.equal(await page.locator('#log-form input[name="newCount"]').inputValue(), '1');
+      assert.equal(await page.locator('#log-form input[name="renewalCount"]').inputValue(), '2');
+      assert.equal(await page.locator('#log-form input[name="trial"]').inputValue(), '3');
+      assert.equal(await page.locator('#log-form').evaluate(el => el.inert), false);
+      assert.equal(await page.locator('[data-file-items="room"] .selected-file').count(), 1);
+      await page.locator('[data-file-items="room"]').getByText('two.png', { exact: false }).waitFor();
       fail = false;
-      await click('retry-upload');
-      await page.waitForFunction(() => !document.querySelector('[data-action="retry-upload"]'));
-      await click('save-prep');
-      await page.locator('#prep-form').waitFor({ state: 'detached' });
-      assert.equal(store.preps[0].materials.length, 2);
-      const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
-      store.lessons.push({ id: 'app-retry', teacher: user.nickname, date: today, courseName: 'APP retry', courseType: '樂高小創客', siteType: 'self', appStatus: 'pending', appFiles: [], status: 'submitted' });
-      await page.reload();
-      await nav('weekly');
-      fail = true;
-      uploads.length = 0;
-      await page.locator('[data-app-evidence-id="app-retry"]').setInputFiles([photo('one.png'), photo('two.png')]);
-      await page.locator('[data-action="retry-app-evidence"]').waitFor();
-      assert.equal(store.lessons[0].appStatus, 'pending');
+      await roomRetry().click();
+      await roomRetry().waitFor({ state: 'detached' });
+      assert.equal(await page.locator('[data-file-items="room"] .selected-file').count(), 2);
+      holdSaveConfirmation = true;
+      loseSaveResponse = true;
+      await click('submit-log');
+      await page.getByText('尚未取得儲存確認', { exact: false }).waitFor();
+      assert.equal(lessonWrites, 1, 'cloud lesson write completed despite missing response');
+      assert.equal(await page.locator('[data-file-items="room"] .selected-file').count(), 2);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2), false);
       await page.screenshot({ path: `/private/tmp/kpi-upload-${role}-${width}-retry.png`, fullPage: true });
-      await page.waitForTimeout(150);
-      await page.close();
-      page = await context.newPage();
-      page.on('pageerror', e => errors.push(e.message));
-      await page.goto(`${origin}/review/${area}/index.html?workspace=${role}`);
-      await nav('weekly');
-      await page.locator('[data-action="retry-app-evidence"]').waitFor();
-      fail = false;
-      await click('retry-app-evidence');
-      await page.locator('[data-action="retry-app-evidence"]').waitFor({ state: 'detached' });
-      assert.equal(store.lessons[0].appFiles.length, 2);
-      assert.equal(store.lessons[0].appStatus, 'published');
+      await reopen(area);
+      assert.equal(await page.locator('#log-form input[name="courseName"]').inputValue(), 'Simple lesson retry');
+      assert.equal(await page.locator('[data-file-items="room"] .selected-file').count(), 2);
+      holdSaveConfirmation = false;
+      await click('submit-log');
+      await page.locator('#log-form').waitFor({ state: 'detached' });
+      assert.equal(lessonWrites, 1, 'manual UI retry must retain original operation ID');
+      assert.equal(saveIds.length, 2, 'manual UI retry must send the saved lesson operation again');
+      assert.equal(new Set(saveIds).size, 1);
+      assert.deepEqual(lessonPayloads[1], lessonPayloads[0], 'manual UI retry must retain the original lesson payload');
+      assert.equal(store.lessons.length, 1);
+      assert.equal(store.lessons[0].courseName, 'Simple lesson retry');
+      assert.equal(store.lessons[0].present, 6);
+      assert.equal(store.lessons[0].newCount, 1);
+      assert.equal(store.lessons[0].renewalCount, 2);
+      assert.equal(store.lessons[0].trial, 3);
+      assert.equal(store.lessons[0].roomFiles.length, 2);
     }
     assert.equal(uploads.filter(p => p.base64 === firstPayload).length, 1, 'confirmed file must not upload twice');
     assert.equal(uploads.filter(p => p.base64 !== firstPayload).length, 4, 'three bounded failed attempts plus one explicit retry');
     await page.reload();
     if (role === 'admin-marketing') await page.locator('.record-card', { hasText: 'Two-file retry' }).waitFor();
-    else {
-      await page.locator('.app-evidence-row .app-evidence-files > *').first().waitFor();
-      assert.equal(await page.locator('.app-evidence-row .app-evidence-files > *').count(), 2);
-    }
+    else await page.locator('.record-row', { hasText: 'Simple lesson retry' }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2), false);
     assert.deepEqual(errors, []);
     await page.screenshot({ path: `/private/tmp/kpi-upload-${role}-${width}.png`, fullPage: true });

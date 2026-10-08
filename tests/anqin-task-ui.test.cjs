@@ -132,8 +132,8 @@ assert.match(source, /function applyPreviewReviewContext\(/, '安親審查模式
 assert.match(source, /if \(!applyPreviewReviewContext\(control\.dataset\.role\)\) state\.ui\.role = control\.dataset\.role/, '切換審查角色時必須同步身份範圍');
 assert.match(source, /applyPreviewReviewContext\(LOCAL_REVIEW_ROLE\)/, '網址指定主管視角時首次載入就必須套用正確身份');
 assert.match(source, /GLOBAL_MANAGER_NICKNAMES\.some\(name => sameReviewIdentity\(name, managerNickname\)\)/, '小魚在審查與正式登入都必須擁有全教室檢視範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20261008-manager-month-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20261008-manager-month-1/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20261008-september-penalty-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20261008-september-penalty-1/, '登入備援路徑也必須避開舊版快取');
 
 const startupSafetySource = source.slice(source.indexOf('function stripEmbeddedMediaJson('), source.indexOf('function loadState()'));
 const startupSafetyContext = vm.createContext({ JSON, Number, Set });
@@ -527,7 +527,8 @@ assert.match(qaHarness, /action === 'addFeedback'/, '隔離驗收需保存主管
 assert.match(qaHarness, /action === 'saveEval'/, '隔離驗收需保存主管評核並讓老師重新讀取');
 assert.match(qaHarness, /total_score: totalScore, grade: tier\.grade, bonus: tier\.bonus/, '隔離驗收雲端需像正式後端一樣計算評核總分、等第與獎金');
 assert.match(qaHarness, /role !== 'teacher' \|\| item\.status === 'submitted'/, '老師不得讀到主管尚未完成的評核草稿');
-assert.match(source, /const calculatedTotal = Math\.max\(0, scoreValues\.reduce/, '老師評核總分需由各項分數重新核算，避免缺少彙總欄位時錯顯示 0 分');
+assert.match(source, /const calculatedTotal = displayedEvaluationTotal\(evaluation, scoreValues\)/, '老師評核優先顯示已公布保存總分，舊資料缺少總分時才由各項與保存扣分核算');
+assert.match(source, /const latePenalty = Math\.max\(0, savedEvaluationNumber\(evaluation, 'late_penalty'\) \|\| 0\)/, '老師已公布畫面必須以保存的遲到扣分為準');
 assert.match(source, /const grade = String\(evaluation\.grade/, '老師評核需在舊資料缺少等第時依總分補算');
 assert.match(source, /function saveManagerDerivedTaskToCloud\(task\)/, '主管要求補件時需直接建立正式雲端待辦');
 assert.match(source, /主管工作區與目前登入身分不一致/, '對話送出前需阻擋工作區與登入角色錯置');

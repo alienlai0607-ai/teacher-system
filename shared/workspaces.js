@@ -11,7 +11,7 @@
       shortLabel: '安親',
       description: '安親工作紀錄與班務',
       icon: 'book-open-check',
-      path: 'review/anqin-v2/index.html?v=20261008-manager-month-1',
+      path: 'review/anqin-v2/index.html?v=20261008-september-penalty-1',
     },
     'anqin-manager': {
       id: 'anqin-manager',
@@ -20,16 +20,16 @@
       shortLabel: '安親主管',
       description: '安親審核與主管管理',
       icon: 'clipboard-check',
-      path: 'review/anqin-v2/index.html?v=20261008-manager-month-1',
+      path: 'review/anqin-v2/index.html?v=20261008-september-penalty-1',
     },
     'talent-fulltime': {
       id: 'talent-fulltime',
       group: 'talent',
       label: '才藝正職',
       shortLabel: '才藝正職',
-      description: '工作日誌、KPI 與獎金',
+      description: '人數、續抱、整潔照片與 KPI',
       icon: 'sparkles',
-      path: 'review/talent-v2/index.html?workspace=talent-fulltime&v=20261007-talent-coverage-1',
+      path: 'review/talent-v2/index.html?workspace=talent-fulltime&v=20261008-release-1',
     },
     'talent-pt': {
       id: 'talent-pt',
@@ -38,16 +38,16 @@
       shortLabel: '才藝 PT',
       description: '上課紀錄、鐘點與續報',
       icon: 'clock-3',
-      path: 'review/talent-v2/index.html?workspace=talent-pt&v=20261007-talent-coverage-1',
+      path: 'review/talent-v2/index.html?workspace=talent-pt&v=20261008-release-1',
     },
     'talent-manager': {
       id: 'talent-manager',
       group: 'talent',
       label: '才藝主管',
       shortLabel: '才藝主管',
-      description: '備課查閱、評分與結算',
+      description: '課堂人數、評分與結算',
       icon: 'chart-no-axes-combined',
-      path: 'review/talent-v2/index.html?workspace=talent-manager&v=20261007-talent-coverage-1',
+      path: 'review/talent-v2/index.html?workspace=talent-manager&v=20261008-release-1',
     },
     'talent-payroll': {
       id: 'talent-payroll',
@@ -56,7 +56,7 @@
       shortLabel: '才藝薪資',
       description: 'PT 月度鐘點與續報資格',
       icon: 'calculator',
-      path: 'review/talent-v2/index.html?workspace=talent-payroll&v=20261007-talent-coverage-1',
+      path: 'review/talent-v2/index.html?workspace=talent-payroll&v=20261008-release-1',
     },
     'admin-marketing': {
       id: 'admin-marketing',
@@ -107,7 +107,7 @@
   const LEGACY_ASSIGNMENTS = {
     '柏翰': ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'],
     '小魚': ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'],
-    '酸酸': ['anqin-manager'],
+    '酸酸': ['anqin-manager', 'talent-pt'],
     '柳丁': ['talent-manager', 'class-roster-manager'],
     '浩浩': ['talent-fulltime'],
     RITA: ['talent-fulltime'],
@@ -185,6 +185,9 @@
 
   function getAssignments(user = {}) {
     const explicit = parseAssignments(user.work_assignments || user.workAssignments || user.assignments);
+    // 酸酸的既有 30 天登入快照可能仍只有安親主管；這次已由柏翰明確授權才藝 PT，
+    // 因此在後端帳號遷移完成前後都補上入口，不需要清除她的登入或本機草稿。
+    if (normalizeNickname(user.nickname) === '酸酸' && !explicit.includes('talent-pt')) explicit.push('talent-pt');
     const ids = explicit.length ? explicit : inferredAssignments(user);
     return ids.map(id => DEFINITIONS[id]).filter(Boolean);
   }

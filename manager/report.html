@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>月度評核報表（列印）</title>
 <link rel="stylesheet" href="../shared/style.css?v=20260624k">
-<script src="../shared/config.js?v=20261008-admin-load-1"></script>
-<script src="../shared/auth.js?v=20261007-talent-coverage-1"></script>
-<script src="../shared/api.js?v=20260916-reliability-2"></script>
-<script src="../shared/ui.js?v=20260825-production-audit-2"></script>
+<script src="../shared/config.js?v=20261008-release-1"></script>
+<script src="../shared/auth.js?v=20261008-release-1"></script>
+<script src="../shared/api.js?v=20261008-release-1"></script>
+<script src="../shared/ui.js?v=20261008-release-1"></script>
 <script src="../shared/pwa.js?v=20260825-production-audit-2"></script>
 <script src="../shared/push.js?v=20260912-push-resilience-2"></script>
 <style>
@@ -382,11 +382,32 @@ function renderReport(nickname, ym, ev, evalObj) {
   }
   html += `</tbody></table>`;
 
-  const total = evalObj ? Number(evalObj.total_score || (kpiTotal + okrScore)) : null;
+  // 已公布報表只呈現評核列當時保存的 total_score 與加扣分欄位；
+  // 不依目前規則從次數回算，避免開啟舊報表就改變歷史結果。
+  const storedTotal = evalObj && evalObj.total_score !== undefined && evalObj.total_score !== null && evalObj.total_score !== ''
+    ? Number(evalObj.total_score) : null;
+  const total = evalObj ? (Number.isFinite(storedTotal) ? storedTotal : (kpiTotal + okrScore)) : null;
   const bonus = evalObj ? (evalObj.final_bonus ?? evalObj.bonus ?? 0) : null;
   const lateCount = evalObj ? Number(evalObj.score_late_count || 0) : 0;
+  const latePenalty = evalObj ? Number(evalObj.late_penalty || 0) : 0;
+  const makeupCount = evalObj ? Number(evalObj.makeup_count || 0) : 0;
+  const makeupPenalty = evalObj ? Number(evalObj.makeup_penalty || 0) : 0;
+  const septemberMissingCount = evalObj && evalObj.year_month === '2026-09'
+    ? Number(evalObj.september_missing_count || 0) : 0;
+  const septemberMissingPenalty = evalObj && evalObj.year_month === '2026-09'
+    ? Number(evalObj.september_missing_penalty || 0) : 0;
+  const septemberBonusPoints = evalObj && evalObj.year_month === '2026-09'
+    ? Number(evalObj.september_bonus_points || 0) : 0;
+  const septemberManualPenalty = evalObj && evalObj.year_month === '2026-09' && anqin;
+  const currentLatePenalty = lateCount >= 3 ? 5 : 0;
+  const latePenaltyText = latePenalty
+    ? (latePenalty === currentLatePenalty ? `保存固定扣 ${latePenalty} 分` : `依當時已公布結果扣 ${latePenalty} 分`)
+    : '未達 3 次不扣分';
+  const adjustmentBreakdown = evalObj
+    ? `${septemberBonusPoints ? `　➕ 九月加分 ${septemberBonusPoints} 分` : ''}${septemberMissingCount || septemberMissingPenalty ? `　📝 缺交（主管填寫） ${septemberMissingCount} 次，保存扣 ${septemberMissingPenalty} 分` : ''}${makeupCount || makeupPenalty ? `　⏳ 缺交（系統統計） ${makeupCount} 次，保存扣 ${makeupPenalty} 分` : ''}${lateCount || latePenalty ? `　⏰ 遲到 ${lateCount} 次，${latePenaltyText}${septemberManualPenalty ? '（九月由主管填寫）' : ''}` : ''}`
+    : '';
   const breakdown = anqin
-    ? `KPI ${evalObj ? kpiTotal : '—'} 分（OKR 獨立另計）${lateCount >= 3 ? `　⏰ 遲到 ${lateCount} 次已計扣` : ''}`
+    ? `KPI ${evalObj ? kpiTotal : '—'} 分（OKR 獨立另計）${adjustmentBreakdown}`
     : `KPI ${evalObj ? kpiTotal : '—'} + OKR ${evalObj ? okrScore : '—'}`;
   html += `<div class="total-banner">
     <div>${breakdown}</div>

@@ -349,16 +349,71 @@
       const updatedAt = new Date().toISOString();
       const key = `${normalizeNickname(payload.nickname)}:${payload.year_month}`;
       const scores = Array.from({ length: 6 }, (_, index) => Number(payload[`score_k${index + 1}`] || 0));
-      const makeupPenalty = Number(payload.makeup_penalty || 0);
-      const totalScore = Math.max(0, scores.reduce((sum, score) => sum + score, 0) - makeupPenalty);
-      const tier = evaluationTier(totalScore);
-      cloudStore.evals[key] = {
-        ...cloneWithoutSession(payload), total_score: totalScore, grade: tier.grade, bonus: tier.bonus,
-        makeup_count: Number(payload.makeup_count || 0), makeup_penalty: makeupPenalty,
-        updated_at: updatedAt,
-      };
-      persistCloudStore();
-      result = { ok: true, total_score: totalScore, grade: tier.grade, bonus: tier.bonus, updated_at: updatedAt };
+      const existing = cloudStore.evals[key] || null;
+      const septemberBonusEligible = payload.year_month === '2026-09';
+      const septemberMissingSupplied = Object.prototype.hasOwnProperty.call(payload, 'september_missing_count') &&
+        payload.september_missing_count !== undefined && payload.september_missing_count !== null &&
+        payload.september_missing_count !== '';
+      const makeupCount = septemberBonusEligible ? 0 : Object.values(cloudStore.logs).filter(log =>
+        normalizeNickname(log.nickname) === normalizeNickname(payload.nickname) &&
+        String(log.date || '').startsWith(String(payload.year_month || '')) && log.is_makeup === true).length;
+      let septemberMissingCount = 0;
+      let penaltyError = '';
+      if (septemberBonusEligible) {
+        septemberMissingCount = septemberMissingSupplied
+          ? Number(payload.september_missing_count)
+          : Number(existing?.september_missing_count || 0);
+        if (!Number.isInteger(septemberMissingCount) || septemberMissingCount < 0) penaltyError = '九月缺交次數需為 0 以上的整數';
+      } else if (septemberMissingSupplied) {
+        const unexpectedMissingCount = Number(payload.september_missing_count);
+        if (!Number.isFinite(unexpectedMissingCount) || unexpectedMissingCount !== 0) {
+          penaltyError = '九月缺交次數僅適用於 2026-09 安親評核';
+        }
+      }
+      const makeupPenalty = makeupCount * 2;
+      const septemberMissingPenalty = septemberMissingCount * 2;
+      const lateCount = Number(payload.score_late_count || 0);
+      if (!Number.isInteger(lateCount) || lateCount < 0) penaltyError = '遲到次數需為 0 以上的整數';
+      const latePenalty = lateCount >= 3 ? 5 : 0;
+      const septemberBonusSupplied = Object.prototype.hasOwnProperty.call(payload, 'september_bonus_points') &&
+        payload.september_bonus_points !== undefined && payload.september_bonus_points !== null &&
+        payload.september_bonus_points !== '';
+      let septemberBonusPoints = 0;
+      let septemberBonusError = '';
+      if (septemberBonusEligible) {
+        if (septemberBonusSupplied) {
+          septemberBonusPoints = Number(payload.september_bonus_points);
+          if (!Number.isInteger(septemberBonusPoints) || septemberBonusPoints < 0 || septemberBonusPoints > 5) {
+            septemberBonusError = '九月加分需為 0–5 的整數';
+          }
+        } else if (existing) {
+          const savedSeptemberBonus = Number(existing.september_bonus_points || 0);
+          septemberBonusPoints = Number.isInteger(savedSeptemberBonus) && savedSeptemberBonus >= 0 && savedSeptemberBonus <= 5
+            ? savedSeptemberBonus : 0;
+        }
+      } else if (septemberBonusSupplied) {
+        const unexpectedSeptemberBonus = Number(payload.september_bonus_points);
+        if (!Number.isFinite(unexpectedSeptemberBonus) || unexpectedSeptemberBonus !== 0) {
+          septemberBonusError = '九月加分僅適用於 2026-09 安親評核';
+        }
+      }
+      if (penaltyError || septemberBonusError) {
+        result = { ok: false, error: penaltyError || septemberBonusError };
+      } else {
+        const totalScore = Math.min(100, Math.max(0,
+          scores.reduce((sum, score) => sum + score, 0) + septemberBonusPoints - septemberMissingPenalty - makeupPenalty - latePenalty));
+        const tier = evaluationTier(totalScore);
+        cloudStore.evals[key] = {
+          ...cloneWithoutSession(payload), total_score: totalScore, grade: tier.grade, bonus: tier.bonus,
+          makeup_count: makeupCount, makeup_penalty: makeupPenalty,
+          september_missing_count: septemberMissingCount, september_missing_penalty: septemberMissingPenalty,
+          score_late_count: lateCount, late_penalty: latePenalty,
+          september_bonus_points: septemberBonusPoints,
+          updated_at: updatedAt,
+        };
+        persistCloudStore();
+        result = { ok: true, total_score: totalScore, grade: tier.grade, bonus: tier.bonus, updated_at: updatedAt };
+      }
     } else if (action === 'getEval') {
       const available = Object.values(cloudStore.evals)
         .filter(item => normalizeNickname(item.nickname) === normalizeNickname(payload.nickname))

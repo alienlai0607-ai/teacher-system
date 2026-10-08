@@ -64,7 +64,7 @@ function withRecordWriteLock_(callback, beforeAnyWrite) {
 const RECEIPTED_ACTIONS_ = new Set([
   'saveLog', 'saveCoursePrep', 'deleteCoursePrep', 'saveTalentLesson', 'saveTalentDraft',
   'saveTalentPrep', 'deleteTalentPrep', 'reviewTalentPrep', 'updateTalentAppStatus',
-  'saveTalentScore', 'addTalentMessage', 'approveTalentBonus',
+  'saveTalentScore', 'addTalentMessage', 'approveTalentBonus', 'forfeitTalentMonthlyBonus',
   'saveAdminMarketingRecord', 'saveAdminMarketingAssignment', 'reviewAdminMarketingRecord',
   'reviewAdminMarketingTrialBonus', 'saveAdminMarketingScore', 'addAdminMarketingMessage',
   'saveClassRosterMutation', 'saveWeekly', 'addFeedback', 'markFeedbackRead',

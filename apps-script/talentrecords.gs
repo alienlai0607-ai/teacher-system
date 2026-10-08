@@ -5,6 +5,9 @@
  */
 
 const TALENT_EFFECTIVE_DATE_ = '2026-09-01';
+const TALENT_SIMPLE_ENTRY_VERSION_ = 2;
+const TALENT_SIMPLE_ONLY_START_ = '2026-10-08';
+const TALENT_RUBRIC_V2_START_MONTH_ = '2026-10';
 
 function ensureTalentRecordsSheet_() {
   const ss = getSS();
@@ -65,7 +68,7 @@ function talentEmployment_(user) {
 
 function talentManagerCanReview_(actor) {
   return !!actor && actor.status === 'active' && (
-    actor.role === 'admin' || talentAssignments_(actor).indexOf('talent-manager') >= 0
+    actor.role === 'admin' || isGlobalManager_(actor) || talentAssignments_(actor).indexOf('talent-manager') >= 0
   );
 }
 
@@ -73,21 +76,21 @@ function talentCanAccessUser_(actor, target) {
   if (!actor || !target || actor.status !== 'active' || target.status !== 'active') return false;
   if (actor.role === 'admin' || isGlobalManager_(actor) || actor.nickname === target.nickname) return true;
   if (talentAssignments_(actor).indexOf('talent-manager') >= 0 && userHasTalentWork_(target)) return true;
-  return actor.role === 'manager' && sameDepartment_(actor.department, target.department);
+  return false;
 }
 
 function talentCanAccessHistoricalUser_(actor, target) {
   if (!actor || !target || actor.status !== 'active' || ['suspended', 'deleted'].indexOf(target.status) < 0) return false;
   if (actor.role === 'admin' || isGlobalManager_(actor)) return true;
   if (talentAssignments_(actor).indexOf('talent-manager') >= 0 && userHasTalentWork_(target)) return true;
-  return actor.role === 'manager' && sameDepartment_(actor.department, target.department);
+  return false;
 }
 
 function talentCanAccessPendingUser_(actor, target) {
   if (!actor || !target || actor.status !== 'active' || target.status !== 'pending') return false;
   if (actor.role === 'admin' || isGlobalManager_(actor)) return true;
   if (talentAssignments_(actor).indexOf('talent-manager') >= 0 && userHasTalentWork_(target)) return true;
-  return actor.role === 'manager' && sameDepartment_(actor.department, target.department);
+  return false;
 }
 
 function talentPublicUser_(user) {
@@ -105,9 +108,13 @@ function talentPublicUser_(user) {
 }
 
 function talentSchedulesForDate_(user, date) {
-  const weekday = new Date(String(date || '') + 'T12:00:00+08:00').getDay();
+  const normalizedDate = String(date || '').slice(0, 10);
+  const weekday = new Date(normalizedDate + 'T12:00:00+08:00').getDay();
   return normalizeUserSchedule_(user && user.schedule_json).filter(function (item) {
-    return Number(item.weekday) === weekday;
+    if (Number(item.weekday) !== weekday) return false;
+    if (item.effectiveFrom && normalizedDate < item.effectiveFrom) return false;
+    if (item.effectiveUntil && normalizedDate > item.effectiveUntil) return false;
+    return true;
   });
 }
 
@@ -161,6 +168,110 @@ function talentAppEvidence_(items, required) {
     throw new Error('家長 APP 發布證據只接受圖片');
   }
   return files;
+}
+
+function talentDriveFileIdFromUrl_(value) {
+  const url = String(value || '').trim();
+  if (!/^https:\/\/drive\.google\.com\//i.test(url)) return '';
+  const pathMatch = url.match(/\/file\/d\/([A-Za-z0-9_-]{10,200})(?:[/?#]|$)/i);
+  const queryMatch = url.match(/[?&]id=([A-Za-z0-9_-]{10,200})(?:[&#]|$)/i);
+  return String(pathMatch && pathMatch[1] || queryMatch && queryMatch[1] || '');
+}
+
+function talentDriveItemTrashed_(item) {
+  try { return !item || typeof item.isTrashed !== 'function' || item.isTrashed() === true; }
+  catch (error) { return true; }
+}
+
+function talentDriveParents_(item) {
+  const result = [];
+  try {
+    if (!item || typeof item.getParents !== 'function') return result;
+    const iterator = item.getParents();
+    while (iterator && iterator.hasNext() && result.length < 20) result.push(iterator.next());
+  } catch (error) { return []; }
+  return result;
+}
+
+function talentDriveFolderMatches_(folder, expectedName) {
+  try {
+    return !talentDriveItemTrashed_(folder)
+      && typeof folder.getName === 'function'
+      && String(folder.getName() || '') === expectedName;
+  } catch (error) { return false; }
+}
+
+function talentRoomFileInEvidencePath_(file, user, lessonDate) {
+  const expectedDepartment = normalizeDepartment_(user && user.department) || '未分部門';
+  const expectedNickname = String(user && user.nickname || '').trim();
+  const expectedMonth = String(lessonDate || '').slice(0, 7);
+  if (!expectedNickname || !/^\d{4}-\d{2}$/.test(expectedMonth)) return false;
+  let evidenceRoot;
+  try { evidenceRoot = getEvidenceRootFolder_(); }
+  catch (error) { return false; }
+  if (talentDriveItemTrashed_(evidenceRoot)) return false;
+  let evidenceRootId = '';
+  try { evidenceRootId = String(evidenceRoot.getId() || ''); }
+  catch (error) { return false; }
+  if (!evidenceRootId) return false;
+
+  return talentDriveParents_(file).some(function (monthFolder) {
+    let monthName = '';
+    try { monthName = String(monthFolder.getName() || ''); }
+    catch (error) { return false; }
+    if (talentDriveItemTrashed_(monthFolder) || monthName !== expectedMonth) return false;
+    return talentDriveParents_(monthFolder).some(function (workFolder) {
+      if (!talentDriveFolderMatches_(workFolder, '才藝')) return false;
+      return talentDriveParents_(workFolder).some(function (teacherFolder) {
+        if (!talentDriveFolderMatches_(teacherFolder, expectedNickname)) return false;
+        return talentDriveParents_(teacherFolder).some(function (departmentFolder) {
+          if (!talentDriveFolderMatches_(departmentFolder, expectedDepartment)) return false;
+          return talentDriveParents_(departmentFolder).some(function (rootFolder) {
+            if (!talentDriveFolderMatches_(rootFolder, 'KPI證據')) return false;
+            try { return String(rootFolder.getId() || '') === evidenceRootId; }
+            catch (error) { return false; }
+          });
+        });
+      });
+    });
+  });
+}
+
+function verifyTalentRoomDriveFile_(item, user, lessonDate) {
+  const fileId = String(item && item.fileId || '').trim();
+  const urlFileId = talentDriveFileIdFromUrl_(item && item.url);
+  if (!/^[A-Za-z0-9_-]{10,200}$/.test(fileId) || !urlFileId || fileId !== urlFileId) {
+    throw new Error('課後教室整潔照片連結或檔案識別碼不正確');
+  }
+  let file;
+  try { file = DriveApp.getFileById(fileId); }
+  catch (error) { throw new Error('課後教室整潔照片不存在或無法存取'); }
+  try {
+    if (!file || String(file.getId() || '') !== fileId) throw new Error('invalid file');
+  } catch (error) {
+    throw new Error('課後教室整潔照片不存在或無法存取');
+  }
+  if (talentDriveItemTrashed_(file)) throw new Error('課後教室整潔照片已移到垃圾桶');
+  let actualMimeType = '';
+  try { actualMimeType = String(file.getMimeType() || ''); }
+  catch (error) { throw new Error('無法確認課後教室整潔照片類型'); }
+  if (!/^image\//i.test(actualMimeType)) throw new Error('課後教室整潔證據只接受圖片');
+  if (!talentRoomFileInEvidencePath_(file, user, lessonDate)) {
+    throw new Error('課後教室整潔照片不在本人的 KPI 證據資料夾');
+  }
+  item.fileId = fileId;
+  item.url = 'https://drive.google.com/file/d/' + fileId + '/view';
+  item.mimeType = actualMimeType;
+  try { item.fileName = String(file.getName() || item.fileName || '教室整潔照片').slice(0, 160); }
+  catch (error) { /* 保留原有顯示檔名 */ }
+  return item;
+}
+
+function talentRoomEvidence_(items, required, user, lessonDate) {
+  const files = talentAttachments_(items, required);
+  if (!required) return files;
+  if (!user || !String(user.nickname || '').trim()) throw new Error('無法確認教室整潔照片所屬老師');
+  return files.map(function (item) { return verifyTalentRoomDriveFile_(item, user, lessonDate); });
 }
 
 function mergeTalentAppEvidence_(existingItems, incomingItems) {
@@ -258,11 +369,12 @@ function getTalentWorkspaceData(params) {
     else if (row.record_type === 'conversation') conversations.push(record);
     else if (row.record_type === 'lesson_draft' && row.nickname === actor.nickname) draft = record.draft || null;
   });
-  if (actor.role !== 'admin' && actor.role !== 'manager') {
+  if (!talentManagerCanReview_(actor)) {
     const publishedMonths = {};
     for (let index = scores.length - 1; index >= 0; index -= 1) {
-      if (scores[index].published === true || scores[index].status === 'published') {
-        publishedMonths[scores[index].month] = true;
+      const published = scores[index].published === true || scores[index].status === 'published';
+      if (published || scores[index].appPhotoBonusForfeited === true) {
+        if (published) publishedMonths[scores[index].month] = true;
         delete scores[index].history;
       }
       else scores.splice(index, 1);
@@ -375,6 +487,145 @@ function validateTalentLessonRequiredFields_(lesson) {
   }
 }
 
+function talentLessonEntryVersion_(lesson) {
+  return Number(lesson && lesson.entryVersion || 0) >= TALENT_SIMPLE_ENTRY_VERSION_
+    ? TALENT_SIMPLE_ENTRY_VERSION_
+    : 1;
+}
+
+function talentLessonSaveVersionError_(existingRow, existingLesson, requestedVersion) {
+  if (existingRow && existingRow.status === 'submitted'
+      && existingLesson && talentLessonEntryVersion_(existingLesson) < TALENT_SIMPLE_ENTRY_VERSION_) {
+    return '此歷史紀錄為舊版格式，只能查看；如需補傳 APP 截圖，請從紀錄詳情使用「補傳 APP 截圖」';
+  }
+  if (!existingRow && todayStr() >= TALENT_SIMPLE_ONLY_START_
+      && Number(requestedVersion || 0) < TALENT_SIMPLE_ENTRY_VERSION_) {
+    return '此頁面版本已過期，請重新整理並使用新版才藝表單後再送出';
+  }
+  return '';
+}
+
+function preserveTalentAdminBackfillState_(lesson, initialLesson) {
+  const hasOwn = Object.prototype.hasOwnProperty;
+  ['adminBackfillApproved', 'adminBackfillApprovedBy', 'adminBackfillApprovedAt', 'adminBackfillNote'].forEach(function (key) {
+    if (initialLesson && hasOwn.call(initialLesson, key)) lesson[key] = initialLesson[key];
+    else delete lesson[key];
+  });
+}
+
+function applyTalentBonusState_(lesson, initialLesson) {
+  const hasOwn = Object.prototype.hasOwnProperty;
+  const declaredNew = Number(lesson.newCount || 0);
+  const declaredRenewal = Number(lesson.renewalCount || 0);
+  const countsChanged = !initialLesson
+    || Number(initialLesson.newCount || 0) !== declaredNew
+    || Number(initialLesson.renewalCount || 0) !== declaredRenewal;
+  const approvalFields = [
+    'bonusApproval', 'approvedNewCount', 'approvedRenewalCount',
+    'bonusApprovedBy', 'bonusApprovedAt', 'bonusApprovalNote'
+  ];
+  if (!countsChanged) {
+    approvalFields.forEach(function (key) {
+      if (hasOwn.call(initialLesson, key)) lesson[key] = initialLesson[key];
+      else delete lesson[key];
+    });
+    if (!hasOwn.call(initialLesson, 'bonusApproval')) {
+      lesson.bonusApproval = declaredNew || declaredRenewal ? 'pending' : 'not_required';
+    }
+    if (!hasOwn.call(initialLesson, 'approvedNewCount')) lesson.approvedNewCount = 0;
+    if (!hasOwn.call(initialLesson, 'approvedRenewalCount')) lesson.approvedRenewalCount = 0;
+    return;
+  }
+  lesson.bonusApproval = declaredNew || declaredRenewal ? 'pending' : 'not_required';
+  lesson.approvedNewCount = 0;
+  lesson.approvedRenewalCount = 0;
+  lesson.bonusApprovedBy = '';
+  lesson.bonusApprovedAt = '';
+  lesson.bonusApprovalNote = '';
+}
+
+function talentScheduleDuration_(time) {
+  const match = String(time || '').trim().match(/^(\d{1,2}):(\d{2})\s*[-–~～]\s*(\d{1,2}):(\d{2})$/);
+  if (!match) return 0;
+  const start = Number(match[1]) * 60 + Number(match[2]);
+  const end = Number(match[3]) * 60 + Number(match[4]);
+  const minutes = end - start;
+  return minutes > 0 ? minutes / 60 : 0;
+}
+
+function talentRequiredCount_(value, label) {
+  if (value === '' || value === null || value === undefined) throw new Error('請填寫' + label);
+  const count = Number(value);
+  if (!Number.isFinite(count) || count < 0 || !Number.isInteger(count) || count > 999) {
+    throw new Error(label + '必須是 0～999 的整數');
+  }
+  return count;
+}
+
+function normalizeTalentSimpleLesson_(lesson, user, matchedSchedule, isCoverage) {
+  const hasOwn = Object.prototype.hasOwnProperty;
+  const rawPresent = hasOwn.call(lesson, 'present') ? lesson.present
+    : hasOwn.call(lesson, 'studentCount') ? lesson.studentCount
+      : hasOwn.call(lesson, 'attendanceCount') ? lesson.attendanceCount : '';
+  const rawRenewal = hasOwn.call(lesson, 'renewalCount') ? lesson.renewalCount
+    : hasOwn.call(lesson, 'renewal_count') ? lesson.renewal_count : '';
+  const rawNew = hasOwn.call(lesson, 'newCount') ? lesson.newCount
+    : hasOwn.call(lesson, 'new_count') ? lesson.new_count : '';
+  const rawTrial = hasOwn.call(lesson, 'trial') ? lesson.trial
+    : hasOwn.call(lesson, 'trialCount') ? lesson.trialCount : '';
+  const present = talentRequiredCount_(rawPresent, '本堂正式上課人數');
+  const renewal = talentRequiredCount_(rawRenewal, '續抱人數');
+  const newCount = talentRequiredCount_(rawNew, '新生人數');
+  const trial = talentRequiredCount_(rawTrial, '體驗人數');
+  if (renewal > present) throw new Error('續抱人數不可大於本堂正式上課人數');
+  if (newCount > present) throw new Error('新生人數不可大於本堂正式上課人數');
+  const bonusExempt = isCoverage || String(lesson.siteType || '') === 'partner';
+
+  if (matchedSchedule) {
+    lesson.courseName = String(matchedSchedule.courseName || lesson.courseName || matchedSchedule.label || lesson.courseType || '').trim();
+    lesson.courseType = String(matchedSchedule.courseType || lesson.courseType || lesson.courseName || '').trim();
+  } else {
+    lesson.courseName = String(lesson.courseName || lesson.courseType || '').trim();
+    lesson.courseType = String(lesson.courseType || lesson.courseName || '').trim();
+  }
+  if (!lesson.courseName) throw new Error('請選擇課程');
+
+  lesson.entryVersion = TALENT_SIMPLE_ENTRY_VERSION_;
+  lesson.expected = present;
+  lesson.present = present;
+  lesson.leave = 0;
+  lesson.absent = 0;
+  lesson.makeup = 0;
+  lesson.trial = trial;
+  lesson.renewalCount = bonusExempt ? 0 : renewal;
+  lesson.newCount = bonusExempt ? 0 : newCount;
+  lesson.prepId = '';
+  lesson.issue = '';
+  lesson.parentStatus = 'not_required';
+  lesson.parentFollowup = '';
+  lesson.attendanceFiles = talentAttachments_(lesson.attendanceFiles, false);
+  lesson.learningFiles = talentAttachments_(lesson.learningFiles, false);
+  lesson.roomFiles = talentRoomEvidence_(lesson.roomFiles, true, user, lesson.date);
+  lesson.roomDone = lesson.roomFiles.length > 0;
+  if (!lesson.roomDone) throw new Error('請上傳課後教室整潔照片');
+
+  if (!isCoverage) {
+    const scheduledDuration = talentScheduleDuration_(matchedSchedule && matchedSchedule.time);
+    const requestedDuration = Number(lesson.duration || 0);
+    lesson.duration = scheduledDuration || ([1, 1.5].indexOf(requestedDuration) >= 0 ? requestedDuration : 1.5);
+    if ([1, 1.5].indexOf(lesson.duration) < 0) throw new Error('固定課程時數只可為 1 或 1.5 小時');
+  }
+  if (!lesson.siteType) lesson.siteType = 'self';
+  if (!lesson.site) {
+    const department = normalizeDepartment_(user && user.department);
+    lesson.site = department === '才藝部門' ? '布拉克自營教室' : department;
+  }
+  lesson.appStatus = 'not_required';
+  lesson.appFiles = [];
+  lesson.appUpdatedAt = '';
+  lesson.appPublishedAt = '';
+}
+
 function saveTalentLesson(params) {
   const actor = params.__actor;
   const nickname = String(params.nickname || actor && actor.nickname || '').trim();
@@ -385,6 +636,7 @@ function saveTalentLesson(params) {
   const lesson = talentPayload_(params.lesson);
   const baseContentRevision = String(lesson.contentRevision || '');
   if (!lesson.id) return { ok: false, error: '課堂紀錄編號遺失' };
+  lesson.entryVersion = talentLessonEntryVersion_(lesson);
   lesson.teacher = nickname;
   const employment = talentEmployment_(user);
   lesson.employment = employment;
@@ -417,6 +669,9 @@ function saveTalentLesson(params) {
   const initialExisting = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lesson.id);
   const initialLesson = initialExisting && initialExisting.record_type === 'lesson' && initialExisting.nickname === nickname
     ? talentRecordObject_(initialExisting) : null;
+  const initialVersionError = talentLessonSaveVersionError_(initialExisting, initialLesson, lesson.entryVersion);
+  if (initialVersionError) return { ok: false, error: initialVersionError };
+  preserveTalentAdminBackfillState_(lesson, initialLesson);
   ['reportUrl', 'reportFileId', 'reportFolderUrl', 'reportGeneratedAt', 'reportRevision'].forEach(function (key) {
     lesson[key] = initialLesson ? initialLesson[key] || '' : '';
   });
@@ -462,39 +717,45 @@ function saveTalentLesson(params) {
     lesson.appPublishedAt = '';
     lesson.backfilled = lesson.date !== todayStr();
   } else {
-    validateTalentLessonRequiredFields_(lesson);
-    ['expected', 'present', 'leave', 'absent', 'makeup', 'trial'].forEach(function (key) {
-      lesson[key] = Math.max(0, Math.floor(Number(lesson[key] || 0)));
-    });
-    if (lesson.expected !== lesson.present + lesson.leave + lesson.absent) throw new Error('應到正式人數必須等於正式實到、請假與未請假缺席合計');
-    lesson.duration = Number(lesson.duration || 0);
-    if (lesson.siteType === 'partner' && !isCoverage) lesson.duration = 1.5;
-    if (!isCoverage && [1, 1.5].indexOf(lesson.duration) < 0) throw new Error('授課時數只可選 1 或 1.5 小時');
-    const prepRow = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', String(lesson.prepId || ''));
-    if (!prepRow || prepRow.record_type !== 'prep' || prepRow.nickname !== nickname) {
-      throw new Error('請選擇本人的備課檔案');
+    const simpleEntry = lesson.entryVersion >= TALENT_SIMPLE_ENTRY_VERSION_;
+    if (simpleEntry) {
+      normalizeTalentSimpleLesson_(lesson, user, matchedSchedule, isCoverage);
+    } else {
+      validateTalentLessonRequiredFields_(lesson);
+      ['expected', 'present', 'leave', 'absent', 'makeup', 'trial'].forEach(function (key) {
+        lesson[key] = Math.max(0, Math.floor(Number(lesson[key] || 0)));
+      });
+      if (lesson.expected !== lesson.present + lesson.leave + lesson.absent) throw new Error('應到正式人數必須等於正式實到、請假與未請假缺席合計');
+      lesson.duration = Number(lesson.duration || 0);
+      if (lesson.siteType === 'partner' && !isCoverage) lesson.duration = 1.5;
+      if (!isCoverage && [1, 1.5].indexOf(lesson.duration) < 0) throw new Error('授課時數只可選 1 或 1.5 小時');
+      const prepRow = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', String(lesson.prepId || ''));
+      if (!prepRow || prepRow.record_type !== 'prep' || prepRow.nickname !== nickname) {
+        throw new Error('請選擇本人的備課檔案');
+      }
+      const selectedPrep = talentRecordObject_(prepRow);
+      talentAttachments_(selectedPrep.materials, true);
+      lesson.courseType = String(selectedPrep.courseType || '').trim();
+      lesson.courseName = String(selectedPrep.courseName || selectedPrep.title || '').trim();
+      if (!lesson.courseType || !lesson.courseName) throw new Error('所選備課檔案缺少課程資料，請先更新備課檔案');
+      lesson.attendanceFiles = talentAttachments_(lesson.attendanceFiles, true);
+      lesson.learningFiles = talentAttachments_(lesson.learningFiles, true);
+      lesson.roomFiles = talentAttachments_(lesson.roomFiles, true);
+      lesson.roomDone = lesson.roomFiles.length > 0;
+      if (!lesson.roomDone) throw new Error('請上傳課後教室復原照片');
+      if (['complete', 'followup'].indexOf(lesson.parentStatus) < 0) throw new Error('請選擇親師溝通狀態');
+      if (lesson.parentStatus === 'followup' && !String(lesson.parentFollowup || '').trim()) throw new Error('請填寫個別追蹤與下一步');
+      if (lesson.parentStatus !== 'followup') lesson.parentFollowup = '';
+      lesson.newCount = lesson.siteType === 'self' && lesson.employment === 'fulltime' ? Math.max(0, Math.floor(Number(lesson.newCount || 0))) : 0;
+      lesson.renewalCount = lesson.siteType === 'self' && !isCoverage ? Math.max(0, Math.floor(Number(lesson.renewalCount || 0))) : 0;
+      if (lesson.renewalCount > lesson.present) throw new Error('續抱人數不可大於上課人數');
     }
-    const selectedPrep = talentRecordObject_(prepRow);
-    talentAttachments_(selectedPrep.materials, true);
-    lesson.courseType = String(selectedPrep.courseType || '').trim();
-    lesson.courseName = String(selectedPrep.courseName || selectedPrep.title || '').trim();
-    if (!lesson.courseType || !lesson.courseName) throw new Error('所選備課檔案缺少課程資料，請先更新備課檔案');
-    lesson.attendanceFiles = talentAttachments_(lesson.attendanceFiles, true);
-    lesson.learningFiles = talentAttachments_(lesson.learningFiles, true);
-    lesson.roomFiles = talentAttachments_(lesson.roomFiles, true);
-    lesson.roomDone = lesson.roomFiles.length > 0;
-    if (!lesson.roomDone) throw new Error('請上傳課後教室復原照片');
-    if (['complete', 'followup'].indexOf(lesson.parentStatus) < 0) throw new Error('請選擇親師溝通狀態');
-    if (lesson.parentStatus === 'followup' && !String(lesson.parentFollowup || '').trim()) throw new Error('請填寫個別追蹤與下一步');
-    if (lesson.parentStatus !== 'followup') lesson.parentFollowup = '';
-    lesson.newCount = lesson.siteType === 'self' && lesson.employment === 'fulltime' ? Math.max(0, Math.floor(Number(lesson.newCount || 0))) : 0;
-    lesson.renewalCount = lesson.siteType === 'self' && !isCoverage ? Math.max(0, Math.floor(Number(lesson.renewalCount || 0))) : 0;
     const pay = talentLessonPay_(lesson, user);
     lesson.pay = pay.amount;
     lesson.payRate = pay.rate;
     lesson.payTier = pay.tier;
     lesson.payRequiresReview = pay.requiresReview;
-    if (lesson.siteType === 'partner' || isCoverage) {
+    if (simpleEntry || lesson.siteType === 'partner' || isCoverage) {
       lesson.appStatus = 'not_required';
       lesson.appFiles = [];
       lesson.appUpdatedAt = '';
@@ -506,20 +767,8 @@ function saveTalentLesson(params) {
       lesson.appPublishedAt = initialLesson && initialLesson.appPublishedAt || lesson.appPublishedAt || '';
     }
     lesson.backfilled = isCoverage && lesson.date !== todayStr();
-    const bonusCountsChanged = initialLesson && (
-      Number(initialLesson.newCount || 0) !== lesson.newCount || Number(initialLesson.renewalCount || 0) !== lesson.renewalCount
-    );
-    if (bonusCountsChanged) {
-      lesson.bonusApproval = (lesson.newCount || lesson.renewalCount) ? 'pending' : 'not_required';
-      lesson.approvedNewCount = 0;
-      lesson.approvedRenewalCount = 0;
-      lesson.bonusApprovedBy = '';
-      lesson.bonusApprovedAt = '';
-      lesson.bonusApprovalNote = '';
-    } else if (!lesson.bonusApproval) {
-      lesson.bonusApproval = (lesson.newCount || lesson.renewalCount) ? 'pending' : 'not_required';
-    }
   }
+  applyTalentBonusState_(lesson, initialLesson);
   lesson.status = 'submitted';
   lesson.contentRevision = nowIso() + '-' + Utilities.getUuid().slice(0, 8);
   lesson.lastRequestId = String(params.request_id || '');
@@ -529,8 +778,11 @@ function saveTalentLesson(params) {
   let duplicateSubmission = false;
   try {
     const existing = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lesson.id);
+    const existingLesson = existing && existing.record_type === 'lesson' && existing.nickname === nickname
+      ? talentRecordObject_(existing) : null;
+    const lockedVersionError = talentLessonSaveVersionError_(existing, existingLesson, lesson.entryVersion);
+    if (lockedVersionError) return { ok: false, error: lockedVersionError };
     if (existing && existing.record_type === 'lesson' && existing.nickname === nickname && existing.status === 'submitted') {
-      const existingLesson = talentRecordObject_(existing);
       if ((params.request_id && existingLesson.lastRequestId === params.request_id) || !String(lesson.updatedAt || '').trim()) {
         saved = existingLesson;
         duplicateSubmission = true;
@@ -548,6 +800,8 @@ function saveTalentLesson(params) {
       if (duplicate) return { ok: false, error: '這個日期與班次已有送出紀錄，不能重複申報' };
     }
     if (!duplicateSubmission) {
+      preserveTalentAdminBackfillState_(lesson, existingLesson);
+      applyTalentBonusState_(lesson, existingLesson);
       saved = upsertTalentRecord_('lesson', nickname, lesson, actor.nickname);
       removeTalentRecord_('talent-lesson-draft-' + nickname, nickname);
     }
@@ -658,6 +912,276 @@ function backfillHongdouCoverage20260919FromEditor() {
     return String(talentRecordObject_(row).date || '').slice(0, 7) === '2026-09';
   }).reduce(function (sum, row) { return sum + Number(talentRecordObject_(row).pay || 0); }, 0);
   const result = { ok: true, duplicate: duplicate, record_id: saved.id || recordId, teacher: teacher.nickname, date: '2026-09-19', time: '10:40–12:10', students: 11, amount: Number(saved.pay || 0), september_wage_total: septemberTotal };
+  Logger.log(JSON.stringify(result));
+  return result;
+}
+
+function suansuanSeptemberBackfillLesson_(entry, teacher, operator, timestamp) {
+  const lesson = {
+    id: entry.id,
+    entryVersion: TALENT_SIMPLE_ENTRY_VERSION_,
+    teacher: teacher.nickname,
+    employment: 'pt',
+    lessonStatus: 'held',
+    lessonKind: 'scheduled',
+    date: entry.date,
+    scheduleKey: entry.schedule.scheduleKey,
+    scheduleLabel: entry.schedule.label,
+    scheduleTime: entry.schedule.time,
+    courseType: entry.schedule.courseType || entry.schedule.courseName || entry.schedule.label,
+    courseName: entry.schedule.courseName || entry.schedule.label,
+    siteType: entry.schedule.siteType,
+    site: entry.schedule.site,
+    duration: talentScheduleDuration_(entry.schedule.time) || 1.5,
+    expected: entry.present,
+    present: entry.present,
+    leave: 0,
+    absent: 0,
+    makeup: 0,
+    trial: 0,
+    prepId: '',
+    issue: '',
+    parentStatus: 'not_required',
+    attendanceFiles: [],
+    learningFiles: [],
+    roomFiles: [],
+    roomDone: false,
+    appStatus: 'not_required',
+    appFiles: [],
+    newCount: 0,
+    renewalCount: entry.renewal,
+    approvedNewCount: 0,
+    approvedRenewalCount: 0,
+    bonusApproval: entry.renewal > 0 ? 'pending' : 'not_required',
+    status: 'submitted',
+    adminBackfillApproved: true,
+    adminBackfillApprovedBy: operator.nickname,
+    adminBackfillApprovedAt: timestamp,
+    adminBackfillNote: '柏翰確認的 2026/09 酸酸才藝 PT 歷史課程；當時無整潔照，不偽造附件。',
+    backfilled: true,
+    contentRevision: timestamp + '-' + Utilities.getUuid().slice(0, 8)
+  };
+  const calculatedPay = talentLessonPay_(lesson, teacher);
+  if (calculatedPay.requiresReview || calculatedPay.amount <= 0) {
+    throw new Error(entry.date + ' ' + lesson.courseName + ' 鐘點計算無法強制列入薪資');
+  }
+  lesson.adminPayOverrideApproved = true;
+  lesson.adminPayOverrideAmount = calculatedPay.amount;
+  lesson.adminPayOverrideRate = calculatedPay.rate;
+  lesson.adminPayOverrideTier = calculatedPay.tier + '（管理員核定歷史回填）';
+  lesson.adminPayOverrideReason = '柏翰確認酸酸 2026/09 才藝 PT 課程必須列入薪資';
+  lesson.adminPayOverrideBy = operator.nickname;
+  lesson.adminPayOverrideAt = timestamp;
+  const forcedPay = talentLessonPay_(lesson, teacher);
+  lesson.pay = forcedPay.amount;
+  lesson.payRate = forcedPay.rate;
+  lesson.payTier = forcedPay.tier;
+  lesson.payRequiresReview = forcedPay.requiresReview;
+  return lesson;
+}
+
+function validateSuansuanSeptemberBackfillDuplicate_(row, expected) {
+  const actual = talentRecordObject_(row);
+  const differences = [];
+  function text(value) { return String(value == null ? '' : value).trim().replace(/\s+/g, ' ').toLowerCase(); }
+  function sameNumber(left, right) { return Math.abs(Number(left) - Number(right)) < 0.0001; }
+  function requireText(label, actualValue, expectedValue) {
+    if (text(actualValue) !== text(expectedValue)) differences.push(label);
+  }
+  function requireNumber(label, actualValue, expectedValue) {
+    if (!sameNumber(actualValue, expectedValue)) differences.push(label);
+  }
+  function requireBoolean(label, actualValue, expectedValue) {
+    if (actualValue !== expectedValue) differences.push(label);
+  }
+  requireText('資料類型', row.record_type, 'lesson');
+  requireText('老師', row.nickname, expected.teacher);
+  requireText('送出狀態', row.status, 'submitted');
+  requireText('資料老師', actual.teacher, expected.teacher);
+  requireNumber('表單版本', actual.entryVersion, expected.entryVersion);
+  requireText('聘用身分', actual.employment, expected.employment);
+  requireText('上課狀態', actual.lessonStatus, expected.lessonStatus);
+  requireText('課程類別', actual.lessonKind, expected.lessonKind);
+  requireText('日期', actual.date, expected.date);
+  requireText('排班識別碼', actual.scheduleKey, expected.scheduleKey);
+  requireText('班次', actual.scheduleLabel, expected.scheduleLabel);
+  requireText('時間', actual.scheduleTime, expected.scheduleTime);
+  requireText('課程類型', actual.courseType, expected.courseType);
+  requireText('課程名稱', actual.courseName, expected.courseName);
+  requireText('場域', actual.siteType, expected.siteType);
+  requireText('地點', actual.site, expected.site);
+  requireNumber('時數', actual.duration, expected.duration);
+  requireNumber('應到人數', actual.expected, expected.expected);
+  requireNumber('實到人數', actual.present, expected.present);
+  requireNumber('請假人數', actual.leave, expected.leave);
+  requireNumber('缺席人數', actual.absent, expected.absent);
+  requireNumber('補課人數', actual.makeup, expected.makeup);
+  requireNumber('體驗人數', actual.trial, expected.trial);
+  requireNumber('續抱人數', actual.renewalCount, expected.renewalCount);
+  requireNumber('鐘點', actual.pay, expected.pay);
+  requireNumber('時薪', actual.payRate, expected.payRate);
+  requireText('鐘點級距', actual.payTier, expected.payTier);
+  requireBoolean('鐘點核定', actual.adminPayOverrideApproved, true);
+  requireNumber('核定鐘點', actual.adminPayOverrideAmount, expected.adminPayOverrideAmount);
+  requireNumber('核定時薪', actual.adminPayOverrideRate, expected.adminPayOverrideRate);
+  requireText('核定級距', actual.adminPayOverrideTier, expected.adminPayOverrideTier);
+  requireText('鐘點核定人', actual.adminPayOverrideBy, expected.adminPayOverrideBy);
+  requireBoolean('薪資待審', actual.payRequiresReview, false);
+  requireBoolean('歷史回填核定', actual.adminBackfillApproved, true);
+  requireText('歷史回填核定人', actual.adminBackfillApprovedBy, expected.adminBackfillApprovedBy);
+  requireBoolean('歷史回填', actual.backfilled, true);
+  requireText('續抱審核', actual.bonusApproval, expected.bonusApproval);
+  if (differences.length) {
+    throw new Error(expected.date + ' ' + expected.courseName + ' 已有正式紀錄，但 ' + differences.join('、') + ' 不一致；未寫入任何回填資料');
+  }
+  return actual;
+}
+
+function appendTalentBackfillLessonsAtomically_(sheet, lessons, teacher, operator, timestamp) {
+  if (!lessons.length) return;
+  const headers = getHeaders(sheet);
+  const rows = lessons.map(function (lesson) {
+    const record = {
+      record_id: lesson.id,
+      record_type: 'lesson',
+      nickname: teacher.nickname,
+      department: normalizeDepartment_(teacher.department),
+      record_date: lesson.date,
+      year_month: String(lesson.date || '').slice(0, 7),
+      status: 'submitted',
+      data_json: JSON.stringify(talentPayload_(lesson)),
+      created_by: operator.nickname,
+      updated_by: operator.nickname,
+      created_at: timestamp,
+      updated_at: timestamp,
+      submitted_at: timestamp,
+      report_attempted_at: ''
+    };
+    return headers.map(function (header) { return sheetValueForWrite_(record[header]); });
+  });
+  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
+}
+
+/**
+ * 僅供 Apps Script 編輯器手動執行：
+ * 1. 將酸酸保留為安親主管，並開通才藝 PT 與 2026/10/10 起的週六兩班。
+ * 2. 依柏翰確認的人數，幂等回填 2026/09 五筆歷史課程。
+ *
+ * 五筆會先在同一把鎖內完整預檢；任一重複紀錄的課程或薪資不符即全數不寫入。
+ * 歷史課程沒有整潔照，只標示為管理員核定回填，不偽造附件。
+ */
+function backfillSuansuanTalentPtSeptember2026FromEditor() {
+  const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  const operator = email ? findUserByEmail(email) : null;
+  if (!operator || operator.status !== 'active' || operator.role !== 'admin') {
+    throw new Error('只有正式管理員可以開通酸酸才藝 PT 並回填鐘點');
+  }
+
+  migrateTalentUserProfiles_();
+  const teacher = findTalentUser_('酸酸');
+  const assignments = talentAssignments_(teacher);
+  if (!teacher || teacher.status !== 'active' || teacher.role !== 'manager' || talentEmployment_(teacher) !== 'pt'
+      || assignments.indexOf('anqin-manager') < 0 || assignments.indexOf('talent-pt') < 0) {
+    throw new Error('酸酸的安親主管／才藝 PT 雙身分尚未完整建立');
+  }
+  const schedules = normalizeUserSchedule_(teacher.schedule_json);
+  function findSchedule(time, courseName) {
+    const schedule = schedules.filter(function (item) {
+      return Number(item.weekday) === 6 && item.time === time
+        && String(item.courseName || item.label || '').toLowerCase() === String(courseName || '').toLowerCase();
+    })[0];
+    if (!schedule) throw new Error('找不到酸酸週六 ' + courseName + ' ' + time + ' 排班');
+    return schedule;
+  }
+
+  const simpleSchedule = findSchedule('09:00–10:30', '簡易');
+  const wedoSchedule = findSchedule('10:40–12:10', 'WeDo');
+  const entries = [
+    { id: 'talent-admin-backfill-suansuan-20260905-simple', date: '2026-09-05', schedule: simpleSchedule, present: 6, renewal: 0 },
+    { id: 'talent-admin-backfill-suansuan-20260912-simple', date: '2026-09-12', schedule: simpleSchedule, present: 8, renewal: 0 },
+    { id: 'talent-admin-backfill-suansuan-20260919-simple', date: '2026-09-19', schedule: simpleSchedule, present: 4, renewal: 0 },
+    { id: 'talent-admin-backfill-suansuan-20260905-wedo', date: '2026-09-05', schedule: wedoSchedule, present: 10, renewal: 4 },
+    { id: 'talent-admin-backfill-suansuan-20260912-wedo', date: '2026-09-12', schedule: wedoSchedule, present: 10, renewal: 4 }
+  ];
+  const sheet = ensureTalentRecordsSheet_();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) throw new Error('系統正在處理其他才藝資料，未寫入回填，請稍後再試');
+  const results = [];
+  const createdLessons = [];
+  let septemberWageTotal = 0;
+  let pendingRenewalApproval = 0;
+  try {
+    const rows = sheetToObjects(SHEET_NAMES.TALENT_RECORDS).slice();
+    const timestamp = nowIso();
+    const plans = entries.map(function (entry) {
+      return { entry: entry, lesson: suansuanSeptemberBackfillLesson_(entry, teacher, operator, timestamp) };
+    });
+
+    // 先預檢全部五筆，不可邊檢查邊寫入，避免後段衝突時只留下半套資料。
+    plans.forEach(function (plan) {
+      const entry = plan.entry;
+      const matches = rows.filter(function (row) {
+        if (String(row.record_id || '') === entry.id) return true;
+        if (row.record_type !== 'lesson' || row.nickname !== teacher.nickname || row.status !== 'submitted') return false;
+        const recorded = talentRecordObject_(row);
+        return String(recorded.date || '') === entry.date && (
+          String(recorded.scheduleKey || '') === entry.schedule.scheduleKey
+          || String(recorded.scheduleTime || '') === entry.schedule.time
+          || normalizeTalentNickname_(recorded.courseName) === normalizeTalentNickname_(entry.schedule.courseName || entry.schedule.label)
+        );
+      });
+      if (matches.length > 1) {
+        throw new Error(entry.date + ' ' + plan.lesson.courseName + ' 有多筆重複正式紀錄；未寫入任何回填資料');
+      }
+      if (matches.length === 1) {
+        const existing = validateSuansuanSeptemberBackfillDuplicate_(matches[0], plan.lesson);
+        results.push({ id: existing.id || matches[0].record_id, duplicate: true, date: entry.date, course: existing.courseName, present: entry.present, renewal: entry.renewal, amount: Number(existing.pay || 0) });
+      } else {
+        createdLessons.push(plan.lesson);
+        results.push({ id: plan.lesson.id, duplicate: false, date: entry.date, course: plan.lesson.courseName, present: entry.present, renewal: entry.renewal, amount: Number(plan.lesson.pay || 0) });
+      }
+    });
+
+    // 所有預檢都通過後，以單一 setValues 批次寫入新紀錄。
+    appendTalentBackfillLessonsAtomically_(sheet, createdLessons, teacher, operator, timestamp);
+
+    const septemberLessons = rows.filter(function (row) {
+      if (row.record_type !== 'lesson' || row.nickname !== teacher.nickname || row.status !== 'submitted') return false;
+      return String(talentRecordObject_(row).date || '').slice(0, 7) === '2026-09';
+    }).map(talentRecordObject_).concat(createdLessons);
+    septemberWageTotal = septemberLessons.reduce(function (sum, lesson) {
+      return sum + Number(lesson.pay || 0);
+    }, 0);
+    pendingRenewalApproval = septemberLessons.reduce(function (sum, lesson) {
+      return sum + (lesson.bonusApproval === 'approved' ? 0 : Number(lesson.renewalCount || 0));
+    }, 0);
+  } finally {
+    lock.releaseLock();
+  }
+
+  createdLessons.forEach(function (lesson) {
+    logSystem(operator.nickname, 'backfill_talent_lesson', lesson.id, {
+      teacher: teacher.nickname,
+      date: lesson.date,
+      course: lesson.courseName,
+      present: lesson.present,
+      renewal: lesson.renewalCount,
+      amount: lesson.pay
+    });
+  });
+  const result = {
+    ok: true,
+    teacher: teacher.nickname,
+    role: teacher.role,
+    employment_type: talentEmployment_(teacher),
+    work_assignments: assignments,
+    schedule_effective_from: '2026-10-10',
+    records: results,
+    created: createdLessons.length,
+    duplicates: results.length - createdLessons.length,
+    september_wage_total: septemberWageTotal,
+    pending_renewal_approval: pendingRenewalApproval
+  };
   Logger.log(JSON.stringify(result));
   return result;
 }
@@ -805,6 +1329,10 @@ function updateTalentAppStatus(params) {
   return { ok: true, lesson: saved, warning: warning };
 }
 
+function talentRubricVersionForMonth_(month) {
+  return String(month || '') >= TALENT_RUBRIC_V2_START_MONTH_ ? 2 : 1;
+}
+
 function saveTalentScore(params) {
   const actor = params.__actor;
   if (!talentManagerCanReview_(actor)) return { ok: false, error: '只有才藝主管可評分' };
@@ -813,7 +1341,7 @@ function saveTalentScore(params) {
   if (!target || talentEmployment_(target) !== 'fulltime' || !talentCanAccessUser_(actor, target)) return { ok: false, error: '找不到可評分的才藝正職' };
   nickname = target.nickname;
   const month = String(params.month || '').trim();
-  if (!/^\d{4}-\d{2}$/.test(month)) return { ok: false, error: '評分月份不正確' };
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return { ok: false, error: '評分月份不正確' };
   const score = talentPayload_(params.score);
   const maxima = { prep: 25, evidence: 25, communication: 20, attendance: 15, room: 10, improvement: 5 };
   const values = {};
@@ -826,37 +1354,105 @@ function saveTalentScore(params) {
   });
   if (!String(score.reason || '').trim()) return { ok: false, error: '請填寫評分依據或調整理由' };
   const recordId = 'talent-score-' + nickname + '-' + month;
-  const existingRow = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', recordId);
-  const existing = existingRow && existingRow.record_type === 'score' ? talentRecordObject_(existingRow) : null;
-  const published = Boolean(existing && existing.published) || score.published === true;
-  const history = existing && Array.isArray(existing.history) ? existing.history.slice(-19) : [];
-  if (existing) {
-    history.push({
-      scores: existing.scores || {},
-      total: Number(existing.total || 0),
-      reason: String(existing.reason || ''),
-      published: existing.published === true,
-      evaluatedBy: String(existing.evaluatedBy || existingRow.updated_by || ''),
-      evaluatedAt: String(existing.evaluatedAt || existingRow.updated_at || ''),
-    });
+  const result = withRecordWriteLock_(function () {
+    const existingRow = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', recordId);
+    const existing = existingRow && existingRow.record_type === 'score' ? talentRecordObject_(existingRow) : null;
+    // 評分版本只由月份決定，不能信任前端 payload 或既有錯誤版本。
+    const rubricVersion = talentRubricVersionForMonth_(month);
+    const published = Boolean(existing && existing.published) || score.published === true;
+    const history = existing && Array.isArray(existing.history) ? existing.history.slice(-19) : [];
+    if (existing) {
+      history.push({
+        rubricVersion: Number(existing.rubricVersion || 1),
+        scores: existing.scores || {},
+        total: Number(existing.total || 0),
+        reason: String(existing.reason || ''),
+        published: existing.published === true,
+        evaluatedBy: String(existing.evaluatedBy || existingRow.updated_by || ''),
+        evaluatedAt: String(existing.evaluatedAt || existingRow.updated_at || ''),
+      });
+    }
+    const record = {
+      id: recordId,
+      teacher: nickname,
+      date: month + '-01',
+      month: month,
+      rubricVersion: rubricVersion,
+      scores: values,
+      total: total,
+      reason: String(score.reason).trim(),
+      published: published,
+      status: published ? 'published' : 'draft',
+      evaluatedBy: actor.nickname,
+      evaluatedAt: nowIso(),
+      history: history,
+      appPhotoBonusForfeited: Boolean(existing && existing.appPhotoBonusForfeited === true),
+      appPhotoBonusForfeitedBy: String(existing && existing.appPhotoBonusForfeitedBy || ''),
+      appPhotoBonusForfeitedAt: String(existing && existing.appPhotoBonusForfeitedAt || ''),
+      appPhotoBonusForfeitedReason: String(existing && existing.appPhotoBonusForfeitedReason || ''),
+    };
+    return { ok: true, score: upsertTalentRecord_('score', nickname, record, actor.nickname), published: published };
+  });
+  if (!result || !result.ok) return result;
+  logSystem(actor.nickname, 'save_talent_score', recordId, { teacher: nickname, month: month, total: total, published: result.published });
+  delete result.published;
+  return result;
+}
+
+function forfeitTalentMonthlyBonus(params) {
+  const actor = params.__actor;
+  if (!talentManagerCanReview_(actor)) return { ok: false, error: '只有才藝主管可查證並取消當月獎金' };
+  if (params.confirmed !== true) return { ok: false, error: '請明確確認此操作不可恢復' };
+  const month = String(params.month || '').trim();
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return { ok: false, error: '月份不正確' };
+  if (month >= todayStr().slice(0, 7)) return { ok: false, error: '只能在月份結束後查證並取消該月獎金' };
+  const reason = String(params.reason || '').trim();
+  if (!reason) return { ok: false, error: '請填寫主管查證原因' };
+  let nickname = String(params.nickname || '').trim();
+  const target = findTalentUser_(nickname);
+  const canAccessTarget = target && (
+    talentCanAccessUser_(actor, target) || talentCanAccessHistoricalUser_(actor, target)
+  );
+  if (!target || !userHasTalentWork_(target) || !canAccessTarget) {
+    return { ok: false, error: '找不到可處理的才藝人員' };
   }
-  const record = {
-    id: recordId,
-    teacher: nickname,
-    date: month + '-01',
-    month: month,
-    scores: values,
-    total: total,
-    reason: String(score.reason).trim(),
-    published: published,
-    status: published ? 'published' : 'draft',
-    evaluatedBy: actor.nickname,
-    evaluatedAt: nowIso(),
-    history: history,
-  };
-  const saved = upsertTalentRecord_('score', nickname, record, actor.nickname);
-  logSystem(actor.nickname, 'save_talent_score', recordId, { teacher: nickname, month: month, total: total, published: published });
-  return { ok: true, score: saved };
+  nickname = target.nickname;
+  const recordId = 'talent-score-' + nickname + '-' + month;
+  return withRecordWriteLock_(function () {
+    const existingRow = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', recordId);
+    if (existingRow && (existingRow.record_type !== 'score' || existingRow.nickname !== nickname)) {
+      return { ok: false, error: '獎金資料識別衝突，請聯絡管理員' };
+    }
+    const existing = existingRow ? talentRecordObject_(existingRow) : null;
+    if (existing && existing.appPhotoBonusForfeited === true) {
+      return { ok: true, score: existing, duplicate: true, irreversible: true };
+    }
+    const record = existing ? talentPayload_(existing) : {
+      id: recordId,
+      teacher: nickname,
+      date: month + '-01',
+      month: month,
+      rubricVersion: talentRubricVersionForMonth_(month),
+      scores: {},
+      total: 0,
+      reason: '',
+      published: false,
+      status: 'penalty_only',
+      history: [],
+    };
+    record.appPhotoBonusForfeited = true;
+    record.appPhotoBonusForfeitedBy = actor.nickname;
+    record.appPhotoBonusForfeitedAt = nowIso();
+    record.appPhotoBonusForfeitedReason = reason.slice(0, 1000);
+    const saved = upsertTalentRecord_('score', nickname, record, actor.nickname);
+    logSystem(actor.nickname, 'forfeit_talent_monthly_bonus', recordId, {
+      teacher: nickname,
+      month: month,
+      reason: record.appPhotoBonusForfeitedReason,
+      irreversible: true,
+    });
+    return { ok: true, score: saved, irreversible: true };
+  });
 }
 
 function addTalentMessage(params) {
@@ -893,26 +1489,59 @@ function addTalentMessage(params) {
 function approveTalentBonus(params) {
   const actor = params.__actor;
   if (!actor || actor.role !== 'admin') return { ok: false, error: '只有管理員可核准獎金人數' };
-  const row = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', String(params.lesson_id || ''));
-  if (!row || row.record_type !== 'lesson') return { ok: false, error: '找不到課堂紀錄' };
-  const lesson = talentRecordObject_(row);
-  if (lesson.lessonStatus === 'cancelled') return { ok: false, error: '停課沒有獎金事件' };
-  const approvedNew = Math.max(0, Math.floor(Number(params.approved_new_count || 0)));
-  const approvedRenewal = Math.max(0, Math.floor(Number(params.approved_renewal_count || 0)));
-  if (approvedNew > Number(lesson.newCount || 0) || approvedRenewal > Number(lesson.renewalCount || 0)) {
-    return { ok: false, error: '核准人數不可高於老師申報人數' };
+  const lessonId = String(params.lesson_id || '').trim();
+  if (!lessonId) return { ok: false, error: '找不到課堂紀錄' };
+  const rawApprovedNew = params.approved_new_count;
+  const rawApprovedRenewal = params.approved_renewal_count;
+  const approvedNew = Number(rawApprovedNew);
+  const approvedRenewal = Number(rawApprovedRenewal);
+  const approvedNewTypeValid = typeof rawApprovedNew === 'number' ||
+    (typeof rawApprovedNew === 'string' && /^\d+$/.test(rawApprovedNew.trim()));
+  const approvedRenewalTypeValid = typeof rawApprovedRenewal === 'number' ||
+    (typeof rawApprovedRenewal === 'string' && /^\d+$/.test(rawApprovedRenewal.trim()));
+  if (!approvedNewTypeValid || !approvedRenewalTypeValid ||
+      !Number.isFinite(approvedNew) || !Number.isInteger(approvedNew) || approvedNew < 0 ||
+      !Number.isFinite(approvedRenewal) || !Number.isInteger(approvedRenewal) || approvedRenewal < 0) {
+    return { ok: false, error: '核准人數必須是 0 以上整數' };
   }
-  const different = approvedNew !== Number(lesson.newCount || 0) || approvedRenewal !== Number(lesson.renewalCount || 0);
   const note = String(params.note || '').trim();
-  if (different && !note) return { ok: false, error: '調整人數時必須填寫原因' };
-  lesson.approvedNewCount = approvedNew;
-  lesson.approvedRenewalCount = approvedRenewal;
-  lesson.bonusApproval = 'approved';
-  lesson.bonusApprovedBy = actor.nickname;
-  lesson.bonusApprovedAt = nowIso();
-  lesson.bonusApprovalNote = note;
-  const saved = upsertTalentRecord_('lesson', row.nickname, lesson, actor.nickname);
-  return { ok: true, lesson: saved };
+  const result = withRecordWriteLock_(function () {
+    // 必須在與老師寫入相同的 ScriptLock 內重新讀取，避免核准覆蓋同期更新。
+    const row = findObject(SHEET_NAMES.TALENT_RECORDS, 'record_id', lessonId);
+    if (!row || row.record_type !== 'lesson') return { ok: false, error: '找不到課堂紀錄' };
+    const lesson = talentRecordObject_(row);
+    if (lesson.lessonStatus === 'cancelled') return { ok: false, error: '停課沒有獎金事件' };
+    const declaredNew = Number(lesson.newCount || 0);
+    const declaredRenewal = Number(lesson.renewalCount || 0);
+    if (approvedNew > declaredNew || approvedRenewal > declaredRenewal) {
+      return { ok: false, error: '核准人數不可高於老師申報人數' };
+    }
+    const different = approvedNew !== declaredNew || approvedRenewal !== declaredRenewal;
+    if (different && !note) return { ok: false, error: '調整人數時必須填寫原因' };
+    lesson.approvedNewCount = approvedNew;
+    lesson.approvedRenewalCount = approvedRenewal;
+    lesson.bonusApproval = 'approved';
+    lesson.bonusApprovedBy = actor.nickname;
+    lesson.bonusApprovedAt = nowIso();
+    lesson.bonusApprovalNote = note;
+    lesson.contentRevision = lesson.bonusApprovedAt + '-' + Utilities.getUuid().slice(0, 8);
+    // 舊連結內容不含這次核准結果；先隱藏並以 revision 觸發背景重建。
+    lesson.reportUrl = '';
+    lesson.reportFileId = '';
+    lesson.reportGeneratedAt = '';
+    return { ok: true, lesson: upsertTalentRecord_('lesson', row.nickname, lesson, actor.nickname) };
+  });
+  if (!result || !result.ok) return result;
+  const reportJob = typeof queueDeferredTeacherReport_ === 'function'
+    ? queueDeferredTeacherReport_({ type: 'talent', lessonId: lessonId })
+    : { queued: false, scheduled: false };
+  logSystem(actor.nickname, 'approve_talent_bonus', lessonId, {
+    teacher: result.lesson.teacher,
+    approvedNewCount: approvedNew,
+    approvedRenewalCount: approvedRenewal,
+    reportQueued: reportJob.queued,
+  });
+  return Object.assign({}, result, { reportPending: true, reportQueued: reportJob.queued });
 }
 
 function talentHtmlEsc_(value) {
@@ -951,26 +1580,33 @@ function generateTalentLessonPdf_(lesson, user) {
     html += '<h2>停課回報</h2><div class="box"><strong>' + talentHtmlEsc_(lesson.courseName) + '</strong><p>' + talentHtmlEsc_(lesson.cancellationReason) + '</p><p>' + talentHtmlEsc_(lesson.cancellationNote || '') + '</p></div>';
   } else {
     html += '<h2>' + talentHtmlEsc_(lesson.courseName || lesson.courseType) + '</h2><div class="muted">' + talentHtmlEsc_(lesson.courseType || '') + '　' + talentHtmlEsc_(lesson.duration || '') + ' 小時</div>';
-    html += '<div class="grid six"><div class="box">應到<br><strong>' + Number(lesson.expected || 0) + '</strong></div><div class="box">正式實到<br><strong>' + Number(lesson.present || 0) + '</strong></div><div class="box">請假<br><strong>' + Number(lesson.leave || 0) + '</strong></div><div class="box">未請假缺席<br><strong>' + Number(lesson.absent || 0) + '</strong></div><div class="box">補課<br><strong>' + Number(lesson.makeup || 0) + '</strong></div><div class="box">體驗<br><strong>' + Number(lesson.trial || 0) + '</strong></div></div>';
-    html += '<h3>本堂使用的備課檔案</h3><div class="box' + (prep ? '' : ' warning') + '">' + (prep
-      ? '<strong>' + talentHtmlEsc_(prep.courseName || prep.title || '備課檔案') + '</strong><div class="muted">' + talentHtmlEsc_(prep.courseType || '') + '</div>' + (prep.notes ? '<p>' + talentHtmlEsc_(prep.notes) + '</p>' : '')
-      : '原備課檔案已不存在') + '</div>';
-    if (prep) html += talentAttachmentLinks_('備課附件', prep.materials);
-    html += '<h3>課程問題及下次優化</h3><div class="box">' + talentHtmlEsc_(lesson.issue) + '</div>';
-    html += '<h3>親師溝通</h3><div class="box">' + talentHtmlEsc_(lesson.parentStatus === 'complete' ? '全班回報完成' : lesson.parentStatus === 'followup' ? '有個別追蹤' : '尚未完成') + (lesson.parentFollowup ? '<br>' + talentHtmlEsc_(lesson.parentFollowup) : '') + '</div>';
-    if (lesson.lessonKind === 'coverage') {
-      html += '<h3>家長 APP 發布確認</h3><div class="box">帶班免發布，不列入缺件。</div>';
-    } else if (lesson.siteType === 'partner') {
-      html += '<h3>家長 APP 發布確認</h3><div class="box">合作校課程免發布，不列入缺件。</div>';
+    if (talentLessonEntryVersion_(lesson) >= TALENT_SIMPLE_ENTRY_VERSION_) {
+      html += '<div class="grid"><div class="box">正式上課<br><strong>' + Number(lesson.present || 0) + '</strong></div><div class="box">新生<br><strong>' + Number(lesson.newCount || 0) + '</strong></div><div class="box">續抱<br><strong>' + Number(lesson.renewalCount || 0) + '</strong></div><div class="box">體驗<br><strong>' + Number(lesson.trial || 0) + '</strong></div><div class="box">教室整潔<br><strong>' + (Array.isArray(lesson.roomFiles) && lesson.roomFiles.length ? '已拍照' : lesson.adminBackfillApproved ? '歷史回填' : '未附照') + '</strong></div></div>';
+      if (lesson.adminBackfillApproved && (!Array.isArray(lesson.roomFiles) || !lesson.roomFiles.length)) {
+        html += '<div class="box warning">此筆為管理員核定的歷史課程；當時無整潔照，系統未偽造附件。</div>';
+      }
     } else {
-      html += '<h3>家長 APP 發布確認</h3><div class="box">' + (lesson.appStatus === 'published' && Array.isArray(lesson.appFiles) && lesson.appFiles.length ? '已上傳發布完成截圖' : '尚未上傳發布完成截圖') + '</div>';
-      html += talentAttachmentLinks_('家長 APP 發布完成截圖', lesson.appFiles);
+      html += '<div class="grid six"><div class="box">應到<br><strong>' + Number(lesson.expected || 0) + '</strong></div><div class="box">正式實到<br><strong>' + Number(lesson.present || 0) + '</strong></div><div class="box">請假<br><strong>' + Number(lesson.leave || 0) + '</strong></div><div class="box">未請假缺席<br><strong>' + Number(lesson.absent || 0) + '</strong></div><div class="box">補課<br><strong>' + Number(lesson.makeup || 0) + '</strong></div><div class="box">體驗<br><strong>' + Number(lesson.trial || 0) + '</strong></div></div>';
+      html += '<h3>本堂使用的備課檔案</h3><div class="box' + (prep ? '' : ' warning') + '">' + (prep
+        ? '<strong>' + talentHtmlEsc_(prep.courseName || prep.title || '備課檔案') + '</strong><div class="muted">' + talentHtmlEsc_(prep.courseType || '') + '</div>' + (prep.notes ? '<p>' + talentHtmlEsc_(prep.notes) + '</p>' : '')
+        : '原備課檔案已不存在') + '</div>';
+      if (prep) html += talentAttachmentLinks_('備課附件', prep.materials);
+      html += '<h3>課程問題及下次優化</h3><div class="box">' + talentHtmlEsc_(lesson.issue) + '</div>';
+      html += '<h3>親師溝通</h3><div class="box">' + talentHtmlEsc_(lesson.parentStatus === 'complete' ? '全班回報完成' : lesson.parentStatus === 'followup' ? '有個別追蹤' : '尚未完成') + (lesson.parentFollowup ? '<br>' + talentHtmlEsc_(lesson.parentFollowup) : '') + '</div>';
+      if (lesson.lessonKind === 'coverage') {
+        html += '<h3>家長 APP 發布確認</h3><div class="box">帶班免發布，不列入缺件。</div>';
+      } else if (lesson.siteType === 'partner') {
+        html += '<h3>家長 APP 發布確認</h3><div class="box">合作校課程免發布，不列入缺件。</div>';
+      } else {
+        html += '<h3>家長 APP 發布確認</h3><div class="box">' + (lesson.appStatus === 'published' && Array.isArray(lesson.appFiles) && lesson.appFiles.length ? '已上傳發布完成截圖' : '尚未上傳發布完成截圖') + '</div>';
+        html += talentAttachmentLinks_('家長 APP 發布完成截圖', lesson.appFiles);
+      }
+      html += talentAttachmentLinks_('點名簿', lesson.attendanceFiles);
+      html += talentAttachmentLinks_('學習過程與成果', lesson.learningFiles);
     }
     if (lesson.employment === 'pt') html += '<h3>本堂鐘點試算</h3><div class="box">計薪人數 ' + Number(lesson.present || 0) + '＋補課 ' + Number(lesson.makeup || 0) + '；' + talentHtmlEsc_(lesson.payTier || '') + '；本堂 NT$' + Number(lesson.pay || 0).toLocaleString('en-US') + '</div>';
     if (lesson.siteType === 'self' && (Number(lesson.newCount || 0) || Number(lesson.renewalCount || 0))) html += '<h3>新生／續報申報</h3><div class="box">新生 ' + Number(lesson.newCount || 0) + ' 人；續報 ' + Number(lesson.renewalCount || 0) + ' 人；狀態：' + talentHtmlEsc_(lesson.bonusApproval === 'approved' ? '已核准' : '待核准') + '</div>';
-    html += talentAttachmentLinks_('點名簿', lesson.attendanceFiles);
-    html += talentAttachmentLinks_('學習過程與成果', lesson.learningFiles);
-    html += talentAttachmentLinks_('課後教室復原', lesson.roomFiles);
+    html += talentAttachmentLinks_('課後教室整潔', lesson.roomFiles);
   }
   html += '</body></html>';
   const blob = Utilities.newBlob(html, 'text/html', 'talent.html').getAs('application/pdf').setName(fileName);

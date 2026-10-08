@@ -9,7 +9,7 @@ window.API = (function () {
   const RECEIPTED_ACTIONS = new Set([
     'saveLog', 'saveCoursePrep', 'deleteCoursePrep', 'saveTalentLesson', 'saveTalentDraft',
     'saveTalentPrep', 'deleteTalentPrep', 'reviewTalentPrep', 'updateTalentAppStatus',
-    'saveTalentScore', 'addTalentMessage', 'approveTalentBonus',
+    'saveTalentScore', 'addTalentMessage', 'approveTalentBonus', 'forfeitTalentMonthlyBonus',
     'saveAdminMarketingRecord', 'saveAdminMarketingAssignment', 'reviewAdminMarketingRecord',
     'reviewAdminMarketingTrialBonus', 'saveAdminMarketingScore', 'addAdminMarketingMessage',
     'saveClassRosterMutation', 'saveWeekly', 'addFeedback', 'markFeedbackRead',
@@ -483,6 +483,12 @@ window.API = (function () {
       approved_new_count: approvedNewCount,
       approved_renewal_count: approvedRenewalCount,
       note,
+    }),
+    forfeitTalentMonthlyBonus: (nickname, month, reason, confirmed) => call('forfeitTalentMonthlyBonus', {
+      nickname,
+      month,
+      reason,
+      confirmed: confirmed === true,
     }),
     getAdminMarketingWorkspaceData: (params = {}) => call('getAdminMarketingWorkspaceData', {
       ...params,

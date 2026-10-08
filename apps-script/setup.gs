@@ -33,6 +33,7 @@ function setupSheets() {
       'score_k1', 'score_k2', 'score_k3', 'score_k4', 'score_k5', 'score_k6',
       'score_okr', 'total_score', 'grade', 'bonus',
       'score_late_count', 'late_penalty', 'makeup_count', 'makeup_penalty', 'bonus_granted',
+      'september_missing_count', 'september_missing_penalty', 'september_bonus_points',
       'manager_comment', 'interview_notes',
       'status', 'created_at', 'updated_at'
     ],
@@ -130,7 +131,7 @@ function setupSheets() {
     const headers = getHeaders(usersSheet);
     const rows = INITIAL_USERS.map(u => headers.map(header => {
       if (header === 'joined_at') return now;
-      if (header === 'work_assignments') return JSON.stringify(u.work_assignments || []);
+      if (['work_assignments', 'schedule_json', 'rest_days'].indexOf(header) >= 0) return JSON.stringify(u[header] || []);
       return u[header] === undefined ? '' : u[header];
     }));
     usersSheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
@@ -148,13 +149,17 @@ function setupSheets() {
 }
 
 /**
- * 補齊既有帳號的多工作身分與才藝排班。既有管理員已調整過的欄位不覆蓋；
+ * 補齊既有帳號的多工作身分與才藝排班。一般帳號已調整過的欄位不覆蓋；
+ * 酸酸依 2026/10/08 授權固定覆寫為 PT 計薪身分，並幂等合併兩筆週六班。
  * 尚未取得 Google Email 的 RITA／黑豹先以 pending 建檔，避免被誤啟用。
  */
 function migrateTalentUserProfiles_() {
   const profiles = [
     { nickname: '柏翰', employment_type: 'admin', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'] },
-    { nickname: '酸酸', employment_type: 'manager', work_assignments: ['anqin-manager'] },
+    { nickname: '酸酸', employment_type: 'pt', work_assignments: ['anqin-manager', 'talent-pt'], schedule_json: [
+      { weekday: 6, label: '簡易', courseName: '簡易', courseType: '樂高簡易積木', time: '09:00–10:30', siteType: 'self', site: '東橋教室', effectiveFrom: '2026-10-10' },
+      { weekday: 6, label: 'WeDo', courseName: 'WeDo', courseType: 'WeDo 機器人', time: '10:40–12:10', siteType: 'self', site: '東橋教室', effectiveFrom: '2026-10-10' }
+    ] },
     { nickname: '小魚', employment_type: 'manager', work_assignments: ['anqin-manager', 'talent-payroll', 'admin-marketing-manager', 'class-roster-manager'] },
     { nickname: '柳丁', role: 'manager', department: '才藝部門', status: 'pending', employment_type: 'manager', work_assignments: ['talent-manager', 'class-roster-manager'] },
     { nickname: '浩浩', role: 'teacher', department: '才藝部門', status: 'pending', employment_type: 'fulltime', work_assignments: ['talent-fulltime'], rest_days: ['週一', '週日'] },
@@ -215,6 +220,35 @@ function migrateTalentUserProfiles_() {
     if (mergedAssignments.length !== currentAssignments.length) {
       row[indexes.work_assignments] = JSON.stringify(mergedAssignments);
       changed = true;
+    }
+    if (profile.nickname === '酸酸') {
+      const employmentIndex = indexes.employment_type;
+      if (employmentIndex >= 0 && row[employmentIndex] !== 'pt') {
+        row[employmentIndex] = 'pt';
+        changed = true;
+      }
+      const scheduleIndex = indexes.schedule_json;
+      if (scheduleIndex >= 0) {
+        const existingSchedules = normalizeUserSchedule_(row[scheduleIndex]);
+        const requiredSchedules = normalizeUserSchedule_(profile.schedule_json || []);
+        const byKey = {};
+        existingSchedules.forEach(function (item, index) { byKey[item.scheduleKey] = index; });
+        requiredSchedules.forEach(function (required) {
+          const existingIndex = byKey[required.scheduleKey];
+          if (existingIndex === undefined) {
+            byKey[required.scheduleKey] = existingSchedules.length;
+            existingSchedules.push(required);
+          } else {
+            existingSchedules[existingIndex] = Object.assign({}, existingSchedules[existingIndex], required);
+          }
+        });
+        const serializedSchedules = JSON.stringify(existingSchedules);
+        const currentSerializedSchedules = JSON.stringify(normalizeUserSchedule_(row[scheduleIndex]));
+        if (serializedSchedules !== currentSerializedSchedules) {
+          row[scheduleIndex] = serializedSchedules;
+          changed = true;
+        }
+      }
     }
     ['employment_type', 'schedule_json', 'rest_days'].forEach(function (key) {
       const index = indexes[key];
