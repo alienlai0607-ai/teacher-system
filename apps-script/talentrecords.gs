@@ -498,6 +498,11 @@ function talentLessonSaveVersionError_(existingRow, existingLesson, requestedVer
       && existingLesson && talentLessonEntryVersion_(existingLesson) < TALENT_SIMPLE_ENTRY_VERSION_) {
     return '此歷史紀錄為舊版格式，只能查看；如需補傳 APP 截圖，請從紀錄詳情使用「補傳 APP 截圖」';
   }
+  if (existingRow && existingRow.status === 'submitted'
+      && existingLesson && talentLessonEntryVersion_(existingLesson) >= TALENT_SIMPLE_ENTRY_VERSION_
+      && Number(requestedVersion || 0) < TALENT_SIMPLE_ENTRY_VERSION_) {
+    return '此頁面版本已過期，既有新版紀錄不可降級；請重新整理後再送出';
+  }
   if (!existingRow && todayStr() >= TALENT_SIMPLE_ONLY_START_
       && Number(requestedVersion || 0) < TALENT_SIMPLE_ENTRY_VERSION_) {
     return '此頁面版本已過期，請重新整理並使用新版才藝表單後再送出';

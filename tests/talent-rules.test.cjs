@@ -271,6 +271,11 @@ assert.match(
   /舊版格式.*只能查看/,
   '既有 v1 正式紀錄也不得偽裝成 v2 覆寫',
 );
+assert.match(
+  context.talentLessonSaveVersionError_({ status: 'submitted' }, { entryVersion: 2 }, 1),
+  /版本已過期.*不可降級.*重新整理/,
+  '既有 v2 正式紀錄不得降為 v1 繞過新版人數與 Drive 驗證',
+);
 assert.equal(context.talentLessonSaveVersionError_({ status: 'submitted' }, { entryVersion: 2 }, 2), '', '既有 v2 仍可依原規則更新');
 context.todayStr = () => '2026-10-07';
 assert.equal(context.talentLessonSaveVersionError_(null, null, 1), '', '限制不得回溯改變新制生效前的行為');
@@ -367,6 +372,38 @@ assert.deepEqual({ approval: forgedUpdate.bonusApproval, approved: forgedUpdate.
 const changedRenewal = { newCount: 0, renewalCount: 3, bonusApproval: 'approved', approvedRenewalCount: 3 };
 context.applyTalentBonusState_(changedRenewal, approvedServerLesson);
 assert.deepEqual({ approval: changedRenewal.bonusApproval, approved: changedRenewal.approvedRenewalCount }, { approval: 'pending', approved: 0 }, '申報續報人數變更後必須重新待核准');
+
+const storedV2Lesson = {
+  id: 'lesson-v2-no-downgrade', teacher: 'QA老師', entryVersion: 2, lessonStatus: 'held', lessonKind: 'scheduled',
+  date: '2026-10-08', status: 'submitted', contentRevision: 'revision-v2', updatedAt: '2026-10-08T10:00:00.000Z',
+};
+const storedV2Row = { record_type: 'lesson', nickname: 'QA老師', status: 'submitted', updated_at: storedV2Lesson.updatedAt, data: storedV2Lesson };
+let downgradeWrites = 0;
+context.todayStr = () => '2026-10-08';
+context.SHEET_NAMES = { TALENT_RECORDS: 'TalentRecords' };
+context.findUserByNickname = nickname => nickname === 'QA老師' ? {
+  nickname: 'QA老師', role: 'teacher', status: 'active', department: '才藝部門',
+  employment_type: 'fulltime', work_assignments: ['talent-fulltime'],
+} : null;
+context.userHasTalentWork_ = () => true;
+context.findObject = () => storedV2Row;
+context.talentRecordObject_ = row => JSON.parse(JSON.stringify(row.data));
+context.upsertTalentRecord_ = () => { downgradeWrites += 1; throw new Error('降版 payload 不得寫入'); };
+const downgradeAttempt = context.saveTalentLesson({
+  __actor: { nickname: 'QA老師', role: 'teacher', status: 'active' },
+  nickname: 'QA老師',
+  lesson: {
+    id: storedV2Lesson.id, entryVersion: 1, date: storedV2Lesson.date, lessonStatus: 'held',
+    contentRevision: storedV2Lesson.contentRevision, updatedAt: storedV2Lesson.updatedAt,
+    courseType: '舊版課程', courseName: '刻意降版', siteType: 'self', site: '布拉克自營教室',
+    prepId: 'prep-1', issue: '測試', parentStatus: 'complete', expected: 2, present: 2,
+    leave: 0, absent: 0, makeup: 0, trial: 0, newCount: 2, renewalCount: 2,
+  },
+});
+assert.equal(downgradeAttempt.ok, false, '既有 v2 紀錄的 v1 更新必須在任何寫入前失敗');
+assert.match(downgradeAttempt.error, /版本已過期.*不可降級/);
+assert.equal(downgradeWrites, 0, '降版 payload 不得呼叫資料寫入');
+assert.equal(storedV2Row.data.entryVersion, 2, '被拒絕的降版不得改變原紀錄');
 
 let storedLesson = {
   id: 'lesson-app-qa', teacher: 'QA老師', entryVersion: 1, lessonStatus: 'held', siteType: 'self', status: 'submitted',
@@ -736,6 +773,7 @@ assert.match(talentUiSource, /'正式到課總數', '其中新生', '其中續�
 assert.match(talentUiSource, /'bonus-approved': \['已核准'.*'bonus-pending': \['待核准'/, '獎金狀態需明確顯示已核准或待核准');
 assert.match(backendSource, /function updateTalentAppStatus\(/, '舊版課堂的 APP 證據 API 仍需保留，避免歷史資料無法補件');
 assert.match(backendSource, /function talentLessonSaveVersionError_[\s\S]*talentLessonEntryVersion_\(existingLesson\) < TALENT_SIMPLE_ENTRY_VERSION_[\s\S]*此歷史紀錄為舊版格式，只能查看/, '後端必須阻擋舊制正式紀錄透過 saveTalentLesson 改寫');
+assert.match(backendSource, /talentLessonEntryVersion_\(existingLesson\) >= TALENT_SIMPLE_ENTRY_VERSION_[\s\S]*Number\(requestedVersion \|\| 0\) < TALENT_SIMPLE_ENTRY_VERSION_[\s\S]*既有新版紀錄不可降級/, '後端必須阻擋既有 v2 正式紀錄降為 v1 繞過新版檢核');
 assert.match(backendSource, /function preserveTalentAdminBackfillState_\([\s\S]*function applyTalentBonusState_\(/, '管理員補登與獎金核准欄位必須由伺服器保護');
 assert.match(backendSource, /function talentRubricVersionForMonth_[\s\S]*TALENT_RUBRIC_V2_START_MONTH_[\s\S]*const rubricVersion = talentRubricVersionForMonth_\(month\)/, '後端評分版本必須只由月份決定，不能信任 payload');
 assert.match(talentUiSource, /function talentRubricVersionForMonth\([\s\S]*function kpiDimensionsFor\([\s\S]*record\?\.month/, '前端評分版本也必須只由月份決定');

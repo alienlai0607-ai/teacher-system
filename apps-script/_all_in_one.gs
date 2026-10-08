@@ -21,7 +21,7 @@
  * 5. 把網址貼到前端 shared/config.js 的 API_URL
  */
 
-const KPI_RELEASE_VERSION_ = '20261008-release-4';
+const KPI_RELEASE_VERSION_ = '20261008-release-5';
 
 // ============ 路由 ============
 function doGet(e) {
@@ -7484,6 +7484,11 @@ function talentLessonSaveVersionError_(existingRow, existingLesson, requestedVer
   if (existingRow && existingRow.status === 'submitted'
       && existingLesson && talentLessonEntryVersion_(existingLesson) < TALENT_SIMPLE_ENTRY_VERSION_) {
     return '此歷史紀錄為舊版格式，只能查看；如需補傳 APP 截圖，請從紀錄詳情使用「補傳 APP 截圖」';
+  }
+  if (existingRow && existingRow.status === 'submitted'
+      && existingLesson && talentLessonEntryVersion_(existingLesson) >= TALENT_SIMPLE_ENTRY_VERSION_
+      && Number(requestedVersion || 0) < TALENT_SIMPLE_ENTRY_VERSION_) {
+    return '此頁面版本已過期，既有新版紀錄不可降級；請重新整理後再送出';
   }
   if (!existingRow && todayStr() >= TALENT_SIMPLE_ONLY_START_
       && Number(requestedVersion || 0) < TALENT_SIMPLE_ENTRY_VERSION_) {
