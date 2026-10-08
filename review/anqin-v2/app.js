@@ -1144,6 +1144,9 @@
   // 主管可在上一筆評核仍載入時切換老師／月份；只讓最後一次請求更新畫面，
   // 避免較慢的舊回應把 A 老師分數覆蓋到 B 老師的儲存表單。
   let managerEvaluationLoadGeneration = 0;
+  // 進入頁面時會先查詢最近評核；若主管已手動選擇老師／月份，
+  // 較慢的「最近評核」回應不得再開啟另一次載入來覆蓋手動選擇。
+  let managerEvaluationSelectionGeneration = 0;
   let openDraftStore = loadOpenDraftStore();
   if (startupDraftStoreNeedsRewrite) writeOpenDraftStore();
 
@@ -3228,7 +3231,9 @@
     }) || ANQIN_BONUS_TIERS[ANQIN_BONUS_TIERS.length - 1];
   }
 
-  async function loadManagerEvaluation(teacher = integrationRuntime.managerEvaluationTeacher, month = integrationRuntime.managerEvaluationMonth) {
+  async function loadManagerEvaluation(teacher = integrationRuntime.managerEvaluationTeacher, month = integrationRuntime.managerEvaluationMonth, latestSelectionGeneration = null) {
+    if (latestSelectionGeneration === null) managerEvaluationSelectionGeneration += 1;
+    else if (latestSelectionGeneration !== managerEvaluationSelectionGeneration) return;
     const loadGeneration = ++managerEvaluationLoadGeneration;
     const session = legacySession();
     const teachers = managerEvaluationTeachers();
@@ -3270,13 +3275,15 @@
   }
 
   async function loadLatestManagerEvaluation() {
+    const selectionGeneration = ++managerEvaluationSelectionGeneration;
     const session = legacySession();
     const teachers = managerEvaluationTeachers();
     if (!session || !['manager', 'admin'].includes(session.role) || !teachers.length) {
-      await loadManagerEvaluation();
+      await loadManagerEvaluation(undefined, undefined, selectionGeneration);
       return;
     }
     const result = await API.listEvals({ role: 'teacher', viewer: session.nickname });
+    if (selectionGeneration !== managerEvaluationSelectionGeneration) return;
     const teacherMap = new Map(teachers.map(person => [normalizeReviewNickname(backendNickname(person.nickname)), person.nickname]));
     const latest = (result?.ok && Array.isArray(result.evals) ? result.evals : [])
       .filter(item => teacherMap.has(normalizeReviewNickname(item.nickname)))
@@ -3286,10 +3293,10 @@
         return String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || ''));
       })[0];
     if (latest) {
-      await loadManagerEvaluation(teacherMap.get(normalizeReviewNickname(latest.nickname)), latest.year_month);
+      await loadManagerEvaluation(teacherMap.get(normalizeReviewNickname(latest.nickname)), latest.year_month, selectionGeneration);
       return;
     }
-    await loadManagerEvaluation(teachers[0].nickname, state.daily.date.slice(0, 7));
+    await loadManagerEvaluation(teachers[0].nickname, state.daily.date.slice(0, 7), selectionGeneration);
   }
 
   function managerEvaluationValues() {
@@ -9063,7 +9070,7 @@
       const root = window.AUTH?.relativeRoot?.() || '../../';
       if (realRole === 'admin') window.location.href = `${root}admin/dashboard.html?v=20260827-test-view-fast-1#test-view`;
       else if (window.AUTH?.routeByRole) window.AUTH.routeByRole(realRole, realSession);
-      else window.location.href = `${root}review/anqin-v2/index.html?v=20261008-september-penalty-1`;
+      else window.location.href = `${root}review/anqin-v2/index.html?v=20261008-release-2`;
     }
     else if (action === 'open-test-view') {
       const root = window.AUTH?.relativeRoot?.() || '../../';

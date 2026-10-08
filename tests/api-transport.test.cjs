@@ -154,6 +154,17 @@ function createApi(fetchImpl, options = {}) {
   assert.equal(hungSignal.aborted, true, '永不回應的連線必須被中止');
   assert.equal(hungResult.uncertain, true, '逾時不能當成確定未写入');
 
+  let slowReadCalls = 0; let slowReadSignal;
+  const slowReadApi = createApi((_url, init) => {
+    slowReadCalls += 1;
+    slowReadSignal = init.signal;
+    return new Promise(() => {});
+  }, { deadlineMs: 5 });
+  const slowReadResult = await slowReadApi.getEvalEvidence('QA', '2026-09');
+  assert.equal(slowReadResult.code, 'REQUEST_TIMEOUT');
+  assert.equal(slowReadSignal.aborted, true, '慢速評核讀取逾時仍須中止瀏覽器等待');
+  assert.equal(slowReadCalls, 1, '慢速讀表逾時不可立即重送，避免 Apps Script 執行互相拖慢');
+
   let savedId = ''; let mutations = 0; let confirmations = 0;
   const recoveryApi = createApi(async (_url, init) => {
     const payload = JSON.parse(init.body);

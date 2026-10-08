@@ -5,6 +5,10 @@ window.API = (function () {
   const READ_RETRY_DELAYS_MS = [700, 1400];
   const WRITE_RECEIPT_DELAYS_MS = [0, 700, 1400];
   const WRITE_BUSY_DELAYS_MS = [1500, 3500];
+  const SLOW_READ_ACTIONS = new Set([
+    'getEvalEvidence', 'getEval', 'listEvals',
+    'listLogs', 'listUsers', 'listStudents', 'listCoursePreps',
+  ]);
   const RESUMABLE_UPLOADS = new Set(['uploadPhoto', 'uploadPhotos', 'uploadFile']);
   const RECEIPTED_ACTIONS = new Set([
     'saveLog', 'saveCoursePrep', 'deleteCoursePrep', 'saveTalentLesson', 'saveTalentDraft',
@@ -98,7 +102,8 @@ window.API = (function () {
     // 行政與班級資料會讀取較多正式試算表；Apps Script 冷啟動時可能超過
     // 一般讀取的 25 秒。給這兩個唯讀 API 較長時間，避免資料其實仍在整理時
     // 前端先誤判失敗。
-    const slowAction = /^(upload|saveAdminMarketingRecord|saveClassRosterMutation|saveTalentLesson|updateTalentAppStatus|sendSubmitPdf|regenerate|runProduction|getAdminMarketingWorkspaceData|getClassRosterData)/.test(payload.action);
+    const slowAction = SLOW_READ_ACTIONS.has(payload.action)
+      || /^(upload|saveAdminMarketingRecord|saveClassRosterMutation|saveTalentLesson|updateTalentAppStatus|sendSubmitPdf|regenerate|runProduction|getAdminMarketingWorkspaceData|getClassRosterData)/.test(payload.action);
     const timeoutMs = slowAction ? 90000 : 25000;
     let timer;
     const deadline = new Promise((_, reject) => {
@@ -289,7 +294,10 @@ window.API = (function () {
         return data.ok && attempt > 0 ? { ...data, recovered: true } : data;
       } catch (err) {
         lastError = err;
-        const hasRetry = (retryable || resumableUpload) && attempt < maxAttempts - 1;
+        // Apps Script 在瀏覽器 abort 後仍可能繼續讀表；慢速唯讀逾時時不要
+        // 立刻再送兩份相同重查，避免冷啟動變成多個執行互相拖慢。
+        const timeoutStillRunning = err?.code === 'REQUEST_TIMEOUT' && SLOW_READ_ACTIONS.has(action);
+        const hasRetry = (retryable || resumableUpload) && !timeoutStillRunning && attempt < maxAttempts - 1;
         console.warn('[API]', action, hasRetry ? 'retrying:' : 'error:', err.message);
         if (hasRetry) await wait(READ_RETRY_DELAYS_MS[attempt]);
         else break;

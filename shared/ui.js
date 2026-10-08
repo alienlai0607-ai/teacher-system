@@ -84,7 +84,7 @@ window.UI = (function () {
     const isManager = user.role === 'manager';
     const isTeacher = user.role === 'teacher' || user.role === 'admin_staff';
     const isAnqinManager = isManager && ['東橋教室', '永康教室', '北區教室'].includes(user.department);
-    const managerDashboard = isAnqinManager ? `${root}review/anqin-v2/index.html?v=20261008-september-penalty-1` : `${root}manager/dashboard.html`;
+    const managerDashboard = isAnqinManager ? `${root}review/anqin-v2/index.html?v=20261008-release-2` : `${root}manager/dashboard.html`;
     return `
       <header class="top-bar">
         <div class="brand"><img src="${root}shared/icons/logo.png" class="brand-logo" alt="布拉克星球"> KPI 系統</div>

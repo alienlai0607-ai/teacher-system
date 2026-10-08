@@ -50,11 +50,14 @@ function assertPreviousStaticEvaluationLoaded(nodes, message) {
   assert.equal(nodes.bonus_granted.checked, false, `${message}: fixture must load the previous denied bonus decision`);
 }
 
-async function verifyIntegratedManagerRace() {
+function integratedManagerEvaluationLoaderSource() {
   const start = app.indexOf('  async function loadManagerEvaluation(');
-  const end = app.indexOf('  async function loadLatestManagerEvaluation()', start);
-  assert.ok(start >= 0 && end > start, 'must locate integrated manager evaluation loader');
+  const end = app.indexOf('  function managerEvaluationValues()', start);
+  assert.ok(start >= 0 && end > start, 'must locate integrated manager evaluation loaders');
+  return app.slice(start, end);
+}
 
+async function verifyIntegratedManagerRace() {
   const aEvidence = deferred();
   const aEvaluation = deferred();
   const bEvidence = deferred();
@@ -68,6 +71,7 @@ async function verifyIntegratedManagerRace() {
   const renders = [];
   const context = vm.createContext({
     managerEvaluationLoadGeneration: 0,
+    managerEvaluationSelectionGeneration: 0,
     integrationRuntime: {
       managerEvaluationTeacher: '', managerEvaluationMonth: '', managerEvaluationStatus: 'idle',
       managerEvaluationMessage: '', managerEvaluationEvidence: null, managerEvaluation: null,
@@ -87,7 +91,7 @@ async function verifyIntegratedManagerRace() {
     },
     Promise,
   });
-  vm.runInContext(app.slice(start, end), context);
+  vm.runInContext(integratedManagerEvaluationLoaderSource(), context);
 
   const oldLoad = context.loadManagerEvaluation('紅豆', '2026-09');
   const latestLoad = context.loadManagerEvaluation('小明', '2026-10');
@@ -107,6 +111,57 @@ async function verifyIntegratedManagerRace() {
   assert.equal(context.integrationRuntime.managerEvaluationEvidence.marker, 'B evidence', 'late old evidence must be ignored');
   assert.equal(context.integrationRuntime.managerEvaluation.marker, 'B evaluation', 'late old evaluation must be ignored');
   assert.equal(renders.at(-1).managerEvaluationTeacher, '小明');
+}
+
+async function verifyManualSelectionInvalidatesPendingLatestLookup() {
+  const latestList = deferred();
+  const evidenceCalls = [];
+  const evaluationCalls = [];
+  const context = vm.createContext({
+    managerEvaluationLoadGeneration: 0,
+    managerEvaluationSelectionGeneration: 0,
+    integrationRuntime: {
+      managerEvaluationTeacher: '', managerEvaluationMonth: '', managerEvaluationStatus: 'idle',
+      managerEvaluationMessage: '', managerEvaluationEvidence: null, managerEvaluation: null,
+    },
+    state: { daily: { date: '2026-10-08' } },
+    legacySession: () => ({ nickname: '小魚', role: 'manager' }),
+    managerEvaluationTeachers: () => [
+      { nickname: '紅豆', role: 'teacher', department: '東橋教室' },
+      { nickname: '小明', role: 'teacher', department: '北區教室' },
+    ],
+    managerScopeMatches: () => true,
+    backendNickname: value => value,
+    normalizeReviewNickname: value => String(value || '').trim(),
+    renderApp() {},
+    API: {
+      listEvals: () => latestList.promise,
+      getEvalEvidence: async (nickname, month) => {
+        evidenceCalls.push({ nickname, month });
+        return { ok: true, marker: `${nickname}:${month}:evidence` };
+      },
+      getEval: async ({ nickname, year_month }) => {
+        evaluationCalls.push({ nickname, month: year_month });
+        return { ok: true, eval: { nickname, year_month } };
+      },
+    },
+    Promise,
+    Map,
+  });
+  vm.runInContext(integratedManagerEvaluationLoaderSource(), context);
+
+  const pendingLatest = context.loadLatestManagerEvaluation();
+  await context.loadManagerEvaluation('紅豆', '2026-09');
+  latestList.resolve({
+    ok: true,
+    evals: [{ nickname: '小明', year_month: '2026-10-01T00:00:00.000Z', updated_at: '2026-10-08T09:00:00.000Z' }],
+  });
+  await pendingLatest;
+
+  assert.equal(context.integrationRuntime.managerEvaluationTeacher, '紅豆', 'pending latest lookup must not replace a manual teacher selection');
+  assert.equal(context.integrationRuntime.managerEvaluationMonth, '2026-09', 'pending latest lookup must not replace a manual month selection with an ISO date');
+  assert.deepEqual(evidenceCalls, [{ nickname: '紅豆', month: '2026-09' }], 'stale latest lookup must not start another evidence request');
+  assert.deepEqual(evaluationCalls, [{ nickname: '紅豆', month: '2026-09' }], 'stale latest lookup must not start another evaluation request');
 }
 
 async function verifyLegacyManagerRace() {
@@ -239,6 +294,7 @@ async function verifyLegacyManagerClearsPreviousStaticFields() {
 
 Promise.all([
   verifyIntegratedManagerRace(),
+  verifyManualSelectionInvalidatesPendingLatestLookup(),
   verifyLegacyManagerRace(),
   verifyLegacyManagerClearsPreviousStaticFields(),
 ]).then(() => {

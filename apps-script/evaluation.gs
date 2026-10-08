@@ -347,9 +347,32 @@ function saveEval(params) {
   return { ok: true, eval_id, total_score: totalScore, grade: tier.grade, bonus: data.final_bonus || tier.bonus };
 }
 
+/**
+ * 評核月份正規化：Sheets 可能把 yyyy-MM 自動轉成當月某日的 Date。
+ * 評核查詢、排序與回傳一律使用 yyyy-MM，避免 Date 字串造成比對失敗。
+ */
+function normalizeEvalYearMonth_(value) {
+  if (Object.prototype.toString.call(value) === '[object Date]') {
+    return isNaN(value.getTime()) ? '' : Utilities.formatDate(value, 'Asia/Taipei', 'yyyy-MM');
+  }
+  const text = String(value === undefined || value === null ? '' : value).trim();
+  const match = text.match(/^(\d{4})[-/](\d{1,2})(?:[-/]\d{1,2}(?:[T\s].*)?)?$/);
+  if (!match) return text;
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) return text;
+  return `${match[1]}-${String(month).padStart(2, '0')}`;
+}
+
+function normalizeEvalRecord_(record) {
+  if (!record) return record;
+  return Object.assign({}, record, { year_month: normalizeEvalYearMonth_(record.year_month) });
+}
+
 function getEval(params) {
   const { nickname, viewer } = params;
-  const requestedMonth = String(params.year_month || '').trim();
+  const requestedMonthInput = String(params.year_month || '').trim();
+  const requestedMonth = requestedMonthInput === 'latest'
+    ? 'latest' : normalizeEvalYearMonth_(params.year_month);
   if (!nickname || !viewer) return { ok: false, error: 'missing fields' };
   const user = findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
@@ -364,19 +387,20 @@ function getEval(params) {
   const prefix = isManager ? 'MEVAL' : 'EVAL';
   const workerViewer = ['teacher', 'admin_staff'].includes(viewerUser.role);
   const available = sheetToObjects(sheetName)
+    .map(normalizeEvalRecord_)
     .filter(item => item.nickname === nickname)
     .filter(item => !workerViewer || item.status === 'submitted')
     .sort((a, b) => {
-      const monthCompare = String(b.year_month || '').localeCompare(String(a.year_month || ''));
+      const monthCompare = normalizeEvalYearMonth_(b.year_month).localeCompare(normalizeEvalYearMonth_(a.year_month));
       if (monthCompare) return monthCompare;
       return String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || ''));
     });
-  const months = Array.from(new Set(available.map(item => String(item.year_month || '')).filter(Boolean)));
+  const months = Array.from(new Set(available.map(item => normalizeEvalYearMonth_(item.year_month)).filter(Boolean)));
   if (!requestedMonth || requestedMonth === 'latest') {
     return { ok: true, eval: available[0] || null, months, selected_month: months[0] || '' };
   }
   const eval_id = `${prefix}-${requestedMonth}-${nickname}`;
-  const e = findObject(sheetName, 'eval_id', eval_id);
+  const e = normalizeEvalRecord_(findObject(sheetName, 'eval_id', eval_id));
   if (workerViewer && e && e.status !== 'submitted') {
     return { ok: true, eval: null, months, selected_month: requestedMonth };
   }
@@ -385,12 +409,13 @@ function getEval(params) {
 
 function listEvals(params) {
   const { evaluator, year_month, role, viewer } = params;
+  const requestedMonth = normalizeEvalYearMonth_(year_month);
   const viewerUser = findUserByNickname(viewer);
   if (!viewerUser || viewerUser.status !== 'active' || !['admin', 'manager'].includes(viewerUser.role)) {
     return { ok: false, error: '無評核清單讀取權限' };
   }
   const sheetName = role === 'manager' ? SHEET_NAMES.MANAGER_EVAL : SHEET_NAMES.TEACHER_EVAL;
-  let list = sheetToObjects(sheetName);
+  let list = sheetToObjects(sheetName).map(normalizeEvalRecord_);
   if (viewerUser.role === 'manager' && !isGlobalManager_(viewerUser)) {
     const allowed = sheetToObjects(SHEET_NAMES.USERS)
       .filter(user => sameDepartment_(user.department, viewerUser.department))
@@ -398,13 +423,15 @@ function listEvals(params) {
     list = list.filter(item => allowed.includes(item.nickname));
   }
   if (evaluator) list = list.filter(e => e.evaluator === evaluator);
-  if (year_month) list = list.filter(e => e.year_month === year_month);
+  if (requestedMonth) list = list.filter(e => normalizeEvalYearMonth_(e.year_month) === requestedMonth);
   return { ok: true, evals: list };
 }
 
 function calcDeptAvg(department, year_month) {
+  const requestedMonth = normalizeEvalYearMonth_(year_month);
   const evals = sheetToObjects(SHEET_NAMES.TEACHER_EVAL)
-    .filter(e => e.year_month === year_month);
+    .map(normalizeEvalRecord_)
+    .filter(e => normalizeEvalYearMonth_(e.year_month) === requestedMonth);
   const users = sheetToObjects(SHEET_NAMES.USERS);
   const deptTeachers = users.filter(u => sameDepartment_(u.department, department) && u.role === 'teacher').map(u => u.nickname);
   const deptEvals = evals.filter(e => deptTeachers.includes(e.nickname));
