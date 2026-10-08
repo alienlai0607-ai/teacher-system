@@ -394,6 +394,7 @@
   }
 
   let classRosterBusy = false;
+  let classRosterCloudReady = PREVIEW_MODE;
 
   function persist(message = '已儲存') {
     state.ui.lastSavedAt = new Date().toISOString();
@@ -633,8 +634,14 @@
       state.users = Array.isArray(result.users) ? result.users : [];
       state.settings = { ...state.settings, ...(result.settings || {}) };
     }
-    if (result.classRoster && Array.isArray(result.classRoster.classes)) state.classRoster = result.classRoster;
-    if (isRosterOnly && Array.isArray(result.classes)) applyClassRosterSnapshot(result);
+    if (result.classRoster && Array.isArray(result.classRoster.classes)) {
+      state.classRoster = result.classRoster;
+      classRosterCloudReady = true;
+    }
+    if (isRosterOnly && Array.isArray(result.classes)) {
+      applyClassRosterSnapshot(result);
+      classRosterCloudReady = true;
+    }
     if (!isManager && state.ui.route === 'performance') state.ui.performanceMonth = scoreMonths(true)[0] || currentMonth();
     if (isManager && state.ui.route === 'evaluation') state.ui.evaluationMonth = scoreMonths(false)[0] || currentMonth();
     cloud = { status: 'ready', message: isRosterOnly ? '班級人數已同步' : `已同步 ${state.records.length} 筆紀錄` };
@@ -1262,6 +1269,7 @@
         const result = await window.API?.getClassRosterData?.();
         if (!result?.ok) throw new Error(result?.error || '班級資料同步失敗');
         applyClassRosterSnapshot(result);
+        classRosterCloudReady = true;
         persist('班級資料已同步');
         if (notify) toast('班級資料已同步');
       }
@@ -2266,6 +2274,7 @@
       if (state.ui.route === 'evaluation') state.ui.evaluationMonth = scoreMonths(false)[0] || currentMonth();
       persist('頁面已切換');
       closeDialog(); renderApp();
+      if (state.ui.route === 'class-roster' && !classRosterCloudReady) await loadClassRosterData(false);
       return;
     }
     const actionNode = event.target.closest('[data-action]');

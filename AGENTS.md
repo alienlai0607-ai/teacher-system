@@ -7,7 +7,7 @@
 - **前端**：純靜態網頁，GitHub Pages 部署（repo: `alienlai0607-ai/teacher-system`，網域 `teacher.blockplanetcamp.com`）。push 到 `main` 即上線。
 - **後端**：Google Apps Script Web App + Google Sheets 當資料庫。
 - **目前 API URL**（在 `shared/config.js`）：
-  `https://script.google.com/macros/s/AKfycbyCO1dCIJEzTN6k1S-E3-key0T16pwd2P2_Alht76kYp3VocTjJ-_TC3xDqTxQ0bAKm/exec`
+  `https://script.google.com/macros/s/AKfycbwaAhbwsIVrCyiEc8e9LSx-cCo-OmJy_VLYkSTaHZ8ZWICCPHjg8YNgwk5aQsvWrUEy6A/exec`
 - **角色**：admin（柏翰）/ manager（酸酸-永康、小魚-北區、柳丁-才藝）/ teacher / admin_staff（皮皮老師-美編行銷）。三部門：永康教室、北區教室、才藝部門。
 
 ## 目錄結構
@@ -42,6 +42,8 @@
 4. **saveLog 防清空保護**：非送出狀態 + 新內容分數 <20 + 既有 >=100 → 跳過儲存（防舊快取前端把資料洗掉）。
 
 ## 主要功能（都已上線驗證）
+
+- 2026-10-08 行政美宣主管頁載入加速：正式資料已累積 113 筆，舊版首次開啟還同時讀取班級、異動與提醒三張表，冷啟動實測約 30 秒。新版改為先載入行政資料，班級人數點入時才獨立同步；行政首報獎金仍為首次正式報名且完成繳費每人 50 元，沒有 KPI 分數級距獎金。版本 `20261008-admin-load-1` 已部署為 Apps Script v79，API URL 已更新。本機 2,572 項介面檢查、50 種故障情境、32 項後端規則與班級權限驗收全數通過。
 
 - **日報**：today.html 六桶 KPI（安親部門用 100 分制 ANQIN_KPI，見 config.js）、照片上傳（前端壓縮 1280px → base64 → Drive「KPI證據/部門/暱稱/年月」）。
 - **雙向對話**：回饋串 chat.js，老師可回覆主管/老闆。

@@ -10,7 +10,7 @@
  * 5. 把網址貼到前端 shared/config.js 的 API_URL
  */
 
-const KPI_RELEASE_VERSION_ = '20261007-talent-coverage-1';
+const KPI_RELEASE_VERSION_ = '20261008-admin-load-1';
 
 // ============ 路由 ============
 function doGet(e) {

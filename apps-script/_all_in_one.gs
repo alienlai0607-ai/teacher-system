@@ -21,7 +21,7 @@
  * 5. 把網址貼到前端 shared/config.js 的 API_URL
  */
 
-const KPI_RELEASE_VERSION_ = '20261007-talent-coverage-1';
+const KPI_RELEASE_VERSION_ = '20261008-admin-load-1';
 
 // ============ 路由 ============
 function doGet(e) {
@@ -8350,7 +8350,9 @@ function getAdminMarketingWorkspaceData(params) {
   if (!actor || actor.status !== 'active' || !userHasAdminMarketingWork_(actor)) {
     return { ok: false, error: '此帳號沒有行政美宣工作區權限' };
   }
-  ensureAdminMarketingRecordsSheet_();
+  // 正式上線後資料表已建立；只有缺表時才跑表頭初始化，
+  // 避免每次開頁都多一次試算表讀取。
+  if (!getSS().getSheetByName(SHEET_NAMES.ADMIN_MARKETING_RECORDS)) ensureAdminMarketingRecordsSheet_();
   const allUsers = sheetToObjects(SHEET_NAMES.USERS);
   const users = allUsers.filter(function (user) {
     return user.status === 'active' && adminMarketingAssignments_(user).indexOf('admin-marketing') >= 0 && adminMarketingCanAccessUser_(actor, user);
@@ -8362,11 +8364,10 @@ function getAdminMarketingWorkspaceData(params) {
     return allowed[row.nickname] === true;
   }).map(adminMarketingRecordObject_);
   records.sort(function (a, b) { return String(b.updatedAt || b.date || '').localeCompare(String(a.updatedAt || a.date || '')); });
-  return {
+  const result = {
     ok: true,
     users: users.map(adminMarketingPublicUser_),
     records: records,
-    classRoster: getClassRosterSnapshot_(),
     settings: {
       supervisor: '小魚',
       videoWeeklyTarget: 2,
@@ -8376,6 +8377,10 @@ function getAdminMarketingWorkspaceData(params) {
       kpi: ADMIN_MARKETING_KPI_,
     },
   };
+  // 班級人數有自己的 API，三張資料表改為點進去時才讀取。
+  // 保留明確參數，供舊版客戶端或診斷工具需要一次取得時使用。
+  if (params && params.include_class_roster === true) result.classRoster = getClassRosterSnapshot_();
+  return result;
 }
 
 function existingAdminMarketingFolder_(root, department, nickname) {
