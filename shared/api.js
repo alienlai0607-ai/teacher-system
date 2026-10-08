@@ -95,7 +95,10 @@ window.API = (function () {
       queueMetric(metric);
     };
     const controller = new AbortController();
-    const slowAction = /^(upload|saveAdminMarketingRecord|saveClassRosterMutation|saveTalentLesson|updateTalentAppStatus|sendSubmitPdf|regenerate|runProduction)/.test(payload.action);
+    // 行政與班級資料會讀取較多正式試算表；Apps Script 冷啟動時可能超過
+    // 一般讀取的 25 秒。給這兩個唯讀 API 較長時間，避免資料其實仍在整理時
+    // 前端先誤判失敗。
+    const slowAction = /^(upload|saveAdminMarketingRecord|saveClassRosterMutation|saveTalentLesson|updateTalentAppStatus|sendSubmitPdf|regenerate|runProduction|getAdminMarketingWorkspaceData|getClassRosterData)/.test(payload.action);
     const timeoutMs = slowAction ? 90000 : 25000;
     let timer;
     const deadline = new Promise((_, reject) => {
