@@ -3,6 +3,26 @@
  */
 
 /**
+ * 評核頁會同時讀取多張表。通用 sheetToObjects() 會為每張表分開取得
+ * 列數、欄數、表頭與資料，正式資料量較大時會累積成數十次 Sheets RPC。
+ * 此處改為每張表一次 getDataRange().getValues()，並保留與 sheetToObjects
+ * 相同的 date 正規化行為。只在單次評核請求內使用，不快取舊資料。
+ */
+function evalSheetObjects_(name) {
+  const values = getSheet(name).getDataRange().getValues();
+  if (values.length <= 1) return [];
+  const headers = values[0];
+  return values.slice(1).map(row => {
+    const obj = {};
+    headers.forEach((header, index) => {
+      if (!header) return;
+      obj[header] = header === 'date' ? cellDateStr_(row[index]) : row[index];
+    });
+    return obj;
+  });
+}
+
+/**
  * 取得評核所需的證據摘要
  * 主管打開「評核某老師當月」時呼叫，自動彙整所有證據
  */
@@ -15,9 +35,13 @@ function getEvalEvidence(params) {
   const lastDay = new Date(year, month, 0).getDate();
   const to = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
-  const user = findUserByNickname(nickname);
+  // 同一次讀 Users 即可取得被評核者與查看者，避免 findObject
+  // 為每人反覆掃描 Users 欄位與列資料。HTTP 請求已驗證時直接沿用 actor。
+  const users = evalSheetObjects_(SHEET_NAMES.USERS);
+  const user = users.find(item => item.nickname === nickname);
   if (!user) return { ok: false, error: 'user not found' };
-  const viewerUser = findUserByNickname(viewer);
+  const actor = params.__actor && params.__actor.nickname === viewer ? params.__actor : null;
+  const viewerUser = actor || users.find(item => item.nickname === viewer);
   const canReview = viewerUser && viewerUser.status === 'active' && (
     viewerUser.role === 'admin' ||
     (viewerUser.role === 'manager' && (isGlobalManager_(viewerUser) || sameDepartment_(viewerUser.department, user.department))) ||
@@ -26,11 +50,11 @@ function getEvalEvidence(params) {
   if (!canReview) return { ok: false, error: '無評核資料讀取權限' };
 
   // 1. 當月所有日誌
-  const logs = sheetToObjects(SHEET_NAMES.LOGS)
+  const logs = evalSheetObjects_(SHEET_NAMES.LOGS)
     .filter(l => l.nickname === nickname && String(l.date) >= from && String(l.date) <= to);
 
   // 2. 附件證據（依 KPI 分類）
-  const evidence = sheetToObjects(SHEET_NAMES.EVIDENCE)
+  const evidence = evalSheetObjects_(SHEET_NAMES.EVIDENCE)
     .filter(e => e.nickname === nickname && String(e.date) >= from && String(e.date) <= to);
   // 新版直接保存 100 分制 KPI 編號；沒有 source_type 的歷史資料仍套用舊編號。
   const anqinUser = isAnqinUser(user);
@@ -51,18 +75,18 @@ function getEvalEvidence(params) {
   const lesson_days = Object.values(_evDay).filter(x => x.lesson).length;
 
   // 3. 主管當月回饋
-  const feedback = sheetToObjects(SHEET_NAMES.FEEDBACK)
+  const feedback = evalSheetObjects_(SHEET_NAMES.FEEDBACK)
     .filter(f => f.to_nickname === nickname && String(f.created_at).slice(0, 7) === year_month);
 
   // 4. 觀課/巡班
-  const observations = sheetToObjects(SHEET_NAMES.OBSERVATION)
+  const observations = evalSheetObjects_(SHEET_NAMES.OBSERVATION)
     .filter(o => o.observed === nickname && String(o.date) >= from && String(o.date) <= to);
 
   // 5. 發文證據：主管(安親發文 KPI4) + 行政美編行銷(社群內容 KPI1)
   let posts = [];
   let postsByWeek = {};
   if (user.role === 'manager' || (user.role === 'admin_staff' && user.subtype === 'marketing')) {
-    posts = sheetToObjects(SHEET_NAMES.POSTS)
+    posts = evalSheetObjects_(SHEET_NAMES.POSTS)
       .filter(p => p.nickname === nickname && String(p.date) >= from && String(p.date) <= to);
     posts.forEach(p => {
       postsByWeek[p.week_of] = (postsByWeek[p.week_of] || 0) + 1;
@@ -71,7 +95,7 @@ function getEvalEvidence(params) {
 
   // 6. OKR
   const semester = year_month >= `${year}-08` ? `${year}-下` : `${year}-上`;
-  const okrs = sheetToObjects(SHEET_NAMES.OKR)
+  const okrs = evalSheetObjects_(SHEET_NAMES.OKR)
     .filter(o => o.nickname === nickname && o.semester === semester);
 
   // 7. 自動建議分數
@@ -374,9 +398,12 @@ function getEval(params) {
   const requestedMonth = requestedMonthInput === 'latest'
     ? 'latest' : normalizeEvalYearMonth_(params.year_month);
   if (!nickname || !viewer) return { ok: false, error: 'missing fields' };
-  const user = findUserByNickname(nickname);
+  const readObjects = typeof evalSheetObjects_ === 'function' ? evalSheetObjects_ : sheetToObjects;
+  const users = SHEET_NAMES.USERS ? readObjects(SHEET_NAMES.USERS) : null;
+  const user = users ? users.find(item => item.nickname === nickname) : findUserByNickname(nickname);
   if (!user) return { ok: false, error: 'user not found' };
-  const viewerUser = findUserByNickname(viewer);
+  const actor = params.__actor && params.__actor.nickname === viewer ? params.__actor : null;
+  const viewerUser = actor || (users ? users.find(item => item.nickname === viewer) : findUserByNickname(viewer));
   if (!viewerUser || viewerUser.status !== 'active') return { ok: false, error: '無評核讀取權限' };
   const canRead = viewerUser.role === 'admin' ||
     (viewerUser.role === 'manager' && (isGlobalManager_(viewerUser) || sameDepartment_(viewerUser.department, user.department))) ||
@@ -386,7 +413,7 @@ function getEval(params) {
   const sheetName = isManager ? SHEET_NAMES.MANAGER_EVAL : SHEET_NAMES.TEACHER_EVAL;
   const prefix = isManager ? 'MEVAL' : 'EVAL';
   const workerViewer = ['teacher', 'admin_staff'].includes(viewerUser.role);
-  const available = sheetToObjects(sheetName)
+  const available = readObjects(sheetName)
     .map(normalizeEvalRecord_)
     .filter(item => item.nickname === nickname)
     .filter(item => !workerViewer || item.status === 'submitted')
@@ -400,7 +427,8 @@ function getEval(params) {
     return { ok: true, eval: available[0] || null, months, selected_month: months[0] || '' };
   }
   const eval_id = `${prefix}-${requestedMonth}-${nickname}`;
-  const e = normalizeEvalRecord_(findObject(sheetName, 'eval_id', eval_id));
+  // 直接從上方已讀取的評核資料挑選，不再為單一 eval_id 重掃整張表。
+  const e = available.find(item => item.eval_id === eval_id) || null;
   if (workerViewer && e && e.status !== 'submitted') {
     return { ok: true, eval: null, months, selected_month: requestedMonth };
   }
@@ -410,14 +438,18 @@ function getEval(params) {
 function listEvals(params) {
   const { evaluator, year_month, role, viewer } = params;
   const requestedMonth = normalizeEvalYearMonth_(year_month);
-  const viewerUser = findUserByNickname(viewer);
+  const readObjects = typeof evalSheetObjects_ === 'function' ? evalSheetObjects_ : sheetToObjects;
+  let users = null;
+  const actor = params.__actor && params.__actor.nickname === viewer ? params.__actor : null;
+  const viewerUser = actor || (users = readObjects(SHEET_NAMES.USERS)).find(item => item.nickname === viewer);
   if (!viewerUser || viewerUser.status !== 'active' || !['admin', 'manager'].includes(viewerUser.role)) {
     return { ok: false, error: '無評核清單讀取權限' };
   }
   const sheetName = role === 'manager' ? SHEET_NAMES.MANAGER_EVAL : SHEET_NAMES.TEACHER_EVAL;
-  let list = sheetToObjects(sheetName).map(normalizeEvalRecord_);
+  let list = readObjects(sheetName).map(normalizeEvalRecord_);
   if (viewerUser.role === 'manager' && !isGlobalManager_(viewerUser)) {
-    const allowed = sheetToObjects(SHEET_NAMES.USERS)
+    if (!users) users = readObjects(SHEET_NAMES.USERS);
+    const allowed = users
       .filter(user => sameDepartment_(user.department, viewerUser.department))
       .map(user => user.nickname);
     list = list.filter(item => allowed.includes(item.nickname));
@@ -429,10 +461,11 @@ function listEvals(params) {
 
 function calcDeptAvg(department, year_month) {
   const requestedMonth = normalizeEvalYearMonth_(year_month);
-  const evals = sheetToObjects(SHEET_NAMES.TEACHER_EVAL)
+  const readObjects = typeof evalSheetObjects_ === 'function' ? evalSheetObjects_ : sheetToObjects;
+  const evals = readObjects(SHEET_NAMES.TEACHER_EVAL)
     .map(normalizeEvalRecord_)
     .filter(e => normalizeEvalYearMonth_(e.year_month) === requestedMonth);
-  const users = sheetToObjects(SHEET_NAMES.USERS);
+  const users = readObjects(SHEET_NAMES.USERS);
   const deptTeachers = users.filter(u => sameDepartment_(u.department, department) && u.role === 'teacher').map(u => u.nickname);
   const deptEvals = evals.filter(e => deptTeachers.includes(e.nickname));
   if (deptEvals.length === 0) return 0;

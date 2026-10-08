@@ -3231,6 +3231,24 @@
     }) || ANQIN_BONUS_TIERS[ANQIN_BONUS_TIERS.length - 1];
   }
 
+  function pendingManagerEvaluationEvidence(error = '') {
+    return {
+      ok: true,
+      _partial: true,
+      _pending: !error,
+      _error: String(error || ''),
+      summary: {
+        log_count: 0,
+        makeup_count: 0,
+        evidence_count: 0,
+        feedback_count: 0,
+        observation_count: 0,
+      },
+      evidence_by_kpi: { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] },
+      suggestion: {},
+    };
+  }
+
   async function loadManagerEvaluation(teacher = integrationRuntime.managerEvaluationTeacher, month = integrationRuntime.managerEvaluationMonth, latestSelectionGeneration = null) {
     if (latestSelectionGeneration === null) managerEvaluationSelectionGeneration += 1;
     else if (latestSelectionGeneration !== managerEvaluationSelectionGeneration) return;
@@ -3254,14 +3272,11 @@
     integrationRuntime.managerEvaluationMessage = '正在彙整評核資料';
     renderApp();
     const nickname = backendNickname(selectedTeacher);
-    const [evidenceResult, evaluationResult] = await Promise.all([
-      API.getEvalEvidence(nickname, selectedMonth),
-      API.getEval({ nickname, year_month: selectedMonth, viewer: session.nickname }),
-    ]);
+    const evaluationResult = await API.getEval({ nickname, year_month: selectedMonth, viewer: session.nickname });
     if (loadGeneration !== managerEvaluationLoadGeneration) return;
-    if (!evidenceResult?.ok || !evaluationResult?.ok) {
+    if (!evaluationResult?.ok) {
       integrationRuntime.managerEvaluationStatus = 'error';
-      integrationRuntime.managerEvaluationMessage = evidenceResult?.error || evaluationResult?.error || '評核資料讀取失敗';
+      integrationRuntime.managerEvaluationMessage = evaluationResult?.error || '評核資料讀取失敗';
       integrationRuntime.managerEvaluationEvidence = null;
       integrationRuntime.managerEvaluation = null;
       renderApp();
@@ -3269,9 +3284,27 @@
     }
     integrationRuntime.managerEvaluationStatus = 'saved';
     integrationRuntime.managerEvaluationMessage = evaluationResult.eval ? '已載入既有評核' : '尚未建立本月評核';
-    integrationRuntime.managerEvaluationEvidence = evidenceResult;
+    // 評分本身只需要既有評核；完整證據彙整可能要讀多張歷史表。
+    // 先顯示可填寫表單，再讓證據在背景補上，避免主管被雲端冷啟動卡住。
+    integrationRuntime.managerEvaluationEvidence = pendingManagerEvaluationEvidence();
     integrationRuntime.managerEvaluation = evaluationResult.eval || null;
     renderApp();
+    let evidenceResult;
+    try {
+      // 既有評核先回來並顯示後才讀完整證據，避免兩個 Apps Script 冷啟動互搶資源。
+      evidenceResult = await API.getEvalEvidence(nickname, selectedMonth);
+    } catch (error) {
+      evidenceResult = { ok: false, error: error?.message || '評分依據暫時無法載入' };
+    }
+    if (loadGeneration !== managerEvaluationLoadGeneration) return;
+    integrationRuntime.managerEvaluationEvidence = evidenceResult?.ok
+      ? evidenceResult
+      : pendingManagerEvaluationEvidence(evidenceResult?.error || '評分依據暫時無法載入');
+    integrationRuntime.managerEvaluationMessage = evidenceResult?.ok
+      ? (evaluationResult.eval ? '已載入既有評核' : '尚未建立本月評核')
+      : (evidenceResult?.error || '評分依據暫時無法載入');
+    const activeForm = typeof document !== 'undefined' ? document.querySelector('#manager-evaluation-form') : null;
+    if (activeForm?.dataset?.dirty !== 'true') renderApp();
   }
 
   async function loadLatestManagerEvaluation() {
@@ -3363,6 +3396,7 @@
     const summary = evidence.summary || {};
     return `<div class="page manager-evaluation-page">
       ${pageHead('月度評核', `${esc(selectedMonth)} · ${esc(selectedTeacher)}`, actions)}
+      ${evidence._partial ? `<div class="notice-band ${evidence._pending ? 'info' : 'danger'}"><div>${icon(evidence._pending ? 'loader-circle' : 'cloud-alert', 19)}</div><div><div class="notice-title">${evidence._pending ? '評分依據正在背景整理' : '評分依據暫時無法載入'}</div><div class="notice-copy">${evidence._pending ? '評分表已可先填寫與儲存，證據統計完成後會自動補上。' : `${esc(evidence._error || '請稍後重新讀取')}；評分表仍可正常填寫與儲存。`}</div></div></div>` : ''}
       ${invalid ? `<div class="notice-band danger">${icon('triangle-alert', 19)}<div><div class="notice-title">既有分數超過新版配分</div><div class="notice-copy">請逐項修正後再完成評核；系統不會儲存超過上限的分數。</div></div></div>` : ''}
       <div class="status-strip"><div class="status-cell"><div class="status-label">日報</div><div class="status-value">${Number(summary.log_count || 0)}</div></div><div class="status-cell"><div class="status-label">成果證據</div><div class="status-value">${Number(summary.evidence_count || 0)}</div></div><div class="status-cell"><div class="status-label">主管回饋</div><div class="status-value">${Number(summary.feedback_count || 0)}</div></div><div class="status-cell"><div class="status-label">觀課／巡班</div><div class="status-value">${Number(summary.observation_count || 0)}</div></div></div>
       <form id="manager-evaluation-form" class="content-grid wide-aside">
@@ -3465,7 +3499,23 @@
       toast(`評核未儲存：${result?.error || '請稍後重試'}`, 'danger');
       return;
     }
-    await loadManagerEvaluation(integrationRuntime.managerEvaluationTeacher, integrationRuntime.managerEvaluationMonth);
+    const makeupCount = septemberBonusEligible ? 0 : Number(integrationRuntime.managerEvaluationEvidence?.summary?.makeup_count || 0);
+    integrationRuntime.managerEvaluation = {
+      ...(integrationRuntime.managerEvaluation || {}),
+      ...payload,
+      eval_id: result.eval_id,
+      total_score: Number(result.total_score || 0),
+      grade: result.grade || '',
+      bonus: result.bonus || 0,
+      late_penalty: evaluationLatePenaltyForCount(payload.score_late_count, integrationRuntime.managerEvaluationMonth),
+      makeup_count: makeupCount,
+      makeup_penalty: makeupCount * 2,
+      september_missing_penalty: septemberBonusEligible ? septemberMissingCount * 2 : 0,
+      updated_at: new Date().toISOString(),
+    };
+    integrationRuntime.managerEvaluationStatus = 'saved';
+    integrationRuntime.managerEvaluationMessage = status === 'submitted' ? '已完成本月評核' : '評核草稿已儲存';
+    renderApp();
     toast(status === 'submitted' ? '月度評核已完成，老師可查看結果' : '評核草稿已儲存', 'success');
   }
 
@@ -9070,7 +9120,7 @@
       const root = window.AUTH?.relativeRoot?.() || '../../';
       if (realRole === 'admin') window.location.href = `${root}admin/dashboard.html?v=20260827-test-view-fast-1#test-view`;
       else if (window.AUTH?.routeByRole) window.AUTH.routeByRole(realRole, realSession);
-      else window.location.href = `${root}review/anqin-v2/index.html?v=20261008-release-2`;
+      else window.location.href = `${root}review/anqin-v2/index.html?v=20261008-release-3`;
     }
     else if (action === 'open-test-view') {
       const root = window.AUTH?.relativeRoot?.() || '../../';
@@ -9491,7 +9541,11 @@
     window.setTimeout(() => loadTeacherEvaluation('latest'), 0);
   }
   if (initialSession?.role === 'teacher' && state.integration.dailyDraftSyncPending) window.setTimeout(scheduleDailyCloudDraftSync, 1200);
-  if (['manager', 'admin'].includes(initialSession?.role)) window.setTimeout(() => syncManagerCloudData(openedFromNotification), 0);
+  // 直開評核頁時先讓評核專用 API 完成；月總覽的多張表同步等使用者回總覽再啟動，
+  // 避免冷啟動同時掃描相同試算表而互相拖慢。
+  if (['manager', 'admin'].includes(initialSession?.role) && state.ui.route !== 'evaluations') {
+    window.setTimeout(() => syncManagerCloudData(openedFromNotification), 0);
+  }
   if (['manager', 'admin'].includes(initialSession?.role) && state.ui.route === 'evaluations') {
     window.setTimeout(() => loadLatestManagerEvaluation(), 0);
   }

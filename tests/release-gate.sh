@@ -34,6 +34,7 @@ cd "$ROOT"
 "$NODE_BIN" tests/anqin-september-bonus-score.test.cjs
 "$NODE_BIN" tests/anqin-evaluation-load-race.test.cjs
 "$NODE_BIN" tests/evaluation-year-month-normalization.test.cjs
+"$NODE_BIN" tests/evaluation-evidence-performance.test.cjs
 "$NODE_BIN" tests/anqin-task-ui.test.cjs
 "$NODE_BIN" tests/anqin-manager-month.test.cjs
 "$NODE_BIN" tests/anqin-photo-batch.test.cjs

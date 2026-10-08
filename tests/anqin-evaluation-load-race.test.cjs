@@ -7,6 +7,9 @@ const root = path.resolve(__dirname, '..');
 const app = fs.readFileSync(path.join(root, 'review/anqin-v2/app.js'), 'utf8');
 const legacy = fs.readFileSync(path.join(root, 'manager/eval.html'), 'utf8');
 
+assert.match(app, /initialSession\?\.role\) && state\.ui\.route !== 'evaluations'/,
+  'opening manager evaluations directly must not start the full manager month sync in parallel');
+
 function deferred() {
   let resolve;
   const promise = new Promise(next => { resolve = next; });
@@ -51,10 +54,93 @@ function assertPreviousStaticEvaluationLoaded(nodes, message) {
 }
 
 function integratedManagerEvaluationLoaderSource() {
-  const start = app.indexOf('  async function loadManagerEvaluation(');
+  const start = app.indexOf('  function pendingManagerEvaluationEvidence(');
   const end = app.indexOf('  function managerEvaluationValues()', start);
   assert.ok(start >= 0 && end > start, 'must locate integrated manager evaluation loaders');
   return app.slice(start, end);
+}
+
+async function flushAsyncLoader() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+async function verifyIntegratedManagerRendersBeforeEvidence() {
+  const evidence = deferred();
+  const evaluation = deferred();
+  const renders = [];
+  const dirtyForm = { dataset: { dirty: 'false' } };
+  const context = vm.createContext({
+    managerEvaluationLoadGeneration: 0,
+    managerEvaluationSelectionGeneration: 0,
+    integrationRuntime: {
+      managerEvaluationTeacher: '', managerEvaluationMonth: '', managerEvaluationStatus: 'idle',
+      managerEvaluationMessage: '', managerEvaluationEvidence: null, managerEvaluation: null,
+    },
+    state: { daily: { date: '2026-10-08' } },
+    legacySession: () => ({ nickname: '小魚', role: 'manager' }),
+    managerEvaluationTeachers: () => [{ nickname: '紅豆', role: 'teacher', department: '東橋教室' }],
+    managerScopeMatches: () => true,
+    backendNickname: value => value,
+    document: { querySelector: () => dirtyForm },
+    renderApp: () => renders.push({
+      status: context.integrationRuntime.managerEvaluationStatus,
+      evaluation: context.integrationRuntime.managerEvaluation,
+      evidence: context.integrationRuntime.managerEvaluationEvidence,
+    }),
+    API: {
+      getEvalEvidence: () => evidence.promise,
+      getEval: () => evaluation.promise,
+    },
+    Promise,
+  });
+  vm.runInContext(integratedManagerEvaluationLoaderSource(), context);
+
+  const pendingLoad = context.loadManagerEvaluation('紅豆', '2026-09');
+  evaluation.resolve({ ok: true, eval: { marker: 'existing September evaluation' } });
+  await flushAsyncLoader();
+  assert.equal(context.integrationRuntime.managerEvaluationStatus, 'saved', 'existing evaluation must render while evidence is still pending');
+  assert.equal(context.integrationRuntime.managerEvaluation.marker, 'existing September evaluation');
+  assert.equal(context.integrationRuntime.managerEvaluationEvidence._partial, true);
+  assert.equal(context.integrationRuntime.managerEvaluationEvidence._pending, true);
+  assert.equal(renders.at(-1).status, 'saved', 'form-ready render must happen before evidence resolves');
+
+  const rendersBeforeEvidence = renders.length;
+  dirtyForm.dataset.dirty = 'true';
+  evidence.resolve({ ok: true, marker: 'late evidence' });
+  await pendingLoad;
+  assert.equal(context.integrationRuntime.managerEvaluationEvidence.marker, 'late evidence');
+  assert.equal(renders.length, rendersBeforeEvidence, 'late evidence must not rerender and erase dirty manager inputs');
+}
+
+async function verifyIntegratedManagerKeepsFormWhenEvidenceFails() {
+  const context = vm.createContext({
+    managerEvaluationLoadGeneration: 0,
+    managerEvaluationSelectionGeneration: 0,
+    integrationRuntime: {
+      managerEvaluationTeacher: '', managerEvaluationMonth: '', managerEvaluationStatus: 'idle',
+      managerEvaluationMessage: '', managerEvaluationEvidence: null, managerEvaluation: null,
+    },
+    state: { daily: { date: '2026-10-08' } },
+    legacySession: () => ({ nickname: '小魚', role: 'manager' }),
+    managerEvaluationTeachers: () => [{ nickname: '紅豆', role: 'teacher', department: '東橋教室' }],
+    managerScopeMatches: () => true,
+    backendNickname: value => value,
+    renderApp() {},
+    API: {
+      getEvalEvidence: async () => { throw new Error('evidence timeout'); },
+      getEval: async () => ({ ok: true, eval: { marker: 'keep me' } }),
+    },
+    Promise,
+  });
+  vm.runInContext(integratedManagerEvaluationLoaderSource(), context);
+
+  await context.loadManagerEvaluation('紅豆', '2026-09');
+  assert.equal(context.integrationRuntime.managerEvaluationStatus, 'saved', 'evidence failure must not turn the evaluation form into a fatal error');
+  assert.equal(context.integrationRuntime.managerEvaluation.marker, 'keep me', 'evidence failure must preserve the loaded evaluation');
+  assert.equal(context.integrationRuntime.managerEvaluationEvidence._partial, true);
+  assert.equal(context.integrationRuntime.managerEvaluationEvidence._pending, false);
+  assert.match(context.integrationRuntime.managerEvaluationEvidence._error, /evidence timeout/);
 }
 
 async function verifyIntegratedManagerRace() {
@@ -294,6 +380,8 @@ async function verifyLegacyManagerClearsPreviousStaticFields() {
 
 Promise.all([
   verifyIntegratedManagerRace(),
+  verifyIntegratedManagerRendersBeforeEvidence(),
+  verifyIntegratedManagerKeepsFormWhenEvidenceFails(),
   verifyManualSelectionInvalidatesPendingLatestLookup(),
   verifyLegacyManagerRace(),
   verifyLegacyManagerClearsPreviousStaticFields(),
