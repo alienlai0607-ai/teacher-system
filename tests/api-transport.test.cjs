@@ -164,6 +164,8 @@ function createApi(fetchImpl, options = {}) {
   assert.equal(slowReadResult.code, 'REQUEST_TIMEOUT');
   assert.equal(slowReadSignal.aborted, true, '慢速評核讀取逾時仍須中止瀏覽器等待');
   assert.equal(slowReadCalls, 1, '慢速讀表逾時不可立即重送，避免 Apps Script 執行互相拖慢');
+  assert.doesNotMatch(slowReadResult.error, /已自動重試/, '未重送的慢速讀取不可誤稱已自動重試');
+  assert.match(slowReadResult.error, /已停止等待/, '慢速讀取逾時應明確說明本次已停止等待');
 
   let savedId = ''; let mutations = 0; let confirmations = 0;
   const recoveryApi = createApi(async (_url, init) => {

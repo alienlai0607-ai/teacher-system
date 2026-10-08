@@ -355,7 +355,9 @@ window.API = (function () {
       request_id: payload.request_id || '',
       uncertain: !retryable,
       code: lastError?.code || 'NETWORK_ERROR',
-      error: retryable
+      error: lastError?.code === 'REQUEST_TIMEOUT' && SLOW_READ_ACTIONS.has(action)
+        ? '雲端資料讀取時間較長，本次已停止等待，請稍後再試一次'
+        : retryable
         ? '雲端連線暫時不穩，系統已自動重試，請再試一次'
         : resumableUpload ? '檔案傳送暫時中斷；已選檔案仍保留，可直接重試'
         : '尚未取得儲存確認，內容仍保留；請稍後再試，系統會先確認上次結果',
