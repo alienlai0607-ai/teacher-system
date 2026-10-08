@@ -44,6 +44,7 @@
   let startupStateNeedsRewrite = false;
   let startupDraftStoreNeedsRewrite = false;
   let startupRecoverySaved = false;
+  let stateStorageWriteProtected = false;
 
   function normalizeReviewNickname(value) {
     return String(value || '')
@@ -976,6 +977,7 @@
   }
 
   function rewriteRecoveredStartupState(source) {
+    if (stateStorageWriteProtected) return false;
     try {
       const serialized = serializeStateForStorage(source, true);
       localStorage.setItem(STORAGE_KEY, serialized);
@@ -986,9 +988,36 @@
     }
   }
 
+  function supportedStoredStateVersion(source) {
+    const storedVersion = Number(source?.version);
+    const unsupported = !Number.isInteger(storedVersion) || storedVersion < 8 || storedVersion > APP_VERSION;
+    return !unsupported;
+  }
+
+  function enterStateStorageProtection(message) {
+    stateStorageWriteProtected = true;
+    startupStateNeedsRewrite = false;
+    startupRecoverySaved = false;
+    loadStateIssue = message;
+    return createSeed();
+  }
+
+  function storageHasKey(storage, targetKey) {
+    try {
+      for (let index = 0; index < storage.length; index += 1) {
+        if (storage.key(index) === targetKey) return true;
+      }
+    } catch (error) {
+      return false;
+    }
+    return false;
+  }
+
   function loadState() {
     let raw = '';
     let backupRaw = '';
+    let safeMainKeyPresent = false;
+    let safeBackupKeyPresent = false;
     try {
       LEGACY_TEST_STORAGE_KEYS.forEach(key => {
         localStorage.removeItem(key);
@@ -996,28 +1025,36 @@
         localStorage.removeItem(`${key}_open_drafts`);
         try { sessionStorage.removeItem(`${key}_open_drafts`); } catch (error) { /* no-op */ }
       });
-      if (SAFE_START_MODE) backupRaw = localStorage.getItem(BACKUP_KEY) || '';
+      if (SAFE_START_MODE) {
+        safeBackupKeyPresent = storageHasKey(localStorage, BACKUP_KEY);
+        backupRaw = localStorage.getItem(BACKUP_KEY) || '';
+        safeMainKeyPresent = storageHasKey(localStorage, STORAGE_KEY);
+      }
       else raw = localStorage.getItem(STORAGE_KEY) || '';
+      if (!SAFE_START_MODE) backupRaw = localStorage.getItem(BACKUP_KEY) || '';
     } catch (error) {
-      loadStateIssue = '瀏覽器目前不允許讀取本機資料，已開啟空白審查資料。';
-      return createSeed();
+      return enterStateStorageProtection('瀏覽器目前不允許安全讀取本機資料；原始內容未被覆蓋，目前以空白唯讀保全模式開啟。');
     }
     if (SAFE_START_MODE) {
-      startupStateNeedsRewrite = true;
       if (!backupRaw) {
+        if (safeMainKeyPresent || safeBackupKeyPresent) {
+          return enterStateStorageProtection('已使用安全模式開啟；偵測到原始本機資料但沒有可安全恢復的文字備份，原始資料已保留，目前為唯讀保全模式。');
+        }
         loadStateIssue = '已使用安全模式開啟；本機沒有文字備份，正式資料將由雲端重新同步。';
         return createSeed();
       }
+      let safeBackup = null;
       try {
-        const safeBackup = JSON.parse(backupRaw);
-        const storedVersion = Number(safeBackup.version);
-        if (!Number.isInteger(storedVersion) || storedVersion < 8 || storedVersion > APP_VERSION) throw new Error('unsupported version');
-        loadStateIssue = '已使用安全模式恢復文字資料；未完成上傳的本機照片需重新選擇。';
-        return normalizeLoadedState(safeBackup);
+        safeBackup = JSON.parse(backupRaw);
       } catch (error) {
-        loadStateIssue = '安全備份無法讀取，已開啟乾淨工作區；正式資料將由雲端重新同步。';
-        return createSeed();
+        return enterStateStorageProtection('安全備份無法讀取，原始資料未被覆蓋；目前以空白唯讀保全模式開啟。');
       }
+      if (!supportedStoredStateVersion(safeBackup)) {
+        return enterStateStorageProtection('安全備份的資料版本較新或不受支援，原始資料已保留；目前以空白唯讀保全模式開啟。');
+      }
+      startupStateNeedsRewrite = true;
+      loadStateIssue = '已使用安全模式恢復文字資料；未完成上傳的本機照片需重新選擇。';
+      return normalizeLoadedState(safeBackup);
     }
     let parsed = null;
     let backup = null;
@@ -1033,13 +1070,18 @@
     } catch (error) {
       loadStateIssue = '主要資料無法解析，系統正在嘗試安全備份。';
     }
+    try {
+      if (backupRaw) backup = JSON.parse(backupRaw);
+    } catch (error) {
+      backup = null;
+    }
+    if (parsed && !supportedStoredStateVersion(parsed)) {
+      return enterStateStorageProtection('主要資料的版本較新或不受支援，原始資料與安全備份皆已保留；目前以空白唯讀保全模式開啟。');
+    }
+    if (backup && !supportedStoredStateVersion(backup)) {
+      return enterStateStorageProtection('安全備份的版本較新或不受支援，原始資料與安全備份皆已保留；目前以空白唯讀保全模式開啟。');
+    }
     if (!parsed) {
-      try {
-        backupRaw = localStorage.getItem(BACKUP_KEY) || '';
-        if (backupRaw) backup = JSON.parse(backupRaw);
-      } catch (error) {
-        backup = null;
-      }
       if (backup) {
         parsed = backup;
         startupStateNeedsRewrite = true;
@@ -1047,12 +1089,10 @@
       }
     }
     if (!parsed) {
+      if (raw || backupRaw) {
+        return enterStateStorageProtection('主要資料與安全備份皆無法安全載入，原始資料已保留；目前以空白唯讀保全模式開啟。');
+      }
       loadStateIssue = '主要資料與安全備份皆無法載入，已保留原資料並開啟空白審查頁。';
-      return createSeed();
-    }
-    const storedVersion = Number(parsed.version);
-    if (!Number.isInteger(storedVersion) || storedVersion < 8 || storedVersion > APP_VERSION) {
-      loadStateIssue = '資料版本無法辨識，舊資料未被覆蓋；目前先開啟空白審查頁。';
       return createSeed();
     }
     return normalizeLoadedState(parsed);
@@ -1698,6 +1738,7 @@
   }
 
   function writeSafeBackup(snapshot) {
+    if (stateStorageWriteProtected) return false;
     const serialized = serializeStateForStorage(snapshot, true);
     try {
       localStorage.setItem(BACKUP_KEY, serialized);
@@ -1720,6 +1761,15 @@
   }
 
   function persist(message = '草稿已儲存') {
+    if (stateStorageWriteProtected) {
+      const protectionMessage = '偵測到較新或不受支援的本機資料，原始資料已鎖定保留；目前變更只留在記憶體。';
+      const previousProtectionMessage = runtimeHealth.persistError || '';
+      runtimeHealth.persistError = protectionMessage;
+      runtimeHealth.lastPersistOk = false;
+      updateSaveIndicator('error', '唯讀保全模式：原始資料未覆寫');
+      if (previousProtectionMessage !== protectionMessage) refreshSystemStatusNotice();
+      return false;
+    }
     const previousStorageWarning = runtimeHealth.persistError || runtimeHealth.mediaPersistWarning || '';
     const previousSavedAt = state.ui.lastSavedAt;
     const previousRevision = state.ui.saveRevision;
@@ -1774,6 +1824,10 @@
   }
 
   function schedulePersist() {
+    if (stateStorageWriteProtected) {
+      updateSaveIndicator('error', '唯讀保全模式：原始資料未覆寫');
+      return;
+    }
     updateSaveIndicator('saving', '儲存中');
     window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(() => persist(), 450);
@@ -1783,7 +1837,7 @@
     const read = storage => {
       try {
         if (SAFE_START_MODE) {
-          storage.removeItem(DRAFT_KEY);
+          if (!stateStorageWriteProtected) storage.removeItem(DRAFT_KEY);
           return {};
         }
         const raw = storage.getItem(DRAFT_KEY) || '{}';
@@ -1805,6 +1859,7 @@
   }
 
   function writeOpenDraftStore() {
+    if (stateStorageWriteProtected) return '';
     const serialized = serializeStateForStorage(openDraftStore, true);
     try {
       localStorage.setItem(DRAFT_KEY, serialized);
@@ -9120,7 +9175,7 @@
       const root = window.AUTH?.relativeRoot?.() || '../../';
       if (realRole === 'admin') window.location.href = `${root}admin/dashboard.html?v=20260827-test-view-fast-1#test-view`;
       else if (window.AUTH?.routeByRole) window.AUTH.routeByRole(realRole, realSession);
-      else window.location.href = `${root}review/anqin-v2/index.html?v=20261008-release-5`;
+      else window.location.href = `${root}review/anqin-v2/index.html?v=20261008-release-6`;
     }
     else if (action === 'open-test-view') {
       const root = window.AUTH?.relativeRoot?.() || '../../';
@@ -9268,6 +9323,11 @@
       openDialog({ title: '清空審查資料', body: `<div class="notice-band danger">${icon('triangle-alert', 19)}<div><div class="notice-title">這個審查瀏覽器內的所有真人測試資料都會被清除</div><div class="notice-copy">正式 KPI 系統資料不受影響。</div></div></div>`, footer: `<button type="button" class="btn" data-action="close-dialog">取消</button><button type="button" class="btn btn-danger" data-action="confirm-reset">確認清空</button>` });
     }
     else if (action === 'confirm-reset') {
+      if (stateStorageWriteProtected) {
+        closeDialog();
+        toast('目前為唯讀保全模式，原始本機資料不會被清除', 'danger');
+        return;
+      }
       localStorage.removeItem(STORAGE_KEY);
       localStorage.removeItem(BACKUP_KEY);
       localStorage.removeItem(DRAFT_KEY);
@@ -9471,6 +9531,7 @@
   });
 
   window.addEventListener('beforeunload', () => {
+    if (stateStorageWriteProtected) return;
     window.clearTimeout(draftTimer);
     persistCurrentDrawerDraft(true);
     if (saveTimer) {
@@ -9480,6 +9541,7 @@
   });
 
   const preservePageDrafts = () => {
+    if (stateStorageWriteProtected) return;
     window.clearTimeout(draftTimer);
     window.clearTimeout(saveTimer);
     persistCurrentDrawerDraft(true);

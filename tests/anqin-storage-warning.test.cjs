@@ -10,7 +10,7 @@ function persistPhoto(cloudUrl, failWithPhoto = false, failAll = false) {
   const state = { ui: {}, photo: { dataUrl: 'data:image/jpeg;base64,' + 'a'.repeat(900000), cloudUrl } };
   const runtimeHealth = {};
   const context = vm.createContext({
-    state, runtimeHealth, MAX_PERSISTED_MEDIA_CHARS: 850000,
+    state, runtimeHealth, stateStorageWriteProtected: false, MAX_PERSISTED_MEDIA_CHARS: 850000,
     STORAGE_KEY: 'main', BACKUP_KEY: 'backup', lastStorageToastAt: 0,
     localStorage: { setItem(key, value) { if (failAll || (failWithPhoto && value.includes('data:image'))) { const e = new Error('full'); e.name = 'QuotaExceededError'; throw e; } }, removeItem() {} },
     materialCloudUrl: item => item.cloudUrl || '',

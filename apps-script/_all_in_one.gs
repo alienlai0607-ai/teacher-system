@@ -21,7 +21,7 @@
  * 5. 把網址貼到前端 shared/config.js 的 API_URL
  */
 
-const KPI_RELEASE_VERSION_ = '20261008-release-5';
+const KPI_RELEASE_VERSION_ = '20261008-release-6';
 
 // ============ 路由 ============
 function doGet(e) {
@@ -2494,6 +2494,11 @@ function saveLogRecord_(params) {
     return { ok: false, code: 'ALREADY_SUBMITTED', error: '此日紀錄已正式送出，舊草稿未覆蓋；如需修改，請開啟已送出的紀錄' };
   }
   if (existing && recordConflict_(params.base_revision, existing.record_revision || existing.updated_at)) return recordConflictResult_();
+  const formatTransitionError = validateAnqinLogFormatTransition_(params, user, existing);
+  if (formatTransitionError) return formatTransitionError;
+  const normalizedEvidence = normalizeAnqinEvidenceAttachments_(params, user, existing);
+  if (!normalizedEvidence.ok) return normalizedEvidence;
+  if (normalizedEvidence.normalized) params = Object.assign({}, params, { attachments: normalizedEvidence.attachments });
   const courseRecordError = validateAnqinCourseRecord_(params, user);
   if (courseRecordError) return courseRecordError;
   ensureHeaders(getSheet(SHEET_NAMES.LOGS), ['record_revision', 'last_request_id', 'delivery_state', 'delivery_error', 'evidence_state', 'delivery_attempted_at']);
@@ -2639,6 +2644,190 @@ function anqinCourseScreenshots_(record, attachments) {
         && anqinCourseFileId_({ fileId: attachment.fileId, url: attachment.url }) === fileId;
     });
   });
+}
+
+function anqinV2Snapshot_(rawKpi6) {
+  const kpi6 = parseJsonField(rawKpi6);
+  const snapshot = kpi6 && typeof kpi6 === 'object' ? kpi6.v2_snapshot : null;
+  return snapshot && typeof snapshot === 'object' && snapshot.schema === 'anqin-v2'
+    && snapshot.submission && typeof snapshot.submission === 'object' ? snapshot : null;
+}
+
+function validateAnqinLogFormatTransition_(params, user, existing) {
+  if (!isAnqinUser(user) || !existing || !existing.submitted_at || params.submitted !== true) return null;
+  if (anqinV2Snapshot_(existing.kpi6_data) && !anqinV2Snapshot_(params.kpi6_data)) {
+    return {
+      ok: false,
+      code: 'ANQIN_FORMAT_DOWNGRADE',
+      error: '此日誌已使用新版格式，不能以舊版頁面覆蓋；請重新整理後再送出',
+    };
+  }
+  return null;
+}
+
+function anqinVersionedEvidenceSource_(value) {
+  return /^(v2-|env_)/.test(String(value || ''));
+}
+
+function anqinEvidenceIdentity_(attachment) {
+  const item = attachment && typeof attachment === 'object' ? attachment : {};
+  const tokens = {};
+  const kinds = { attachment: {}, file: {}, url: {} };
+  const fileIds = {};
+  function token(kind, value) {
+    const text = String(value || '').trim();
+    if (text) {
+      tokens[kind + ':' + text] = true;
+      kinds[kind][text] = true;
+    }
+  }
+  token('attachment', item.attachmentId);
+  [item.fileId, item.cloudFileId].forEach(function (value) {
+    const id = String(value || '').trim();
+    if (/^[A-Za-z0-9_-]+$/.test(id)) fileIds[id] = true;
+  });
+  [item.url, item.cloudUrl].forEach(function (value) {
+    const url = String(value || '').trim();
+    if (!url) return;
+    token('url', url.replace(/[?#].*$/, '').replace(/\/+$/, ''));
+    const match = url.match(/^https:\/\/drive\.google\.com\/file\/d\/([A-Za-z0-9_-]+)(?:\/[^\s"'<>]*)?$/);
+    if (match) fileIds[match[1]] = true;
+  });
+  Object.keys(fileIds).forEach(function (id) { token('file', id); });
+  return {
+    tokens: Object.keys(tokens),
+    attachmentIds: Object.keys(kinds.attachment),
+    fileIds: Object.keys(kinds.file),
+    urls: Object.keys(kinds.url),
+    conflictingFileIds: Object.keys(fileIds).length > 1,
+  };
+}
+
+function anqinV2EvidenceClaims_(snapshot) {
+  const claims = [];
+  let error = '';
+  function addClaim(attachment, forType, kpi, fallbackAttachmentId) {
+    if (!attachment || typeof attachment !== 'object' || error) return;
+    const identity = anqinEvidenceIdentity_(Object.assign({}, attachment, {
+      attachmentId: attachment.id || attachment.attachmentId || fallbackAttachmentId || '',
+    }));
+    if (identity.conflictingFileIds) {
+      error = '新版日誌內的附件檔案識別不一致，未儲存任何變更';
+      return;
+    }
+    if (!identity.tokens.length) return;
+    claims.push({ identity: identity, forType: forType, kpi: kpi });
+  }
+
+  const submission = snapshot && snapshot.submission || {};
+  (Array.isArray(submission.activitySnapshots) ? submission.activitySnapshots : []).forEach(function (activity) {
+    const type = String(activity && activity.type || '');
+    if (!type || type === 'lessonprep') return;
+    const kpi = type === 'tutoring' ? 1
+      : ['project', 'robotics', 'portfolio'].indexOf(type) >= 0 ? 2
+        : ['classroom', 'sel'].indexOf(type) >= 0 ? 3 : 5;
+    (Array.isArray(activity.evidence) ? activity.evidence : []).forEach(function (evidence) {
+      let attachments = Array.isArray(evidence && evidence.attachments) ? evidence.attachments : [];
+      if (!attachments.length && evidence && (evidence.fileName || evidence.cloudFileId || evidence.cloudUrl || evidence.url)) {
+        attachments = [Object.assign({}, evidence, { id: evidence.id ? 'attachment_' + evidence.id + '_1' : '' })];
+      }
+      attachments.forEach(function (attachment) { addClaim(attachment, 'v2-' + type, kpi); });
+    });
+  });
+
+  const operation = snapshot && snapshot.operation;
+  const operationEvidence = operation && operation.evidenceByCheck || {};
+  ['classroom', 'tools', 'trash', 'toilet'].forEach(function (key) {
+    addClaim(operationEvidence[key], 'env_' + key, 6, 'env_' + key);
+  });
+  const courseRecord = submission && submission.courseRecord;
+  (courseRecord && Array.isArray(courseRecord.attachments) ? courseRecord.attachments : []).forEach(function (attachment) {
+    addClaim(attachment, 'v2-course-record', 2);
+  });
+  return error
+    ? { ok: false, code: 'EVIDENCE_SOURCE_CONFLICT', error: error }
+    : { ok: true, claims: claims };
+}
+
+function normalizeAnqinEvidenceAttachments_(params, user, existing) {
+  if (!isAnqinUser(user) || params.submitted !== true) {
+    return { ok: true, normalized: false, attachments: params.attachments };
+  }
+  const snapshot = anqinV2Snapshot_(params.kpi6_data);
+  if (!snapshot) return { ok: true, normalized: false, attachments: params.attachments };
+  const parsedIncoming = parseJsonField(params.attachments);
+  const incoming = parsedIncoming == null ? [] : parsedIncoming;
+  if (!Array.isArray(incoming)) {
+    return { ok: false, code: 'EVIDENCE_SOURCE_CONFLICT', error: '新版日誌的附件清單格式不正確，未儲存任何變更' };
+  }
+  const expected = anqinV2EvidenceClaims_(snapshot);
+  if (!expected.ok) return expected;
+
+  const preservedCandidates = [];
+  const existingAttachments = parseJsonField(existing && existing.attachments);
+  (Array.isArray(existingAttachments) ? existingAttachments : []).forEach(function (attachment) {
+    if (!attachment || !anqinVersionedEvidenceSource_(attachment.forType)) return;
+    const identity = anqinEvidenceIdentity_(attachment);
+    if (!identity.tokens.length) return;
+    preservedCandidates.push({
+      identity: identity,
+      forType: String(attachment.forType),
+      kpi: attachment.kpi,
+    });
+  });
+
+  function matchingClaims(identity, candidates) {
+    function overlaps(left, right) {
+      const wanted = {};
+      left.forEach(function (value) { wanted[value] = true; });
+      return right.some(function (value) { return wanted[value]; });
+    }
+    return candidates.filter(function (candidate) {
+      const other = candidate.identity;
+      // A canonical Drive file ID is strongest.  A copied attachment ID must not
+      // be able to relabel a different uploaded original.
+      if (identity.fileIds.length && other.fileIds.length) return overlaps(identity.fileIds, other.fileIds);
+      if (identity.attachmentIds.length && other.attachmentIds.length
+          && overlaps(identity.attachmentIds, other.attachmentIds)) return true;
+      return identity.urls.length && other.urls.length && overlaps(identity.urls, other.urls);
+    });
+  }
+  function oneMetadata(matches) {
+    const metadata = {};
+    matches.forEach(function (candidate) {
+      metadata[JSON.stringify([candidate.forType, String(candidate.kpi === undefined ? '' : candidate.kpi)])] = candidate;
+    });
+    const keys = Object.keys(metadata);
+    return keys.length === 1 ? { value: metadata[keys[0]] } : { conflict: keys.length > 1 };
+  }
+
+  const normalized = [];
+  for (let index = 0; index < incoming.length; index++) {
+    const attachment = incoming[index];
+    if (!attachment || typeof attachment !== 'object') {
+      normalized.push(attachment);
+      continue;
+    }
+    const identity = anqinEvidenceIdentity_(attachment);
+    if (identity.conflictingFileIds) {
+      return { ok: false, code: 'EVIDENCE_SOURCE_CONFLICT', error: '附件檔案識別不一致，未覆蓋原日誌；請重新讀取後再送出' };
+    }
+    let metadata = oneMetadata(matchingClaims(identity, expected.claims));
+    if (metadata.conflict) {
+      return { ok: false, code: 'EVIDENCE_SOURCE_CONFLICT', error: '附件來源版本互相衝突，未覆蓋原日誌；請重新讀取後再送出' };
+    }
+    if (!metadata.value) {
+      metadata = oneMetadata(matchingClaims(identity, preservedCandidates));
+      if (metadata.conflict) {
+        return { ok: false, code: 'EVIDENCE_SOURCE_CONFLICT', error: '既有附件來源版本互相衝突，未覆蓋原日誌；請重新讀取後再送出' };
+      }
+    }
+    if (!metadata.value) {
+      return { ok: false, code: 'EVIDENCE_SOURCE_UNVERIFIED', error: '附件不屬於本次新版日誌內容，未儲存任何變更；請重新讀取後再送出' };
+    }
+    normalized.push(Object.assign({}, attachment, { forType: metadata.value.forType, kpi: metadata.value.kpi }));
+  }
+  return { ok: true, normalized: true, attachments: normalized };
 }
 
 function validateAnqinCourseRecord_(params, user) {

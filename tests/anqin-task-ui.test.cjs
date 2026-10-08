@@ -132,8 +132,8 @@ assert.match(source, /function applyPreviewReviewContext\(/, '安親審查模式
 assert.match(source, /if \(!applyPreviewReviewContext\(control\.dataset\.role\)\) state\.ui\.role = control\.dataset\.role/, '切換審查角色時必須同步身份範圍');
 assert.match(source, /applyPreviewReviewContext\(LOCAL_REVIEW_ROLE\)/, '網址指定主管視角時首次載入就必須套用正確身份');
 assert.match(source, /GLOBAL_MANAGER_NICKNAMES\.some\(name => sameReviewIdentity\(name, managerNickname\)\)/, '小魚在審查與正式登入都必須擁有全教室檢視範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20261008-release-5/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20261008-release-5/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20261008-release-6/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20261008-release-6/, '登入備援路徑也必須避開舊版快取');
 
 const startupSafetySource = source.slice(source.indexOf('function stripEmbeddedMediaJson('), source.indexOf('function loadState()'));
 const startupSafetyContext = vm.createContext({ JSON, Number, Set });
@@ -142,7 +142,7 @@ const oversizedPhoto = `data:image/jpeg;base64,${'A'.repeat(20000)}`;
 const strippedStartupJson = startupSafetyContext.stripEmbeddedMediaJson(JSON.stringify({ note: '保留文字', dataUrl: oversizedPhoto }));
 assert.equal(JSON.parse(strippedStartupJson).note, '保留文字', '安全啟動清理照片時必須保留文字內容');
 assert.equal(JSON.parse(strippedStartupJson).dataUrl, '', '安全啟動不得再次解析大型內嵌照片');
-assert.match(source, /if \(SAFE_START_MODE\) backupRaw = localStorage\.getItem\(BACKUP_KEY\)[\s\S]{0,80}else raw = localStorage\.getItem\(STORAGE_KEY\)/, '安全模式不得讀取可能造成閃退的主要大型暫存');
+assert.match(source, /if \(SAFE_START_MODE\) \{[\s\S]{0,260}backupRaw = localStorage\.getItem\(BACKUP_KEY\)[\s\S]{0,260}safeMainKeyPresent = storageHasKey\(localStorage, STORAGE_KEY\)[\s\S]{0,120}\}\s*else raw = localStorage\.getItem\(STORAGE_KEY\)/, '安全模式只能枚舉主要暫存 key，不得讀取可能造成閃退的大型內容');
 const loadStateSource = source.slice(source.indexOf('function loadState()'), source.indexOf('let state = loadState()'));
 assert.match(loadStateSource, /backupRaw = localStorage\.getItem\(BACKUP_KEY\)/, '安全模式需讀取不含照片的文字備份');
 assert.match(loadStateSource, /if \(SAFE_START_MODE\)[\s\S]*return normalizeLoadedState\(safeBackup\)/, '安全模式需直接由文字備份復原');

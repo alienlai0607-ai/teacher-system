@@ -44,6 +44,7 @@ function fixture({ indexedDB = fakeIndexedDB(), scope = 'teacher-A', storage = n
   const state = { ui: {}, integration: { cloudSyncEnabled: true }, context: { teacher: 'QA' }, daily: { date: '2026-09-16', summary: {} }, activities: [], submissions: [], studentCases: [], contacts: [], operations: { date: '2026-09-16', dutyOwner: 'QA', evidenceByCheck: {} } };
   const context = vm.createContext({
     state, openDraftStore: {}, evidenceDraft: null, activityDraft: null, planDraft: null,
+    stateStorageWriteProtected: false,
     localMediaDatabase: null, localMediaRestoreInFlight: null, LOCAL_MEDIA_DB: scope,
     currentDrawerDraftKey: 'evidence:QA:today:new', DRAFT_KEY: scope + ':drafts', STORAGE_KEY: scope + ':state',
     runtimeHealth: {}, integrationRuntime: {}, MAX_DOCUMENT_FILE_BYTES: 25 * 1024 * 1024, MAX_IMAGE_SOURCE_BYTES: 25 * 1024 * 1024, MAX_EVIDENCE_FILES: 8,

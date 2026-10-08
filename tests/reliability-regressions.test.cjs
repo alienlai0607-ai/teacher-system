@@ -26,7 +26,7 @@ async function main() {
     upsertRow: (sheet, key, data) => { const old = [...records.values()].find(item => item.sheet === sheet && item[key] === data[key]); if (old) Object.assign(old, copy(data)); else context.appendRow(sheet, data); },
     sheetToObjects: sheet => [...records.values()].filter(item => item.sheet === sheet).map(copy),
     parseJsonField: value => typeof value === 'string' ? (value ? JSON.parse(value) : null) : value,
-    normalizeDepartment_: value => value, isGlobalManager_: () => false,
+    normalizeDepartment_: value => value, isGlobalManager_: () => false, isAnqinUser: () => false,
     todayStr: () => '2026-09-06', nowIso: () => '2026-09-06T12:00:00', logSystem() {},
     addDaysStr_: (date, amount) => {
       const value = new Date(`${date}T00:00:00Z`);

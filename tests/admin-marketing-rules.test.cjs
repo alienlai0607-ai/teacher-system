@@ -313,9 +313,9 @@ assert.match(uiHtmlSource, /workspaces\.css\?v=20260901-workspace-wrap-1/, '行�
 assert.match(uiHtmlSource, /styles\.css\?v=20260912-roster-time-2/, '班級人數版面需使用獨立快取版本');
 assert.match(uiHtmlSource, /app\.js\?v=20261008-admin-load-1/, '行政載入優化需使用獨立快取版本');
 assert.match(uiHtmlSource, /shared\/roster-time\.js\?v=20260912-roster-time-2/, '舊版時間字串需要先正規化');
-assert.match(uiHtmlSource, /shared\/api\.js\?v=20261008-release-5/, '行政頁需載入包含班級人數、登入回應與冷啟動保護的最新 API 版本');
+assert.match(uiHtmlSource, /shared\/api\.js\?v=20261008-release-6/, '行政頁需載入包含班級人數、登入回應與冷啟動保護的最新 API 版本');
 assert.match(apiSource, /getAdminMarketingWorkspaceData\|getClassRosterData/, '行政與班級唯讀 API 冷啟動時需使用較長逾時');
-assert.match(uiHtmlSource, /shared\/workspaces\.js\?v=20261008-release-5/, '工作切換需避開舊權限快取');
+assert.match(uiHtmlSource, /shared\/workspaces\.js\?v=20261008-release-6/, '工作切換需避開舊權限快取');
 assert.match(uiSource, /\['converted_half_year', '已報名半年'\]/, '試上結果需可選擇已報名半年');
 assert.match(uiSource, /result\?\.code === 'RECORD_CONFLICT'[\s\S]*result\.current_record[\s\S]*merged\.recordRevision/, '更新衝突需合併最新版後安全重試');
 assert.equal((workspacesSource.match(/admin-marketing-v1\/index\.html\?workspace=(?:admin-marketing|admin-marketing-manager|class-roster-manager)&v=20261008-admin-load-1/g) || []).length, 3, '行政、主管與班級人數入口都需避開舊版快取');

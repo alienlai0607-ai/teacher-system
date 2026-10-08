@@ -43,6 +43,7 @@ cd "$ROOT"
 "$NODE_BIN" tests/course-record-editor-delivery.test.cjs
 "$NODE_BIN" tests/anqin-summary-state.test.cjs
 "$NODE_BIN" tests/anqin-storage-warning.test.cjs
+"$NODE_BIN" tests/anqin-state-version-protection.test.cjs
 "$NODE_BIN" tests/anqin-local-media.test.cjs
 "$NODE_BIN" tests/submitted-state-regressions.test.cjs
 "$NODE_BIN" tests/anqin-submit-recovery.test.cjs
