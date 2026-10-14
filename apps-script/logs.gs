@@ -9,6 +9,285 @@ function saveLog(params) {
   return withRecordWriteLock_(function () { return saveLogRecord_(params); }, true);
 }
 
+/**
+ * 僅供 Apps Script 編輯器手動執行：
+ * 將羊羊誤存在 2026/10/14 的安親 KPI 整筆移回 2026/10/13。
+ *
+ * 這是一次性、精確 revision 限定的資料修復：目標日已有資料或來源版本有變化時
+ * 必須停止，不做合併或覆寫。資料搬移成功後才在鎖外重建 PDF，不發送通知。
+ */
+function repairYangyangAnqinDate20261013FromEditor() {
+  const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  const operator = email ? findUserByEmail(email) : null;
+  if (!operator || operator.status !== 'active' || operator.role !== 'admin') {
+    throw new Error('只有正式管理員可以修復羊羊的 KPI 日期');
+  }
+
+  const nickname = '羊羊';
+  const sourceDate = '2026-10-14';
+  const targetDate = '2026-10-13';
+  const sourceLogId = 'LOG-20261014-羊羊';
+  const targetLogId = 'LOG-20261013-羊羊';
+  const expectedRevision = '2a9348b6-e75e-4b88-ae17-8389672711c2';
+  const repairMarker = 'repair-yangyang-anqin-date-20261013-v1';
+
+  function deferredJobKey() {
+    if (typeof deferredTeacherReportJobKey_ === 'function') {
+      return deferredTeacherReportJobKey_({ type: 'kpi', nickname: nickname, date: sourceDate });
+    }
+    const identity = sourceDate + '|' + nickname;
+    return 'DEFERRED_TEACHER_REPORT_JOB_V1_kpi_' + Utilities.base64EncodeWebSafe(identity, Utilities.Charset.UTF_8).replace(/=+$/g, '');
+  }
+
+  function linkedRows(sheetName, field, value) {
+    const sheet = getSheet(sheetName);
+    const headers = getHeaders(sheet);
+    const column = headers.indexOf(field);
+    if (column < 0 || sheet.getLastRow() <= 1) return [];
+    return sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues().map(function (values, index) {
+      const item = { _row: index + 2 };
+      headers.forEach(function (header, headerIndex) { item[header] = values[headerIndex]; });
+      return item;
+    }).filter(function (item) { return String(item[field]) === String(value); });
+  }
+
+  function parseKpiField(value, fieldName) {
+    if (value === '' || value === null || value === undefined) return value;
+    let parsed;
+    try {
+      parsed = typeof value === 'string' ? JSON.parse(value) : JSON.parse(JSON.stringify(value));
+    } catch (error) {
+      const invalid = new Error(fieldName + ' 不是可安全搬移的 JSON，未寫入任何資料');
+      invalid.code = 'REPAIR_INVALID_KPI_JSON';
+      throw invalid;
+    }
+    return parsed;
+  }
+
+  function moveSnapshotRecordDate(record, label, required) {
+    if (!record || typeof record !== 'object') {
+      if (required) {
+        const missing = new Error(label + ' 遺失，未寫入任何資料');
+        missing.code = 'REPAIR_SNAPSHOT_DATE_MISSING';
+        throw missing;
+      }
+      return;
+    }
+    if (record.date === undefined || record.date === null || record.date === '') {
+      if (required) {
+        const missing = new Error(label + ' 日期遺失，未寫入任何資料');
+        missing.code = 'REPAIR_SNAPSHOT_DATE_MISSING';
+        throw missing;
+      }
+      return;
+    }
+    if (String(record.date) !== sourceDate) {
+      const mismatch = new Error(label + ' 日期不是指定來源日，未寫入任何資料');
+      mismatch.code = 'REPAIR_SNAPSHOT_DATE_MISMATCH';
+      throw mismatch;
+    }
+    record.date = targetDate;
+  }
+
+  function migrateV2SnapshotBusinessDates(kpi6) {
+    const snapshot = kpi6 && kpi6.v2_snapshot;
+    if (!snapshot || typeof snapshot !== 'object') {
+      const invalid = new Error('kpi6_data 缺少可安全搬移的 v2 snapshot，未寫入任何資料');
+      invalid.code = 'REPAIR_SNAPSHOT_MISSING';
+      throw invalid;
+    }
+    moveSnapshotRecordDate(snapshot.submission, 'submission', true);
+    ['activitySnapshots', 'studentCaseSnapshots', 'contactSnapshots'].forEach(function (field) {
+      const records = snapshot.submission[field];
+      if (records === undefined || records === null) return;
+      if (!Array.isArray(records)) {
+        const invalid = new Error('submission.' + field + ' 格式不正確，未寫入任何資料');
+        invalid.code = 'REPAIR_SNAPSHOT_INVALID';
+        throw invalid;
+      }
+      records.forEach(function (record, index) {
+        moveSnapshotRecordDate(record, 'submission.' + field + '[' + index + ']', false);
+      });
+    });
+    if (snapshot.daily && Object.prototype.hasOwnProperty.call(snapshot.daily, 'date')) {
+      moveSnapshotRecordDate(snapshot.daily, 'daily', false);
+    }
+    if (snapshot.operation) moveSnapshotRecordDate(snapshot.operation, 'operation', true);
+    return snapshot;
+  }
+
+  let lockedResult;
+  try {
+    lockedResult = withRecordWriteLock_(function () {
+      const source = findObject(SHEET_NAMES.LOGS, 'log_id', sourceLogId);
+      const target = findObject(SHEET_NAMES.LOGS, 'log_id', targetLogId);
+      const props = PropertiesService.getScriptProperties();
+      const oldDeferredKey = deferredJobKey();
+
+      if (!source) {
+        if (target && String(target.last_request_id || '') === repairMarker) {
+          props.deleteProperty(oldDeferredKey);
+          return {
+            ok: true,
+            duplicate: true,
+            repaired: false,
+            log_id: targetLogId,
+            revision: String(target.record_revision || ''),
+            marker: repairMarker,
+          };
+        }
+        return { ok: false, code: 'REPAIR_SOURCE_NOT_FOUND', error: '找不到指定來源版本，且目標不是本修復函式建立；未寫入任何資料' };
+      }
+      if (target) {
+        return { ok: false, code: 'REPAIR_TARGET_EXISTS', error: '2026/10/13 已有羊羊 KPI，為避免覆寫已停止；未寫入任何資料' };
+      }
+      if (String(source.record_revision || '') !== expectedRevision) {
+        return {
+          ok: false,
+          code: 'REPAIR_SOURCE_REVISION_CHANGED',
+          error: '羊羊 2026/10/14 KPI 版本已改變，未寫入任何資料',
+          current_revision: String(source.record_revision || ''),
+        };
+      }
+      if (String(source.nickname || '') !== nickname || String(source.date || '') !== sourceDate) {
+        return { ok: false, code: 'REPAIR_SOURCE_IDENTITY_MISMATCH', error: '來源 KPI 的老師或日期不符，未寫入任何資料' };
+      }
+
+      const sourceEvidence = linkedRows(SHEET_NAMES.EVIDENCE, 'log_id', sourceLogId);
+      const targetEvidence = linkedRows(SHEET_NAMES.EVIDENCE, 'log_id', targetLogId);
+      const sourceFeedback = linkedRows(SHEET_NAMES.FEEDBACK, 'log_id', sourceLogId);
+      const targetFeedback = linkedRows(SHEET_NAMES.FEEDBACK, 'log_id', targetLogId);
+      if (targetEvidence.length || targetFeedback.length) {
+        return { ok: false, code: 'REPAIR_TARGET_REFERENCES_EXIST', error: '2026/10/13 已有關聯證據或回饋，為避免合併已停止；未寫入任何資料' };
+      }
+
+      // kpi1～kpi5 沒有這次要搬移的 schema business record date，原儲存值完全不碰，
+      // 避免單純修日期時造成 JSON 重序列化或欄位順序變化。
+      const kpi6 = parseKpiField(source.kpi6_data, 'kpi6_data');
+      const snapshot = migrateV2SnapshotBusinessDates(kpi6);
+      const operation = snapshot.operation;
+      if (operation) {
+        // 正式舊資料的 dutyOwner 可能保留「老師」稱謂；只接受羊羊這兩個既有身分，
+        // 並保留原本的稱謂後綴，避免把其他老師的班務紀錄誤搬。
+        const allowedOwners = [nickname, nickname + '老師'];
+        const sourceOperationIds = allowedOwners.map(function (owner) { return 'op_' + sourceDate + '_' + owner; });
+        const targetOperationIds = allowedOwners.map(function (owner) { return 'op_' + targetDate + '_' + owner; });
+        const operationId = String(operation.id || '');
+        const sourceOwnerIndex = sourceOperationIds.indexOf(operationId);
+        const targetOwnerIndex = targetOperationIds.indexOf(operationId);
+        if (operationId && sourceOwnerIndex < 0 && targetOwnerIndex < 0) {
+          return { ok: false, code: 'REPAIR_OPERATION_ID_MISMATCH', error: '班務檢核編號不符預期，未寫入任何資料' };
+        }
+        const ownerIndex = sourceOwnerIndex >= 0 ? sourceOwnerIndex : targetOwnerIndex >= 0 ? targetOwnerIndex : 0;
+        operation.id = targetOperationIds[ownerIndex];
+      }
+
+      const newRevision = Utilities.getUuid();
+      const sourceFields = {
+        log_id: source.log_id,
+        date: source.date,
+        kpi6_data: source.kpi6_data,
+        record_revision: source.record_revision,
+        last_request_id: source.last_request_id,
+        is_makeup: source.is_makeup,
+        delivery_state: source.delivery_state,
+        delivery_error: source.delivery_error,
+        evidence_state: source.evidence_state,
+      };
+      const oldDeferredValue = props.getProperty(oldDeferredKey);
+      const writtenEvidence = [];
+      const writtenFeedback = [];
+      let dailyWritten = false;
+      try {
+        updateRow(SHEET_NAMES.LOGS, source._row, {
+          log_id: targetLogId,
+          date: targetDate,
+          kpi6_data: kpi6,
+          record_revision: newRevision,
+          last_request_id: repairMarker,
+          is_makeup: false,
+          delivery_state: 'complete',
+          delivery_error: '',
+          evidence_state: 'ready',
+        });
+        dailyWritten = true;
+        sourceEvidence.forEach(function (row) {
+          updateRow(SHEET_NAMES.EVIDENCE, row._row, { log_id: targetLogId, date: targetDate });
+          writtenEvidence.push(row);
+        });
+        sourceFeedback.forEach(function (row) {
+          updateRow(SHEET_NAMES.FEEDBACK, row._row, { log_id: targetLogId });
+          writtenFeedback.push(row);
+        });
+        props.deleteProperty(oldDeferredKey);
+      } catch (error) {
+        writtenFeedback.reverse().forEach(function (row) {
+          try { updateRow(SHEET_NAMES.FEEDBACK, row._row, { log_id: row.log_id }); } catch (ignored) {}
+        });
+        writtenEvidence.reverse().forEach(function (row) {
+          try { updateRow(SHEET_NAMES.EVIDENCE, row._row, { log_id: row.log_id, date: row.date }); } catch (ignored) {}
+        });
+        if (dailyWritten) {
+          try { updateRow(SHEET_NAMES.LOGS, source._row, sourceFields); } catch (ignored) {}
+        }
+        try {
+          if (oldDeferredValue === null || oldDeferredValue === undefined) props.deleteProperty(oldDeferredKey);
+          else props.setProperty(oldDeferredKey, oldDeferredValue);
+        } catch (ignored) {}
+        return { ok: false, code: 'REPAIR_WRITE_FAILED', error: '修復寫入失敗，系統已嘗試還原：' + String(error && error.message || error) };
+      }
+
+      logSystem(operator.nickname, 'repair_yangyang_anqin_date', targetLogId, {
+        source_log_id: sourceLogId,
+        target_log_id: targetLogId,
+        source_revision: expectedRevision,
+        new_revision: newRevision,
+        evidence_rows: sourceEvidence.length,
+        feedback_rows: sourceFeedback.length,
+        deferred_job_removed: oldDeferredValue !== null && oldDeferredValue !== undefined,
+        notification_sent: false,
+      });
+      return {
+        ok: true,
+        duplicate: false,
+        repaired: true,
+        log_id: targetLogId,
+        revision: newRevision,
+        marker: repairMarker,
+        evidence_rows: sourceEvidence.length,
+        feedback_rows: sourceFeedback.length,
+      };
+    }, true);
+  } catch (error) {
+    const failed = { ok: false, code: error && error.code || 'REPAIR_FAILED', error: String(error && error.message || error) };
+    Logger.log(JSON.stringify(failed));
+    return failed;
+  }
+
+  if (!lockedResult || !lockedResult.ok) {
+    Logger.log(JSON.stringify(lockedResult || { ok: false, code: 'REPAIR_NO_RESULT' }));
+    return lockedResult;
+  }
+  let pdfResult;
+  try {
+    const generated = generatePersonKpiPdf_(nickname, targetDate);
+    if (!generated || !generated.url) throw new Error('PDF 未產生可用網址');
+    pdfResult = { ok: true, url: generated.url };
+  } catch (error) {
+    // 資料搬移已完成；PDF 是鎖外的次要工作，失敗不可回滾正確資料。
+    pdfResult = { ok: false, error: String(error && error.message || error) };
+  }
+  lockedResult.pdf = pdfResult;
+  lockedResult.source_pdf_review = {
+    date: sourceDate,
+    automatically_deleted: false,
+    required: true,
+    note: '舊 2026/10/14 個人 PDF 不自動刪除；請在修復後核對 Drive，若存在即視為錯日期舊輸出另行處理。',
+  };
+  Logger.log(JSON.stringify(lockedResult));
+  return lockedResult;
+}
+
 function previousKpiWorkday_(dateStr) {
   let date = addDaysStr_(dateStr, -1);
   while (isKpiWeekend_(date)) date = addDaysStr_(date, -1);

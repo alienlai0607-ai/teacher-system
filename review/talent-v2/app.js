@@ -19,6 +19,32 @@
   })[char]);
   const icon = (name, size = 18) => `<i data-lucide="${name}" width="${size}" height="${size}" aria-hidden="true"></i>`;
   const todayIso = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
+  const addIsoDays = (dateString, amount) => {
+    const date = new Date(`${dateString}T12:00:00+08:00`);
+    date.setDate(date.getDate() + amount);
+    return date.toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
+  };
+  const previousKpiWorkday = (dateString = todayIso()) => {
+    let date = addIsoDays(dateString, -1);
+    while ([0, 6].includes(new Date(`${date}T12:00:00+08:00`).getDay())) date = addIsoDays(date, -1);
+    return date;
+  };
+  const nextKpiWorkday = dateString => {
+    let date = addIsoDays(dateString, 1);
+    while ([0, 6].includes(new Date(`${date}T12:00:00+08:00`).getDay())) date = addIsoDays(date, 1);
+    return date;
+  };
+  const talentLessonDateAllowed = (dateString, currentDate = todayIso()) => (
+    /^\d{4}-\d{2}-\d{2}$/.test(String(dateString || ''))
+      && String(dateString) <= currentDate
+      && currentDate <= nextKpiWorkday(String(dateString))
+  );
+
+  function talentLogEditable(item, currentDate = todayIso()) {
+    if (!item) return false;
+    const scheduled = item.lessonStatus !== 'cancelled' && String(item.lessonKind || 'scheduled') === 'scheduled';
+    return scheduled ? talentLessonDateAllowed(item.date, currentDate) : String(item.date || '') === currentDate;
+  }
   const currentMonth = () => todayIso().slice(0, 7);
   const uid = prefix => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
   const formatDate = value => {
@@ -624,9 +650,9 @@
         <article class="status-card"><span class="status-icon green">${icon(isPt() ? 'badge-dollar-sign' : 'gauge', 20)}</span><div><small>${isPt() ? '本月鐘點預估' : '本月 KPI'}</small><strong>${isPt() ? formatMoney(ownLogs().reduce((sum, item) => sum + Number(item.pay || 0), 0)) : `${scoreTotal(scoreFor(currentUser.nickname))} 分`}</strong><span>${isPt() ? '依每堂實際人數計算' : '月底由主管核定'}</span></div></article>
       </section>
       <section class="panel" id="teacher-class-roster"></section>
-      ${isPt() ? `<div class="notice strict">${icon('lock', 19)}<div><strong>固定課程只能當日送出</strong><span>臨時代課請選「帶班」，可填實際日期、時間與地點；停課也可補選過去排課日。</span></div></div>` : ''}
+      <div class="notice info">${icon('calendar-check-2', 19)}<div><strong>可於授課當日或下一個工作日完成</strong><span>週一可補完週五至週日實際排課；期限內不列補繳。課程與整潔照片仍須在上課當天完成拍攝。</span></div></div>
       <div class="notice strict">${icon('triangle-alert', 19)}<div><strong>家長 APP 照片會影響整月獎金</strong><span>${esc(TALENT_APP_PHOTO_POLICY)}</span></div></div>
-      ${state.draftLog ? `<div class="notice warning">${icon('file-pen-line', 19)}<div><strong>有一筆今日未完成草稿</strong><span>上次輸入已保留，請在今日結束前送出。</span></div><button type="button" class="btn btn-small" data-action="new-log">繼續填寫</button><button type="button" class="icon-button" data-action="discard-log-draft" aria-label="刪除這筆草稿" title="刪除草稿">${icon('trash-2', 16)}</button></div>` : ''}
+      ${state.draftLog ? `<div class="notice warning">${icon('file-pen-line', 19)}<div><strong>有一筆未完成草稿</strong><span>上次輸入與課程日期已保留，請在交付期限內送出。</span></div><button type="button" class="btn btn-small" data-action="new-log">繼續填寫</button><button type="button" class="icon-button" data-action="discard-log-draft" aria-label="刪除這筆草稿" title="刪除草稿">${icon('trash-2', 16)}</button></div>` : ''}
       <section class="panel">
         <div class="panel-head"><div><h2>今日課程</h2><p>${primary ? `已帶入 ${primary.label} ${primary.time}` : isPt() ? '今日沒有固定排課；如有臨時代課，可新增紀錄並選「帶班」。' : '上課後新增本堂紀錄。'}</p></div></div>
         <div class="panel-body">${logs.length ? logs.map(renderLogRow).join('') : renderEmpty('還沒有今日紀錄', '上課後用同一張表完成紀錄，不需要分散重寫。', 'clipboard-pen-line', '<button type="button" class="btn btn-primary" data-action="new-log">新增紀錄</button>')}</div>
@@ -651,7 +677,7 @@
     return `<article class="record-row">
       <div class="record-date"><strong>${formatDate(item.date)}</strong><span>${esc(item.scheduleTime || `${item.duration} 小時`)}</span></div>
       <div class="record-main"><div class="record-title">${esc(item.courseName || item.courseType)} ${isCoverage ? statusBadge('帶班') : statusBadge(item.status)}</div><div class="record-meta">${esc(item.site)} · 正式總數 ${present}（新生 ${newCount}、續報 ${renewal}）· 體驗另計 ${trial} · ${esc(item.teacher)}</div><div class="record-note">${esc(item.adminBackfillApproved ? item.adminBackfillNote : isSimple ? roomLabel : '舊制課堂紀錄（原始資料仍可查看）')}</div></div>
-      <div class="record-side">${item.employment === 'pt' ? `<strong>${formatMoney(item.pay)}</strong><span>${roomLabel}</span>` : `<strong>${present} 人</strong><span>${roomLabel}</span>`}<div class="record-actions">${isTeacher() && Number(item.entryVersion || 1) >= 2 && item.date === todayIso() && normalizeName(item.teacher) === normalizeName(currentUser.nickname) ? `<button type="button" class="icon-button" data-action="edit-log" data-id="${item.id}" aria-label="編輯今日紀錄" title="編輯今日紀錄">${icon('pencil', 16)}</button>` : ''}<button type="button" class="icon-button" data-action="view-log" data-id="${item.id}" aria-label="查看紀錄">${icon('chevron-right', 18)}</button></div></div>
+      <div class="record-side">${item.employment === 'pt' ? `<strong>${formatMoney(item.pay)}</strong><span>${roomLabel}</span>` : `<strong>${present} 人</strong><span>${roomLabel}</span>`}<div class="record-actions">${isTeacher() && Number(item.entryVersion || 1) >= 2 && talentLogEditable(item) && normalizeName(item.teacher) === normalizeName(currentUser.nickname) ? `<button type="button" class="icon-button" data-action="edit-log" data-id="${item.id}" aria-label="編輯期限內紀錄" title="編輯期限內紀錄">${icon('pencil', 16)}</button>` : ''}<button type="button" class="icon-button" data-action="view-log" data-id="${item.id}" aria-label="查看紀錄">${icon('chevron-right', 18)}</button></div></div>
     </article>`;
   }
 
@@ -868,7 +894,7 @@
     const expected = expectedPtSessions(person);
     const exceptions = state.settings.ptExceptions || [];
     const usedLogIndexes = new Set();
-    const missing = expected.filter(slot => {
+    const unresolved = expected.filter(slot => {
       const exempt = exceptions.some(item => normalizeName(item.teacher) === normalizeName(person.nickname) && item.date === slot.date && ['official_cancel', 'system_outage'].includes(item.type));
       if (exempt) return false;
       const exactIndex = logs.findIndex((item, index) => !usedLogIndexes.has(index) && item.date === slot.date && item.status === 'submitted' && logComplete(item) && item.scheduleKey === slot.scheduleKey);
@@ -884,15 +910,18 @@
       }
       return true;
     });
+    const pending = unresolved.filter(slot => todayIso() <= nextKpiWorkday(slot.date));
+    const missing = unresolved.filter(slot => todayIso() > nextKpiWorkday(slot.date));
     const incomplete = logs.filter(item => item.status !== 'submitted' || !logComplete(item));
     const appMissing = logs.filter(item => item.status === 'submitted' && logComplete(item) && appEvidenceRequired(item) && !appEvidenceComplete(item));
     const hasApprovedBackfill = logs.some(item => item.adminBackfillApproved === true && item.lessonStatus !== 'cancelled' && item.status === 'submitted' && logComplete(item));
     return {
       expected: expected.length,
       missing,
+      pending,
       incomplete,
       appMissing,
-      eligible: (expected.length > 0 || hasApprovedBackfill) && missing.length === 0 && incomplete.length === 0 && appMissing.length === 0,
+      eligible: (expected.length > 0 || hasApprovedBackfill) && missing.length === 0 && pending.length === 0 && incomplete.length === 0 && appMissing.length === 0,
     };
   }
 
@@ -915,7 +944,7 @@
     return `${pageHead('鐘點與續報', 'PT 不做 100 分 KPI；這裡只顯示本堂鐘點與當月履約資格。', monthControl())}
       <section class="hero-summary compact"><div><span>${state.ui.month} 鐘點預估</span><strong>${formatMoney(wage)}</strong><p>${heldLogs.length} 堂上課${cancelledLogs.length ? ` · ${cancelledLogs.length} 堂停課` : ''}</p></div><div class="bonus-total"><span>續報獎金預估</span><strong>${formatMoney(renewalBonus)}</strong><small>${eligible ? '當月應填課堂均完成' : compliance.missing.length ? `已缺交 ${compliance.missing.length} 堂，當月續報獎金不適用` : compliance.appMissing.length ? `舊制 APP 截圖缺 ${compliance.appMissing.length} 堂，補傳前不適用` : '尚未完成當月履約資格'} · 僅限自營教室</small></div></section>
       ${beforeLaunch ? `<div class="notice info">${icon('calendar-check-2', 19)}<div><strong>制度自 2026/09/01 起正式實施</strong><span>9 月 1 日以前不產生漏填、資格取消或獎金影響。</span></div></div>` : ''}
-      ${compliance.missing.length ? `<div class="notice strict">${icon('ban', 19)}<div><strong>當月續報獎金資格已取消</strong><span>未當日送出：${compliance.missing.map(item => formatDate(item.date)).join('、')}。過期課堂不開放補寫。</span></div></div>` : ''}
+      ${compliance.missing.length ? `<div class="notice strict">${icon('ban', 19)}<div><strong>當月續報獎金資格已取消</strong><span>未在下一個工作日前完成：${compliance.missing.map(item => formatDate(item.date)).join('、')}。超過期限不開放補寫。</span></div></div>` : ''}
       ${bonusForfeited ? `<div class="notice strict">${icon('ban', 19)}<div><strong>${esc(TALENT_BONUS_FORFEITED_LABEL)}</strong><span>${esc(bonusRecord.appPhotoBonusForfeitedReason || '主管已完成查證；鐘點費不受影響。')}</span></div></div>` : ''}
       ${compliance.appMissing.length ? `<div class="notice warning">${icon('image-off', 19)}<div><strong>舊制家長 APP 截圖尚未完成</strong><span>待補傳：${compliance.appMissing.map(item => `${formatDate(item.date)} ${item.courseName || item.courseType}`).join('、')}。請開啟該筆舊紀錄直接補傳。</span></div><button type="button" class="btn btn-small" data-action="view-log" data-id="${esc(compliance.appMissing[0].id)}">開啟紀錄補傳</button></div>` : ''}
       <section class="panel"><div class="panel-head"><div><h2>本月明細</h2><p>鐘點級距依每堂實際人數計算。</p></div></div><div class="panel-body">${logs.length ? logs.map(renderPayRow).join('') : renderEmpty('本月尚無記錄', '送出第一堂後，系統會自動列出鐘點級距。', 'badge-dollar-sign')}</div></section>
@@ -1164,13 +1193,13 @@
   function renderGuide() {
     if (isPayroll()) {
       return `${pageHead('PT 月結制度規則', '本頁只保留月結所需的計薪口徑、帶班、停課與續報資格。')}
-        <section class="guide-grid"><article class="guide-card"><span>${icon('calculator', 22)}</span><div><h2>鐘點計算</h2><ul><li>計薪只看「正式學員到課總數」；新生與續報已包含在內，體驗學生另計、不列入。</li><li>2–4 人 500／小時；5–7 人 600／小時；8–10 人 800／小時。</li><li>超過 10 人須由主管確認鐘點。</li><li>黑豹善化固定課程為 600／小時，每堂 1.5 小時為 900 元。</li></ul></div></article><article class="guide-card"><span>${icon('calendar-x-2', 22)}</span><div><h2>帶班、停課與漏填</h2><ul><li>制度自 2026/09/01 起正式判定。</li><li>固定課程只能當日送出，不能事後補寫。</li><li>臨時代課請選「帶班」，可選實際日期、開始時間、結束時間與地點；按實際時數計薪。</li><li>帶班不抵銷老師原本固定班次，也不計續報獎金。</li><li>停課可補登過去排課日，需保留原因與補登標記。</li><li>每堂正常課程需填人數、續報並上傳教室整潔照片。</li></ul></div></article><article class="guide-card"><span>${icon('printer', 22)}</span><div><h2>月結輸出</h2><ul><li>按月份彙整所有 PT 的固定課程、帶班、時數與金額。</li><li>個人月結單列出每一堂計算來源，可直接列印交老師核對。</li><li>逐堂 CSV 可供薪資歸檔，不需要再次人工輸入。</li><li>續報人數須核准後，才列入正式獎金。</li></ul></div></article><article class="guide-card"><span>${icon('folder-open', 22)}</span><div><h2>雲端日報</h2><ul><li>依老師與月份自動整理正式 PDF，不需人工搬檔。</li><li>需以系統綁定的 Google 帳號開啟 Drive。</li><li>主管只會看到自己獲授權的老師資料夾；小魚與管理員可依全域權限查看。</li></ul></div></article></section>`;
+        <section class="guide-grid"><article class="guide-card"><span>${icon('calculator', 22)}</span><div><h2>鐘點計算</h2><ul><li>計薪只看「正式學員到課總數」；新生與續報已包含在內，體驗學生另計、不列入。</li><li>2–4 人 500／小時；5–7 人 600／小時；8–10 人 800／小時。</li><li>超過 10 人須由主管確認鐘點。</li><li>黑豹善化固定課程為 600／小時，每堂 1.5 小時為 900 元。</li></ul></div></article><article class="guide-card"><span>${icon('calendar-x-2', 22)}</span><div><h2>帶班、停課與漏填</h2><ul><li>制度自 2026/09/01 起正式判定。</li><li>固定課程可於授課當日或下一個工作日送出；期限內不列補繳。</li><li>臨時代課請選「帶班」，可選實際日期、開始時間、結束時間與地點；按實際時數計薪。</li><li>帶班不抵銷老師原本固定班次，也不計續報獎金。</li><li>停課可補登過去排課日，需保留原因與補登標記。</li><li>每堂正常課程需填人數、續報並上傳教室整潔照片。</li></ul></div></article><article class="guide-card"><span>${icon('printer', 22)}</span><div><h2>月結輸出</h2><ul><li>按月份彙整所有 PT 的固定課程、帶班、時數與金額。</li><li>個人月結單列出每一堂計算來源，可直接列印交老師核對。</li><li>逐堂 CSV 可供薪資歸檔，不需要再次人工輸入。</li><li>續報人數須核准後，才列入正式獎金。</li></ul></div></article><article class="guide-card"><span>${icon('folder-open', 22)}</span><div><h2>雲端日報</h2><ul><li>依老師與月份自動整理正式 PDF，不需人工搬檔。</li><li>需以系統綁定的 Google 帳號開啟 Drive。</li><li>主管只會看到自己獲授權的老師資料夾；小魚與管理員可依全域權限查看。</li></ul></div></article></section>`;
     }
     return `${pageHead(isPt() ? 'PT 使用與規則' : modeRole() === 'fulltime' ? '正職使用與規則' : '才藝部制度規則', '將說明集中在這裡，正式填寫頁面只保留當下需要的提示。')}
       <section class="guide-grid">
-        <article class="guide-card"><span>${icon('route', 22)}</span><div><h2>一次填寫流程</h2><ol><li>確認課程或固定班次。</li><li>填正式學員到課總數，再標出其中的新生、續報；體驗學生另計。</li><li>課後整理教室並上傳整潔照片。</li><li>送出後系統會自動整理日報；不需再填備課、點名、成果、問題或 APP 截圖。</li><li>當日需要修正時，從「我的紀錄」開啟；PT 一般課堂跨日後不開放修改。</li></ol></div></article>
+        <article class="guide-card"><span>${icon('route', 22)}</span><div><h2>一次填寫流程</h2><ol><li>確認課程或固定班次。</li><li>填正式學員到課總數，再標出其中的新生、續報；體驗學生另計。</li><li>課後整理教室並上傳整潔照片。</li><li>送出後系統會自動整理日報；不需再填備課、點名、成果、問題或 APP 截圖。</li><li>在授課當日或下一個工作日需要修正時，可從「我的紀錄」開啟；超過期限後不開放修改。</li></ol></div></article>
         <article class="guide-card"><span>${icon('images', 22)}</span><div><h2>整潔照片怎麼拍</h2><ul><li>照片要看得出教室、桌面與教具已完成整理。</li><li>仍須於上課當天完成整理並拍照。</li><li>可一次多選照片；選錯可先按叉號移除再送出。</li><li>歷史的備課與課堂證據仍會保留，不會被刪除。</li></ul></div></article>
-        ${isPt() || ['manager', 'payroll'].includes(modeRole()) ? `<article class="guide-card"><span>${icon('badge-dollar-sign', 22)}</span><div><h2>PT 鐘點規則</h2><ul><li>制度自 2026/09/01 起正式判定。</li><li>級距只看正式學員到課總數；體驗學生不計入。</li><li>2–4 人 500／小時；5–7 人 600／小時；8–10 人 800／小時；超過 10 人由主管確認。</li><li>固定課程未於當日送出，當月續報獎金資格取消且不能補寫。</li><li>臨時代課選「帶班」，日期與時間可依實際授課填寫；不抵固定班次，也不計續報人數。</li><li>停課可補選過去排課日；需填原因，不計鐘點，也不算漏填。</li><li>黑豹善化固定課程每堂固定 900，無續報獎金。</li><li>PT 沒有新生獎金；自營教室續報獎金須通過當月履約並經核准。</li></ul></div></article>` : ''}
+        ${isPt() || ['manager', 'payroll'].includes(modeRole()) ? `<article class="guide-card"><span>${icon('badge-dollar-sign', 22)}</span><div><h2>PT 鐘點規則</h2><ul><li>制度自 2026/09/01 起正式判定。</li><li>級距只看正式學員到課總數；體驗學生不計入。</li><li>2–4 人 500／小時；5–7 人 600／小時；8–10 人 800／小時；超過 10 人由主管確認。</li><li>固定課程未於下一個工作日前完成，當月續報獎金資格取消且不能補寫。</li><li>臨時代課選「帶班」，日期與時間可依實際授課填寫；不抵固定班次，也不計續報人數。</li><li>停課可補選過去排課日；需填原因，不計鐘點，也不算漏填。</li><li>黑豹善化固定課程每堂固定 900，無續報獎金。</li><li>PT 沒有新生獎金；自營教室續報獎金須通過當月履約並經核准。</li></ul></div></article>` : ''}
         ${['fulltime', 'manager'].includes(modeRole()) ? `<article class="guide-card"><span>${icon('gauge', 22)}</span><div><h2>正職 KPI 獎金</h2><ul><li>80–84 分：符合職務標準，不另發。</li><li>85–89 分：1,000 元。</li><li>90–94 分：1,500 元。</li><li>95–100 分：2,500 元。</li></ul></div></article>` : ''}
         ${modeRole() === 'manager' ? `<article class="guide-card"><span>${icon('folder-open', 22)}</span><div><h2>雲端日報</h2><ul><li>正式送出後依老師與月份自動產生 PDF。</li><li>請用系統綁定的 Google 帳號開啟 Drive。</li><li>柳丁查看才藝老師；小魚與管理員依全域權限查看。</li></ul></div></article>` : ''}
       </section>`;
@@ -1269,21 +1298,21 @@
     const selectedDuration = Number(formValue('duration', scheduleDuration(schedule))) || 1.5;
     openDrawer({
       title: editing ? '編輯本堂紀錄' : state.draftLog ? '繼續本堂紀錄' : '新增本堂紀錄',
-      subtitle: editing ? '今日內更新同一筆，不會重複計薪。' : '同一頁完成一堂課，系統會自動草稿保留。',
-      body: `<form id="log-form" novalidate><input type="hidden" name="id" value="${esc(draft.id || '')}"><input type="hidden" name="updatedAt" value="${esc(draft.updatedAt || '')}"><input type="hidden" name="contentRevision" value="${esc(draft.contentRevision || '')}">
+      subtitle: editing ? '交付期限內更新同一筆，不會重複計薪。' : '同一頁完成一堂課，系統會自動草稿保留。',
+      body: `<form id="log-form" novalidate data-editing="${editing ? 'true' : 'false'}" data-room-upload-date="${pendingFiles.room.length ? esc(formValue('date', todayIso())) : ''}"><input type="hidden" name="id" value="${esc(draft.id || '')}"><input type="hidden" name="updatedAt" value="${esc(draft.updatedAt || '')}"><input type="hidden" name="contentRevision" value="${esc(draft.contentRevision || '')}">
         <div class="draft-sync-status" data-draft-sync-status>${icon('circle-check', 16)}<span>輸入內容會自動暫存</span></div>
-        ${editing ? `<div class="notice info inline-rule">${icon('pencil', 18)}<div><strong>正在補充今天已送出的紀錄</strong><span>儲存後更新原日報；日期、班次與上課狀態不可更換。</span></div></div>` : ''}
-        ${isPt() ? `<div class="notice strict inline-rule">${icon('lock', 18)}<div><strong>固定課程仍須當日送出</strong><span>臨時代課請選「帶班」，並填寫實際日期、時間與地點。</span></div></div>` : ''}
+        ${editing ? `<div class="notice info inline-rule">${icon('pencil', 18)}<div><strong>正在補充期限內已送出的紀錄</strong><span>儲存後更新原日報；日期、班次與上課狀態不可更換。</span></div></div>` : ''}
+        ${isPt() ? `<div class="notice info inline-rule">${icon('calendar-check-2', 18)}<div><strong>固定課程可於當日或下一個工作日送出</strong><span>週一可選週五至週日的實際排課；臨時代課請選「帶班」，並填寫實際日期、時間與地點。</span></div></div>` : ''}
         ${isPt() ? `<section class="form-section status-section"><div class="section-title"><span class="section-number">1</span><div><h3>本堂狀態</h3><p>選擇固定課程、臨時帶班或停課。</p></div></div>
-          <fieldset class="lesson-status-segment"><legend>上課狀態 <b>*</b></legend><label><input type="radio" name="lessonStatus" value="held" ${draftLessonStatus === 'held' ? 'checked' : ''}><span>${icon('circle-play', 18)}正常上課</span></label><label><input type="radio" name="lessonStatus" value="coverage" ${draftLessonStatus === 'coverage' ? 'checked' : ''}><span>${icon('users-round', 18)}帶班</span></label><label><input type="radio" name="lessonStatus" value="cancelled" ${draftLessonStatus === 'cancelled' ? 'checked' : ''}><span>${icon('calendar-x-2', 18)}停課</span></label></fieldset>
-          <div class="form-grid"><label class="form-field"><span>課程日期 <b>*</b></span><input type="date" name="date" value="${esc(formValue('date', todayIso()))}" max="${todayIso()}" required><small data-date-hint>正常上課固定為今天</small></label><label class="form-field" data-scheduled-only><span>本堂排課 <b>*</b></span><select name="scheduleKey" data-schedule-select data-initial-value="${esc(formValue('scheduleKey', schedule.scheduleKey))}" required></select><small>同一天有多堂課時，請選這一堂的時間與地點。</small></label><label class="form-field" data-coverage-only hidden><span>開始時間 <b>*</b></span><input type="time" name="coverageStart" value="${esc(formValue('coverageStart', '10:40'))}" step="1800" required disabled></label><label class="form-field" data-coverage-only hidden><span>結束時間 <b>*</b></span><input type="time" name="coverageEnd" value="${esc(formValue('coverageEnd', '12:10'))}" step="1800" required disabled><small>以 30 分鐘為單位，最多 4 小時。</small></label></div>
+          ${editing ? `<input type="hidden" name="lessonStatus" value="${esc(draftLessonStatus)}">` : ''}<fieldset class="lesson-status-segment"><legend>上課狀態 <b>*</b></legend><label><input type="radio" name="${editing ? 'lessonStatusDisplay' : 'lessonStatus'}" value="held" ${draftLessonStatus === 'held' ? 'checked' : ''} ${editing ? 'disabled' : ''}><span>${icon('circle-play', 18)}正常上課</span></label><label><input type="radio" name="${editing ? 'lessonStatusDisplay' : 'lessonStatus'}" value="coverage" ${draftLessonStatus === 'coverage' ? 'checked' : ''} ${editing ? 'disabled' : ''}><span>${icon('users-round', 18)}帶班</span></label><label><input type="radio" name="${editing ? 'lessonStatusDisplay' : 'lessonStatus'}" value="cancelled" ${draftLessonStatus === 'cancelled' ? 'checked' : ''} ${editing ? 'disabled' : ''}><span>${icon('calendar-x-2', 18)}停課</span></label></fieldset>
+          <div class="form-grid"><label class="form-field"><span>課程日期 <b>*</b></span><input type="date" name="date" value="${esc(formValue('date', todayIso()))}" min="${previousKpiWorkday()}" max="${todayIso()}" ${editing ? 'readonly' : ''} required><small data-date-hint>可選今天或仍在下一工作日期限內的授課日</small></label><label class="form-field" data-scheduled-only><span>本堂排課 <b>*</b></span><select name="${editing ? 'scheduleKeyDisplay' : 'scheduleKey'}" data-schedule-select data-initial-value="${esc(formValue('scheduleKey', schedule.scheduleKey))}" ${editing ? 'disabled' : 'required'}></select>${editing ? `<input type="hidden" name="scheduleKey" value="${esc(formValue('scheduleKey', schedule.scheduleKey))}">` : ''}<small>${editing ? '已送出紀錄不可更換班次。' : '同一天有多堂課時，請選這一堂的時間與地點。'}</small></label><label class="form-field" data-coverage-only hidden><span>開始時間 <b>*</b></span><input type="time" name="coverageStart" value="${esc(formValue('coverageStart', '10:40'))}" step="1800" required disabled></label><label class="form-field" data-coverage-only hidden><span>結束時間 <b>*</b></span><input type="time" name="coverageEnd" value="${esc(formValue('coverageEnd', '12:10'))}" step="1800" required disabled><small>以 30 分鐘為單位，最多 4 小時。</small></label></div>
           <div data-cancelled-only hidden><div class="form-grid">${field('停課課程名稱', 'cancelledCourseName', 'text', formValue('cancelledCourseName'), true, '例：週三 WeDo 機器人')}${selectField('停課原因', 'cancellationReason', ['招生人數不足', '學員請假／無人到課', '中心或合作校通知', '天候／停班停課', '其他'], formValue('cancellationReason', '學員請假／無人到課'), true)}</div><label class="form-field span-all"><span>補充說明</span><textarea name="cancellationNote" placeholder="可補充通知來源或後續安排。">${esc(formValue('cancellationNote'))}</textarea></label><div class="notice info compact-notice">${icon('info', 18)}<div><strong>停課補登會保留標記</strong><span>本堂不計鐘點，也不算漏填；主管月結仍看得到補登日期與原因。</span></div></div></div>
         </section>` : ''}
         <div data-held-only>
         <div class="simple-entry-intro">${icon('sparkles', 20)}<div><strong>新版只填必要資料</strong><span>確認課程與四種人數後，上傳教室整潔照片即可送出。</span></div></div>
         <div class="notice strict inline-rule">${icon('triangle-alert', 18)}<div><strong>家長 APP 照片會影響整月獎金</strong><span>${esc(TALENT_APP_PHOTO_POLICY)}</span></div></div>
         <section class="form-section"><div class="section-title"><span class="section-number">${isPt() ? '2' : '1'}</span><div><h3>課程與班次</h3><p>${isPt() ? '固定課程依排班帶入；帶班仍可填實際日期、時間與地點。' : '填寫課程或班級名稱即可。'}</p></div></div><div class="form-grid">
-          ${isPt() ? '' : `<label class="form-field"><span>授課日期 <b>*</b></span><input type="date" name="date" value="${esc(formValue('date', todayIso()))}" max="${todayIso()}" readonly required><small>正常課程固定為今天</small></label>`}
+          ${isPt() ? '' : `<label class="form-field"><span>授課日期 <b>*</b></span><input type="date" name="date" value="${esc(formValue('date', todayIso()))}" min="${previousKpiWorkday()}" max="${todayIso()}" ${editing ? 'readonly' : ''} required><small data-date-hint>可選今天或仍在下一工作日期限內的授課日</small></label>`}
           <label class="form-field span-all"><span>課程／班級名稱 <b>*</b></span><input name="courseName" value="${esc(selectedCourseName)}" data-auto-course="${autoCourse ? 'true' : 'false'}" placeholder="例：簡易、WeDo" required><small>${isPt() ? '已設定的班次會自動帶入，需要時可修正。' : '只用來辨識這堂課，不需建立備課檔案。'}</small></label>
           <input type="hidden" name="courseType" value="${esc(selectedCourseType || selectedCourseName)}">
           ${isPt() ? `<label class="form-field" data-scheduled-only><span>上課場域</span><input data-schedule-site-type-display value="${schedule.siteType === 'partner' ? '合作校／外派' : '布拉克自營教室'}" readonly><input type="hidden" name="siteType" value="${esc(schedule.siteType || 'self')}"></label><label class="form-field" data-coverage-only hidden><span>帶班場域 <b>*</b></span><select name="coverageSiteType" required disabled><option value="self" ${formValue('coverageSiteType', formValue('siteType', 'self')) !== 'partner' ? 'selected' : ''}>布拉克自營教室</option><option value="partner" ${formValue('coverageSiteType', formValue('siteType')) === 'partner' ? 'selected' : ''}>合作校／外派</option></select></label>` : '<input type="hidden" name="siteType" value="self">'}
@@ -1532,6 +1561,7 @@
     const logForm = input.closest('#log-form');
     const selectedLessonDate = String(logForm?.elements?.date?.value || '');
     const roomUploadDate = category === 'room' && /^\d{4}-\d{2}-\d{2}$/.test(selectedLessonDate) ? selectedLessonDate : todayIso();
+    if (category === 'room' && logForm) logForm.dataset.roomUploadDate = roomUploadDate;
     files.forEach(file => {
       if (category === 'room' && logForm) talentUploadDates.set(file, roomUploadDate);
       else if (!talentUploadDates.has(file)) talentUploadDates.set(file, todayIso());
@@ -1775,11 +1805,18 @@
       $$('input, select, textarea', node).forEach(control => { control.disabled = !coverage; });
     });
     const dateInput = form.elements.date;
-    if (isPt() && dateInput) {
-      dateInput.readOnly = !(cancelled || coverage);
-      if (!cancelled && !coverage && dateInput.value !== todayIso()) dateInput.value = todayIso();
+    if (dateInput) {
+      const editing = form.dataset.editing === 'true';
+      const normalScheduled = !cancelled && !coverage;
+      dateInput.readOnly = editing;
+      dateInput.max = todayIso();
+      if (normalScheduled) dateInput.min = previousKpiWorkday();
+      else dateInput.removeAttribute('min');
+      const dateAllowed = !normalScheduled || talentLessonDateAllowed(dateInput.value);
+      dateInput.setCustomValidity(dateAllowed ? '' : '正常課程只可於授課當日或下一個工作日填寫');
+      dateInput.setAttribute('aria-invalid', dateAllowed ? 'false' : 'true');
       const hint = $('[data-date-hint]', form);
-      if (hint) hint.textContent = coverage ? '帶班可選實際授課日期（不可選未來）' : cancelled ? '停課可選過去的固定排課日' : '正常上課固定為今天';
+      if (hint) hint.textContent = coverage ? '帶班可選實際授課日期（不可選未來）' : cancelled ? '停課可選過去的固定排課日' : '可選授課當日或下一個工作日；週一可選週五至週日的實際排課';
     }
     if (isPt() && !coverage) updatePtScheduleSelect(form);
     const calculatedCoverageDuration = coverageDuration(form.elements.coverageStart?.value, form.elements.coverageEnd?.value);
@@ -1845,7 +1882,7 @@
   }
 
   function updatePtScheduleSelect(form) {
-    const select = form.elements.scheduleKey;
+    const select = $('[data-schedule-select]', form);
     const dateInput = form.elements.date;
     if (!select || !dateInput?.value) return;
     const schedules = schedulesForDate(currentUser, dateInput.value);
@@ -1918,8 +1955,8 @@
     const isCoverage = isPt() && rawLessonStatus === 'coverage';
     const lessonStatus = rawLessonStatus === 'cancelled' ? 'cancelled' : 'held';
     const lessonDate = String(data.get('date') || todayIso());
-    if (isPt() && lessonStatus !== 'cancelled' && !isCoverage && lessonDate !== todayIso()) {
-      toast('PT 紀錄僅能於授課當日送出，不開放補寫', 'danger');
+    if (lessonStatus !== 'cancelled' && !isCoverage && !talentLessonDateAllowed(lessonDate)) {
+      toast('正常課程只可於授課當日或下一個工作日送出；週五至週日可於週一完成', 'danger');
       return;
     }
     let selectedScheduleKey = String(data.get('scheduleKey') || '');
@@ -2296,7 +2333,7 @@
     openDrawer({
       title: `${row.person.nickname}｜${state.ui.month} 月結單`,
       subtitle: '系統依逐堂紀錄自動彙整，可直接列印交老師核對。',
-      body: `<article class="print-sheet" id="pt-statement"><header class="statement-head"><img src="../../shared/icons/logo.png" alt="布拉克星球 Logo"><div><span>布拉克星球 KPI 系統</span><h2>才藝 PT 月度鐘點費明細</h2></div><strong>${esc(state.ui.month)}</strong></header><section class="statement-meta"><div><span>老師</span><strong>${esc(row.person.nickname)}</strong></div><div><span>固定排班</span><strong>${esc(row.person.schedule?.map(item => `${item.label} ${item.time}`).join('、') || '依班表')}</strong></div><div><span>產生日期</span><strong>${esc(todayIso().replace(/-/g, '/'))}</strong></div></section><div class="table-wrap statement-table"><table><thead><tr><th>日期</th><th>課程</th><th>狀態</th><th>正式總數</th><th>其中新生</th><th>其中續報</th><th>體驗另計</th><th>計薪人數／級距</th><th>時數與單價</th><th>本堂金額</th></tr></thead><tbody>${rowsHtml}</tbody></table></div><section class="statement-summary"><div><span>正常上課</span><strong>${row.heldLogs.length} 堂／${row.hours} 小時</strong></div><div><span>停課</span><strong>${row.cancelledLogs.length} 堂</strong></div><div><span>鐘點費合計</span><strong>${formatMoney(row.wage)}</strong></div><div><span>續報 ${row.renewal} 人</span><strong>${eligibility}／${formatMoney(row.renewalBonus)}</strong></div><div class="grand-total"><span>本月預估合計</span><strong>${formatMoney(row.total)}</strong></div></section>${row.bonusForfeited ? `<div class="statement-warning"><strong>${esc(TALENT_BONUS_FORFEITED_LABEL)}</strong><span>${esc(row.bonusForfeitureReason || '')}</span></div>` : ''}${missingDates.length ? `<div class="statement-warning"><strong>續報獎金資格取消</strong><span>正常課程未於當日送出：${missingDates.join('、')}</span></div>` : ''}${appMissingDates.length ? `<div class="statement-warning"><strong>舊制家長 APP 發布證據缺件</strong><span>${appMissingDates.join('、')}</span></div>` : ''}<footer class="statement-signatures"><span>老師核對：________________</span><span>主管／行政核對：________________</span></footer></article>`,
+      body: `<article class="print-sheet" id="pt-statement"><header class="statement-head"><img src="../../shared/icons/logo.png" alt="布拉克星球 Logo"><div><span>布拉克星球 KPI 系統</span><h2>才藝 PT 月度鐘點費明細</h2></div><strong>${esc(state.ui.month)}</strong></header><section class="statement-meta"><div><span>老師</span><strong>${esc(row.person.nickname)}</strong></div><div><span>固定排班</span><strong>${esc(row.person.schedule?.map(item => `${item.label} ${item.time}`).join('、') || '依班表')}</strong></div><div><span>產生日期</span><strong>${esc(todayIso().replace(/-/g, '/'))}</strong></div></section><div class="table-wrap statement-table"><table><thead><tr><th>日期</th><th>課程</th><th>狀態</th><th>正式總數</th><th>其中新生</th><th>其中續報</th><th>體驗另計</th><th>計薪人數／級距</th><th>時數與單價</th><th>本堂金額</th></tr></thead><tbody>${rowsHtml}</tbody></table></div><section class="statement-summary"><div><span>正常上課</span><strong>${row.heldLogs.length} 堂／${row.hours} 小時</strong></div><div><span>停課</span><strong>${row.cancelledLogs.length} 堂</strong></div><div><span>鐘點費合計</span><strong>${formatMoney(row.wage)}</strong></div><div><span>續報 ${row.renewal} 人</span><strong>${eligibility}／${formatMoney(row.renewalBonus)}</strong></div><div class="grand-total"><span>本月預估合計</span><strong>${formatMoney(row.total)}</strong></div></section>${row.bonusForfeited ? `<div class="statement-warning"><strong>${esc(TALENT_BONUS_FORFEITED_LABEL)}</strong><span>${esc(row.bonusForfeitureReason || '')}</span></div>` : ''}${missingDates.length ? `<div class="statement-warning"><strong>續報獎金資格取消</strong><span>正常課程未在下一個工作日前完成：${missingDates.join('、')}</span></div>` : ''}${appMissingDates.length ? `<div class="statement-warning"><strong>舊制家長 APP 發布證據缺件</strong><span>${appMissingDates.join('、')}</span></div>` : ''}<footer class="statement-signatures"><span>老師核對：________________</span><span>主管／行政核對：________________</span></footer></article>`,
       footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button><button type="button" class="btn btn-primary" data-action="print-statement">${icon('printer', 16)}列印月結單</button>`,
     });
   }
@@ -2474,7 +2511,7 @@
     else if (action === 'refresh-schedule') { closeDialog(); await loadCloudData(); renderApp(); }
     else if (action === 'edit-log') {
       const item = state.logs.find(log => log.id === control.dataset.id);
-      if (!item || item.date !== todayIso() || normalizeName(item.teacher) !== normalizeName(currentUser.nickname)) return;
+      if (!item || !talentLogEditable(item) || normalizeName(item.teacher) !== normalizeName(currentUser.nickname)) return;
       if (Number(item.entryVersion || 1) < 2) {
         toast('舊制正式紀錄僅供查看；如缺 APP 截圖，請開啟紀錄詳情補傳', 'warning');
         return;
@@ -2512,6 +2549,10 @@
       const index = Number(control.dataset.index);
       if (!Array.isArray(pendingFiles[category]) || !Number.isInteger(index) || index < 0 || index >= pendingFiles[category].length) return;
       pendingFiles[category].splice(index, 1);
+      if (category === 'room' && pendingFiles.room.length === 0) {
+        const form = $('#log-form');
+        if (form) form.dataset.roomUploadDate = '';
+      }
       refreshUploadControl(category);
       if ($('#log-form')) captureLogDraft();
       await preserveTalentEditor();
@@ -2709,6 +2750,18 @@
   });
 
   document.addEventListener('change', async event => {
+    const changedLogForm = event.target.closest('#log-form');
+    if (changedLogForm && event.target.matches('[name="date"]')) {
+      const roomUploadDate = String(changedLogForm.dataset.roomUploadDate || '');
+      const roomUploadInProgress = Boolean(changedLogForm.querySelector('[data-upload-category="room"][data-uploading="true"]'));
+      if (roomUploadDate && roomUploadDate !== event.target.value && (pendingFiles.room.length || roomUploadInProgress)) {
+        event.target.value = roomUploadDate;
+        updateLogFormLogic();
+        await preserveTalentEditor();
+        toast(`整潔照片已依 ${formatDate(roomUploadDate)} 上傳；如需更改課程日期，請先移除照片再重新選擇`, 'warning');
+        return;
+      }
+    }
     if (event.target.closest('#log-form, #prep-form') && event.target.type !== 'file') preserveTalentEditor();
     if (event.target.matches('[data-month-picker]')) {
       state.ui.month = event.target.value || currentMonth();

@@ -13,6 +13,12 @@ async function scenario(browser, role, width) {
   const context = await browser.newContext({ viewport: { width, height: 844 }, timezoneId: 'Asia/Taipei', serviceWorkers: 'block' });
   const page = await context.newPage();
   const user = { nickname: '皮皮老師', role: 'admin_staff', subtype: 'marketing', department: '北區教室', work_assignments: [role], session_token: 'isolated-test-token', t: Date.now() };
+  if (role === 'talent-pt') {
+    user.employment_type = 'pt';
+    user.schedule_json = Array.from({ length: 7 }, (_, weekday) => ({
+      weekday, label: '上傳韌性測試班', time: '19:00–20:30', siteType: 'self', site: '上傳韌性測試教室',
+    }));
+  }
   const store = { preps: [], lessons: [], records: [] };
   const uploads = [];
   const receipts = new Map();
@@ -131,6 +137,7 @@ async function scenario(browser, role, width) {
       assert.equal(store.lessons[0].roomFiles.length, 2);
       assert.equal(store.lessons[0].present, 8);
       assert.equal(store.lessons[0].renewalCount, 2);
+      assert.equal(store.lessons[0].lessonKind, 'scheduled');
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2), false);
       await page.screenshot({ path: `/private/tmp/kpi-upload-${role}-${width}-retry.png`, fullPage: true });
     }

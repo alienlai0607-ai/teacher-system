@@ -132,8 +132,8 @@ assert.match(source, /function applyPreviewReviewContext\(/, '安親審查模式
 assert.match(source, /if \(!applyPreviewReviewContext\(control\.dataset\.role\)\) state\.ui\.role = control\.dataset\.role/, '切換審查角色時必須同步身份範圍');
 assert.match(source, /applyPreviewReviewContext\(LOCAL_REVIEW_ROLE\)/, '網址指定主管視角時首次載入就必須套用正確身份');
 assert.match(source, /GLOBAL_MANAGER_NICKNAMES\.some\(name => sameReviewIdentity\(name, managerNickname\)\)/, '小魚在審查與正式登入都必須擁有全教室檢視範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20261008-release-6/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20261008-release-6/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20261014-release-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20261014-release-1/, '登入備援路徑也必須避開舊版快取');
 
 const startupSafetySource = source.slice(source.indexOf('function stripEmbeddedMediaJson('), source.indexOf('function loadState()'));
 const startupSafetyContext = vm.createContext({ JSON, Number, Set });
@@ -390,7 +390,7 @@ const cloudSnapshotSource = source.slice(source.indexOf('function buildCloudSnap
 assert.match(cloudSnapshotSource, /status: submission\.status === 'draft' \? 'draft' : 'submitted'/, '正式雲端快照必須使用本次送出狀態，不得沿用本機舊草稿狀態');
 assert.match(cloudSnapshotSource, /submittedAt: submission\.submittedAt \|\| ''/, '正式雲端快照必須保存本次實際送出時間');
 const cloudDraftSyncSource = source.slice(source.indexOf('async function syncDailyDraftToCloud('), source.indexOf('function scheduleDailyCloudDraftSync('));
-assert.match(cloudDraftSyncSource, /if \(dailyNeedsResubmit\(\)\)[\s\S]{0,260}reason: 'awaiting-resubmit'/, '修改已送出日報時不得用背景草稿覆蓋主管仍在看的正式版本');
+assert.match(cloudDraftSyncSource, /existing\?\.status === 'draft' && existing\.previousStatus[\s\S]{0,160}reason: 'awaiting-resubmit'/, '修改已送出日報時不得用背景草稿覆蓋主管仍在看的正式版本');
 assert.match(source, /function cloudDecisionIsCurrent\(decisionAt, contentUpdatedAt\)/, '雲端同步需比較主管決定與老師補件的時間版本');
 assert.match(source, /cloudDecisionIsCurrent\(latestDecisionRow\.created_at, submission\.submittedAt\)/, '重新送出的日報不得被舊主管決定改回待補件');
 assert.match(source, /\['已知悉', '需改進'\]\.includes\(row\.tag\)/, '一般主管對話不得誤改日報審查狀態');

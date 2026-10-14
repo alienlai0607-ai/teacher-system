@@ -3,6 +3,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const sharp = require('sharp');
 const out = path.resolve(__dirname, '../../output/google-staging-20260914');
+fs.mkdirSync(out, { recursive: true });
 
 (async () => {
   const fixtures = [];

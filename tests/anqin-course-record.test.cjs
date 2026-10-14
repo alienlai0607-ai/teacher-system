@@ -40,6 +40,7 @@ function fixture() {
     backendNickname: value => value.replace(/老師$/, ''), cloudTeacherNickname: value => value.replace(/老師$/, ''),
     cloudLogId: (name, date) => `${name}:${date}`, cloudIdentityReady: () => true,
     dailyNeedsResubmit: () => false, dailySubmitInFlight: false, cloudDraftInFlight: null, cloudDraftGeneration: 0, cloudDraftTimer: null,
+    scheduledDailyCloudDraft: null, queuedDailyCloudDrafts: new Map(),
     integrationRuntime: {}, persist: () => true, updateSaveIndicator() {}, refreshSystemStatusNotice() {},
     dailyCloudConflict: null, normalizeContactRecord() {}, reconcileLegacyPlans() {}, preserveActivityMedia() {},
     operationRecordById: id => [state.operations, ...state.operationHistory].find(item => item.id === id),
@@ -54,7 +55,7 @@ function fixture() {
     'normalizeCourseRecord', 'courseRecordRequired', 'courseRecordComplete', 'dailyKpiOptional',
     'todayActivities', 'todaySectionStatus', 'dailyCompletion', 'hasDailyRecords',
     'createDailySubmissionRecord', 'removeInlineMedia', 'buildCloudSnapshot', 'joinActivityText', 'joinActivityFeedback',
-    'buildLegacySubmissionPayload', 'syncDailyDraftRequest', 'dailySubmissionContentSignature', 'normalizeDailySubmissionSignature',
+    'buildLegacySubmissionPayload', 'captureDailyDraftSyncSnapshot', 'syncDailyDraftRequest', 'dailySubmissionContentSignature', 'normalizeDailySubmissionSignature',
     'previousKpiWorkday', 'isNextWorkdayGraceDate', 'operationHasDailyContent', 'rollWorkspaceToToday',
     'preserveAttachmentMedia', 'hydrateCloudSnapshotAttachments', 'importCloudSnapshot',
   ];

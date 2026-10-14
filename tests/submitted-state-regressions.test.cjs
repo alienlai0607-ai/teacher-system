@@ -29,19 +29,22 @@ function harness(logs, options = {}) {
     integration: {}, context: { teacher, department: 'QA' }, ui: { role: options.manager ? 'manager' : 'teacher' },
     daily: { date: '2026-09-16', status: 'draft', submittedAt: '', summary: {} },
     submissions: copy(options.submissions || []), activities: [], contacts: [], studentCases: [],
-    lessonPlans: [], operationHistory: [], tasks: [], feedbackThreads: {},
+    lessonPlans: [], operations: copy(options.operations || { id: 'op_2026-09-16_QA老師', date: '2026-09-16', dutyOwner: teacher, room: 'QA', evidenceByCheck: {} }),
+    operationHistory: copy(options.operationHistory || []), tasks: [], feedbackThreads: {},
   };
   const context = vm.createContext({
     state, console, clone: copy, SAFE_START_MODE: true,
     cloudLogId: (name, date) => `${name}-${date}`, dailyNeedsResubmit: () => false,
-    cloudDraftInFlight: null, dailySubmitInFlight: false, dailyCloudConflict: null,
+    cloudDraftInFlight: options.cloudDraftInFlight || null,
+    dailySubmitInFlight: Boolean(options.dailySubmitInFlight), dailyCloudConflict: null,
     driveFileId: () => '',
     hydrateCloudSnapshotAttachments: copy, normalizeContactRecord() {}, normalizeEvidenceRecord() {},
     reconcileLegacyPlans() {}, preserveActivityMedia() {}, preserveAttachmentMedia() {},
-    operationRecordById: () => null, sameReviewIdentity: (a, b) => a === b,
+    operationRecordById: id => [state.operations, ...state.operationHistory].find(item => item?.id === id) || null,
+    sameReviewIdentity: (a, b) => a === b,
     ensureCloudTeacherIdentity: async () => ({ ok: true }),
     legacySession: () => ({ role: options.manager ? 'manager' : 'teacher', nickname: teacher }),
-    integrationRuntime: {}, renderApp() {},
+    integrationRuntime: copy(options.integrationRuntime || {}), renderApp() {},
     todayIso: () => '2026-09-16',
     addDays: (value, amount) => { const date = new Date(`${value}T12:00:00Z`); date.setUTCDate(date.getUTCDate() + amount); return date.toISOString().slice(0, 10); },
     dailyKpiOptional: value => [0, 6].includes(new Date(`${value}T00:00:00Z`).getUTCDay()),
@@ -54,6 +57,10 @@ function harness(logs, options = {}) {
     feedbackThreadKey: (kind, id) => `${kind}:${id}`, feedbackThreadMessages: () => [],
     displayNameForBackend: name => name, backendNickname: () => 'QA',
     sameFeedbackMessage: (a, b) => a.id === b.id,
+    createSeed: () => ({
+      daily: { status: 'draft', submittedAt: '', summary: {}, courseRecord: { channels: [], attachments: [], note: '' } },
+      operations: { evidenceByCheck: {}, confirmedAt: '', status: 'draft' },
+    }),
   });
   context.window.API = context.API;
   vm.runInContext(
@@ -65,6 +72,26 @@ function harness(logs, options = {}) {
     vm.runInContext(block('  async function syncCloudFeedback(', '  async function syncTeacherCloudData('), context);
   }
   return context;
+}
+
+function movedDateFixture() {
+  const log = cloudLog('2026-09-15', { status: 'pending' });
+  log.kpi6_data.v2_snapshot.submission.id = 'sub-date-move';
+  log.kpi6_data.v2_snapshot.submission.courseRecord = {
+    channels: ['group'], note: '', attachments: [{ id: 'course-photo', fileName: 'remote.jpg', cloudUrl: 'https://example.invalid/remote.jpg' }],
+  };
+  log.kpi6_data.v2_snapshot.operation = {
+    id: 'op_2026-09-15_QA老師', date: '2026-09-15', dutyOwner: teacher, room: 'QA',
+    confirmedAt: log.submitted_at, evidenceByCheck: {},
+  };
+  const cached = {
+    ...copy(log.kpi6_data.v2_snapshot.submission), date: '2026-09-16',
+    submittedAt: log.submitted_at, cloudSavedAt: log.kpi6_data.v2_snapshot.savedAt,
+  };
+  const oldOperation = {
+    ...copy(log.kpi6_data.v2_snapshot.operation), id: 'op_2026-09-16_QA老師', date: '2026-09-16',
+  };
+  return { log, cached, oldOperation };
 }
 
 test('teacher history uses durable submission evidence for inconsistent legacy drafts', async () => {
@@ -103,6 +130,85 @@ test('same cloud version can repair an already cached false draft', async () => 
   const ctx = harness([log], { submissions: [cached] });
   await ctx.syncTeacherCloudData(false);
   assert.equal(ctx.state.submissions[0].status, 'pending');
+});
+
+test('same submission id moved by an admin follows the cloud date and clears only the matching submitted workspace', async () => {
+  const { log, cached, oldOperation } = movedDateFixture();
+  const ctx = harness([log], { submissions: [cached], operations: oldOperation });
+  ctx.state.daily.status = 'submitted';
+  ctx.state.daily.submittedAt = log.submitted_at;
+  ctx.state.integration.logRevisions = { [`${teacher}-2026-09-15`]: log.record_revision };
+  await ctx.syncTeacherCloudData(false);
+  assert.equal(ctx.state.submissions.length, 1);
+  assert.equal(ctx.state.submissions[0].date, '2026-09-15');
+  assert.equal(ctx.state.daily.status, 'draft');
+  assert.equal(ctx.state.daily.submittedAt, '');
+  assert.equal(ctx.state.operations.date, '2026-09-16');
+  assert.equal(ctx.state.operations.confirmedAt, '');
+  assert.ok(ctx.state.operationHistory.some(item => item.id === 'op_2026-09-15_QA老師'));
+  assert.ok(!ctx.state.operationHistory.some(item => item.id === 'op_2026-09-16_QA老師'));
+});
+
+test('a moved cloud date never overwrites old-date edits awaiting resubmission', () => {
+  const { log, cached, oldOperation } = movedDateFixture();
+  cached.status = 'draft';
+  cached.previousStatus = 'pending';
+  cached.keyResult = '本機尚未重送的內容';
+  const ctx = harness([log], { submissions: [cached], operations: oldOperation });
+  ctx.state.daily.summary.keyResult = '正在編輯的新內容';
+  const before = copy(ctx.state);
+  const imported = ctx.importCloudSnapshot(log.kpi6_data.v2_snapshot, [], log.record_revision, false, log.submitted_at);
+  assert.equal(imported, false);
+  assert.deepEqual(ctx.state, before);
+});
+
+test('a moved cloud date protects an unconfirmed submission on its previous date', () => {
+  const { log, cached, oldOperation } = movedDateFixture();
+  const ctx = harness([log], { submissions: [cached], operations: oldOperation });
+  ctx.state.integration.pendingDailySubmission = {
+    teacher, date: '2026-09-16', submission: copy(cached), payload: { request_id: 'pending-old-date' },
+  };
+  const before = copy(ctx.state);
+  const imported = ctx.importCloudSnapshot(log.kpi6_data.v2_snapshot, [], log.record_revision, false, log.submitted_at);
+  assert.equal(imported, false);
+  assert.deepEqual(ctx.state, before);
+});
+
+test('a moved cloud date waits for old-date course photos to finish saving', () => {
+  const { log, cached, oldOperation } = movedDateFixture();
+  const ctx = harness([log], {
+    submissions: [cached], operations: oldOperation, integrationRuntime: { courseRecordUploading: true },
+  });
+  const before = copy(ctx.state);
+  const imported = ctx.importCloudSnapshot(log.kpi6_data.v2_snapshot, [], log.record_revision, false, log.submitted_at);
+  assert.equal(imported, false);
+  assert.deepEqual(ctx.state, before);
+});
+
+test('a moved cloud date preserves old-date workspaces and local photos during every save or submit race', () => {
+  for (const guard of ['dailyDraftSyncPending', 'cloudDraftInFlight', 'dailySubmitInFlight']) {
+    const { log, cached, oldOperation } = movedDateFixture();
+    const localPhoto = {
+      id: 'local-only-photo', fileName: 'local.jpg', dataUrl: 'data:image/jpeg;base64,LOCAL',
+      localMediaKey: 'local-media-key', uploadStatus: 'local',
+    };
+    cached.courseRecord = { channels: ['group'], note: '尚未同步', attachments: [copy(localPhoto)] };
+    oldOperation.evidenceByCheck = { classroom: copy(localPhoto) };
+    const ctx = harness([log], {
+      submissions: [cached], operations: oldOperation,
+      cloudDraftInFlight: guard === 'cloudDraftInFlight' ? { pending: true } : null,
+      dailySubmitInFlight: guard === 'dailySubmitInFlight',
+    });
+    ctx.state.daily.courseRecord = copy(cached.courseRecord);
+    ctx.state.integration.dailyDraftSyncPending = guard === 'dailyDraftSyncPending';
+    ctx.state.integration.dailyWorkspaces = {
+      '2026-09-16': { daily: copy(ctx.state.daily), operation: copy(oldOperation) },
+    };
+    const before = copy(ctx.state);
+    const imported = ctx.importCloudSnapshot(log.kpi6_data.v2_snapshot, [], log.record_revision, false, log.submitted_at);
+    assert.equal(imported, false, guard);
+    assert.deepEqual(ctx.state, before, guard);
+  }
 });
 
 test('confirmed sent snapshot repairs a cached draft even when its client timestamp is newer', async () => {

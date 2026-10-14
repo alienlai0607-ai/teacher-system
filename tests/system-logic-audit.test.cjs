@@ -349,6 +349,20 @@ test('Friday can be delivered on Monday without makeup penalty', ({ c, request }
   assert.equal(c.getMakeupQuota({ nickname: 'north' }).used, 0);
 });
 
+test('selected previous-workday date stays on that date in log id and storage', ({ c, request }) => {
+  c.todayStr = () => '2026-10-14';
+  c.ensureHeaders(c.getSheet('DailyLogs'), ['locked', 'is_makeup', 'submitted_at', 'record_revision', 'last_request_id']);
+  const result = request('north', 'saveLog', {
+    nickname: 'north', date: '2026-10-13', submitted: false,
+    reflection: 'QA 必須歸在 10/13', request_id: 'selected-date-20261013',
+  });
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.log_id, 'LOG-20261013-north');
+  assert.equal(result.is_makeup, false);
+  assert.equal(c.findObject('DailyLogs', 'log_id', 'LOG-20261013-north').date, '2026-10-13');
+  assert.equal(c.findObject('DailyLogs', 'log_id', 'LOG-20261014-north'), null, '不得誤建 10/14 資料列');
+});
+
 test('next-day grace remains valid across a month boundary', ({ c, request }) => {
   c.todayStr = () => '2026-09-01';
   c.ensureHeaders(c.getSheet('DailyLogs'), ['locked', 'is_makeup', 'submitted_at', 'record_revision', 'last_request_id']);

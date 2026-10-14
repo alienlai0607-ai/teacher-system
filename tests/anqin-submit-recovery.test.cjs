@@ -56,6 +56,7 @@ function submitContext(options = {}) {
     toast(message) { context.lastToast = message; },
     showDailySubmissionReceipt(submission) { receipts.push(copy(submission)); },
     finishDailyDelivery: async () => {}, showDailyCloudConflict() {},
+    cancelScheduledDailyCloudDraft() {},
     markDailyNeedsResubmit() {
       state.daily.status = 'draft'; state.daily.submittedAt = '';
       const submission = state.submissions.find(item => item.date === state.daily.date && item.teacher === state.context.teacher);

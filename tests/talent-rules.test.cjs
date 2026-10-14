@@ -201,6 +201,141 @@ assert.deepEqual({
 }, { rate: 800, amount: 1200, review: false }, '主管核定的 11 人歷史帶班須強制列入 1,200 元');
 assert.equal(pay({ lessonStatus: 'cancelled' }).amount, 0);
 
+assert.equal(
+  context.talentScheduledLessonWithinSubmissionWindow_('2026-10-13', '2026-10-14'),
+  true,
+  '週二的固定課程可於週三送出或修改',
+);
+assert.equal(
+  context.talentScheduledLessonWithinSubmissionWindow_('2026-10-16', '2026-10-19'),
+  true,
+  '週五的固定課程可於下週一送出或修改',
+);
+assert.equal(
+  context.talentScheduledLessonWithinSubmissionWindow_('2026-10-16', '2026-10-17'),
+  true,
+  '週五課在期限前的週六仍可送出或修改',
+);
+assert.equal(
+  context.talentScheduledLessonWithinSubmissionWindow_('2026-10-16', '2026-10-18'),
+  true,
+  '週五課在期限前的週日仍可送出或修改',
+);
+assert.equal(
+  context.talentScheduledLessonWithinSubmissionWindow_('2026-10-17', '2026-10-19'),
+  true,
+  '週六實際排課可於下一個工作日週一送出或修改',
+);
+assert.equal(
+  context.talentScheduledLessonWithinSubmissionWindow_('2026-10-17', '2026-10-18'),
+  true,
+  '週六課在期限前的週日仍可送出或修改',
+);
+assert.equal(
+  context.talentScheduledLessonWithinSubmissionWindow_('2026-10-13', '2026-10-15'),
+  false,
+  '週二的固定課程到週四已逾期，必須阻擋',
+);
+assert.equal(
+  context.talentScheduledLessonWithinSubmissionWindow_('2026-10-16', '2026-10-20'),
+  false,
+  '週五的固定課程到週二已逾期，必須阻擋',
+);
+
+function saveWindowScenario(today, lessonDate, existingLesson = null) {
+  const writes = [];
+  const teacher = {
+    nickname: 'QA才藝老師', role: 'teacher', status: 'active', department: '才藝部門',
+    employment_type: 'fulltime', work_assignments: ['talent-fulltime'],
+  };
+  const storedRow = existingLesson ? {
+    record_id: existingLesson.id,
+    record_type: 'lesson',
+    nickname: teacher.nickname,
+    status: 'submitted',
+    updated_at: existingLesson.updatedAt,
+    data: JSON.parse(JSON.stringify(existingLesson)),
+  } : null;
+  const saveContext = vm.createContext({
+    Array, Date, Error, JSON, Math, Number, Object, RegExp, String, console,
+    decodeURIComponent, encodeURIComponent,
+    Utilities: { getUuid: () => 'window-test-uuid' },
+    normalizeDepartment_: value => String(value || ''),
+    isGlobalManager_: () => false,
+  });
+  vm.runInContext(backendSource, saveContext);
+  saveContext.SHEET_NAMES = { TALENT_RECORDS: 'TalentRecords' };
+  saveContext.todayStr = () => today;
+  saveContext.nowIso = () => `${today}T12:00:00`;
+  saveContext.findUserByNickname = nickname => nickname === teacher.nickname ? teacher : null;
+  saveContext.userHasTalentWork_ = () => true;
+  saveContext.findObject = (_sheet, _key, recordId) => storedRow && storedRow.record_id === recordId ? storedRow : null;
+  saveContext.talentRecordObject_ = row => JSON.parse(JSON.stringify(row.data));
+  saveContext.talentAttachments_ = items => Array.isArray(items) ? items.slice() : [];
+  saveContext.talentRoomEvidence_ = items => Array.isArray(items) ? items.slice() : [];
+  saveContext.sheetToObjects = () => [];
+  saveContext.LockService = { getScriptLock: () => ({ tryLock: () => true, releaseLock: () => {} }) };
+  saveContext.upsertTalentRecord_ = (_type, _nickname, lesson) => {
+    const saved = JSON.parse(JSON.stringify({ ...lesson, updatedAt: `${today}T12:00:00` }));
+    writes.push(saved);
+    return saved;
+  };
+  saveContext.removeTalentRecord_ = () => {};
+  saveContext.queueDeferredTeacherReport_ = () => ({ queued: true, scheduled: true });
+  saveContext.logSystem = () => {};
+  const source = existingLesson || {};
+  const result = saveContext.saveTalentLesson({
+    __actor: teacher,
+    nickname: teacher.nickname,
+    request_id: `window-${today}-${lessonDate}`,
+    lesson: {
+      ...JSON.parse(JSON.stringify(source)),
+      id: source.id || `lesson-${lessonDate}`,
+      entryVersion: 2,
+      date: lessonDate,
+      lessonStatus: 'held',
+      lessonKind: 'scheduled',
+      courseName: '週二才藝課',
+      courseType: '樂高小創客',
+      siteType: 'self',
+      site: '布拉克自營教室',
+      duration: 1.5,
+      present: 4,
+      newCount: 1,
+      renewalCount: 1,
+      trial: 0,
+      roomFiles: [{ fileId: 'window-room-photo' }],
+    },
+  });
+  return { result, writes };
+}
+
+const tuesdayOnWednesday = saveWindowScenario('2026-10-14', '2026-10-13');
+assert.equal(tuesdayOnWednesday.result.ok, true, '週二固定課程應可在週三新增送出');
+assert.equal(tuesdayOnWednesday.writes[0].backfilled, false, '週三交付週二課程仍在期限內，不得標示補登');
+const fridayOnMonday = saveWindowScenario('2026-10-19', '2026-10-16');
+assert.equal(fridayOnMonday.result.ok, true, '週五固定課程應可在週一新增送出');
+assert.equal(fridayOnMonday.writes[0].backfilled, false, '週一交付週五課程仍在期限內，不得標示補登');
+assert.equal(saveWindowScenario('2026-10-17', '2026-10-16').result.ok, true, '週五固定課程在週六仍未逾期');
+assert.equal(saveWindowScenario('2026-10-18', '2026-10-16').result.ok, true, '週五固定課程在週日仍未逾期');
+const saturdayOnMonday = saveWindowScenario('2026-10-19', '2026-10-17');
+assert.equal(saturdayOnMonday.result.ok, true, '週六固定課程應可在下一個工作日週一新增送出');
+assert.equal(saturdayOnMonday.writes[0].backfilled, false, '週一交付週六課程仍在期限內，不得標示補登');
+assert.equal(saveWindowScenario('2026-10-18', '2026-10-17').result.ok, true, '週六固定課程在週日仍未逾期');
+const expiredTuesday = saveWindowScenario('2026-10-15', '2026-10-13');
+assert.equal(expiredTuesday.result.ok, false, '週二課程週四才新增必須阻擋');
+assert.match(expiredTuesday.result.error, /下一個工作日/);
+assert.equal(expiredTuesday.writes.length, 0, '逾期請求不得寫入');
+const editableLesson = {
+  ...tuesdayOnWednesday.writes[0],
+  id: 'lesson-edit-window',
+  contentRevision: 'existing-window-revision',
+  updatedAt: '2026-10-13T20:00:00',
+  status: 'submitted',
+};
+assert.equal(saveWindowScenario('2026-10-14', '2026-10-13', editableLesson).result.ok, true, '已送出週二課程在週三仍可修改');
+assert.equal(saveWindowScenario('2026-10-15', '2026-10-13', editableLesson).result.ok, false, '已送出週二課程到週四不可再修改');
+
 const coverageSchedule = context.talentCoverageSchedule_({ date: '2026-09-19', coverageStart: '10:40', coverageEnd: '12:10', coverageSiteType: 'self', coverageSite: '東橋教室' });
 assert.deepEqual({ label: coverageSchedule.scheduleLabel, time: coverageSchedule.scheduleTime, duration: coverageSchedule.duration, site: coverageSchedule.site }, { label: '帶班', time: '10:40–12:10', duration: 1.5, site: '東橋教室' });
 assert.throws(() => context.talentCoverageSchedule_({ date: '2026-09-19', coverageStart: '10:40', coverageEnd: '12:20', coverageSite: '東橋教室' }), /0.5 小時倍數/);
@@ -730,7 +865,7 @@ assert.match(talentUiSource, /相同檔案已略過/, '重複整潔照片需略�
 assert.match(backendSource, /fingerprint: String\(item\.fingerprint/, '附件內容指紋需保存到雲端供下次編輯繼續防重');
 assert.match(talentUiSource, /route: 'records', label: '我的紀錄'/, '才藝老師查看過去內容的入口需直接命名為我的紀錄');
 assert.match(talentUiSource, /const teacherPriority = \['today', 'class-roster', 'records'/, '才藝手機底部需直接顯示我的紀錄，不得藏到更多');
-assert.match(talentUiSource, /aria-label="編輯今日紀錄"/, '才藝老師需能從我的紀錄直接編輯當日內容');
+assert.match(talentUiSource, /aria-label="編輯期限內紀錄"/, '才藝老師需能從我的紀錄直接編輯交付期限內內容');
 const logEditorSource = talentUiSource.slice(talentUiSource.indexOf('function openLogEditor('), talentUiSource.indexOf('function field('));
 assert.match(logEditorSource, /numberField\('正式學員到課總數', 'present'[\s\S]*numberField\('其中：新生', 'newCount'[\s\S]*numberField\('其中：續報', 'renewalCount'[\s\S]*numberField\('體驗學生人數', 'trial'/, '新版表單需以正式總數、內含分類及體驗另計呈現四種必填人數');
 assert.match(logEditorSource, /data-other-formal-count[\s\S]*data-count-summary[\s\S]*data-formal-count-summary[\s\S]*data-trial-count-summary/, '人數表單需顯示其他正式學員與正式／體驗即時摘要');
@@ -745,21 +880,30 @@ assert.match(talentUiSource, /\.\.\.values,[\s\S]*id: editingId \|\| existingLog
 assert.match(talentUiSource, /state\.logs = \(Array\.isArray\(state\.logs\)[\s\S]*id: uid\('log'\)/, '舊本機課堂缺少編號時需自動修復');
 assert.match(talentUiSource, /class="record-actions"[\s\S]*data-action="edit-log"[\s\S]*data-action="view-log"/, '編輯與查看按鈕需放入獨立動作列，避免疊在同一座標');
 assert.match(talentStyleSource, /\.record-actions \{ display: flex;[\s\S]*gap: 6px;/, '編輯與查看按鈕需保留可點擊間距');
-assert.match(talentIndexSource, /app\.js\?v=(?:2026100[89]-talent-(?:simple|pt)-\d+|20261008-release-\d+)/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
+assert.match(talentIndexSource, /app\.js\?v=(?:2026100[89]-talent-(?:simple|pt)-\d+|202610(?:08|14)-release-\d+)/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
 const saveTalentLessonSource = backendSource.slice(backendSource.indexOf('function saveTalentLesson('), backendSource.indexOf('function saveTalentPrep('));
 assert.equal((saveTalentLessonSource.match(/talentLessonSaveVersionError_\(/g) || []).length, 2, '才藝儲存需在取鎖前與取鎖後各阻擋一次舊版降版繞過');
 assert.doesNotMatch(saveTalentLessonSource, /generateTalentLessonPdf_/, '才藝正式儲存不得同步等待 PDF');
 assert.match(saveTalentLessonSource, /queueDeferredTeacherReport_\(\{ type: 'talent'/, '才藝日報需放入背景佇列');
 const submitLogSource = talentUiSource.slice(talentUiSource.indexOf('async function submitLog('), talentUiSource.indexOf('function openPrepEditor('));
 assert.match(submitLogSource, /newCount \+ renewalCount > present[\s\S]*兩者合計不可超過正式學員到課總數/, '前端送出前必須阻擋新生與續報合計超過正式總數');
+assert.match(talentUiSource, /const talentLessonDateAllowed =[\s\S]*String\(dateString\) <= currentDate[\s\S]*currentDate <= nextKpiWorkday\(String\(dateString\)\)/, '才藝前端日期需允許授課日至下一工作日期限內填寫，含週末與週一');
+assert.match(talentUiSource, /function talentLogEditable\([\s\S]*scheduled \? talentLessonDateAllowed\(item\.date, currentDate\) : String\(item\.date \|\| ''\) === currentDate/, '帶班與停課只可當日編輯，不得顯示跨日後端必拒絕的入口');
+assert.match(logEditorSource, /data-editing="\$\{editing \? 'true' : 'false'\}"[\s\S]*select name="\$\{editing \? 'scheduleKeyDisplay' : 'scheduleKey'\}"[\s\S]*type="hidden" name="scheduleKey"/, '編輯正式紀錄時日期與班次需在前端鎖定，同時保留原班次送出值');
+assert.match(talentUiSource, /data-room-upload-date[\s\S]*整潔照片已依 \$\{formatDate\(roomUploadDate\)\} 上傳；如需更改課程日期，請先移除照片再重新選擇/, '整潔照片上傳後需阻擋改日期，避免照片落入錯誤月份資料夾');
+assert.match(submitLogSource, /!talentLessonDateAllowed\(lessonDate\)[\s\S]*授課當日或下一個工作日/, '才藝送出前需阻擋超過下一工作日的固定課程');
+assert.doesNotMatch(talentUiSource, /正常上課固定為今天|固定課程只能當日送出/, '才藝介面不得再把固定課程鎖回今天');
 assert.match(submitLogSource, /entryVersion: 2[\s\S]*expected: present, present, leave: 0, absent: 0, makeup: 0, trial,[\s\S]*newCount: siteType === 'self' && !isCoverage \? newCount : 0,[\s\S]*renewalCount:/, '新版送出必須標記版本、保留體驗，且只在獎金適用場域保留新生與續報');
 assert.doesNotMatch(submitLogSource, /pendingFiles\.attendance\.length|pendingFiles\.learning\.length|pendingFiles\.app\.length/, '新版送出不得再等待點名、學習或 APP 附件');
 assert.match(talentUiSource, /function talentSubmissionError\(/, '才藝送出錯誤不得直接顯示內部欄位名稱');
-assert.match(talentUiSource, /name="lessonStatus" value="coverage"/, '才藝 PT 表單需提供帶班選項');
+assert.match(talentUiSource, /name="\$\{editing \? 'lessonStatusDisplay' : 'lessonStatus'\}" value="coverage"/, '才藝 PT 表單需提供帶班選項，編輯時則鎖定原狀態');
 assert.match(talentUiSource, /name="coverageStart"[\s\S]*name="coverageEnd"/, '帶班需讓老師選擇開始與結束時間');
 assert.match(talentUiSource, /帶班可選實際授課日期/, '帶班日期需開放選擇實際授課日');
 assert.match(backendSource, /function talentCoverageSchedule_\(/, '後端需獨立驗證帶班時間與地點');
-assert.match(backendSource, /!initialExisting && lesson\.lessonStatus === 'held' && !isCoverage/, '只有帶班可跨日新增，固定課程限制不得被放寬');
+assert.match(backendSource, /function talentScheduledLessonWithinSubmissionWindow_\([\s\S]*talentNextWorkday_\(lesson\)/, '固定課程交付期限必須以授課當日或下一個工作日判定');
+assert.match(saveTalentLessonSource, /!initialExisting && lesson\.lessonStatus === 'held' && !isCoverage[\s\S]*talentScheduledLessonWithinSubmissionWindow_\(lesson\.date, today\)/, '新增正常固定課程必須共用下一工作日期限');
+assert.match(saveTalentLessonSource, /initialIsScheduledLesson[\s\S]*talentScheduledLessonWithinSubmissionWindow_\(initialLesson\.date, today\)/, '已提交的固定課程在同一期限內仍可修改');
+assert.match(saveTalentLessonSource, /lesson\.backfilled = isCoverage && lesson\.date !== today;/, '下一工作日送出的固定課程不得標記為補登');
 assert.match(backendSource, /function backfillHongdouCoverage20260919FromEditor\(/, '需提供一次性補入紅豆 9\/19 帶班鐘點的管理員函式');
 assert.match(backendSource, /adminPayOverrideAmount: 1200/, '紅豆 9\/19 帶班須核定 1,200 元');
 const talentPaySource = talentUiSource.slice(talentUiSource.indexOf('function renderPay()'), talentUiSource.indexOf('function renderPayRow('));
@@ -779,7 +923,7 @@ assert.match(backendSource, /function talentRubricVersionForMonth_[\s\S]*TALENT_
 assert.match(talentUiSource, /function talentRubricVersionForMonth\([\s\S]*function kpiDimensionsFor\([\s\S]*record\?\.month/, '前端評分版本也必須只由月份決定');
 assert.match(talentUiSource, /月底前若未將全部課堂照片上傳至家長 APP[\s\S]*當月獎金全部取消；事後補繳也不補發/, '表單需顯示醒目的 APP 照片獎金政策');
 assert.match(talentUiSource, /APP 照片未完成，當月獎金取消，補繳不補發/, '老師與主管月結需使用一致的取消標示');
-assert.match(talentUiSource, /Number\(item\.entryVersion \|\| 1\) >= 2[\s\S]*aria-label="編輯今日紀錄"/, '舊制正式紀錄不得顯示新版編輯按鈕');
+assert.match(talentUiSource, /Number\(item\.entryVersion \|\| 1\) >= 2[\s\S]*aria-label="編輯期限內紀錄"/, '舊制正式紀錄不得顯示新版編輯按鈕');
 assert.match(talentUiSource, /補傳 APP 截圖[\s\S]*data-app-evidence-id/, '舊制缺少 APP 截圖時仍需能從紀錄詳情補傳');
 assert.match(talentUiSource, /function selectedPerformanceMonth\(\)/, '才藝老師 KPI 應使用獨立評核月份');
 assert.match(talentUiSource, /scoreMonthsFor\(currentUser\.nickname, true\)\[0\]/, '才藝老師進入 KPI 時必須直接開啟最近一次已公布評核');

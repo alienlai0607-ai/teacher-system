@@ -165,10 +165,12 @@ async function scenario(browser, spec) {
         assert.equal(response.ok, true, JSON.stringify(response));
         uploaded.push({ fileId: response.fileId, url: response.url, name: photo.name, mimeType: photo.mimeType, kpi: index === 0 ? 2 : 1 });
       }
-      const proofId = `course-proof-${spec.id}`;
-      Object.assign(uploaded[0], { attachmentId: proofId, forType: 'v2-course-record', type: 'photo' });
-      const proof = uploaded[0];
-      const courseRecord = { channels: ['group'], note: '', attachments: [{ id: proofId, fileName: proof.name, mimeType: proof.mimeType, cloudFileId: proof.fileId, cloudUrl: proof.url, uploadStatus: 'uploaded' }] };
+      const courseRecordAttachments = uploaded.map((proof, index) => {
+        const proofId = `course-proof-${spec.id}-${index + 1}`;
+        Object.assign(proof, { attachmentId: proofId, forType: 'v2-course-record', type: 'photo' });
+        return { id: proofId, fileName: proof.name, mimeType: proof.mimeType, cloudFileId: proof.fileId, cloudUrl: proof.url, uploadStatus: 'uploaded' };
+      });
+      const courseRecord = { channels: ['group'], note: '', attachments: courseRecordAttachments };
       const params = { nickname, date: today, reflection: spec.text, attachments: uploaded, submitted: true,
         kpi6_data: { v2_snapshot: { schema: 'anqin-v2', submission: { teacher: nickname, date: today, status: 'pending', courseRecord } } } };
       let saved = spec.method === 'double-submit'
@@ -269,7 +271,7 @@ async function scenario(browser, spec) {
       const record = typeof result.log.kpi6_data === 'string' ? JSON.parse(result.log.kpi6_data) : result.log.kpi6_data;
       const course = record.v2_snapshot.submission.courseRecord;
       assert.deepEqual(course.channels, ['group']);
-      assert.equal(course.attachments.length, 1, 'course screenshot survives saved-log reload');
+      assert.equal(course.attachments.length, photos.length, 'every course screenshot survives saved-log reload');
     } else {
       await page.waitForFunction(() => document.querySelector('#app')?.children.length > 0 && !document.body.innerText.includes('正在讀取正式資料'));
       await page.getByText(spec.title, { exact: false }).first().waitFor();

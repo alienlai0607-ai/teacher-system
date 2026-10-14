@@ -1102,7 +1102,9 @@
   if (startupStateNeedsRewrite) startupRecoverySaved = rewriteRecoveredStartupState(state);
   let saveTimer = null;
   let cloudDraftTimer = null;
+  let scheduledDailyCloudDraft = null;
   let cloudDraftInFlight = null;
+  const queuedDailyCloudDrafts = new Map();
   let cloudDraftGeneration = 0;
   let dailyCloudConflict = null;
   let taskSyncTimer = null;
@@ -1254,6 +1256,8 @@
     if (formalLoginRedirectScheduled || IS_QA_HARNESS || IS_PREVIEW_REVIEW_SESSION) return;
     formalLoginRedirectScheduled = true;
     window.clearTimeout(cloudDraftTimer);
+    cloudDraftTimer = null;
+    scheduledDailyCloudDraft = null;
     persistCurrentDrawerDraft(true);
     state.integration.dailyDraftSyncPending = true;
     persist('未送出內容已保留');
@@ -1352,8 +1356,9 @@
     const graceDate = previousKpiWorkday();
     if (dailyKpiOptional(graceDate)) return null;
     if (state.daily.date === graceDate && !state.daily.submittedAt) return { date: graceDate, active: true };
-    const submission = state.submissions.find(item => item.teacher === state.context.teacher && item.date === graceDate && item.status === 'draft');
-    return submission ? { ...submission, active: false } : null;
+    const submission = state.submissions.find(item => item.teacher === state.context.teacher && item.date === graceDate);
+    if (submission && submission.status !== 'draft' && submission.submittedAt) return null;
+    return submission ? { ...submission, active: false } : { date: graceDate, active: false, empty: true };
   }
 
   function operationHasDailyContent(operation) {
@@ -1409,6 +1414,20 @@
     };
   }
 
+  function normalizeDailyWorkspaceDate(workspace, date) {
+    const fallback = dailyWorkspaceFromSubmission(date);
+    const daily = { ...(workspace?.daily || fallback.daily), date };
+    const sourceOperation = workspace?.operation || fallback.operation;
+    const operation = {
+      ...sourceOperation,
+      id: `op_${date}_${state.context.teacher}`,
+      date,
+      room: sourceOperation?.room || state.context.department,
+      dutyOwner: state.context.teacher,
+    };
+    return { ...(workspace || {}), daily, operation };
+  }
+
   function switchTeacherDailyDate(date) {
     const today = todayIso();
     const graceDate = previousKpiWorkday(today);
@@ -1417,6 +1436,7 @@
       toast('目前送出結果仍在確認，完成後才能切換日期', 'warning');
       return false;
     }
+    flushScheduledDailyCloudDraft();
     persistCurrentDrawerDraft(true);
     if (date === today && state.daily.date < today) {
       saveActiveDailyWorkspace();
@@ -1425,9 +1445,10 @@
         : null;
       rollWorkspaceToToday(true);
       if (savedToday) {
-        state.daily = savedToday.daily;
-        state.operations = savedToday.operation || dailyWorkspaceFromSubmission(today).operation;
-        state.weekly = savedToday.weekly || state.weekly;
+        const workspace = normalizeDailyWorkspaceDate(savedToday, today);
+        state.daily = workspace.daily;
+        state.operations = workspace.operation;
+        state.weekly = workspace.weekly || state.weekly;
         state.operationHistory = (state.operationHistory || []).filter(item => item.id !== state.operations.id);
       }
       persist('已保留上個工作日的 KPI，並切回今天');
@@ -1442,17 +1463,13 @@
       else state.operationHistory.unshift(clone(currentOperation));
     }
     const saved = state.integration.dailyWorkspaces?.[date];
-    const workspace = saved ? clone(saved) : dailyWorkspaceFromSubmission(date);
-    if (date === graceDate && !saved && !state.submissions.some(item => item.teacher === state.context.teacher && item.date === date && item.status === 'draft')) {
-      toast('上個工作日沒有可補寫的草稿', 'warning');
-      return false;
-    }
+    const workspace = normalizeDailyWorkspaceDate(saved ? clone(saved) : dailyWorkspaceFromSubmission(date), date);
     state.daily = workspace.daily;
-    state.operations = workspace.operation || dailyWorkspaceFromSubmission(date).operation;
+    state.operations = workspace.operation;
     state.operationHistory = (state.operationHistory || []).filter(item => item.id !== state.operations.id);
     state.ui.route = 'today';
     state.ui.todayTab = 'activities';
-    persist(date === graceDate ? '已開啟上個工作日的 KPI 草稿' : '已切回今天的 KPI');
+    persist(date === graceDate ? '已開啟上個工作日的 KPI' : '已切回今天的 KPI');
     renderApp();
     return true;
   }
@@ -2680,18 +2697,18 @@
     const graceDraft = graceBackfillSubmission();
     const dayWord = graceActive ? '上個工作日' : '今日';
     const switchAction = graceActive
-      ? `<button type="button" class="btn" data-action="switch-daily-date" data-date="${todayIso()}">${icon('calendar-days', 16)}<span>先進入今天</span></button>`
+      ? `<button type="button" class="btn" data-action="switch-daily-date" data-date="${todayIso()}">${icon('calendar-days', 16)}<span>切換 KPI 日期：${formatShortDate(todayIso())}（今天）</span></button>`
       : graceDraft && !graceDraft.active
-        ? `<button type="button" class="btn btn-primary" data-action="switch-daily-date" data-date="${esc(graceDraft.date)}">${icon('history', 16)}<span>補完上個工作日 KPI</span></button>`
+        ? `<button type="button" class="btn btn-primary" data-action="switch-daily-date" data-date="${esc(graceDraft.date)}">${icon('history', 16)}<span>切換 KPI 日期：${formatShortDate(graceDraft.date)}（上個工作日）</span></button>`
         : '';
     const actions = `${switchAction}<button type="button" class="btn" data-action="open-contact">${icon('message-circle-plus', 16)}<span class="btn-label-mobile-hide">記錄孩子狀況</span></button><button type="button" class="btn" data-action="open-activity" data-type="lessonprep">${icon('notebook-tabs', 16)}<span class="btn-label-mobile-hide">新增備課檔案</span></button>`;
     const graceNotice = graceActive
-      ? `<div class="notice-band warning next-workday-grace-notice">${icon('clock-3', 20)}<div><div class="notice-title">正在補寫上個工作日的 KPI，今天仍可正常交付</div><div class="notice-copy">寬限至今天結束；週五可於週一完成，不列補繳、不扣補繳分。照片與證據責任不順延，若當日未拍到必要照片，仍由老師自行負責。</div></div><button type="button" class="btn btn-small" data-action="switch-daily-date" data-date="${todayIso()}">先進入今天</button></div>`
+      ? `<div class="notice-band warning next-workday-grace-notice">${icon('clock-3', 20)}<div><div class="notice-title">目前 KPI 日期：${formatDate(state.daily.date)}（上個工作日）</div><div class="notice-copy">寬限至今天結束；週五可於週一完成，不列補繳、不扣補繳分。照片與證據責任不順延，若當日未拍到必要照片，仍由老師自行負責。</div></div><button type="button" class="btn btn-small" data-action="switch-daily-date" data-date="${todayIso()}">切回今天</button></div>`
       : graceDraft && !graceDraft.active
-        ? `<div class="notice-band warning next-workday-grace-notice">${icon('clock-alert', 20)}<div><div class="notice-title">上個工作日的 KPI 尚未完成</div><div class="notice-copy">可在今天結束前補完；週五可於週一補交，不列補繳。照片與證據仍須符合原規則。</div></div><button type="button" class="btn btn-small btn-primary" data-action="switch-daily-date" data-date="${esc(graceDraft.date)}">現在補完</button></div>`
+        ? `<div class="notice-band warning next-workday-grace-notice">${icon('clock-alert', 20)}<div><div class="notice-title">可切換 KPI 日期至 ${formatDate(graceDraft.date)}</div><div class="notice-copy">無論是否已有草稿，都可在今天結束前填寫上個工作日；週五可於週一完成，不列補繳。照片與證據仍須符合原規則。</div></div><button type="button" class="btn btn-small btn-primary" data-action="switch-daily-date" data-date="${esc(graceDraft.date)}">填寫 ${formatShortDate(graceDraft.date)} KPI</button></div>`
         : '';
     return `<div class="page">
-      ${pageHead(graceActive ? '補寫上個工作日 KPI' : '今日工作紀錄', `${formatDate(state.daily.date)} · ${state.context.department} · ${state.context.teacher}`, actions)}
+      ${pageHead(graceActive ? '補寫上個工作日 KPI' : '今日工作紀錄', `KPI 日期：${formatDate(state.daily.date)} · ${state.context.department} · ${state.context.teacher}`, actions)}
       ${renderGuideInvite()}
       ${graceNotice}
       <div class="status-strip">
@@ -3863,7 +3880,7 @@
         <div class="activity-section-title"><span>${icon('folder-open', 18)}</span><div><strong>課程資料</strong><small>只記錄這份備課用於哪門課</small></div></div>
         <div class="form-grid">
           <div class="form-field"><label class="form-label" for="course-prep-type">課程類型 <span class="required">*</span></label><select id="course-prep-type" name="targetCourse" required><option value="">請選擇課程</option>${ACTIVITY_DETAIL_SCHEMAS.lessonprep[0].options.map(option => `<option value="${esc(option)}" ${details.targetCourse === option ? 'selected' : ''}>${esc(option)}</option>`).join('')}</select></div>
-          <div class="form-field">${value.id ? '<div class="form-label">建立日期</div>' : '<label class="form-label" for="course-prep-date">建立日期</label>'}${prepDateControl}${value.id ? '' : '<div class="field-hint">可選今天或上一個工作日；週一可選上週五。</div>'}</div>
+          <div class="form-field">${value.id ? '<div class="form-label">建立日期</div>' : '<label class="form-label" for="course-prep-date">建立日期</label>'}${prepDateControl}${value.id ? '' : '<div class="field-hint">這裡只記錄備課檔案的建立日，不會切換整份 KPI 日期。要填昨天 KPI，請使用頁面上方的「切換 KPI 日期」。週一可選上週五。</div>'}</div>
           <div class="form-field span-2"><label class="form-label" for="course-prep-title">課程名稱 <span class="required">*</span></label><input id="course-prep-title" name="title" value="${esc(value.title || '')}" placeholder="例：9/1 數學小挑戰" required></div>
           <div class="form-field span-2"><label class="form-label" for="course-prep-note">上課內容或使用提醒（選填）</label><textarea id="course-prep-note" name="prepSummary" placeholder="需要補充時再填寫；沒有可留白。">${esc(value.prep?.summary || '')}</textarea></div>
           <div class="form-field span-2"><div class="form-label">教案或教材附件 <span class="required">*</span></div><label class="file-drop" for="activity-prep-files">${icon('upload-cloud', 21)}<span><strong>加入附件</strong><small>至少一份，可一次選多份；文件保留原檔，單檔上限 25 MB</small></span></label><input class="sr-only" id="activity-prep-files" type="file" multiple data-change="prep-files" accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.key,image/*,video/*"><div id="prep-file-list">${renderSimplePrepFiles(value.prepEvidence || [])}</div></div>
@@ -4304,6 +4321,7 @@
         <span class="prep-library-meta">
           <span class="${attachments.length ? '' : 'is-alert'}">${icon('paperclip', 13)}${attachmentCopy}</span>
           <span>${icon('history', 13)}${usageCopy}</span>
+          <span>${icon('calendar-days', 13)}${formatShortDate(activity.date)} 建立</span>
           <span>${icon('calendar-clock', 13)}${formatShortDate(updatedDate)} 更新</span>
         </span>
       </span>
@@ -4777,17 +4795,30 @@
   function importCloudSnapshot(snapshot, cloudAttachments = [], revision = '', force = false, cloudSubmittedAt = '') {
     if (!snapshot || snapshot.schema !== 'anqin-v2' || !snapshot.submission) return false;
     const logId = cloudLogId(snapshot.submission.teacher, snapshot.submission.date);
+    // A backend repair can keep the submission id while moving its business date.
+    // Resolve that old date before any current-day safety check or cache mutation.
+    const existingById = snapshot.submission.id
+      ? state.submissions.find(item => item.id === snapshot.submission.id)
+      : null;
+    const existingSubmission = existingById || state.submissions.find(item => item.date === snapshot.submission.date && item.teacher === snapshot.submission.teacher);
+    const previousDate = String(existingById?.date || '');
+    const dateMoved = Boolean(existingById?.id && previousDate && previousDate !== snapshot.submission.date);
     const isCurrent = snapshot.submission.teacher === state.context.teacher && snapshot.submission.date === state.daily.date;
+    const previousIsCurrent = dateMoved
+      && snapshot.submission.teacher === state.context.teacher
+      && previousDate === state.daily.date;
+    const affectsCurrent = isCurrent || previousIsCurrent;
     // Keep the exact daily attachment collection stable while screenshot bytes are being saved.
-    if (isCurrent && integrationRuntime.courseRecordUploading) return false;
+    if (affectsCurrent && integrationRuntime.courseRecordUploading) return false;
     const pendingSubmission = state.integration.pendingDailySubmission;
-    const hasUnconfirmedSubmission = pendingSubmission?.teacher === snapshot.submission.teacher && pendingSubmission?.date === snapshot.submission.date;
+    const hasUnconfirmedSubmission = pendingSubmission?.teacher === snapshot.submission.teacher
+      && (pendingSubmission?.date === snapshot.submission.date || (dateMoved && pendingSubmission?.date === previousDate));
     if (hasUnconfirmedSubmission) return false;
-    if (!force && isCurrent && (state.integration.dailyDraftSyncPending || dailyNeedsResubmit() || cloudDraftInFlight || dailySubmitInFlight)) {
+    if (!force && affectsCurrent && (state.integration.dailyDraftSyncPending || dailyNeedsResubmit() || cloudDraftInFlight || dailySubmitInFlight)) {
       if (revision && revision !== state.integration.logRevisions?.[logId]) dailyCloudConflict = { snapshot, cloudAttachments, revision, cloudSubmittedAt };
       return false;
     }
-    const existingSubmission = state.submissions.find(item => item.id === snapshot.submission.id || (item.date === snapshot.submission.date && item.teacher === snapshot.submission.teacher));
+    const previousRevision = String(state.integration.logRevisions?.[logId] || '');
     // A previous day's local revision still needs explicit resubmission after rollover.
     if (!force && existingSubmission?.status === 'draft' && existingSubmission.previousStatus) return false;
     if (revision) state.integration.logRevisions = { ...(state.integration.logRevisions || {}), [logId]: revision };
@@ -4817,8 +4848,9 @@
     remoteSubmission.contactSnapshots.forEach(normalizeContactRecord);
     const remoteStamp = String(remoteSubmission.cloudSavedAt || remoteSubmission.submittedAt || '');
     const localStamp = String(existingSubmission?.cloudSavedAt || existingSubmission?.submittedAt || '');
+    const revisionChanged = Boolean(revision && previousRevision && previousRevision !== revision);
     const repairsSubmittedState = hasCloudSubmission && remoteSubmission.status !== 'draft' && existingSubmission?.status === 'draft' && !existingSubmission.previousStatus;
-    const remoteIsNewer = force || !existingSubmission || remoteStamp > localStamp || repairsSubmittedState;
+    const remoteIsNewer = force || !existingSubmission || remoteStamp > localStamp || repairsSubmittedState || revisionChanged || dateMoved;
     if (!remoteIsNewer) {
       (remoteSubmission.courseRecord?.attachments || []).forEach(remote => {
         const local = existingSubmission?.courseRecord?.attachments?.find(item => item.id === remote.id);
@@ -4846,6 +4878,45 @@
     });
     if (existingSubmission) Object.assign(existingSubmission, remoteSubmission);
     else state.submissions.unshift(remoteSubmission);
+
+    // 管理員修正正式紀錄日期時，submission id 會維持不變。雲端日期是唯一真相；
+    // 清掉舊日期的班務快取，以及老師裝置上完全相同、已送出的舊日工作區。
+    if (dateMoved) {
+      const incomingOperation = hydratedSnapshot.operation || null;
+      const incomingPrefix = `op_${remoteSubmission.date}_`;
+      const previousOperationId = incomingOperation?.id?.startsWith(incomingPrefix)
+        ? `op_${previousDate}_${incomingOperation.id.slice(incomingPrefix.length)}`
+        : '';
+      if (previousOperationId) {
+        state.operationHistory = (state.operationHistory || []).filter(item => item.id !== previousOperationId);
+      }
+      const activeMatchesMovedSubmission = state.daily.date === previousDate
+        && Boolean(state.daily.submittedAt)
+        && state.daily.submittedAt === String(existingSubmission?.submittedAt || remoteSubmission.submittedAt || '')
+        && !state.integration.pendingDailySubmission
+        && !state.integration.dailyDraftSyncPending
+        && !cloudDraftInFlight
+        && !dailySubmitInFlight
+        && !dailyNeedsResubmit();
+      const activeOperationIsMoved = Boolean(previousOperationId && state.operations?.id === previousOperationId);
+      if (activeOperationIsMoved && (state.ui.role !== 'teacher' || activeMatchesMovedSubmission)) {
+        const blank = createSeed();
+        state.operations = {
+          ...clone(blank.operations),
+          id: `op_${state.daily.date}_${state.context.teacher}`,
+          date: state.daily.date,
+          room: state.context.department,
+          dutyOwner: state.context.teacher,
+        };
+      }
+      if (state.ui.role === 'teacher' && activeMatchesMovedSubmission) {
+        const blank = createSeed();
+        state.daily = { ...clone(blank.daily), date: previousDate, status: 'draft', submittedAt: '' };
+        if (state.integration.dailyWorkspaces) delete state.integration.dailyWorkspaces[previousDate];
+      }
+      const previousLogId = cloudLogId(remoteSubmission.teacher, previousDate);
+      if (state.integration.logRevisions) delete state.integration.logRevisions[previousLogId];
+    }
 
     // A daily snapshot is authoritative for that teacher/date, including removals.
     const belongsToDay = item => item.teacher === remoteSubmission.teacher && item.date === remoteSubmission.date;
@@ -7510,32 +7581,66 @@
     };
   }
 
-  async function syncDailyDraftToCloud() {
-    if (cloudDraftInFlight) return cloudDraftInFlight;
-    if (dailySubmitInFlight) return { ok: true, skipped: true };
-    cloudDraftInFlight = syncDailyDraftRequest();
-    try { return await cloudDraftInFlight; } finally { cloudDraftInFlight = null; }
+  function dailyDraftSyncKey(snapshot) {
+    return `${snapshot?.teacher || ''}\n${snapshot?.date || ''}`;
   }
 
-  async function syncDailyDraftRequest() {
+  function captureDailyDraftSyncSnapshot() {
+    const date = state.daily.date;
+    const teacher = state.context.teacher;
     const pendingSubmission = state.integration.pendingDailySubmission;
-    if (pendingSubmission?.date === state.daily.date && pendingSubmission.teacher === state.context.teacher) return { ok: true, skipped: true, reason: 'submission-unconfirmed' };
-    if (dailyNeedsResubmit()) {
-      state.integration.dailyDraftSyncPending = false;
-      persist('修改內容已保留，重新送出後更新主管版本');
-      refreshSystemStatusNotice();
-      return { ok: true, skipped: true, reason: 'awaiting-resubmit' };
-    }
-    if (!state.integration.cloudSyncEnabled || state.daily.submittedAt || !cloudIdentityReady() || !window.API?.saveLog) {
-      return { ok: true, skipped: true };
-    }
-    const existing = state.submissions.find(item => item.date === state.daily.date && item.teacher === state.context.teacher);
+    if (pendingSubmission?.date === date && pendingSubmission.teacher === teacher) return null;
+    if (!state.integration.cloudSyncEnabled || state.daily.submittedAt || dailyNeedsResubmit() || !cloudIdentityReady() || !window.API?.saveLog) return null;
+    const existing = state.submissions.find(item => item.date === date && item.teacher === teacher);
     const submission = createDailySubmissionRecord(existing);
     submission.submittedAt = '';
     submission.status = 'draft';
     const payload = buildLegacySubmissionPayload(submission, []);
     payload.submitted = false;
-    const generation = cloudDraftGeneration;
+    return { date, teacher, generation: cloudDraftGeneration, payload: clone(payload) };
+  }
+
+  function handleDailyDraftSyncError(error) {
+    integrationRuntime.draftSyncStatus = 'error';
+    integrationRuntime.cloudMessage = error?.message || '雲端草稿同步失敗';
+    state.integration.dailyDraftSyncPending = true;
+    persist('本機草稿已保留');
+    updateSaveIndicator('error', '本機已儲存，雲端草稿待重試');
+    refreshSystemStatusNotice();
+  }
+
+  async function syncDailyDraftToCloud(snapshot = null) {
+    if (dailySubmitInFlight) return { ok: true, skipped: true };
+    const request = snapshot || captureDailyDraftSyncSnapshot();
+    if (!request) return { ok: true, skipped: true };
+    const key = dailyDraftSyncKey(request);
+    if (cloudDraftInFlight) {
+      queuedDailyCloudDrafts.set(key, request);
+      return cloudDraftInFlight;
+    }
+    cloudDraftInFlight = syncDailyDraftRequest(request);
+    try {
+      return await cloudDraftInFlight;
+    } finally {
+      cloudDraftInFlight = null;
+      const next = queuedDailyCloudDrafts.entries().next().value;
+      if (next && !dailySubmitInFlight) {
+        queuedDailyCloudDrafts.delete(next[0]);
+        syncDailyDraftToCloud(next[1]).catch(handleDailyDraftSyncError);
+      }
+    }
+  }
+
+  async function syncDailyDraftRequest(snapshot = captureDailyDraftSyncSnapshot()) {
+    if (!snapshot) return { ok: true, skipped: true };
+    const { date, teacher, generation, payload } = snapshot;
+    const pendingSubmission = state.integration.pendingDailySubmission;
+    if (pendingSubmission?.date === date && pendingSubmission.teacher === teacher) return { ok: true, skipped: true, reason: 'submission-unconfirmed' };
+    const existing = state.submissions.find(item => item.date === date && item.teacher === teacher);
+    if (existing?.status === 'draft' && existing.previousStatus) return { ok: true, skipped: true, reason: 'awaiting-resubmit' };
+    if ((existing?.submittedAt && existing.status !== 'draft') || !state.integration.cloudSyncEnabled || !cloudIdentityReady() || !window.API?.saveLog) {
+      return { ok: true, skipped: true };
+    }
     integrationRuntime.draftSyncStatus = 'saving';
     const result = await API.saveLog(payload);
     if (!result?.ok) {
@@ -7548,36 +7653,46 @@
       return result;
     }
     integrationRuntime.draftSyncStatus = 'saved';
-    state.integration.logRevisions = { ...(state.integration.logRevisions || {}), [cloudLogId(submission.teacher, submission.date)]: result.revision || '' };
+    state.integration.logRevisions = { ...(state.integration.logRevisions || {}), [cloudLogId(teacher, date)]: result.revision || '' };
     integrationRuntime.draftSyncAt = new Date().toISOString();
     state.integration.lastCloudDraftAt = integrationRuntime.draftSyncAt;
-    state.integration.dailyDraftSyncPending = generation !== cloudDraftGeneration;
-    if (state.integration.dailyDraftSyncPending) {
-      window.clearTimeout(cloudDraftTimer);
-      cloudDraftTimer = window.setTimeout(() => syncDailyDraftToCloud(), 900);
-    }
+    state.integration.dailyDraftSyncPending = Boolean(scheduledDailyCloudDraft || queuedDailyCloudDrafts.size || generation !== cloudDraftGeneration);
     persist('本機與雲端草稿已儲存');
     refreshSystemStatusNotice();
     return result;
   }
 
+  function flushScheduledDailyCloudDraft() {
+    if (!scheduledDailyCloudDraft) return;
+    window.clearTimeout(cloudDraftTimer);
+    cloudDraftTimer = null;
+    const snapshot = scheduledDailyCloudDraft;
+    scheduledDailyCloudDraft = null;
+    syncDailyDraftToCloud(snapshot).catch(handleDailyDraftSyncError);
+  }
+
+  function cancelScheduledDailyCloudDraft(date = state.daily.date, teacher = state.context.teacher) {
+    const key = dailyDraftSyncKey({ date, teacher });
+    if (scheduledDailyCloudDraft && dailyDraftSyncKey(scheduledDailyCloudDraft) === key) {
+      window.clearTimeout(cloudDraftTimer);
+      cloudDraftTimer = null;
+      scheduledDailyCloudDraft = null;
+    }
+    queuedDailyCloudDrafts.delete(key);
+  }
+
   function scheduleDailyCloudDraftSync() {
     cloudDraftGeneration += 1;
-    const pendingSubmission = state.integration.pendingDailySubmission;
-    if (pendingSubmission?.date === state.daily.date && pendingSubmission.teacher === state.context.teacher) return;
-    if (!state.integration.cloudSyncEnabled || state.daily.submittedAt || dailyNeedsResubmit() || !cloudIdentityReady()) return;
+    const snapshot = captureDailyDraftSyncSnapshot();
+    if (!snapshot) return;
     state.integration.dailyDraftSyncPending = true;
     persist('本機已儲存，等待雲端同步');
     window.clearTimeout(cloudDraftTimer);
+    scheduledDailyCloudDraft = snapshot;
     cloudDraftTimer = window.setTimeout(() => {
-      syncDailyDraftToCloud().catch(error => {
-        integrationRuntime.draftSyncStatus = 'error';
-        integrationRuntime.cloudMessage = error?.message || '雲端草稿同步失敗';
-        state.integration.dailyDraftSyncPending = true;
-        persist('本機草稿已保留');
-        updateSaveIndicator('error', '本機已儲存，雲端草稿待重試');
-        refreshSystemStatusNotice();
-      });
+      if (scheduledDailyCloudDraft === snapshot) scheduledDailyCloudDraft = null;
+      cloudDraftTimer = null;
+      syncDailyDraftToCloud(snapshot).catch(handleDailyDraftSyncError);
     }, 900);
   }
 
@@ -7606,6 +7721,11 @@
     } finally {
       dailySubmitInFlight = false;
       if (integrationRuntime.cloudStatus === 'submitting') integrationRuntime.cloudStatus = 'idle';
+      const nextDraft = queuedDailyCloudDrafts.entries().next().value;
+      if (nextDraft) {
+        queuedDailyCloudDrafts.delete(nextDraft[0]);
+        syncDailyDraftToCloud(nextDraft[1]).catch(handleDailyDraftSyncError);
+      }
       renderApp();
     }
   }
@@ -7690,7 +7810,7 @@
       toast('週末免填 KPI，不需送出', 'success');
       return;
     }
-    window.clearTimeout(cloudDraftTimer);
+    cancelScheduledDailyCloudDraft(context.date, context.teacher);
     if (cloudDraftInFlight) {
       const draftResult = await cloudDraftInFlight;
       if (draftResult?.uncertain && !pending) {
@@ -9175,7 +9295,7 @@
       const root = window.AUTH?.relativeRoot?.() || '../../';
       if (realRole === 'admin') window.location.href = `${root}admin/dashboard.html?v=20260827-test-view-fast-1#test-view`;
       else if (window.AUTH?.routeByRole) window.AUTH.routeByRole(realRole, realSession);
-      else window.location.href = `${root}review/anqin-v2/index.html?v=20261008-release-6`;
+      else window.location.href = `${root}review/anqin-v2/index.html?v=20261014-release-1`;
     }
     else if (action === 'open-test-view') {
       const root = window.AUTH?.relativeRoot?.() || '../../';

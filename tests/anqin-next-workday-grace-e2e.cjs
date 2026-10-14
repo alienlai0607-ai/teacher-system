@@ -5,7 +5,7 @@ const path = require('node:path');
 const { chromium } = require('playwright');
 
 const root = path.resolve(__dirname, '..');
-const origin = 'http://127.0.0.1:18779';
+const origin = (process.env.KPI_QA_BASE_URL || 'http://127.0.0.1:18779').replace(/\/+$/, '');
 const teacher = '江江老師';
 const friday = '2026-10-02';
 const monday = '2026-10-05';
@@ -69,7 +69,7 @@ async function main() {
 
   await page.locator(`[data-action="switch-daily-date"][data-date="${monday}"]`).first().click();
   await page.waitForFunction(({ key, date }) => JSON.parse(localStorage.getItem(key)).daily.date === date, { key: storageKey, date: monday });
-  assert.match(await page.locator('body').innerText(), /上個工作日的 KPI 尚未完成/);
+  assert.match(await page.locator('body').innerText(), /可切換 KPI 日期至 2026\/10\/02/);
   await page.locator('[data-action="today-tab"][data-tab="submit"]').click();
   await page.locator('#summary-teacher-note').fill('週一已先填的內容');
 

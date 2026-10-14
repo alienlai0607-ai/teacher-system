@@ -92,6 +92,7 @@ function attachDailySubmit(fixture, result) {
   const writes = [];
   Object.assign(context, {
     dailyCloudConflict: null, dailySubmitInFlight: true, cloudDraftTimer: null, cloudDraftInFlight: null,
+    cancelScheduledDailyCloudDraft() {},
     dailyKpiOptional: () => false, hasDailyRecords: () => true, dailyCompletion: () => 100,
     createDailySubmissionRecord: () => ({ id: 'submission', date: state.daily.date, teacher: state.context.teacher, status: 'pending', submittedAt: '2026-09-16T12:00:00Z', activitySnapshots: copy(state.activities) }),
     buildLegacySubmissionPayload: (submission, attachments) => ({ nickname: submission.teacher, date: submission.date, submitted: true, submission: copy(submission), attachments: copy(attachments) }),

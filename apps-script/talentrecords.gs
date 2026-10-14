@@ -632,6 +632,28 @@ function normalizeTalentSimpleLesson_(lesson, user, matchedSchedule, isCoverage)
   lesson.appPublishedAt = '';
 }
 
+/**
+ * 固定課程可在授課當日或下一個工作日送出／修改。
+ * 週六、週日不是工作日，因此週五、週六或週日的下一個工作日都是週一。
+ */
+function talentNextWorkday_(dateStr) {
+  const date = new Date(String(dateStr || '').slice(0, 10) + 'T00:00:00Z');
+  if (isNaN(date.getTime())) return '';
+  do {
+    date.setUTCDate(date.getUTCDate() + 1);
+  } while (date.getUTCDay() === 0 || date.getUTCDay() === 6);
+  return date.toISOString().slice(0, 10);
+}
+
+function talentScheduledLessonWithinSubmissionWindow_(lessonDate, currentDate) {
+  const lesson = String(lessonDate || '').slice(0, 10);
+  const current = String(currentDate || '').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(lesson)
+    && /^\d{4}-\d{2}-\d{2}$/.test(current)
+    && lesson <= current
+    && current <= talentNextWorkday_(lesson);
+}
+
 function saveTalentLesson(params) {
   const actor = params.__actor;
   const nickname = String(params.nickname || actor && actor.nickname || '').trim();
@@ -691,11 +713,18 @@ function saveTalentLesson(params) {
       delete lesson[key];
     });
   }
-  if (!initialExisting && lesson.lessonStatus === 'held' && !isCoverage && lesson.date !== todayStr()) {
-    return { ok: false, error: lesson.employment === 'pt' ? 'PT 正常課程只能在上課當日送出' : '正常課程請於上課當日送出' };
+  const today = todayStr();
+  if (!initialExisting && lesson.lessonStatus === 'held' && !isCoverage
+      && !talentScheduledLessonWithinSubmissionWindow_(lesson.date, today)) {
+    return { ok: false, error: '正常固定課程只能在授課當日或下一個工作日送出（週五至週日可於週一完成）' };
   }
   if (initialLesson && initialExisting.status === 'submitted') {
-    if (String(initialLesson.date || '') !== todayStr()) return { ok: false, error: '已跨日的正式課堂不可修改' };
+    const initialIsScheduledLesson = initialLesson.lessonStatus === 'held'
+      && String(initialLesson.lessonKind || 'scheduled') === 'scheduled';
+    const canEditSubmitted = initialIsScheduledLesson
+      ? talentScheduledLessonWithinSubmissionWindow_(initialLesson.date, today)
+      : String(initialLesson.date || '') === today;
+    if (!canEditSubmitted) return { ok: false, error: '已超過授課當日或下一個工作日，正式課堂不可修改' };
     if (String(initialLesson.date || '') !== lesson.date || initialLesson.lessonStatus !== lesson.lessonStatus) {
       return { ok: false, error: '補充紀錄時不可更換日期或上課狀態' };
     }
@@ -772,7 +801,8 @@ function saveTalentLesson(params) {
       lesson.appUpdatedAt = initialLesson && initialLesson.appUpdatedAt || lesson.appUpdatedAt || '';
       lesson.appPublishedAt = initialLesson && initialLesson.appPublishedAt || lesson.appPublishedAt || '';
     }
-    lesson.backfilled = isCoverage && lesson.date !== todayStr();
+    // 固定課程在下一個工作日交付仍屬期限內，不標示補登、不影響履約資格。
+    lesson.backfilled = isCoverage && lesson.date !== today;
   }
   applyTalentBonusState_(lesson, initialLesson);
   lesson.status = 'submitted';
