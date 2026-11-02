@@ -111,6 +111,20 @@ const suansuan = { nickname: '酸酸', role: 'manager', status: 'active', depart
 assert.equal(context.talentEmployment_(suansuan), 'pt', '雙身分酸酸在才藝計薪必須視為 PT');
 assert.equal(context.talentSchedulesForDate_(suansuan, '2026-10-03').length, 0, '生效日之前不可產生才藝缺件或可填班次');
 assert.equal(context.talentSchedulesForDate_(suansuan, '2026-10-10').length, 2, '生效日當天應開放兩個週六班次');
+const novemberMondaySchedules = context.normalizeUserSchedule_([
+  { weekday: 1, label: '週一積木', courseName: '週一積木', courseType: '樂高小創客', time: '19:00–20:30', siteType: 'self', site: '布拉克自營教室', effectiveFrom: '2026-10-01' },
+]);
+const novemberMondayTeacher = {
+  nickname: '跨月才藝老師', role: 'teacher', status: 'active', department: '才藝部門',
+  employment_type: 'pt', work_assignments: ['talent-pt'], schedule_json: novemberMondaySchedules,
+};
+const novemberSecondSchedules = context.talentSchedulesForDate_(novemberMondayTeacher, '2026-11-02');
+assert.equal(novemberSecondSchedules.length, 1, '跨到 11 月後仍須解析 11/2 週一固定班表');
+assert.deepEqual(
+  Array.from(novemberSecondSchedules, item => ({ label: item.label, courseName: item.courseName, courseType: item.courseType, time: item.time })),
+  [{ label: '週一積木', courseName: '週一積木', courseType: '樂高小創客', time: '19:00–20:30' }],
+  '11 月班表不得被 10 月生效日或跨月邊界截斷',
+);
 const sameCampusTalent = { nickname: '東橋才藝老師', role: 'teacher', status: 'active', department: '東橋教室', employment_type: 'pt', work_assignments: ['talent-pt'] };
 assert.equal(context.talentCanAccessUser_(suansuan, sameCampusTalent), false, '安親主管的 role 不得導致才藝 PT 讀取同教室其他老師資料');
 assert.equal(context.talentCanAccessUser_(suansuan, suansuan), true, '酸酸仍可讀寫自己的才藝 PT 資料');
@@ -241,10 +255,20 @@ assert.equal(
   false,
   '週五的固定課程到週二已逾期，必須阻擋',
 );
+assert.equal(
+  context.talentScheduledLessonWithinSubmissionWindow_('2026-10-31', '2026-11-02'),
+  true,
+  '10/31 週六固定課跨月後仍可於 11/2 下一個工作日送出',
+);
+assert.equal(
+  context.talentScheduledLessonWithinSubmissionWindow_('2026-10-31', '2026-11-03'),
+  false,
+  '10/31 週六固定課到 11/3 已逾期，必須阻擋',
+);
 
-function saveWindowScenario(today, lessonDate, existingLesson = null) {
+function saveWindowScenario(today, lessonDate, existingLesson = null, options = {}) {
   const writes = [];
-  const teacher = {
+  const teacher = options.teacher || {
     nickname: 'QA才藝老師', role: 'teacher', status: 'active', department: '才藝部門',
     employment_type: 'fulltime', work_assignments: ['talent-fulltime'],
   };
@@ -295,6 +319,7 @@ function saveWindowScenario(today, lessonDate, existingLesson = null) {
       date: lessonDate,
       lessonStatus: 'held',
       lessonKind: 'scheduled',
+      scheduleKey: options.scheduleKey || source.scheduleKey || '',
       courseName: '週二才藝課',
       courseType: '樂高小創客',
       siteType: 'self',
@@ -335,6 +360,20 @@ const editableLesson = {
 };
 assert.equal(saveWindowScenario('2026-10-14', '2026-10-13', editableLesson).result.ok, true, '已送出週二課程在週三仍可修改');
 assert.equal(saveWindowScenario('2026-10-15', '2026-10-13', editableLesson).result.ok, false, '已送出週二課程到週四不可再修改');
+const october31OnNovember2 = saveWindowScenario('2026-11-02', '2026-10-31');
+assert.equal(october31OnNovember2.result.ok, true, '10/31 固定課程應可跨月於 11/2 新增送出');
+assert.equal(october31OnNovember2.writes[0].backfilled, false, '跨月但仍在下一工作日期限內，不得標示補登');
+const october31OnNovember3 = saveWindowScenario('2026-11-03', '2026-10-31');
+assert.equal(october31OnNovember3.result.ok, false, '10/31 固定課程到 11/3 才新增必須阻擋');
+assert.match(october31OnNovember3.result.error, /下一個工作日/);
+assert.equal(october31OnNovember3.writes.length, 0, '跨月逾期請求不得寫入');
+const novemberMondaySend = saveWindowScenario('2026-11-02', '2026-11-02', null, {
+  teacher: novemberMondayTeacher,
+  scheduleKey: novemberSecondSchedules[0].scheduleKey,
+});
+assert.equal(novemberMondaySend.result.ok, true, '11/2 週一固定班表應可在當日送出');
+assert.equal(novemberMondaySend.writes[0].scheduleKey, novemberSecondSchedules[0].scheduleKey, '11/2 送出須保留正確班次識別碼');
+assert.equal(novemberMondaySend.writes[0].courseName, '週一積木', '11/2 送出須依固定班表帶入課程名稱');
 
 const coverageSchedule = context.talentCoverageSchedule_({ date: '2026-09-19', coverageStart: '10:40', coverageEnd: '12:10', coverageSiteType: 'self', coverageSite: '東橋教室' });
 assert.deepEqual({ label: coverageSchedule.scheduleLabel, time: coverageSchedule.scheduleTime, duration: coverageSchedule.duration, site: coverageSchedule.site }, { label: '帶班', time: '10:40–12:10', duration: 1.5, site: '東橋教室' });
@@ -669,6 +708,7 @@ const taskSource = fs.readFileSync(path.join(root, 'apps-script/tasks.gs'), 'utf
 const codeSource = fs.readFileSync(path.join(root, 'apps-script/Code.gs'), 'utf8');
 const adminUsersSource = fs.readFileSync(path.join(root, 'admin/users.html'), 'utf8');
 const adminDashboardSource = fs.readFileSync(path.join(root, 'admin/dashboard.html'), 'utf8');
+const loginIndexSource = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const apiSource = fs.readFileSync(path.join(root, 'shared/api.js'), 'utf8');
 const workspaceSource = fs.readFileSync(path.join(root, 'shared/workspaces.js'), 'utf8');
 const talentUiSource = fs.readFileSync(path.join(root, 'review/talent-v2/app.js'), 'utf8');
@@ -676,6 +716,8 @@ assert.doesNotMatch(talentUiSource, /maybeShowPushReminder|talent_push_reminder_
 assert.match(talentUiSource, /data-action="enable-push">開啟 APP 通知/, '保留老師主動開啟通知的設定入口');
 const talentStyleSource = fs.readFileSync(path.join(root, 'review/talent-v2/styles.css'), 'utf8');
 const talentIndexSource = fs.readFileSync(path.join(root, 'review/talent-v2/index.html'), 'utf8');
+const anqinIndexSource = fs.readFileSync(path.join(root, 'review/anqin-v2/index.html'), 'utf8');
+const adminMarketingIndexSource = fs.readFileSync(path.join(root, 'review/admin-marketing-v1/index.html'), 'utf8');
 const anqinUiSource = fs.readFileSync(path.join(root, 'review/anqin-v2/app.js'), 'utf8');
 const adminScheduleHelperSource = adminUsersSource.slice(
   adminUsersSource.indexOf('function scheduleContentKey('),
@@ -875,12 +917,18 @@ assert.match(backendSource, /function validateTalentLessonRequiredFields_\(lesso
 assert.match(backendSource, /courseType: '課程類型'[\s\S]*issue: '課程問題及下次優化'[\s\S]*parentStatus: '親師溝通狀態'/, '舊版資料的必填與中文錯誤訊息仍需保留');
 const talentPdfSource = backendSource.slice(backendSource.indexOf('function generateTalentLessonPdf_('), backendSource.indexOf('function regenerateTalentLessonReport('));
 assert.match(talentPdfSource, /talentLessonEntryVersion_\(lesson\) >= TALENT_SIMPLE_ENTRY_VERSION_[\s\S]*正式到課總數[\s\S]*其中新生[\s\S]*其中續報[\s\S]*體驗另計[\s\S]*教室整潔[\s\S]*\} else \{[\s\S]*課程問題及下次優化/, '日報必須依版本清楚輸出正式總數、其中新生／續報、體驗另計與整潔照片');
-assert.match(talentUiSource, /const draft = existing \|\| state\.draftLog \|\| \{ id: uid\('log'\) \}/, '新增課堂編輯器一開啟就必須取得非空白紀錄編號');
+assert.match(talentUiSource, /const draft = existing \|\|[\s\S]*\{ id: uid\('log'\), date: todayIso\(\) \}/, '新增課堂編輯器一開啟就必須取得非空白紀錄編號與當日日期');
 assert.match(talentUiSource, /\.\.\.values,[\s\S]*id: editingId \|\| existingLog\?\.id \|\| uid\('log'\)/, '表單內的空白隱藏欄位不可覆蓋系統產生的課堂編號');
 assert.match(talentUiSource, /state\.logs = \(Array\.isArray\(state\.logs\)[\s\S]*id: uid\('log'\)/, '舊本機課堂缺少編號時需自動修復');
 assert.match(talentUiSource, /class="record-actions"[\s\S]*data-action="edit-log"[\s\S]*data-action="view-log"/, '編輯與查看按鈕需放入獨立動作列，避免疊在同一座標');
 assert.match(talentStyleSource, /\.record-actions \{ display: flex;[\s\S]*gap: 6px;/, '編輯與查看按鈕需保留可點擊間距');
-assert.match(talentIndexSource, /app\.js\?v=(?:2026100[89]-talent-(?:simple|pt)-\d+|202610(?:08|14)-release-\d+)/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
+assert.match(talentIndexSource, /app\.js\?v=(?:2026100[89]-talent-(?:simple|pt)-\d+|202610(?:08|14)-release-\d+|20261102-talent-rollover-\d+)/, '才藝頁需更新程式快取版本，避免登入後仍讀到舊介面');
+assert.match(loginIndexSource, /shared\/workspaces\.js\?v=20261102-talent-rollover-1/, '登入頁需取得新版才藝入口，避免沿用舊網址快取');
+assert.match(loginIndexSource, /review\\\/talent-v2\\\/index\\\.html[\s\S]*searchParams\.set\('v', '20261102-talent-rollover-1'\)/, '舊才藝頁登入失效後回跳時，需強制改成新版網址');
+assert.match(adminDashboardSource, /shared\/workspaces\.js\?v=20261102-talent-rollover-1/, '主管快速測試入口需取得新版才藝網址');
+assert.match(anqinIndexSource, /shared\/workspaces\.js\?v=20261102-talent-rollover-1/, '多身分老師從安親切換時需取得新版才藝網址');
+assert.match(adminMarketingIndexSource, /shared\/workspaces\.js\?v=20261102-talent-rollover-1/, '多身分老師從行政切換時需取得新版才藝網址');
+assert.match(talentUiSource, /const returnPath = `review\/talent-v2\/index\.html\?workspace=\$\{encodeURIComponent\(requestedWorkspace\(\)\)\}&v=20261102-talent-rollover-1`/, '重新登入後也需帶回原才藝工作區及新版網址');
 const saveTalentLessonSource = backendSource.slice(backendSource.indexOf('function saveTalentLesson('), backendSource.indexOf('function saveTalentPrep('));
 assert.equal((saveTalentLessonSource.match(/talentLessonSaveVersionError_\(/g) || []).length, 2, '才藝儲存需在取鎖前與取鎖後各阻擋一次舊版降版繞過');
 assert.doesNotMatch(saveTalentLessonSource, /generateTalentLessonPdf_/, '才藝正式儲存不得同步等待 PDF');

@@ -773,6 +773,7 @@ async function talentWorkflow(browser) {
     });
 
     const fulltime = trackPage(await context.newPage(), '才藝正職完整流程');
+    await fulltime.clock.install({ time: new Date(`${talentPtTestDate}T12:00:00+08:00`) });
     await fulltime.goto(`${baseUrl}/review/talent-v2/index.html?workspace=talent-fulltime&reviewUser=RITA%E8%80%81%E5%B8%AB`, { waitUntil: 'domcontentloaded' });
     await waitForApp(fulltime);
     check('才藝正職導覽也已移除備課與家長 APP', (
@@ -826,6 +827,7 @@ async function talentWorkflow(browser) {
     await suansuanPage.close();
 
     const manager = trackPage(await context.newPage(), '才藝主管完整流程');
+    await manager.clock.install({ time: new Date(`${talentPtTestDate}T12:00:00+08:00`) });
     await manager.goto(`${baseUrl}/review/talent-v2/index.html?workspace=talent-manager&reviewUser=%E6%9F%B3%E4%B8%81%E4%B8%BB%E7%AE%A1`, { waitUntil: 'domcontentloaded' });
     await waitForApp(manager);
     check('才藝主管導覽已移除備課審查', await manager.locator('[data-route="prep-review"]').count() === 0);
@@ -861,6 +863,7 @@ async function talentWorkflow(browser) {
     await manager.screenshot({ path: path.join(artifactDir, 'talent-manager-workflow.png'), fullPage: true });
 
     const payroll = trackPage(await context.newPage(), '才藝薪資核准流程');
+    await payroll.clock.install({ time: new Date(`${talentPtTestDate}T12:00:00+08:00`) });
     await payroll.goto(`${baseUrl}/review/talent-v2/index.html?workspace=talent-payroll&reviewUser=%E6%9F%8F%E7%BF%B0`, { waitUntil: 'domcontentloaded' });
     await waitForApp(payroll);
     await clickRoute(payroll, 'bonus-approval');
@@ -876,6 +879,7 @@ async function talentWorkflow(browser) {
 
     const blackPanther = await context.newPage();
     trackPage(blackPanther, '黑豹');
+    await blackPanther.clock.install({ time: new Date(`${talentPtTestDate}T12:00:00+08:00`) });
     await blackPanther.goto(`${baseUrl}/review/talent-v2/index.html?workspace=talent-pt&reviewUser=%E9%BB%91%E8%B1%B9%E8%80%81%E5%B8%AB`, { waitUntil: 'domcontentloaded' });
     await waitForApp(blackPanther);
     await clickRoute(blackPanther, 'pay');

@@ -66,6 +66,7 @@ test('talent repeated submit keeps a stable payload after an unknown response', 
   class FormDataMock { get(key) { return values[key] ?? ''; } entries() { return Object.entries(values); } }
   const context = vm.createContext({ Date: ClockDate, FormData: FormDataMock,
     state: { logs: [], draftLog: { ...values } }, activeLogSource: { ...values },
+    talentDraftMutationGeneration: 0,
     currentUser: { nickname: 'QA', employment: 'fulltime' }, PREVIEW_MODE: false,
     window: { clearTimeout() {} }, cloudDraftTimer: null, cloudDraftChain: Promise.resolve(),
     todayIso: () => '2026-09-16', isPt: () => false, schedulesForDate: () => [], talentLessonDateAllowed: () => true,
@@ -107,9 +108,11 @@ test('talent storage failure is not shown as a saved draft', () => {
     localStorage: { removeItem() {}, setItem() { throw new Error('full'); } },
     $: selector => selector === '#save-state' ? indicator : warning,
     icon: () => '', esc: value => value, formatTime: value => value, hydrateIcons() {},
+    todayIso: () => '2026-11-02',
     toast: message => messages.push(message), console: { warn() {} },
   });
-  vm.runInContext(block(talentSource, '  function persist(', '  async function loadCloudData('), context);
+  vm.runInContext(block(talentSource, '  function normalizeTalentUiCalendar(', '  function talentDateBounds(')
+    + block(talentSource, '  function persist(', '  async function loadCloudData('), context);
   assert.equal(context.persist(), false);
   assert.equal(context.state.ui.lastSavedAt, 'earlier');
   assert.match(indicator.innerHTML, /未儲存/);

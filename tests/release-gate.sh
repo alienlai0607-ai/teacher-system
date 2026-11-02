@@ -49,6 +49,7 @@ cd "$ROOT"
 "$NODE_BIN" tests/anqin-local-media.test.cjs
 "$NODE_BIN" tests/submitted-state-regressions.test.cjs
 "$NODE_BIN" tests/anqin-submit-recovery.test.cjs
+"$NODE_BIN" --test tests/talent-month-rollover.test.cjs
 "$NODE_BIN" tests/talent-rules.test.cjs
 "$NODE_BIN" tests/talent-approval-rubric.test.cjs
 "$NODE_BIN" tests/admin-marketing-rules.test.cjs

@@ -46,6 +46,29 @@
     return scheduled ? talentLessonDateAllowed(item.date, currentDate) : String(item.date || '') === currentDate;
   }
   const currentMonth = () => todayIso().slice(0, 7);
+  function normalizeTalentUiCalendar(value, currentDate = todayIso()) {
+    const ui = { ...(value || {}) };
+    const nowDate = String(currentDate || '').slice(0, 10);
+    const nowMonth = nowDate.slice(0, 7);
+    const validMonth = month => /^\d{4}-\d{2}$/.test(String(month || ''));
+    const hasSeenMonth = validMonth(ui.lastSeenMonth);
+    if (!hasSeenMonth || ui.lastSeenMonth !== nowMonth) {
+      ui.month = nowMonth;
+      ui.performanceMonth = '';
+      ui.scoringMonth = '';
+    }
+    if (!validMonth(ui.month) || ui.month > nowMonth) ui.month = nowMonth;
+    ui.lastSeenMonth = nowMonth;
+    ui.lastSeenDate = nowDate;
+    return ui;
+  }
+  function talentDateBounds(lessonStatus, currentDate = todayIso()) {
+    const status = String(lessonStatus || 'held');
+    return {
+      min: status === 'held' ? previousKpiWorkday(currentDate) : '',
+      max: String(currentDate || '').slice(0, 10),
+    };
+  }
   const uid = prefix => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
   const formatDate = value => {
     const parts = String(value || '').slice(0, 10).split('-');
@@ -184,7 +207,8 @@
     const app = $('#app');
     if (app) app.innerHTML = '<main class="auth-required"><img src="../../shared/icons/logo.png" alt="布拉克星球 Logo"><h1>請先登入正式帳號</h1><p>正在返回登入頁面…</p></main>';
     const root = window.AUTH?.relativeRoot?.() || '../../';
-    window.setTimeout(() => window.location.replace(`${root}index.html?return=${encodeURIComponent('review/talent-v2/index.html')}`), 300);
+    const returnPath = `review/talent-v2/index.html?workspace=${encodeURIComponent(requestedWorkspace())}&v=20261102-talent-rollover-1`;
+    window.setTimeout(() => window.location.replace(`${root}index.html?return=${encodeURIComponent(returnPath)}`), 300);
     return;
   }
   window.KPI_REVIEW_USER = currentUser;
@@ -202,7 +226,7 @@
     const date = todayIso();
     return {
       version: APP_VERSION,
-      ui: { route: workspace.start, lastSavedAt: '', month, performanceMonth: '', scoringMonth: '', prepReviewTeacher: '' },
+      ui: { route: workspace.start, lastSavedAt: '', lastSeenMonth: month, lastSeenDate: date, month, performanceMonth: '', scoringMonth: '', prepReviewTeacher: '' },
       settings: { ptStrictStart: TALENT_EFFECTIVE_DATE, ptExceptions: [] },
       users: PREVIEW_MODE ? STAFF.filter(person => person.status !== 'pending') : [],
       pendingUsers: PREVIEW_MODE ? STAFF.filter(person => person.status === 'pending') : [],
@@ -243,10 +267,11 @@
     if (!personal || personal.version !== APP_VERSION) {
       personal = { version: APP_VERSION, ui: seed.ui, draftLog: null, draftPrep: null };
     }
-    return { ...shared, ui: personal.ui, draftLog: personal.draftLog, draftPrep: personal.draftPrep };
+    return { ...shared, ui: normalizeTalentUiCalendar(personal.ui, todayIso()), draftLog: personal.draftLog, draftPrep: personal.draftPrep };
   }
 
   let state = loadState();
+  let talentClockDate = todayIso();
   state.logs = (Array.isArray(state.logs) ? state.logs : []).map(item => item?.id ? item : { ...item, id: uid('log') });
   state.settings = state.settings || { ptStrictStart: TALENT_EFFECTIVE_DATE, ptExceptions: [] };
   state.users = Array.isArray(state.users) ? state.users : [];
@@ -354,9 +379,12 @@
 
   let cloudDraftTimer = 0;
   let cloudDraftChain = Promise.resolve();
+  let talentDraftMutationGeneration = 0;
+  let talentDraftClearInFlight = null;
 
   function persist(message = '已儲存') {
     const previousSavedAt = state.ui.lastSavedAt;
+    state.ui = normalizeTalentUiCalendar(state.ui, todayIso());
     state.ui.lastSavedAt = new Date().toISOString();
     let saved = true;
     try {
@@ -384,6 +412,7 @@
 
   async function loadCloudData(notify = false) {
     if (PREVIEW_MODE) return { ok: true };
+    const requestedDraftGeneration = talentDraftMutationGeneration;
     cloudRuntime.status = 'loading';
     cloudRuntime.message = '正在讀取正式資料';
     renderApp();
@@ -405,7 +434,10 @@
     state.settings = { ...state.settings, ...(result.settings || {}) };
     if (state.ui.route === 'performance') state.ui.performanceMonth = scoreMonthsFor(currentUser.nickname, true)[0] || currentMonth();
     if (state.ui.route === 'scoring') state.ui.scoringMonth = allScoreMonths()[0] || currentMonth();
-    if (!TEST_VIEW_MODE && result.draft && !state.draftLog) state.draftLog = result.draft;
+    if (!TEST_VIEW_MODE && requestedDraftGeneration === talentDraftMutationGeneration && result.draft && !state.draftLog) {
+      state.draftLog = result.draft;
+      talentDraftMutationGeneration += 1;
+    }
     const profile = (result.users || []).find(user => normalizeName(user.nickname) === normalizeName(currentUser.nickname));
     if (profile) {
       currentUser.employment = profile.employment_type || currentUser.employment;
@@ -643,7 +675,9 @@
     const schedules = todaySchedule();
     const logs = ownLogs().filter(item => item.date === todayIso());
     const primary = schedules[0];
-    return `${pageHead('今日上課', '確認班次後，填正式學員到課總數（已含新生、續報）與另計的體驗人數，並上傳教室整潔照片。', `<button type="button" class="btn btn-primary" data-action="new-log">${icon('plus', 17)}新增本堂紀錄</button>`)}
+    const draftDate = String(state.draftLog?.date || '').slice(0, 10);
+    const newLogLabel = state.draftLog ? `新增 ${formatDate(todayIso())} 紀錄` : '新增本堂紀錄';
+    return `${pageHead('今日上課', '確認班次後，填正式學員到課總數（已含新生、續報）與另計的體驗人數，並上傳教室整潔照片。', `<button type="button" class="btn btn-primary" data-action="new-log">${icon('plus', 17)}${newLogLabel}</button>`)}
       <section class="status-grid">
         <article class="status-card"><span class="status-icon yellow">${icon('calendar-days', 20)}</span><div><small>今日排課</small><strong>${schedules.length ? schedules.map(item => item.time).join('、') : '無固定排課'}</strong><span>${schedules.length ? schedules.map(item => item.site).join('、') : '休假日不會產生缺件'}</span></div></article>
         <article class="status-card"><span class="status-icon blue">${icon('clipboard-check', 20)}</span><div><small>今日紀錄</small><strong>${logs.length} 堂</strong><span>${logs.filter(item => item.status === 'submitted').length} 堂已送出</span></div></article>
@@ -652,10 +686,10 @@
       <section class="panel" id="teacher-class-roster"></section>
       <div class="notice info">${icon('calendar-check-2', 19)}<div><strong>可於授課當日或下一個工作日完成</strong><span>週一可補完週五至週日實際排課；期限內不列補繳。課程與整潔照片仍須在上課當天完成拍攝。</span></div></div>
       <div class="notice strict">${icon('triangle-alert', 19)}<div><strong>家長 APP 照片會影響整月獎金</strong><span>${esc(TALENT_APP_PHOTO_POLICY)}</span></div></div>
-      ${state.draftLog ? `<div class="notice warning">${icon('file-pen-line', 19)}<div><strong>有一筆未完成草稿</strong><span>上次輸入與課程日期已保留，請在交付期限內送出。</span></div><button type="button" class="btn btn-small" data-action="new-log">繼續填寫</button><button type="button" class="icon-button" data-action="discard-log-draft" aria-label="刪除這筆草稿" title="刪除草稿">${icon('trash-2', 16)}</button></div>` : ''}
+      ${state.draftLog ? `<div class="notice warning">${icon('file-pen-line', 19)}<div><strong>${draftDate ? `${formatDate(draftDate)} 有一筆未完成草稿` : '有一筆未完成草稿'}</strong><span>原日期、文字與照片都會保留；新增今天紀錄前，系統會先讓您選擇，不會覆蓋這筆草稿。</span></div><button type="button" class="btn btn-small" data-action="resume-log-draft">繼續 ${draftDate ? formatDate(draftDate) : '原'}草稿</button><button type="button" class="icon-button" data-action="discard-log-draft" aria-label="刪除這筆草稿" title="刪除草稿">${icon('trash-2', 16)}</button></div>` : ''}
       <section class="panel">
         <div class="panel-head"><div><h2>今日課程</h2><p>${primary ? `已帶入 ${primary.label} ${primary.time}` : isPt() ? '今日沒有固定排課；如有臨時代課，可新增紀錄並選「帶班」。' : '上課後新增本堂紀錄。'}</p></div></div>
-        <div class="panel-body">${logs.length ? logs.map(renderLogRow).join('') : renderEmpty('還沒有今日紀錄', '上課後用同一張表完成紀錄，不需要分散重寫。', 'clipboard-pen-line', '<button type="button" class="btn btn-primary" data-action="new-log">新增紀錄</button>')}</div>
+        <div class="panel-body">${logs.length ? logs.map(renderLogRow).join('') : renderEmpty('還沒有今日紀錄', '上課後用同一張表完成紀錄，不需要分散重寫。', 'clipboard-pen-line', `<button type="button" class="btn btn-primary" data-action="new-log">${newLogLabel}</button>`)}</div>
       </section>`;
   }
 
@@ -1231,6 +1265,153 @@
 
   function closeDialog() { $('#dialog-root').innerHTML = ''; }
 
+  function openNewLogChoice() {
+    if (!state.draftLog) {
+      openLogEditor({ id: uid('log'), date: todayIso() });
+      return;
+    }
+    const draftDate = String(state.draftLog.date || '').slice(0, 10);
+    openDialog({
+      title: '先選擇如何處理原草稿',
+      body: `<div class="notice warning">${icon('file-warning', 20)}<div><strong>${draftDate ? `${formatDate(draftDate)} 草稿仍未完成` : '仍有一筆未完成草稿'}</strong><span>繼續草稿不會改變原日期；若確定不要原內容，才可刪除後新增 ${formatDate(todayIso())} 紀錄。</span></div></div><p>刪除會移除原草稿的文字與照片，無法復原。系統不會自動刪除或覆蓋。</p>`,
+      footer: `<button type="button" class="btn" data-action="close-dialog">取消</button><button type="button" class="btn" data-action="resume-log-draft">繼續 ${draftDate ? formatDate(draftDate) : '原'}草稿</button><button type="button" class="btn btn-danger" data-action="replace-log-draft">刪除原草稿並新增 ${formatDate(todayIso())}</button>`,
+    });
+  }
+
+  function openDiscardLogDraftDialog() {
+    if (!state.draftLog) return;
+    const draftDate = String(state.draftLog.date || '').slice(0, 10);
+    openDialog({
+      title: '確認刪除未完成草稿',
+      body: `<div class="notice strict">${icon('trash-2', 20)}<div><strong>將刪除${draftDate ? ` ${formatDate(draftDate)}` : ''} 草稿</strong><span>草稿內的文字與照片會一併移除，無法復原。</span></div></div>`,
+      footer: '<button type="button" class="btn" data-action="close-dialog">保留草稿</button><button type="button" class="btn btn-danger" data-action="confirm-discard-log-draft">確認刪除</button>',
+    });
+  }
+
+  async function clearStoredTalentDraft({ startFresh = false } = {}) {
+    if (talentDraftClearInFlight) return talentDraftClearInFlight;
+    const draft = state.draftLog;
+    if (!draft) {
+      closeDialog();
+      if (startFresh) openLogEditor({ id: uid('log'), date: todayIso() });
+      return true;
+    }
+    const draftId = String(draft.id || '');
+    const originalActiveLogSource = activeLogSource;
+    const originalPendingFiles = pendingFiles;
+    const clearGeneration = ++talentDraftMutationGeneration;
+    const clearDialog = typeof document === 'undefined' ? null : document.querySelector?.('#dialog-root .dialog');
+    const isSameDraft = () => talentDraftMutationGeneration === clearGeneration
+      && state.draftLog === draft
+      && String(state.draftLog?.id || '') === draftId;
+    const setBusy = busy => {
+      if (!clearDialog) return;
+      if (!busy && (clearDialog.isConnected === false || document.querySelector?.('#dialog-root .dialog') !== clearDialog)) return;
+      clearDialog.inert = busy;
+      if (busy) clearDialog.setAttribute?.('aria-busy', 'true');
+      else clearDialog.removeAttribute?.('aria-busy');
+      clearDialog.querySelectorAll?.('button').forEach(button => { button.disabled = busy; });
+    };
+    const saveCloudDraft = async value => {
+      if (PREVIEW_MODE) return { ok: true };
+      try {
+        return await API.saveTalentDraft(currentUser.nickname, value);
+      } catch (error) {
+        return { ok: false, error: error?.message || '網路連線中斷' };
+      }
+    };
+    const operation = (async () => {
+      setBusy(true);
+      window.clearTimeout(cloudDraftTimer);
+      await cloudDraftChain;
+      if (!isSameDraft()) {
+        toast('草稿內容已在其他操作中更新，本次未刪除；請確認後再試', 'warning');
+        return false;
+      }
+      const cleared = await saveCloudDraft(null);
+      if (!cleared?.ok) {
+        toast(`原草稿尚未刪除：${cleared?.error || '請稍後重試'}；內容與照片仍完整保留`, 'danger');
+        return false;
+      }
+      if (!isSameDraft()) {
+        const rollback = await saveCloudDraft(state.draftLog || draft);
+        toast(rollback?.ok
+          ? '草稿內容在刪除期間已有更新，已回復雲端，本次未刪除'
+          : `草稿內容在刪除期間已有更新，這台裝置仍保留；雲端回復失敗：${rollback?.error || '請稍後重試'}`,
+          'danger');
+        return false;
+      }
+      const recoveryEntries = [];
+      if (localDraftVault) {
+        await localRecoveryReady;
+        if (!isSameDraft()) {
+          const rollback = await saveCloudDraft(state.draftLog || draft);
+          toast(rollback?.ok ? '草稿內容已有更新，已回復雲端，本次未刪除' : '草稿內容已有更新，本次未刪除；雲端回復尚未完成', 'danger');
+          return false;
+        }
+        Object.entries(localRecovery.editors).forEach(([key, saved]) => {
+          if (saved?.formId === 'log-form' && String(saved?.source?.id || '') === draftId) {
+            recoveryEntries.push([key, saved]);
+            delete localRecovery.editors[key];
+          }
+        });
+        if (recoveryEntries.length && !(await writeTalentRecovery())) {
+          recoveryEntries.forEach(([key, saved]) => { localRecovery.editors[key] = saved; });
+          const rollback = await saveCloudDraft(draft);
+          toast(rollback?.ok
+            ? '本機附件暫存尚未完成清除；原草稿已回復到雲端與這台裝置'
+            : `本機附件暫存尚未完成清除，這台裝置仍保留原草稿；雲端回復失敗：${rollback?.error || '請稍後重試'}`,
+            'danger');
+          return false;
+        }
+      }
+      if (!isSameDraft()) {
+        recoveryEntries.forEach(([key, saved]) => { localRecovery.editors[key] = saved; });
+        const recoveryRestored = !recoveryEntries.length || await writeTalentRecovery();
+        const rollback = await saveCloudDraft(state.draftLog || draft);
+        toast(rollback?.ok && recoveryRestored
+          ? '草稿內容已有更新，已完整回復，本次未刪除'
+          : '草稿內容已有更新，這台裝置仍保留；部分備份尚未回復，請勿關閉頁面',
+          'danger');
+        return false;
+      }
+      state.draftLog = null;
+      activeLogSource = null;
+      pendingFiles = { attendance: [], learning: [], room: [], app: [], prep: [] };
+      if (!persist('草稿已刪除')) {
+        state.draftLog = draft;
+        activeLogSource = originalActiveLogSource;
+        pendingFiles = originalPendingFiles;
+        recoveryEntries.forEach(([key, saved]) => { localRecovery.editors[key] = saved; });
+        const recoveryRestored = !recoveryEntries.length || await writeTalentRecovery();
+        const rollback = await saveCloudDraft(draft);
+        persist('草稿已回復');
+        toast(rollback?.ok && recoveryRestored
+          ? '本機儲存空間不足，原草稿已回復到雲端與這台裝置；請清出空間後再試'
+          : `本機儲存空間不足，畫面仍保留原草稿；${rollback?.ok ? '附件備份尚未回復' : `雲端回復失敗：${rollback?.error || '請稍後重試'}`}`,
+          'danger');
+        return false;
+      }
+      talentDraftMutationGeneration += 1;
+      closeDialog();
+      if (startFresh) {
+        openLogEditor({ id: uid('log'), date: todayIso() });
+        toast(`原草稿已刪除，現在填寫 ${formatDate(todayIso())} 紀錄`, 'success');
+      } else {
+        renderApp();
+        toast('未完成草稿已刪除');
+      }
+      return true;
+    })();
+    talentDraftClearInFlight = operation;
+    try {
+      return await operation;
+    } finally {
+      if (talentDraftClearInFlight === operation) talentDraftClearInFlight = null;
+      setBusy(false);
+    }
+  }
+
   function formValue(name, fallback = '') {
     return activeLogSource?.[name] ?? fallback;
   }
@@ -1269,8 +1450,9 @@
     return [1, 1.5].includes(hours) ? hours : fallback;
   }
 
-  function openLogEditor(existing = null) {
-    const draft = existing || state.draftLog || { id: uid('log') };
+  function openLogEditor(existing = null, options = {}) {
+    const resumingStoredDraft = Boolean(options.resumeStoredDraft && state.draftLog);
+    const draft = existing || (resumingStoredDraft ? state.draftLog : null) || { id: uid('log'), date: todayIso() };
     const persistedLog = draft?.id ? state.logs.find(item => item.id === draft.id) : null;
     if (persistedLog && Number(persistedLog.entryVersion || 1) < 2) {
       toast('舊制正式紀錄僅供查看，不能用新版表單編輯；缺少 APP 截圖時請從紀錄詳情補傳', 'warning');
@@ -1297,7 +1479,7 @@
     const autoCourse = !String(formValue('courseName', '') || '').trim() && Boolean(scheduleName);
     const selectedDuration = Number(formValue('duration', scheduleDuration(schedule))) || 1.5;
     openDrawer({
-      title: editing ? '編輯本堂紀錄' : state.draftLog ? '繼續本堂紀錄' : '新增本堂紀錄',
+      title: editing ? '編輯本堂紀錄' : resumingStoredDraft ? `繼續 ${formatDate(draft.date)} 草稿` : '新增本堂紀錄',
       subtitle: editing ? '交付期限內更新同一筆，不會重複計薪。' : '同一頁完成一堂課，系統會自動草稿保留。',
       body: `<form id="log-form" novalidate data-editing="${editing ? 'true' : 'false'}" data-room-upload-date="${pendingFiles.room.length ? esc(formValue('date', todayIso())) : ''}"><input type="hidden" name="id" value="${esc(draft.id || '')}"><input type="hidden" name="updatedAt" value="${esc(draft.updatedAt || '')}"><input type="hidden" name="contentRevision" value="${esc(draft.contentRevision || '')}">
         <div class="draft-sync-status" data-draft-sync-status>${icon('circle-check', 16)}<span>輸入內容會自動暫存</span></div>
@@ -1423,6 +1605,7 @@
       roomFiles: pendingFiles.room,
       appFiles: pendingFiles.app,
     };
+    talentDraftMutationGeneration += 1;
     persist('草稿已保留');
     const status = $('[data-draft-sync-status]');
     if (status) status.innerHTML = `${icon('save', 16)}<span>本機已暫存，等待雲端同步</span>`;
@@ -1777,6 +1960,26 @@
     return { count, rate, tier, amount: Number(item.pay || 0) };
   }
 
+  function refreshLogDateBounds(form) {
+    if (!form) return;
+    const data = new FormData(form);
+    const rawLessonStatus = String(data.get('lessonStatus') || 'held');
+    const cancelled = isPt() && rawLessonStatus === 'cancelled';
+    const coverage = isPt() && rawLessonStatus === 'coverage';
+    const normalScheduled = !cancelled && !coverage;
+    const dateInput = form.elements.date;
+    if (!dateInput) return;
+    const bounds = talentDateBounds(normalScheduled ? 'held' : rawLessonStatus, todayIso());
+    dateInput.max = bounds.max;
+    if (bounds.min) dateInput.min = bounds.min;
+    else dateInput.removeAttribute('min');
+    const dateAllowed = !normalScheduled || talentLessonDateAllowed(dateInput.value);
+    dateInput.setCustomValidity(dateAllowed ? '' : '正常課程只可於授課當日或下一個工作日填寫');
+    dateInput.setAttribute('aria-invalid', dateAllowed ? 'false' : 'true');
+    const hint = $('[data-date-hint]', form);
+    if (hint) hint.textContent = coverage ? '帶班可選實際授課日期（不可選未來）' : cancelled ? '停課可選過去的固定排課日' : '可選授課當日或下一個工作日；週一可選週五至週日的實際排課';
+  }
+
   function updateLogFormLogic() {
     const form = $('#log-form');
     if (!form) return;
@@ -1805,19 +2008,8 @@
       $$('input, select, textarea', node).forEach(control => { control.disabled = !coverage; });
     });
     const dateInput = form.elements.date;
-    if (dateInput) {
-      const editing = form.dataset.editing === 'true';
-      const normalScheduled = !cancelled && !coverage;
-      dateInput.readOnly = editing;
-      dateInput.max = todayIso();
-      if (normalScheduled) dateInput.min = previousKpiWorkday();
-      else dateInput.removeAttribute('min');
-      const dateAllowed = !normalScheduled || talentLessonDateAllowed(dateInput.value);
-      dateInput.setCustomValidity(dateAllowed ? '' : '正常課程只可於授課當日或下一個工作日填寫');
-      dateInput.setAttribute('aria-invalid', dateAllowed ? 'false' : 'true');
-      const hint = $('[data-date-hint]', form);
-      if (hint) hint.textContent = coverage ? '帶班可選實際授課日期（不可選未來）' : cancelled ? '停課可選過去的固定排課日' : '可選授課當日或下一個工作日；週一可選週五至週日的實際排課';
-    }
+    if (dateInput) dateInput.readOnly = form.dataset.editing === 'true';
+    refreshLogDateBounds(form);
     if (isPt() && !coverage) updatePtScheduleSelect(form);
     const calculatedCoverageDuration = coverageDuration(form.elements.coverageStart?.value, form.elements.coverageEnd?.value);
     if (form.elements.coverageDuration) form.elements.coverageDuration.value = calculatedCoverageDuration ? String(calculatedCoverageDuration) : '';
@@ -1846,6 +2038,26 @@
       preview.innerHTML = `<span>${icon('calculator', 20)}</span><div><small>本堂鐘點預估</small><strong>${formatMoney(pay)}</strong><p>${esc(rule)}</p></div>`;
       hydrateIcons();
     }
+  }
+
+  function reconcileTalentClockContext() {
+    const nextDate = todayIso();
+    const nextMonth = nextDate.slice(0, 7);
+    const previousMonth = String(state.ui.lastSeenMonth || '');
+    const form = $('#log-form');
+    const dateInput = form?.elements?.date;
+    const clockChanged = talentClockDate !== nextDate;
+    const monthChanged = previousMonth !== nextMonth;
+    const boundsStale = Boolean(dateInput && dateInput.max !== nextDate);
+    if (!clockChanged && !monthChanged && !boundsStale) return false;
+    if (clockChanged || monthChanged) {
+      state.ui = normalizeTalentUiCalendar(state.ui, nextDate);
+      persist('日期已更新');
+    }
+    talentClockDate = nextDate;
+    if (form) refreshLogDateBounds(form);
+    else if (clockChanged || monthChanged) renderApp();
+    return true;
   }
 
   function updateStudentCountSummary(form) {
@@ -2031,6 +2243,7 @@
       }
       putLocalLesson(result.lesson || item);
       state.draftLog = null;
+      talentDraftMutationGeneration += 1;
       pendingFiles = { attendance: [], learning: [], room: [], app: [], prep: [] };
       persist(item.backfilled ? '停課已補登' : '停課已登記');
       closeDrawer();
@@ -2099,6 +2312,7 @@
     }
     putLocalLesson(result.lesson || item);
     state.draftLog = null;
+    talentDraftMutationGeneration += 1;
     pendingFiles = { attendance: [], learning: [], room: [], app: [], prep: [] };
     persist('紀錄已送出');
     closeDrawer();
@@ -2446,13 +2660,13 @@
   }
 
   const TEST_VIEW_WRITE_ACTIONS = new Set([
-    'submit-log', 'save-log-draft', 'save-prep', 'confirm-delete-prep',
+    'submit-log', 'save-log-draft', 'replace-log-draft', 'confirm-discard-log-draft', 'save-prep', 'confirm-delete-prep',
     'retry-report', 'setup-automation', 'enable-push',
     'test-notifications', 'retry-upload', 'retry-app-evidence',
   ]);
 
   document.addEventListener('click', async event => {
-    if (document.querySelector('form[data-submitting="true"], [data-uploading="true"]') || activeAppUploads.size) {
+    if (talentDraftClearInFlight || document.querySelector('form[data-submitting="true"], [data-uploading="true"]') || activeAppUploads.size) {
       if (event.target.closest('[data-action], [data-dialog-backdrop]')) {
         event.preventDefault();
         toast('資料正在儲存，完成後即可繼續操作', 'warning');
@@ -2506,7 +2720,12 @@
       closeDrawer();
     }
     else if (action === 'close-dialog') closeDialog();
-    else if (action === 'new-log') openLogEditor();
+    else if (action === 'new-log') openNewLogChoice();
+    else if (action === 'resume-log-draft') {
+      closeDialog();
+      openLogEditor(null, { resumeStoredDraft: true });
+    }
+    else if (action === 'replace-log-draft') await clearStoredTalentDraft({ startFresh: true });
     else if (action === 'register-past-cancellation') { closeDialog(); openLogEditor({ id: uid('log'), lessonStatus: 'cancelled', date: todayIso() }); }
     else if (action === 'refresh-schedule') { closeDialog(); await loadCloudData(); renderApp(); }
     else if (action === 'edit-log') {
@@ -2529,14 +2748,8 @@
       }
       closeDrawer(); renderApp(); toast('未完成紀錄已保留');
     }
-    else if (action === 'discard-log-draft') {
-      const result = PREVIEW_MODE ? { ok: true } : await API.saveTalentDraft(currentUser.nickname, null);
-      if (!result?.ok) { toast(`草稿尚未刪除：${result?.error || '請稍後重試'}`, 'danger'); return; }
-      state.draftLog = null;
-      persist('草稿已刪除');
-      renderApp();
-      toast('未完成草稿已刪除');
-    }
+    else if (action === 'discard-log-draft') openDiscardLogDraftDialog();
+    else if (action === 'confirm-discard-log-draft') await clearStoredTalentDraft();
     else if (action === 'new-prep') openPrepEditor();
     else if (action === 'save-prep') await runFormAction($('#prep-form'), () => savePrep($('#prep-form')));
     else if (action === 'edit-prep') openPrepEditor(state.preps.find(item => item.id === control.dataset.id));
@@ -2798,13 +3011,18 @@
 
   document.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
-    if (document.querySelector('form[data-submitting="true"], [data-uploading="true"]') || activeAppUploads.size) return;
+    if (talentDraftClearInFlight || document.querySelector('form[data-submitting="true"], [data-uploading="true"]') || activeAppUploads.size) return;
     if ($('#dialog-root').children.length) closeDialog(); else if ($('#drawer-root').children.length) closeDrawer();
   });
 
   window.addEventListener('beforeunload', () => {
     const form = $('#log-form');
     if (form?.dataset.dirty === 'true') captureLogDraft(false);
+  });
+  window.addEventListener('pageshow', reconcileTalentClockContext);
+  window.addEventListener('focus', reconcileTalentClockContext);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') reconcileTalentClockContext();
   });
 
   if (state.ui.route === 'performance') state.ui.performanceMonth = scoreMonthsFor(currentUser.nickname, true)[0] || currentMonth();
