@@ -9301,7 +9301,7 @@
       const root = window.AUTH?.relativeRoot?.() || '../../';
       if (realRole === 'admin') window.location.href = `${root}admin/dashboard.html?v=20260827-test-view-fast-1#test-view`;
       else if (window.AUTH?.routeByRole) window.AUTH.routeByRole(realRole, realSession);
-      else window.location.href = `${root}review/anqin-v2/index.html?v=20261110-manager-missing-manual-1`;
+      else window.location.href = `${root}review/anqin-v2/index.html?v=20261110-backfill-clarity-1`;
     }
     else if (action === 'open-test-view') {
       const root = window.AUTH?.relativeRoot?.() || '../../';

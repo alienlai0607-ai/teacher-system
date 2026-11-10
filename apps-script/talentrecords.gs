@@ -1599,6 +1599,11 @@ function talentAttachmentLinks_(title, items) {
   }).join('') + '</ul>';
 }
 
+function talentReportCountText_(lesson, field) {
+  const unknown = Array.isArray(lesson.adminBackfillUnknownFields) ? lesson.adminBackfillUnknownFields : [];
+  return lesson[field] === null || unknown.indexOf(field) >= 0 ? '未提供' : String(Number(lesson[field] || 0));
+}
+
 function generateTalentLessonPdf_(lesson, user) {
   const root = getKpiPdfRootFolder_();
   const department = normalizeDepartment_(user.department) || '才藝部門';
@@ -1620,12 +1625,15 @@ function generateTalentLessonPdf_(lesson, user) {
   } else {
     html += '<h2>' + talentHtmlEsc_(lesson.courseName || lesson.courseType) + '</h2><div class="muted">' + talentHtmlEsc_(lesson.courseType || '') + '　' + talentHtmlEsc_(lesson.duration || '') + ' 小時</div>';
     if (talentLessonEntryVersion_(lesson) >= TALENT_SIMPLE_ENTRY_VERSION_) {
-      html += '<div class="grid"><div class="box">正式到課總數<br><strong>' + Number(lesson.present || 0) + '</strong></div><div class="box">其中新生<br><strong>' + Number(lesson.newCount || 0) + '</strong></div><div class="box">其中續報<br><strong>' + Number(lesson.renewalCount || 0) + '</strong></div><div class="box">體驗另計<br><strong>' + Number(lesson.trial || 0) + '</strong></div><div class="box">教室整潔<br><strong>' + (Array.isArray(lesson.roomFiles) && lesson.roomFiles.length ? '已拍照' : lesson.adminBackfillApproved ? '歷史回填' : '未附照') + '</strong></div></div>';
-      if (lesson.adminBackfillApproved && (!Array.isArray(lesson.roomFiles) || !lesson.roomFiles.length)) {
-        html += '<div class="box warning">此筆為管理員核定的歷史課程；當時無整潔照，系統未偽造附件。</div>';
+      const missingEvidence = Array.isArray(lesson.adminBackfillMissingEvidence) ? lesson.adminBackfillMissingEvidence : [];
+      const roomStatus = Array.isArray(lesson.roomFiles) && lesson.roomFiles.length ? '已拍照'
+        : lesson.adminBackfillApproved || missingEvidence.indexOf('roomFiles') >= 0 ? '未提供' : '未附照';
+      html += '<div class="grid"><div class="box">正式到課總數<br><strong>' + talentReportCountText_(lesson, 'present') + '</strong></div><div class="box">其中新生<br><strong>' + talentReportCountText_(lesson, 'newCount') + '</strong></div><div class="box">其中續報<br><strong>' + talentReportCountText_(lesson, 'renewalCount') + '</strong></div><div class="box">體驗另計<br><strong>' + talentReportCountText_(lesson, 'trial') + '</strong></div><div class="box">教室整潔<br><strong>' + roomStatus + '</strong></div></div>';
+      if (lesson.adminBackfillApproved) {
+        html += '<div class="box warning">' + talentHtmlEsc_(lesson.adminBackfillNote || '此筆為管理員核定的歷史課程補登；僅顯示已提供的資料。') + '</div>';
       }
     } else {
-      html += '<div class="grid six"><div class="box">應到<br><strong>' + Number(lesson.expected || 0) + '</strong></div><div class="box">正式實到<br><strong>' + Number(lesson.present || 0) + '</strong></div><div class="box">請假<br><strong>' + Number(lesson.leave || 0) + '</strong></div><div class="box">未請假缺席<br><strong>' + Number(lesson.absent || 0) + '</strong></div><div class="box">補課<br><strong>' + Number(lesson.makeup || 0) + '</strong></div><div class="box">體驗<br><strong>' + Number(lesson.trial || 0) + '</strong></div></div>';
+      html += '<div class="grid six"><div class="box">應到<br><strong>' + talentReportCountText_(lesson, 'expected') + '</strong></div><div class="box">正式實到<br><strong>' + talentReportCountText_(lesson, 'present') + '</strong></div><div class="box">請假<br><strong>' + talentReportCountText_(lesson, 'leave') + '</strong></div><div class="box">未請假缺席<br><strong>' + talentReportCountText_(lesson, 'absent') + '</strong></div><div class="box">補課<br><strong>' + talentReportCountText_(lesson, 'makeup') + '</strong></div><div class="box">體驗<br><strong>' + talentReportCountText_(lesson, 'trial') + '</strong></div></div>';
       html += '<h3>本堂使用的備課檔案</h3><div class="box' + (prep ? '' : ' warning') + '">' + (prep
         ? '<strong>' + talentHtmlEsc_(prep.courseName || prep.title || '備課檔案') + '</strong><div class="muted">' + talentHtmlEsc_(prep.courseType || '') + '</div>' + (prep.notes ? '<p>' + talentHtmlEsc_(prep.notes) + '</p>' : '')
         : '原備課檔案已不存在') + '</div>';
@@ -1643,8 +1651,11 @@ function generateTalentLessonPdf_(lesson, user) {
       html += talentAttachmentLinks_('點名簿', lesson.attendanceFiles);
       html += talentAttachmentLinks_('學習過程與成果', lesson.learningFiles);
     }
-    if (lesson.employment === 'pt') html += '<h3>本堂鐘點試算</h3><div class="box">計薪只採正式學員到課總數 ' + Number(lesson.present || 0) + '＋補課 ' + Number(lesson.makeup || 0) + '（體驗另計、不列入）；' + talentHtmlEsc_(lesson.payTier || '') + '；本堂 NT$' + Number(lesson.pay || 0).toLocaleString('en-US') + '</div>';
-    if (lesson.siteType === 'self' && (Number(lesson.newCount || 0) || Number(lesson.renewalCount || 0))) html += '<h3>新生／續報申報</h3><div class="box">新生 ' + Number(lesson.newCount || 0) + ' 人；續報 ' + Number(lesson.renewalCount || 0) + ' 人；狀態：' + talentHtmlEsc_(lesson.bonusApproval === 'approved' ? '已核准' : '待核准') + '</div>';
+    if (lesson.employment === 'pt') html += '<h3>本堂鐘點試算</h3><div class="box">計薪只採正式學員到課總數 ' + talentReportCountText_(lesson, 'present') + '＋補課 ' + talentReportCountText_(lesson, 'makeup') + '（體驗另計、不列入）；' + talentHtmlEsc_(lesson.payTier || '') + '；本堂 NT$' + Number(lesson.pay || 0).toLocaleString('en-US') + '</div>';
+    const newCountText = talentReportCountText_(lesson, 'newCount');
+    const renewalCountText = talentReportCountText_(lesson, 'renewalCount');
+    const unknownBonusCounts = newCountText === '未提供' || renewalCountText === '未提供';
+    if (lesson.siteType === 'self' && (unknownBonusCounts || Number(lesson.newCount || 0) || Number(lesson.renewalCount || 0))) html += '<h3>新生／續報申報</h3><div class="box">新生 ' + newCountText + (newCountText === '未提供' ? '' : ' 人') + '；續報 ' + renewalCountText + (renewalCountText === '未提供' ? '' : ' 人') + '；狀態：' + talentHtmlEsc_(unknownBonusCounts ? '待補資料，未核定獎金' : lesson.bonusApproval === 'approved' ? '已核准' : '待核准') + '</div>';
     html += talentAttachmentLinks_('課後教室整潔', lesson.roomFiles);
   }
   html += '</body></html>';

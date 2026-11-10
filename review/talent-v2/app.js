@@ -207,7 +207,7 @@
     const app = $('#app');
     if (app) app.innerHTML = '<main class="auth-required"><img src="../../shared/icons/logo.png" alt="布拉克星球 Logo"><h1>請先登入正式帳號</h1><p>正在返回登入頁面…</p></main>';
     const root = window.AUTH?.relativeRoot?.() || '../../';
-    const returnPath = `review/talent-v2/index.html?workspace=${encodeURIComponent(requestedWorkspace())}&v=20261102-talent-rollover-1`;
+    const returnPath = `review/talent-v2/index.html?workspace=${encodeURIComponent(requestedWorkspace())}&v=20261110-backfill-clarity-1`;
     window.setTimeout(() => window.location.replace(`${root}index.html?return=${encodeURIComponent(returnPath)}`), 300);
     return;
   }
@@ -693,6 +693,36 @@
       </section>`;
   }
 
+  function talentCountUnknown(item, key) {
+    return item[key] === null || (Array.isArray(item.adminBackfillUnknownFields) && item.adminBackfillUnknownFields.includes(key));
+  }
+
+  function talentCountLabel(item, key) {
+    return talentCountUnknown(item, key) ? '未提供' : String(Number(item[key] || 0));
+  }
+
+  function talentReportedTotalLabel(logs, key, total) {
+    const unknown = logs.filter(item => talentCountUnknown(item, key)).length;
+    return `${total}${unknown ? `（另有 ${unknown} 堂未提供）` : ''}`;
+  }
+
+  function lessonPayLabel(item) {
+    const pay = payBreakdown(item);
+    return pay.requiresReview ? '待主管核定' : formatMoney(pay.amount);
+  }
+
+  function pendingLessonSummary(logs) {
+    const pendingPay = logs.filter(item => payBreakdown(item).requiresReview).length;
+    const unknownCounts = logs.filter(item => ['newCount', 'renewalCount', 'trial'].some(key => talentCountUnknown(item, key))).length;
+    return [pendingPay ? `${pendingPay} 堂鐘點待主管核定，尚未列入合計` : '',
+      unknownCounts ? `${unknownCounts} 堂新生／續報／體驗人數尚未提供；未提供的新生與續報不列入獎金` : ''].filter(Boolean).join('；');
+  }
+
+  function pendingLessonNotice(logs) {
+    const message = pendingLessonSummary(logs);
+    return message ? `<div class="notice warning"><div><strong>本月仍有待確認資料</strong><span>${esc(message)}</span></div></div>` : '';
+  }
+
   function renderLogRow(item) {
     if (item.lessonStatus === 'cancelled') {
       return `<article class="record-row">
@@ -704,14 +734,14 @@
     const isCoverage = item.lessonKind === 'coverage';
     const isSimple = Number(item.entryVersion || 0) >= 2;
     const present = Number(item.present || 0);
-    const newCount = Number(item.newCount || 0);
-    const renewal = Number(item.renewalCount || 0);
-    const trial = Number(item.trial || 0);
+    const newCount = talentCountLabel(item, 'newCount');
+    const renewal = talentCountLabel(item, 'renewalCount');
+    const trial = talentCountLabel(item, 'trial');
     const roomLabel = item.adminBackfillApproved ? '歷史補登' : item.roomFiles?.length ? '整潔照片已上傳' : '整潔照片未完成';
     return `<article class="record-row">
       <div class="record-date"><strong>${formatDate(item.date)}</strong><span>${esc(item.scheduleTime || `${item.duration} 小時`)}</span></div>
       <div class="record-main"><div class="record-title">${esc(item.courseName || item.courseType)} ${isCoverage ? statusBadge('帶班') : statusBadge(item.status)}</div><div class="record-meta">${esc(item.site)} · 正式總數 ${present}（新生 ${newCount}、續報 ${renewal}）· 體驗另計 ${trial} · ${esc(item.teacher)}</div><div class="record-note">${esc(item.adminBackfillApproved ? item.adminBackfillNote : isSimple ? roomLabel : '舊制課堂紀錄（原始資料仍可查看）')}</div></div>
-      <div class="record-side">${item.employment === 'pt' ? `<strong>${formatMoney(item.pay)}</strong><span>${roomLabel}</span>` : `<strong>${present} 人</strong><span>${roomLabel}</span>`}<div class="record-actions">${isTeacher() && Number(item.entryVersion || 1) >= 2 && talentLogEditable(item) && normalizeName(item.teacher) === normalizeName(currentUser.nickname) ? `<button type="button" class="icon-button" data-action="edit-log" data-id="${item.id}" aria-label="編輯期限內紀錄" title="編輯期限內紀錄">${icon('pencil', 16)}</button>` : ''}<button type="button" class="icon-button" data-action="view-log" data-id="${item.id}" aria-label="查看紀錄">${icon('chevron-right', 18)}</button></div></div>
+      <div class="record-side">${item.employment === 'pt' ? `<strong>${lessonPayLabel(item)}</strong><span>${roomLabel}</span>` : `<strong>${present} 人</strong><span>${roomLabel}</span>`}<div class="record-actions">${isTeacher() && Number(item.entryVersion || 1) >= 2 && talentLogEditable(item) && normalizeName(item.teacher) === normalizeName(currentUser.nickname) ? `<button type="button" class="icon-button" data-action="edit-log" data-id="${item.id}" aria-label="編輯期限內紀錄" title="編輯期限內紀錄">${icon('pencil', 16)}</button>` : ''}<button type="button" class="icon-button" data-action="view-log" data-id="${item.id}" aria-label="查看紀錄">${icon('chevron-right', 18)}</button></div></div>
     </article>`;
   }
 
@@ -978,6 +1008,7 @@
     return `${pageHead('鐘點與續報', 'PT 不做 100 分 KPI；這裡只顯示本堂鐘點與當月履約資格。', monthControl())}
       <section class="hero-summary compact"><div><span>${state.ui.month} 鐘點預估</span><strong>${formatMoney(wage)}</strong><p>${heldLogs.length} 堂上課${cancelledLogs.length ? ` · ${cancelledLogs.length} 堂停課` : ''}</p></div><div class="bonus-total"><span>續報獎金預估</span><strong>${formatMoney(renewalBonus)}</strong><small>${eligible ? '當月應填課堂均完成' : compliance.missing.length ? `已缺交 ${compliance.missing.length} 堂，當月續報獎金不適用` : compliance.appMissing.length ? `舊制 APP 截圖缺 ${compliance.appMissing.length} 堂，補傳前不適用` : '尚未完成當月履約資格'} · 僅限自營教室</small></div></section>
       ${beforeLaunch ? `<div class="notice info">${icon('calendar-check-2', 19)}<div><strong>制度自 2026/09/01 起正式實施</strong><span>9 月 1 日以前不產生漏填、資格取消或獎金影響。</span></div></div>` : ''}
+      ${pendingLessonNotice(logs)}
       ${compliance.missing.length ? `<div class="notice strict">${icon('ban', 19)}<div><strong>當月續報獎金資格已取消</strong><span>未在下一個工作日前完成：${compliance.missing.map(item => formatDate(item.date)).join('、')}。超過期限不開放補寫。</span></div></div>` : ''}
       ${bonusForfeited ? `<div class="notice strict">${icon('ban', 19)}<div><strong>${esc(TALENT_BONUS_FORFEITED_LABEL)}</strong><span>${esc(bonusRecord.appPhotoBonusForfeitedReason || '主管已完成查證；鐘點費不受影響。')}</span></div></div>` : ''}
       ${compliance.appMissing.length ? `<div class="notice warning">${icon('image-off', 19)}<div><strong>舊制家長 APP 截圖尚未完成</strong><span>待補傳：${compliance.appMissing.map(item => `${formatDate(item.date)} ${item.courseName || item.courseType}`).join('、')}。請開啟該筆舊紀錄直接補傳。</span></div><button type="button" class="btn btn-small" data-action="view-log" data-id="${esc(compliance.appMissing[0].id)}">開啟紀錄補傳</button></div>` : ''}
@@ -991,7 +1022,7 @@
     }
     const pay = payBreakdown(item);
     const coverageBadge = item.lessonKind === 'coverage' ? ` ${statusBadge('帶班')}` : '';
-    return `<article class="record-row"><div class="record-date"><strong>${formatDate(item.date)}</strong><span>${esc(item.scheduleTime || `${item.duration} 小時`)}</span></div><div class="record-main"><div class="record-title">${esc(item.courseName)}${coverageBadge}</div><div class="record-meta">正式總數 ${Number(item.present || 0)}（新生 ${Number(item.newCount || 0)}、續報 ${Number(item.renewalCount || 0)}）· 體驗另計 ${Number(item.trial || 0)} · ${esc(pay.tier)}</div></div><div class="record-side"><strong>${formatMoney(pay.amount)}</strong><span>${item.adminPayOverrideApproved ? '主管已核定' : item.lessonKind === 'coverage' ? '帶班預估' : item.siteType === 'partner' ? '合作校固定' : '本堂預估'}</span></div></article>`;
+    return `<article class="record-row"><div class="record-date"><strong>${formatDate(item.date)}</strong><span>${esc(item.scheduleTime || `${item.duration} 小時`)}</span></div><div class="record-main"><div class="record-title">${esc(item.courseName)}${coverageBadge}</div><div class="record-meta">正式總數 ${Number(item.present || 0)}（新生 ${talentCountLabel(item, 'newCount')}、續報 ${talentCountLabel(item, 'renewalCount')}）· 體驗另計 ${talentCountLabel(item, 'trial')} · ${esc(pay.tier)}</div></div><div class="record-side"><strong>${lessonPayLabel(item)}</strong><span>${item.adminPayOverrideApproved ? '主管已核定' : item.lessonKind === 'coverage' ? '帶班預估' : item.siteType === 'partner' ? '合作校固定' : '本堂預估'}</span></div></article>`;
   }
 
   function renderRecords() {
@@ -1102,7 +1133,8 @@
     const rows = settlementRows();
     if (isPayroll()) return renderPtPayroll(rows.filter(row => row.person.employment === 'pt'));
     return `${pageHead('薪資獎金', '系統顯示預估；行政核對繳費、退費與歸屬後才成為正式發放金額。', `${monthControl()}<button type="button" class="btn" data-action="export-settlement">${icon('download', 16)}匯出月結 CSV</button>`)}
-      <section class="panel"><div class="panel-head"><div><h2>${state.ui.month} 核定與待處理明細</h2><p>只將已公布 KPI 與已核准人數列入目前合計；草稿及待核准資料不會提前發放。</p></div></div><div class="table-wrap"><table><thead><tr><th>人員</th><th>職別</th><th>上課／停課</th><th>鐘點</th><th>KPI</th><th>新生</th><th>續報</th><th>APP 照片獎金</th><th>目前合計</th><th>明細</th></tr></thead><tbody>${rows.map(row => `<tr><td><strong>${esc(row.person.nickname)}</strong>${row.person.status === 'deleted' ? '<small class="table-sub">離職保留</small>' : row.person.status === 'suspended' ? '<small class="table-sub">帳號停用</small>' : ''}${row.pendingBonusLogs.length ? `<small class="table-sub text-danger">${row.pendingBonusLogs.length} 堂獎金待核准</small>` : ''}${row.person.employment === 'fulltime' && !row.scorePublished ? '<small class="table-sub text-danger">KPI 尚未公布</small>' : ''}</td><td>${row.person.employment === 'pt' ? 'PT' : '正職'}</td><td>${row.heldLogs.length}／${row.cancelledLogs.length}</td><td>${formatMoney(row.wage)}</td><td>${row.person.employment === 'fulltime' ? `${row.score} 分／${row.scorePublished ? formatMoney(row.kpi) : '待公布'}` : '不適用'}</td><td>${row.person.employment === 'fulltime' ? `${row.newCount}/${row.reportedNewCount} 人／${formatMoney(row.newBonus)}` : '不適用'}</td><td>${row.renewal}/${row.reportedRenewal} 人／${formatMoney(row.renewalBonus)}</td><td>${monthlyBonusForfeitureControl(row)}</td><td><strong>${formatMoney(row.total)}</strong></td><td>${row.person.employment === 'pt' ? `<button type="button" class="btn btn-small" data-action="view-pt-statement" data-teacher="${esc(row.person.nickname)}">${icon('printer', 15)}月結單</button>` : '—'}</td></tr>`).join('')}</tbody></table></div></section>`;
+      ${pendingLessonNotice(rows.flatMap(row => row.logs))}
+      <section class="panel"><div class="panel-head"><div><h2>${state.ui.month} 核定與待處理明細</h2><p>只將已公布 KPI 與已核准人數列入目前合計；草稿及待核准資料不會提前發放。</p></div></div><div class="table-wrap"><table><thead><tr><th>人員</th><th>職別</th><th>上課／停課</th><th>鐘點</th><th>KPI</th><th>新生</th><th>續報</th><th>APP 照片獎金</th><th>目前合計</th><th>明細</th></tr></thead><tbody>${rows.map(row => `<tr><td><strong>${esc(row.person.nickname)}</strong>${row.person.status === 'deleted' ? '<small class="table-sub">離職保留</small>' : row.person.status === 'suspended' ? '<small class="table-sub">帳號停用</small>' : ''}${row.pendingBonusLogs.length ? `<small class="table-sub text-danger">${row.pendingBonusLogs.length} 堂獎金待核准</small>` : ''}${row.person.employment === 'fulltime' && !row.scorePublished ? '<small class="table-sub text-danger">KPI 尚未公布</small>' : ''}</td><td>${row.person.employment === 'pt' ? 'PT' : '正職'}</td><td>${row.heldLogs.length}／${row.cancelledLogs.length}</td><td>${formatMoney(row.wage)}</td><td>${row.person.employment === 'fulltime' ? `${row.score} 分／${row.scorePublished ? formatMoney(row.kpi) : '待公布'}` : '不適用'}</td><td>${row.person.employment === 'fulltime' ? `${row.newCount}/${talentReportedTotalLabel(row.logs, 'newCount', row.reportedNewCount)} 人／${formatMoney(row.newBonus)}` : '不適用'}</td><td>${row.renewal}/${talentReportedTotalLabel(row.logs, 'renewalCount', row.reportedRenewal)} 人／${formatMoney(row.renewalBonus)}</td><td>${monthlyBonusForfeitureControl(row)}</td><td><strong>${formatMoney(row.total)}</strong></td><td>${row.person.employment === 'pt' ? `<button type="button" class="btn btn-small" data-action="view-pt-statement" data-teacher="${esc(row.person.nickname)}">${icon('printer', 15)}月結單</button>` : '—'}</td></tr>`).join('')}</tbody></table></div></section>`;
   }
 
   function renderPtPayroll(rows) {
@@ -1110,9 +1142,10 @@
     const totalHours = rows.reduce((sum, row) => sum + row.hours, 0);
     const totalRenewal = rows.reduce((sum, row) => sum + row.renewalBonus, 0);
     return `${pageHead('PT 月度鐘點費', '逐堂資料直接由老師送出的紀錄彙整，不需要再次人工輸入。', `${monthControl()}<button type="button" class="btn" data-action="export-pt-detail">${icon('download', 16)}匯出逐堂 CSV</button>`)}
+      ${pendingLessonNotice(rows.flatMap(row => row.logs))}
       <section class="hero-summary compact payroll-hero"><div><span>${state.ui.month} PT 鐘點費</span><strong>${formatMoney(totalWage)}</strong><p>${totalHours} 小時 · ${rows.reduce((sum, row) => sum + row.heldLogs.length, 0)} 堂正常上課</p></div><div class="bonus-total"><span>符合資格的續報獎金</span><strong>${formatMoney(totalRenewal)}</strong><small>停課不計鐘點；漏填正常課程會取消當月續報獎金</small></div></section>
       ${rows.some(row => row.bonusForfeited) ? `<div class="notice strict">${icon('ban', 19)}<div><strong>已有老師整月獎金取消</strong><span>${esc(TALENT_BONUS_FORFEITED_LABEL)}；鐘點費仍照常計算。</span></div></div>` : ''}
-      <section class="panel"><div class="panel-head"><div><h2>${state.ui.month} PT 月結</h2><p>點「列印月結單」可直接交給個別老師核對。</p></div></div><div class="table-wrap"><table><thead><tr><th>老師</th><th>正常上課</th><th>停課</th><th>時數</th><th>鐘點費</th><th>日誌漏填</th><th>續報資格</th><th>續報核准／申報</th><th>續報獎金</th><th>APP 照片獎金</th><th>個人月結單</th></tr></thead><tbody>${rows.map(row => { const missingLogs = row.compliance?.missing.length || 0; const disqualified = missingLogs > 0; return `<tr><td><strong>${esc(row.person.nickname)}</strong>${row.person.status === 'deleted' ? '<small class="table-sub">離職保留</small>' : row.person.status === 'suspended' ? '<small class="table-sub">帳號停用</small>' : ''}<small class="table-sub">${esc(row.person.schedule?.map(item => `${item.label} ${item.time}`).join('、') || '')}</small></td><td>${row.heldLogs.length} 堂</td><td>${row.cancelledLogs.length} 堂</td><td>${row.hours} 小時</td><td><strong>${formatMoney(row.wage)}</strong></td><td class="${missingLogs ? 'text-danger' : ''}">${missingLogs} 堂</td><td>${row.compliance?.eligible ? statusBadge('complete') : disqualified ? statusBadge('資格取消') : statusBadge('待完成')}</td><td class="${row.pendingBonusLogs.length ? 'text-danger' : ''}">${row.renewal}／${row.reportedRenewal} 人</td><td>${formatMoney(row.renewalBonus)}</td><td>${monthlyBonusForfeitureControl(row)}</td><td><button type="button" class="btn btn-small" data-action="view-pt-statement" data-teacher="${esc(row.person.nickname)}">${icon('printer', 15)}列印月結單</button></td></tr>`; }).join('')}</tbody></table></div></section>`;
+      <section class="panel"><div class="panel-head"><div><h2>${state.ui.month} PT 月結</h2><p>點「列印月結單」可直接交給個別老師核對。</p></div></div><div class="table-wrap"><table><thead><tr><th>老師</th><th>正常上課</th><th>停課</th><th>時數</th><th>鐘點費</th><th>日誌漏填</th><th>續報資格</th><th>續報核准／申報</th><th>續報獎金</th><th>APP 照片獎金</th><th>個人月結單</th></tr></thead><tbody>${rows.map(row => { const missingLogs = row.compliance?.missing.length || 0; const disqualified = missingLogs > 0; return `<tr><td><strong>${esc(row.person.nickname)}</strong>${row.person.status === 'deleted' ? '<small class="table-sub">離職保留</small>' : row.person.status === 'suspended' ? '<small class="table-sub">帳號停用</small>' : ''}<small class="table-sub">${esc(row.person.schedule?.map(item => `${item.label} ${item.time}`).join('、') || '')}</small></td><td>${row.heldLogs.length} 堂</td><td>${row.cancelledLogs.length} 堂</td><td>${row.hours} 小時</td><td><strong>${formatMoney(row.wage)}</strong></td><td class="${missingLogs ? 'text-danger' : ''}">${missingLogs} 堂</td><td>${row.compliance?.eligible ? statusBadge('complete') : disqualified ? statusBadge('資格取消') : statusBadge('待完成')}</td><td class="${row.pendingBonusLogs.length ? 'text-danger' : ''}">${row.renewal}／${talentReportedTotalLabel(row.logs, 'renewalCount', row.reportedRenewal)} 人</td><td>${formatMoney(row.renewalBonus)}</td><td>${monthlyBonusForfeitureControl(row)}</td><td><button type="button" class="btn btn-small" data-action="view-pt-statement" data-teacher="${esc(row.person.nickname)}">${icon('printer', 15)}列印月結單</button></td></tr>`; }).join('')}</tbody></table></div></section>`;
   }
 
   function renderBonusApproval() {
@@ -1957,7 +1990,7 @@
     }
     const rate = count < 2 || count > 10 ? 0 : count <= 4 ? 500 : count <= 7 ? 600 : 800;
     const tier = count < 2 ? '未達開班人數' : count > 10 ? '超過 10 人待主管確認' : count <= 4 ? '2–4 人' : count <= 7 ? '5–7 人' : '8–10 人';
-    return { count, rate, tier, amount: Number(item.pay || 0) };
+    return { count, rate, tier, amount: Number(item.pay || 0), requiresReview: item.payRequiresReview === true || count > 10 };
   }
 
   function refreshLogDateBounds(form) {
@@ -2525,9 +2558,9 @@
         ? `${detailAttachments('教室整潔照片', item.roomFiles)}`
         : `${detailBlock('舊制備課檔案', prep ? (prep.courseName || prep.title || '未命名課程') : '備課檔案已移除')}${detailBlock('舊制課程問題及下次優化', item.issue || '未填寫')}${detailAttachments('舊制點名證據', item.attendanceFiles)}${detailAttachments('舊制學習證據', item.learningFiles)}${detailAttachments('教室復原', item.roomFiles)}${detailBlock('新制說明', '歷史資料完整保留；舊制自營課程如缺家長 APP 截圖，仍可在本頁補傳，其餘欄位不使用新版表單補寫。')}`;
     const metrics = isSimple || item.adminBackfillApproved
-      ? `<div class="detail-metrics"><div><span>正式總數</span><strong>${Number(item.present || 0)}</strong></div><div><span>其中新生</span><strong>${Number(item.newCount || 0)}</strong></div><div><span>其中續報</span><strong>${Number(item.renewalCount || 0)}</strong></div><div><span>體驗另計</span><strong>${Number(item.trial || 0)}</strong></div></div>`
+      ? `<div class="detail-metrics"><div><span>正式總數</span><strong>${Number(item.present || 0)}</strong></div><div><span>其中新生</span><strong>${talentCountLabel(item, 'newCount')}</strong></div><div><span>其中續報</span><strong>${talentCountLabel(item, 'renewalCount')}</strong></div><div><span>體驗另計</span><strong>${talentCountLabel(item, 'trial')}</strong></div></div>`
       : `<div class="detail-metrics"><div><span>應到</span><strong>${Number(item.expected || 0)}</strong></div><div><span>正式實到</span><strong>${Number(item.present || 0)}</strong></div><div><span>補課</span><strong>${Number(item.makeup || 0)}</strong></div><div><span>體驗</span><strong>${Number(item.trial || 0)}</strong></div></div>`;
-    openDrawer({ title: item.courseName || item.courseType, subtitle: `${formatDate(item.date)} · ${item.teacher} · ${item.site}${isCoverage ? ` · 帶班 ${item.scheduleTime || ''}` : ''}`, body: `${metrics}<div class="detail-stack">${details}${appEvidenceDetails}${lessonReportBlock(item)}</div>${item.employment === 'pt' ? `<div class="calculation-card static"><span>${icon('badge-dollar-sign', 20)}</span><div><small>${item.adminPayOverrideApproved ? '本堂核定鐘點' : '本堂預估鐘點'}</small><strong>${formatMoney(item.pay)}</strong></div></div>` : ''}`, footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button>${appUploadControl}${!isSimple && prep && !item.adminBackfillApproved ? `<button type="button" class="btn" data-action="view-prep" data-id="${prep.id}">${icon('notebook-tabs', 16)}查看舊制備課檔案</button>` : ''}` });
+    openDrawer({ title: item.courseName || item.courseType, subtitle: `${formatDate(item.date)} · ${item.teacher} · ${item.site}${isCoverage ? ` · 帶班 ${item.scheduleTime || ''}` : ''}`, body: `${metrics}<div class="detail-stack">${details}${appEvidenceDetails}${lessonReportBlock(item)}</div>${item.employment === 'pt' ? `<div class="calculation-card static"><span>${icon('badge-dollar-sign', 20)}</span><div><small>${item.adminPayOverrideApproved ? '本堂核定鐘點' : '本堂預估鐘點'}</small><strong>${lessonPayLabel(item)}</strong></div></div>` : ''}`, footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button>${appUploadControl}${!isSimple && prep && !item.adminBackfillApproved ? `<button type="button" class="btn" data-action="view-prep" data-id="${prep.id}">${icon('notebook-tabs', 16)}查看舊制備課檔案</button>` : ''}` });
   }
 
   function openPtStatement(teacher) {
@@ -2542,12 +2575,12 @@
         return `<tr><td>${formatDate(item.date)}</td><td>${esc(item.courseName)}</td><td>停課${item.backfilled ? '（補登）' : ''}</td><td colspan="6">${esc(item.cancellationReason)}${item.cancellationNote ? `；${esc(item.cancellationNote)}` : ''}</td><td>${formatMoney(0)}</td></tr>`;
       }
       const pay = payBreakdown(item);
-      return `<tr><td>${formatDate(item.date)}</td><td>${esc(item.courseName)}</td><td>${item.lessonKind === 'coverage' ? '帶班' : '正常上課'}</td><td>${Number(item.present || 0)}</td><td>${Number(item.newCount || 0)}</td><td>${Number(item.renewalCount || 0)}</td><td>${Number(item.trial || 0)}</td><td>${pay.count} 人／${esc(pay.tier)}</td><td>${Number(item.duration || 0)} 小時 × ${formatMoney(pay.rate)}</td><td>${formatMoney(pay.amount)}</td></tr>`;
+      return `<tr><td>${formatDate(item.date)}</td><td>${esc(item.courseName)}</td><td>${item.lessonKind === 'coverage' ? '帶班' : '正常上課'}</td><td>${Number(item.present || 0)}</td><td>${talentCountLabel(item, 'newCount')}</td><td>${talentCountLabel(item, 'renewalCount')}</td><td>${talentCountLabel(item, 'trial')}</td><td>${pay.count} 人／${esc(pay.tier)}</td><td>${Number(item.duration || 0)} 小時 × ${pay.requiresReview ? '待主管核定' : formatMoney(pay.rate)}</td><td>${lessonPayLabel(item)}</td></tr>`;
     }).join('') : '<tr><td colspan="10">本月尚無回報紀錄</td></tr>';
     openDrawer({
       title: `${row.person.nickname}｜${state.ui.month} 月結單`,
       subtitle: '系統依逐堂紀錄自動彙整，可直接列印交老師核對。',
-      body: `<article class="print-sheet" id="pt-statement"><header class="statement-head"><img src="../../shared/icons/logo.png" alt="布拉克星球 Logo"><div><span>布拉克星球 KPI 系統</span><h2>才藝 PT 月度鐘點費明細</h2></div><strong>${esc(state.ui.month)}</strong></header><section class="statement-meta"><div><span>老師</span><strong>${esc(row.person.nickname)}</strong></div><div><span>固定排班</span><strong>${esc(row.person.schedule?.map(item => `${item.label} ${item.time}`).join('、') || '依班表')}</strong></div><div><span>產生日期</span><strong>${esc(todayIso().replace(/-/g, '/'))}</strong></div></section><div class="table-wrap statement-table"><table><thead><tr><th>日期</th><th>課程</th><th>狀態</th><th>正式總數</th><th>其中新生</th><th>其中續報</th><th>體驗另計</th><th>計薪人數／級距</th><th>時數與單價</th><th>本堂金額</th></tr></thead><tbody>${rowsHtml}</tbody></table></div><section class="statement-summary"><div><span>正常上課</span><strong>${row.heldLogs.length} 堂／${row.hours} 小時</strong></div><div><span>停課</span><strong>${row.cancelledLogs.length} 堂</strong></div><div><span>鐘點費合計</span><strong>${formatMoney(row.wage)}</strong></div><div><span>續報 ${row.renewal} 人</span><strong>${eligibility}／${formatMoney(row.renewalBonus)}</strong></div><div class="grand-total"><span>本月預估合計</span><strong>${formatMoney(row.total)}</strong></div></section>${row.bonusForfeited ? `<div class="statement-warning"><strong>${esc(TALENT_BONUS_FORFEITED_LABEL)}</strong><span>${esc(row.bonusForfeitureReason || '')}</span></div>` : ''}${missingDates.length ? `<div class="statement-warning"><strong>續報獎金資格取消</strong><span>正常課程未在下一個工作日前完成：${missingDates.join('、')}</span></div>` : ''}${appMissingDates.length ? `<div class="statement-warning"><strong>舊制家長 APP 發布證據缺件</strong><span>${appMissingDates.join('、')}</span></div>` : ''}<footer class="statement-signatures"><span>老師核對：________________</span><span>主管／行政核對：________________</span></footer></article>`,
+      body: `<article class="print-sheet" id="pt-statement"><header class="statement-head"><img src="../../shared/icons/logo.png" alt="布拉克星球 Logo"><div><span>布拉克星球 KPI 系統</span><h2>才藝 PT 月度鐘點費明細</h2></div><strong>${esc(state.ui.month)}</strong></header><section class="statement-meta"><div><span>老師</span><strong>${esc(row.person.nickname)}</strong></div><div><span>固定排班</span><strong>${esc(row.person.schedule?.map(item => `${item.label} ${item.time}`).join('、') || '依班表')}</strong></div><div><span>產生日期</span><strong>${esc(todayIso().replace(/-/g, '/'))}</strong></div></section><div class="table-wrap statement-table"><table><thead><tr><th>日期</th><th>課程</th><th>狀態</th><th>正式總數</th><th>其中新生</th><th>其中續報</th><th>體驗另計</th><th>計薪人數／級距</th><th>時數與單價</th><th>本堂金額</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>${pendingLessonNotice(row.logs)}<section class="statement-summary"><div><span>正常上課</span><strong>${row.heldLogs.length} 堂／${row.hours} 小時</strong></div><div><span>停課</span><strong>${row.cancelledLogs.length} 堂</strong></div><div><span>鐘點費合計</span><strong>${formatMoney(row.wage)}</strong></div><div><span>續報 ${row.renewal} 人</span><strong>${eligibility}／${formatMoney(row.renewalBonus)}</strong></div><div class="grand-total"><span>本月預估合計</span><strong>${formatMoney(row.total)}</strong></div></section>${row.bonusForfeited ? `<div class="statement-warning"><strong>${esc(TALENT_BONUS_FORFEITED_LABEL)}</strong><span>${esc(row.bonusForfeitureReason || '')}</span></div>` : ''}${missingDates.length ? `<div class="statement-warning"><strong>續報獎金資格取消</strong><span>正常課程未在下一個工作日前完成：${missingDates.join('、')}</span></div>` : ''}${appMissingDates.length ? `<div class="statement-warning"><strong>舊制家長 APP 發布證據缺件</strong><span>${appMissingDates.join('、')}</span></div>` : ''}<footer class="statement-signatures"><span>老師核對：________________</span><span>主管／行政核對：________________</span></footer></article>`,
       footer: `<button type="button" class="btn" data-action="close-drawer">關閉</button><button type="button" class="btn btn-primary" data-action="print-statement">${icon('printer', 16)}列印月結單</button>`,
     });
   }
@@ -2618,13 +2651,13 @@
 
   function exportOwn() {
     const rows = [['日期', '老師', '課程', '狀態', '場域', '實際時間', '正式到課總數', '其中新生', '其中續報', '體驗另計', '預估鐘點', '整潔照片數', '停課原因', '補登']];
-    ownLogs().filter(item => item.date.slice(0, 7) === state.ui.month).forEach(item => rows.push([item.date, item.teacher, item.courseName, item.lessonStatus === 'cancelled' ? '停課' : item.lessonKind === 'coverage' ? '帶班' : '正常上課', item.site, item.scheduleTime || '', item.present, item.newCount, item.renewalCount, item.trial, item.pay, item.roomFiles?.length || 0, item.cancellationReason || '', item.backfilled ? '是' : '否']));
+    ownLogs().filter(item => item.date.slice(0, 7) === state.ui.month).forEach(item => rows.push([item.date, item.teacher, item.courseName, item.lessonStatus === 'cancelled' ? '停課' : item.lessonKind === 'coverage' ? '帶班' : '正常上課', item.site, item.scheduleTime || '', item.present, talentCountLabel(item, 'newCount'), talentCountLabel(item, 'renewalCount'), talentCountLabel(item, 'trial'), payBreakdown(item).requiresReview ? '待主管核定' : item.pay, item.roomFiles?.length || 0, item.cancellationReason || '', item.backfilled ? '是' : '否']));
     downloadCsv(rows, `${currentUser.nickname}_${state.ui.month}_才藝紀錄.csv`);
     toast('本月紀錄已匯出');
   }
 
   function exportSettlement() {
-    const rows = [['月份', '人員', '職別', '課堂數', '鐘點', 'KPI分數', 'KPI狀態', 'KPI核定獎金', '新生核准/申報', '新生獎金', '續報核准/申報', '續報獎金', 'APP照片獎金狀態', '查證原因', '目前核定合計']];
+    const rows = [['月份', '人員', '職別', '課堂數', '鐘點', 'KPI分數', 'KPI狀態', 'KPI核定獎金', '新生核准/申報', '新生獎金', '續報核准/申報', '續報獎金', 'APP照片獎金狀態', '查證原因', '目前核定合計', '待確認資料']];
     settlementRows().forEach(row => rows.push([
       state.ui.month,
       row.person.nickname,
@@ -2634,13 +2667,13 @@
       row.person.employment === 'fulltime' ? row.score : '',
       row.person.employment === 'fulltime' ? (row.scorePublished ? '已公布' : '草稿/待公布') : '不適用',
       row.kpi,
-      `${row.newCount}/${row.reportedNewCount}`,
+      `${row.newCount}/${talentReportedTotalLabel(row.logs, 'newCount', row.reportedNewCount)}`,
       row.newBonus,
-      `${row.renewal}/${row.reportedRenewal}`,
+      `${row.renewal}/${talentReportedTotalLabel(row.logs, 'renewalCount', row.reportedRenewal)}`,
       row.renewalBonus,
       row.bonusForfeited ? TALENT_BONUS_FORFEITED_LABEL : '正常',
       row.bonusForfeitureReason,
-      row.total,
+      row.total, pendingLessonSummary(row.logs),
     ]));
     downloadCsv(rows, `${state.ui.month}_才藝薪資獎金核定與待處理.csv`);
     toast('月結 CSV 已匯出，待核定項目已分開標示');
@@ -2651,7 +2684,7 @@
     settlementRows().filter(row => row.person.employment === 'pt').forEach(row => {
       row.logs.slice().sort((a, b) => String(a.date).localeCompare(String(b.date))).forEach(item => {
         const pay = payBreakdown(item);
-        rows.push([state.ui.month, row.person.nickname, item.date, item.courseName, item.lessonStatus === 'cancelled' ? '停課' : item.lessonKind === 'coverage' ? '帶班' : '正常上課', item.present || 0, item.newCount || 0, item.renewalCount || 0, item.trial || 0, pay.count, pay.tier, item.duration || 0, pay.rate, pay.amount, item.roomFiles?.length || 0, item.cancellationReason || '', item.backfilled ? '是' : '否', item.approvedRenewalCount || 0, item.bonusApproval || '不適用', row.compliance?.eligible ? '符合' : (row.compliance?.missing.length || row.compliance?.appMissing.length) ? '取消' : '待完成', row.bonusForfeited ? TALENT_BONUS_FORFEITED_LABEL : '正常']);
+        rows.push([state.ui.month, row.person.nickname, item.date, item.courseName, item.lessonStatus === 'cancelled' ? '停課' : item.lessonKind === 'coverage' ? '帶班' : '正常上課', item.present || 0, talentCountLabel(item, 'newCount'), talentCountLabel(item, 'renewalCount'), talentCountLabel(item, 'trial'), pay.count, pay.tier, item.duration || 0, pay.requiresReview ? '待主管核定' : pay.rate, pay.requiresReview ? '待主管核定' : pay.amount, item.roomFiles?.length || 0, item.cancellationReason || '', item.backfilled ? '是' : '否', item.approvedRenewalCount || 0, item.bonusApproval || '不適用', row.compliance?.eligible ? '符合' : (row.compliance?.missing.length || row.compliance?.appMissing.length) ? '取消' : '待完成', row.bonusForfeited ? TALENT_BONUS_FORFEITED_LABEL : '正常']);
       });
       if (!row.logs.length) rows.push([state.ui.month, row.person.nickname, '', '', '本月無紀錄', 0, 0, 0, 0, 0, '', 0, 0, 0, 0, '', '', 0, '不適用', row.compliance?.missing.length ? '取消' : '待完成', row.bonusForfeited ? TALENT_BONUS_FORFEITED_LABEL : '正常']);
     });

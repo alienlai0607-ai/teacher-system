@@ -51,6 +51,8 @@ cd "$ROOT"
 "$NODE_BIN" tests/anqin-submit-recovery.test.cjs
 "$NODE_BIN" --test tests/talent-month-rollover.test.cjs
 "$NODE_BIN" tests/talent-rules.test.cjs
+"$NODE_BIN" tests/talent-backfill-display.test.cjs
+"$NODE_BIN" tests/talent-backfill-report-truth.test.cjs
 "$NODE_BIN" tests/talent-approval-rubric.test.cjs
 "$NODE_BIN" tests/admin-marketing-rules.test.cjs
 "$NODE_BIN" tests/secondary-save-safety.test.cjs
