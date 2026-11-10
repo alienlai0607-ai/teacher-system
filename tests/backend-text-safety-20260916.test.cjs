@@ -132,7 +132,7 @@ for (const corruptReadback of [false, true]) {
   assert.equal(result.ok, !corruptReadback);
   assert.equal(result.cleanup_complete, true, 'Test sheet is removed even when an assertion fails');
   assert.equal(ss.getSheetByName(result.run_id), undefined);
-  assert.equal(result.release, '20261014-release-1');
+  assert.equal(result.release, '20261110-manager-missing-manual-1');
   if (corruptReadback) assert.match(result.error, /Created text became a formula/);
   else assert.equal(result.checks.length, 3);
   const countBefore = created;

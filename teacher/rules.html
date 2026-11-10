@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>KPI 與獎金規則</title>
 <link rel="stylesheet" href="../shared/style.css?v=20260624k">
-<script src="../shared/config.js?v=20261014-release-1"></script>
-<script src="../shared/auth.js?v=20261014-release-1"></script>
-<script src="../shared/api.js?v=20261014-release-1"></script>
-<script src="../shared/ui.js?v=20261014-release-1"></script>
+<script src="../shared/config.js?v=20261110-manager-missing-manual-1"></script>
+<script src="../shared/auth.js?v=20261110-manager-missing-manual-1"></script>
+<script src="../shared/api.js?v=20261110-manager-missing-manual-1"></script>
+<script src="../shared/ui.js?v=20261110-manager-missing-manual-1"></script>
 <script src="../shared/pwa.js?v=20260825-production-audit-2"></script>
 <script src="../shared/push.js?v=20260912-push-resilience-2"></script>
 <style>
@@ -311,8 +311,8 @@ function renderAnqin() {
     <div class="card">
       <div class="rule-h">➕➖ KPI 加扣分規則</div>
       <div class="note">
-        ・所有月份：缺交每次自 KPI 總分<strong>扣 2 分</strong>；遲到 0～2 次不扣，<strong>3 次含以上固定扣 5 分</strong>（不按次累加）。<br>
-        ・<strong>2026 年 9 月資料來源特例：</strong>因系統不穩，缺交與遲到次數都由主管確認後填寫，不採用系統紀錄自動扣分；其他月份缺交次數由系統統計。<br>
+        ・所有月份：缺交 KPI 次數由主管確認後填寫，不以系統自動偵測結果扣分；每次自 KPI 總分<strong>扣 2 分</strong>。<br>
+        ・遲到次數也由主管填寫；0～2 次不扣，<strong>3 次含以上固定扣 5 分</strong>（不按次累加）。<br>
         ・僅在 <strong>2026 年 9 月評核</strong>，主管可另填寫 <strong>0～5 分「九月加分」</strong>；其他月份不適用。<br>
         加分與扣分都只在總分計算一次；合併後總分最高 100 分，並依最終總分計算評等與獎金級距。
       </div>

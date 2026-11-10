@@ -68,7 +68,7 @@ logs.push(
   { nickname: '紅豆', date: '2026-09-05', is_makeup: true },
   { nickname: '紅豆', date: '2026-09-06', is_makeup: true },
 );
-const combined = backendContext.saveEval(payload({ score_late_count: 4, september_missing_count: 2, september_bonus_points: 5 }));
+const combined = backendContext.saveEval(payload({ score_late_count: 4, manual_missing_count: 2, september_bonus_points: 5 }));
 assert.equal(combined.total_score, 96, '100 + 5 - two manager-entered missing records - one fixed late penalty is applied exactly once');
 assert.equal(combined.grade, '卓越', 'the final adjusted score selects the bonus tier');
 assert.equal(rows.at(-1).september_bonus_points, 5);
@@ -90,8 +90,12 @@ for (const invalid of [-1, 6, 1.5, 'not-a-number']) {
   assert.equal(result.ok, false, `invalid September bonus ${invalid} must be rejected`);
 }
 for (const invalid of [-1, 1.5, 'not-a-number']) {
+  const result = backendContext.saveEval(payload({ manual_missing_count: invalid }));
+  assert.equal(result.ok, false, `invalid unified manual missing count ${invalid} must be rejected`);
+}
+for (const invalid of [-1, 1.5, 'not-a-number']) {
   const result = backendContext.saveEval(payload({ september_missing_count: invalid }));
-  assert.equal(result.ok, false, `invalid September missing count ${invalid} must be rejected`);
+  assert.equal(result.ok, false, `invalid legacy September missing count ${invalid} must be rejected`);
 }
 assert.equal(backendContext.saveEval(payload({ year_month: '2026-10', september_missing_count: 1 })).ok, false,
   'a non-zero manual missing count outside 2026-09 must be rejected');
@@ -101,6 +105,25 @@ assert.equal(backendContext.saveEval(payload({ year_month: '2025-09', september_
   'the exception is exactly 2026-09, not every September');
 assert.equal(backendContext.saveEval(payload({ year_month: '2026-10', september_bonus_points: 0 })).ok, true,
   'an explicit zero outside September is harmless');
+
+logs.push(
+  { nickname: '紅豆', date: '2026-10-02', is_makeup: true },
+  { nickname: '紅豆', date: '2026-10-03', is_makeup: true },
+  { nickname: '紅豆', date: '2026-10-04', is_makeup: true },
+  { nickname: '紅豆', date: '2026-10-05', is_makeup: true },
+);
+const octoberManual = backendContext.saveEval(payload({
+  year_month: '2026-10', score_late_count: 4, manual_missing_count: 3,
+}));
+assert.equal(octoberManual.total_score, 89, 'non-September uses the same manager-entered count: 100 - 6 missing - 5 late');
+assert.equal(rows.at(-1).makeup_count, 3);
+assert.equal(rows.at(-1).makeup_penalty, 6);
+assert.equal(rows.at(-1).september_missing_count, 0);
+assert.equal(rows.at(-1).september_missing_penalty, 0);
+const octoberLogsIgnored = backendContext.saveEval(payload({ year_month: '2026-10', manual_missing_count: 0 }));
+assert.equal(octoberLogsIgnored.total_score, 100, 'automatic is_makeup evidence is never used for scoring in another month');
+assert.equal(rows.at(-1).makeup_count, 0);
+assert.equal(rows.at(-1).makeup_penalty, 0);
 
 const eightyPointScores = {
   score_k1: 15, score_k2: 15, score_k3: 15, score_k4: 15, score_k5: 12, score_k6: 8,
@@ -120,7 +143,7 @@ const explicitClear = backendContext.saveEval(payload({ ...eightyPointScores, se
 assert.equal(explicitClear.total_score, 74, 'clearing only the bonus preserves the manager-entered missing count');
 assert.equal(updated.september_bonus_points, 0);
 
-const explicitClearAll = backendContext.saveEval(payload({ ...eightyPointScores, september_missing_count: 0, september_bonus_points: 0 }));
+const explicitClearAll = backendContext.saveEval(payload({ ...eightyPointScores, manual_missing_count: 0, september_bonus_points: 0 }));
 assert.equal(explicitClearAll.total_score, 80, 'the new UI can explicitly clear both manual September fields with zero');
 assert.equal(updated.september_missing_count, 0);
 
@@ -172,12 +195,12 @@ const managerForm = {
   elements: {
     score_k1: { value: 20 }, score_k2: { value: 20 }, score_k3: { value: 20 },
     score_k4: { value: 20 }, score_k5: { value: 12 }, score_k6: { value: 8 },
-    score_late_count: { value: 4 }, september_missing_count: { value: 2 }, september_bonus_points: { value: 5 },
+    score_late_count: { value: 4 }, manual_missing_count: { value: 2 }, september_bonus_points: { value: 5 },
   },
 };
 Object.assign(helperContext, {
   ANQIN_KPI_STANDARDS: fullScores.map(points => ({ points })),
-  integrationRuntime: { managerEvaluationMonth: '2026-09', managerEvaluationEvidence: { summary: { makeup_count: 2 } } },
+  integrationRuntime: { managerEvaluationMonth: '2026-09', managerEvaluationEvidence: { summary: { makeup_count: 99 } } },
   evaluationTier: total => ({ grade: total >= 95 ? '卓越' : total >= 88 ? '優良' : '達標', bonus: total >= 95 ? 'NT$3,000' : total >= 88 ? 'NT$2,000' : 'NT$1,000' }),
   $: selector => ({
     '#manager-evaluation-form': managerForm,
@@ -200,12 +223,17 @@ assert.equal(managerTotalNode.textContent, '91', 'explicit zero immediately remo
 managerForm.elements.september_bonus_points.value = 5;
 helperContext.integrationRuntime.managerEvaluationMonth = '2026-10';
 helperContext.refreshManagerEvaluationTotal();
-assert.equal(managerTotalNode.textContent, '91', 'another month ignores stale September fields and uses automatic missing-work count plus the same fixed late rule');
+assert.equal(managerTotalNode.textContent, '91', 'another month ignores stale September bonus and uses the same manager-entered missing count plus fixed late rule');
+managerForm.elements.manual_missing_count.value = 3;
+helperContext.refreshManagerEvaluationTotal();
+assert.equal(managerTotalNode.textContent, '89', 'three manager-entered missing records deduct six points in every month');
 
 assert.match(frontend, /selectedMonth === ANQIN_SEPTEMBER_BONUS_MONTH/, 'new manager UI gates the control by selected month');
 assert.match(frontend, /name="september_bonus_points" min="0" max="\$\{ANQIN_SEPTEMBER_BONUS_MAX\}" step="1"/, 'new manager UI exposes an integer 0–5 control');
-assert.match(frontend, /payload\.september_missing_count = septemberMissingCount;/,
-  'new manager UI sends the manager-entered September missing count');
+assert.match(frontend, /id="manager-eval-manual-missing"[^>]*name="manual_missing_count"[^>]*min="0"[^>]*step="1"/,
+  'new manager UI exposes one non-negative integer missing KPI count in every month');
+assert.match(frontend, /payload\.manual_missing_count = manualMissingCount;|manual_missing_count:\s*manualMissingCount/,
+  'new manager UI sends the unified manager-entered missing count');
 assert.match(frontend, /payload\.september_bonus_points = septemberBonusPoints;/,
   'new manager UI sends explicit zero for September bonus and omits it otherwise');
 assert.match(frontend, /<div class="metadata-label">九月加分<\/div>/, 'published teacher view shows the bonus detail');
@@ -217,17 +245,17 @@ assert.ok(legacyRecalcStart >= 0 && legacyRecalcEnd > legacyRecalcStart, 'must l
 const legacyNodes = {
   score_k1: { value: 20 }, score_k2: { value: 20 }, score_k3: { value: 20 },
   score_k4: { value: 20 }, score_k5: { value: 12 }, score_k6: { value: 8 },
-  score_okr: { value: 0 }, score_late_count: { value: 4 }, september_missing_count: { value: 2 }, september_bonus_points: { value: 5 },
+  score_okr: { value: 0 }, score_late_count: { value: 4 }, manual_missing_count: { value: 2 }, september_bonus_points: { value: 5 },
   'select-month': { value: '2026-09' }, 'total-score': { textContent: '' }, 'total-max': { textContent: '' },
   'score-breakdown': { textContent: '' }, 'late-note': { style: {}, textContent: '' },
-  'september-missing-note': { style: {}, textContent: '' },
+  'manual-missing-note': { style: {}, textContent: '' },
   grade: { textContent: '' }, bonus: { textContent: '' }, 'bonus-final': { textContent: '' },
   bonus_granted: { checked: true },
 };
 const legacyContext = vm.createContext({
   currentKpiDef: fullScores.map((max, index) => ({ no: index + 1, max })),
   currentAnqin: true,
-  currentMakeupCount: 2,
+  currentMakeupCount: 99,
   SEPTEMBER_BONUS_MONTH: '2026-09',
   SEPTEMBER_BONUS_MAX: 5,
   document: { getElementById: id => legacyNodes[id] },
@@ -243,7 +271,7 @@ vm.runInContext(legacyManager.slice(legacyRecalcStart, legacyRecalcEnd), legacyC
 legacyContext.recalc();
 assert.equal(legacyNodes['total-score'].textContent, 96, 'legacy manager entry uses the same manual-September formula');
 assert.match(legacyNodes['score-breakdown'].textContent, /九月加分 \+5/);
-assert.match(legacyNodes['score-breakdown'].textContent, /缺交 2 次 −4/);
+assert.match(legacyNodes['score-breakdown'].textContent, /缺交 KPI 2 次 −4/);
 assert.match(legacyNodes['score-breakdown'].textContent, /遲到 4 次 −5/);
 legacyNodes['select-month'].value = '2026-10';
 legacyContext.recalc();
@@ -251,8 +279,10 @@ assert.equal(legacyNodes['total-score'].textContent, 91, 'legacy manager entry i
 
 assert.match(legacyManager, /id="september-bonus-card" style="display:none;"/, 'legacy entry starts with the bonus UI hidden');
 assert.match(legacyManager, /currentAnqin && month === SEPTEMBER_BONUS_MONTH/, 'legacy entry shows it only for eligible Anqin September scoring');
-assert.match(legacyManager, /payload\.september_missing_count = septemberMissingCount;/,
-  'legacy entry sends the manual missing count only for the eligible month');
+assert.match(legacyManager, /id="manual-missing-card"/, 'legacy entry keeps the all-month manual missing field separate from September bonus');
+assert.match(legacyManager, /id="manual_missing_count"/, 'legacy entry exposes the unified manual missing field');
+assert.match(legacyManager, /payload\.manual_missing_count = manualMissingCount;|manual_missing_count:\s*manualMissingCount/,
+  'legacy entry sends the manual missing count in every Anqin month');
 assert.match(legacyManager, /lateCount >= 3 \? 5 : 0/, 'legacy entry uses the global three-late fixed deduction');
 assert.doesNotMatch(legacyManager, /lateCount - 2|直接降一個獎金等級/,
   'legacy entry no longer carries the old per-occurrence or tier-drop rule');
@@ -260,16 +290,22 @@ assert.doesNotMatch(legacyManager, /lateCount - 2|直接降一個獎金等級/,
 assert.match(qaHarness, /september_bonus_points: septemberBonusPoints/, 'isolated QA backend persists the bonus');
 assert.match(qaHarness, /september_missing_count: septemberMissingCount, september_missing_penalty: septemberMissingPenalty/,
   'isolated QA backend persists manual September penalties separately');
-assert.match(qaHarness, /const makeupCount = septemberBonusEligible \? 0 : Object\.values\(cloudStore\.logs\)/,
-  'isolated QA backend must not use automatic log counts for September scoring');
-assert.match(qaHarness, /Math\.min\(100, Math\.max\(0,[\s\S]*septemberBonusPoints - septemberMissingPenalty - makeupPenalty - latePenalty\)\)/,
+assert.match(qaHarness, /manual_missing_count/, 'isolated QA backend accepts the unified manager-entered missing count');
+const qaSaveEval = qaHarness.slice(qaHarness.indexOf("action === 'saveEval'"), qaHarness.indexOf("action === 'getEval'"));
+assert.doesNotMatch(qaSaveEval, /cloudStore\.logs/,
+  'isolated QA backend must not use automatic log counts for scoring in any month');
+assert.match(qaHarness, /Math\.min\(100, Math\.max\(0,[\s\S]*septemberBonusPoints - manualMissingPenalty - latePenalty\)\)/,
   'isolated QA backend mirrors the capped combined formula');
 assert.match(legacyReport, /evalObj\.total_score !== undefined/, 'legacy report prefers the saved total, including zero');
 assert.match(legacyReport, /september_bonus_points/, 'legacy report shows the saved September bonus detail');
 assert.match(legacyReport, /september_missing_penalty/, 'legacy report shows the saved manual missing penalty');
 assert.match(legacyReport, /保存固定扣 \$\{latePenalty\} 分/, 'legacy report shows saved late penalty instead of recalculating history');
 assert.match(rules, /0～5 分「九月加分」/, 'the visible Anqin rules explain the one-time bonus');
-assert.match(rules, /遲到 0～2 次不扣/, 'the visible Anqin rules explain the global late threshold');
+assert.match(rules, /所有月份[\s\S]{0,180}主管[\s\S]{0,180}每次[\s\S]{0,60}扣 2 分/,
+  'the visible Anqin rules explain that every month uses manager-entered missing counts at two points each');
+assert.match(rules, /遲到[\s\S]{0,80}0～2 次不扣[\s\S]{0,80}3 次含以上固定扣 5 分/,
+  'the visible Anqin rules explain the global late threshold');
 assert.match(schema, /september_missing_count/, 'schema documentation records the independent manual missing fields');
+assert.match(schema, /manual_missing_count/, 'schema documents the unified save payload and month-specific persisted fields');
 
-console.log('PASS Anqin 2026-09 manual penalties and bonus: validation, no automatic deduction, fixed late threshold, capped score, both UIs, report, QA, and schema');
+console.log('PASS Anqin all-month manual missing penalties plus 2026-09 bonus: validation, no automatic deduction, fixed late threshold, capped score, both UIs, report, QA, and schema');

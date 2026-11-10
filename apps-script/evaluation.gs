@@ -239,15 +239,31 @@ function saveEval(params) {
   }
 
   // ===== 缺交扣分 =====
-  // 2026-09 安親因當月系統不穩，不能用系統日誌推定缺交；改由主管手動填寫。
-  // 其他月份維持依日誌 is_makeup 自動統計的既有資料來源；每次一律扣 2 分。
+  // 所有月份都由主管手動填寫，避免連假或例外工作日被系統誤判；每次一律扣 2 分。
+  // 新版只信任 manual_missing_count。舊版可能仍會送 makeup_count（自動證據值），
+  // 該欄位不得作為輸入，避免快取中的舊前端覆蓋主管已確認的次數。
+  const manualMissingSupplied = Object.prototype.hasOwnProperty.call(params, 'manual_missing_count') &&
+    params.manual_missing_count !== undefined && params.manual_missing_count !== null &&
+    String(params.manual_missing_count).trim() !== '';
+  let manualMissingCount = 0;
+  if (manualMissingSupplied) {
+    manualMissingCount = Number(params.manual_missing_count);
+    if (!Number.isInteger(manualMissingCount) || manualMissingCount < 0) {
+      return { ok: false, error: '缺交 KPI 次數需為 0 以上的整數' };
+    }
+  }
+
+  // 2026-09 安親沿用原本的九月專屬欄位，確保既有資料與舊版前端仍可使用；
+  // 同月份的 makeup_* 固定為 0，總分只扣 september_missing_penalty 一次。
   const septemberManualPenaltyEligible = anqin && !isManager && year_month === '2026-09';
   const septemberMissingSupplied = Object.prototype.hasOwnProperty.call(params, 'september_missing_count') &&
     params.september_missing_count !== undefined && params.september_missing_count !== null &&
-    params.september_missing_count !== '';
+    String(params.september_missing_count).trim() !== '';
   let septemberMissingCount = 0;
   if (septemberManualPenaltyEligible) {
-    if (septemberMissingSupplied) {
+    if (manualMissingSupplied) {
+      septemberMissingCount = manualMissingCount;
+    } else if (septemberMissingSupplied) {
       septemberMissingCount = Number(params.september_missing_count);
       if (!Number.isInteger(septemberMissingCount) || septemberMissingCount < 0) {
         return { ok: false, error: '九月缺交次數需為 0 以上的整數' };
@@ -266,8 +282,13 @@ function saveEval(params) {
   const septemberMissingPenalty = septemberMissingCount * 2;
   let makeupCount = 0;
   if (!septemberManualPenaltyEligible) {
-    makeupCount = sheetToObjects(SHEET_NAMES.LOGS).filter(l =>
-      l.nickname === nickname && String(l.date).slice(0, 7) === year_month && l.is_makeup === true).length;
+    if (manualMissingSupplied) {
+      makeupCount = manualMissingCount;
+    } else if (existing) {
+      // 舊快取未帶新版欄位時保留已存值；全新評核未帶則預設 0。
+      const savedMissingCount = Number(existing.makeup_count || 0);
+      makeupCount = Number.isInteger(savedMissingCount) && savedMissingCount >= 0 ? savedMissingCount : 0;
+    }
   }
   const makeupPenalty = makeupCount * 2;
 

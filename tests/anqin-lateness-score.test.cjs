@@ -77,21 +77,45 @@ logs.push(
   { nickname: '紅豆', date: '2026-10-02', is_makeup: true },
   { nickname: '紅豆', date: '2026-10-03', is_makeup: true },
 );
-const combined = context.saveEval(payload({ score_k5: 10 }));
-assert.equal(combined.total_score, 94, 'manual KPI scores and automatic missing-work deduction combine without a duplicate late deduction');
+const logsDoNotDeduct = context.saveEval(payload({ manual_missing_count: 0 }));
+assert.equal(logsDoNotDeduct.total_score, 100, 'make-up flags in daily logs never deduct points without a manager-entered count');
+assert.equal(rows.at(-1).makeup_count, 0);
+assert.equal(rows.at(-1).makeup_penalty, 0);
+const staleAutomaticPayloadIgnored = context.saveEval(payload({ makeup_count: 9, makeup_penalty: 18 }));
+assert.equal(staleAutomaticPayloadIgnored.total_score, 100, 'legacy automatic makeup fields are ignored when manual_missing_count is absent');
+assert.equal(rows.at(-1).makeup_count, 0);
+assert.equal(rows.at(-1).makeup_penalty, 0);
+
+const combined = context.saveEval(payload({ score_k5: 10, manual_missing_count: 2 }));
+assert.equal(combined.total_score, 94, 'manual KPI scores and manager-entered missing-work deduction combine without a duplicate late deduction');
 const combinedRow = rows.at(-1);
-assert.equal(combinedRow.score_k5, 10, 'automatic lateness must not overwrite the manager manual category score');
+assert.equal(combinedRow.score_k5, 10, 'manual deductions must not overwrite the manager category score');
+assert.equal(combinedRow.makeup_count, 2);
 assert.equal(combinedRow.makeup_penalty, 4);
 assert.equal(combinedRow.late_penalty, 0);
 
-existing = { _row: 7, eval_id: 'EVAL-2026-10-紅豆', status: 'submitted', total_score: 100, score_late_count: 2, late_penalty: 0 };
+existing = {
+  _row: 7, eval_id: 'EVAL-2026-10-紅豆', status: 'submitted', total_score: 96,
+  score_late_count: 2, late_penalty: 0, makeup_count: 2, makeup_penalty: 4,
+};
 const resaved = context.saveEval(payload());
-assert.equal(resaved.total_score, 96, 'an explicitly re-saved record adopts the current threshold rule and current missing-work evidence');
+assert.equal(resaved.total_score, 96, 'an old cached client that omits manual_missing_count preserves the saved manager-entered count');
 assert.equal(updated.late_penalty, 0);
+assert.equal(updated.makeup_count, 2);
+assert.equal(updated.makeup_penalty, 4);
 assert.equal(updated.total_score, 96);
-assert.equal(existing.total_score, 100, 'the previously published object is not mutated merely by reading it');
+assert.equal(existing.total_score, 96, 'the previously published object is not mutated merely by reading it');
+
+const explicitlyCleared = context.saveEval(payload({ manual_missing_count: 0 }));
+assert.equal(explicitlyCleared.total_score, 100, 'an explicit zero clears the saved manager-entered missing count');
+assert.equal(updated.makeup_count, 0);
+assert.equal(updated.makeup_penalty, 0);
 
 assert.equal(context.saveEval(payload({ score_late_count: 1.5 })).ok, false, 'lateness must remain a non-negative integer');
+for (const invalid of [-1, 1.5, 'not-a-number']) {
+  assert.equal(context.saveEval(payload({ manual_missing_count: invalid })).ok, false,
+    `manual missing count ${invalid} must be rejected`);
+}
 
 const helperStart = frontend.indexOf('  function savedEvaluationNumber(');
 const helperEnd = frontend.indexOf('  function renderTeacherEvaluation()', helperStart);
@@ -129,12 +153,12 @@ const form = {
   elements: {
     score_k1: { value: 20 }, score_k2: { value: 20 }, score_k3: { value: 20 },
     score_k4: { value: 20 }, score_k5: { value: 12 }, score_k6: { value: 8 },
-    score_late_count: { value: 2 },
+    manual_missing_count: { value: 0 }, score_late_count: { value: 2 },
   },
 };
 Object.assign(helperContext, {
   ANQIN_KPI_STANDARDS: fullScores.map(points => ({ points })),
-  integrationRuntime: { managerEvaluationMonth: '2026-10', managerEvaluationEvidence: { summary: { makeup_count: 0 } } },
+  integrationRuntime: { managerEvaluationMonth: '2026-10', managerEvaluationEvidence: { summary: { makeup_count: 99 } } },
   evaluationTier: total => ({ grade: total >= 88 ? '優良' : '達標', bonus: total >= 88 ? 'NT$2,000' : 'NT$1,000' }),
   $: selector => ({
     '#manager-evaluation-form': form,
@@ -152,16 +176,25 @@ helperContext.refreshManagerEvaluationTotal();
 assert.equal(totalNode.textContent, '100', 'manager live preview does not deduct the first two late occurrences');
 assert.equal(tierNode.textContent, '優良 · NT$2,000');
 assert.match(lateTitle.textContent, /遲到 2 次，不扣分/);
+form.elements.manual_missing_count.value = 3;
+helperContext.refreshManagerEvaluationTotal();
+assert.equal(totalNode.textContent, '94', 'manager live preview deducts two points for each manually entered missing KPI');
 form.elements.score_late_count.value = 3;
 helperContext.refreshManagerEvaluationTotal();
-assert.equal(totalNode.textContent, '95', 'manager live preview applies one fixed deduction at three lates');
+assert.equal(totalNode.textContent, '89', 'manager live preview combines three manual missing records and one fixed late deduction');
 assert.match(lateTitle.textContent, /遲到 3 次，固定扣 5 分/);
 
 assert.match(frontend, /data-input="manager-eval-late"/, 'the manager late-count control participates in live calculation');
-assert.match(frontend, /septemberBonusPoints - septemberMissingPenalty - makeupPenalty - latePenalty/, 'the manager preview combines bonus and deductions exactly once');
+assert.match(frontend, /id="manager-eval-manual-missing"[^>]*name="manual_missing_count"[^>]*data-input="manager-eval-manual-missing"/,
+  'every month exposes one manager-entered missing KPI count');
+assert.match(frontend, /manual_missing_count:\s*manualMissingCount|payload\.manual_missing_count\s*=\s*manualMissingCount/,
+  'the manager save payload uses the unified manual_missing_count field');
 assert.match(frontend, /已公布評核以當時寫入的 total_score 與各加扣分欄位為準/, 'published evaluations document saved-value compatibility');
 assert.equal((frontend.match(/const granted = evaluationBonusGranted\(evaluation\);/g) || []).length, 2,
   'teacher and manager evaluation views must share the explicit-false-only bonus rule');
 assert.match(qaHarness, /const latePenalty = lateCount >= 3 \? 5 : 0;/, 'isolated browser QA mirrors the production threshold rule');
+assert.match(qaHarness, /manual_missing_count/, 'isolated browser QA accepts the unified manager-entered missing count');
+const qaSaveEval = qaHarness.slice(qaHarness.indexOf("action === 'saveEval'"), qaHarness.indexOf("action === 'getEval'"));
+assert.doesNotMatch(qaSaveEval, /cloudStore\.logs/, 'isolated browser QA never scans daily logs to score missing KPI records');
 
-console.log('PASS Anqin lateness: 0–2 no deduction, 3+ fixed five points, live total, and saved-history compatibility');
+console.log('PASS Anqin manual missing KPI and lateness: manager count only, 0–2 late no deduction, 3+ fixed five points, live total, and saved-history compatibility');

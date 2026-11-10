@@ -1181,8 +1181,11 @@ async function anqinWorkflow(browser) {
     await page.fill('#manager-eval-late', '2');
     check('安親主管填寫遲到 2 次不扣分', await page.locator('#manager-eval-total').innerText() === '100');
     check('安親主管可直接看到未達門檻不扣分', (await page.locator('#manager-eval-late-note').innerText()).includes('不扣分'));
+    await page.fill('#manager-eval-manual-missing', '3');
+    check('安親主管填寫缺交 3 次會扣 6 分', await page.locator('#manager-eval-total').innerText() === '94');
+    check('安親主管可直接看到手動缺交扣分', (await page.locator('#manager-eval-manual-missing-note').innerText()).includes('扣 6 分'));
     await page.fill('#manager-eval-late', '3');
-    check('安親主管填寫遲到 3 次會固定扣 5 分', await page.locator('#manager-eval-total').innerText() === '95');
+    check('安親主管填寫遲到 3 次會固定扣 5 分', await page.locator('#manager-eval-total').innerText() === '89');
     check('安親主管可直接看到固定遲到扣分', (await page.locator('#manager-eval-late-note').innerText()).includes('固定扣 5 分'));
     await page.fill('#manager-eval-comment', '本月工作紀錄、照片與後續調整皆可清楚查閱。');
     await page.locator('[data-action="save-manager-evaluation"][data-status="submitted"]').click();
@@ -1201,7 +1204,8 @@ async function anqinWorkflow(browser) {
     await page.waitForTimeout(700);
     const teacherEvaluationText = await page.locator('body').innerText();
     check('安親老師可直接看到主管最新已完成評核', teacherEvaluationText.includes('本月工作紀錄、照片與後續調整'));
-    check('安親老師已公布評核顯示扣分後總分', teacherEvaluationText.includes('95 / 100'));
+    check('安親老師已公布評核顯示扣分後總分', teacherEvaluationText.includes('89 / 100'));
+    check('安親老師已公布評核顯示主管填寫缺交 3 次扣 6 分', teacherEvaluationText.includes('缺交') && teacherEvaluationText.includes('主管填寫 3 次，扣 6 分'));
     check('安親老師已公布評核顯示遲到 3 次固定扣 5 分', teacherEvaluationText.includes('遲到') && teacherEvaluationText.includes('3 次，固定扣 5 分'));
 
     await page.goto(`${baseUrl}/review/anqin-v2/qa-harness.html?nickname=%E9%85%B8%E9%85%B8%E4%B8%BB%E7%AE%A1&role=manager&department=%E6%9D%B1%E6%A9%8B%E6%95%99%E5%AE%A4`, { waitUntil: 'domcontentloaded' });

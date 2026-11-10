@@ -17,6 +17,10 @@ const pdfReport = fs.readFileSync(path.join(root, 'apps-script/pdfreport.gs'), '
 const allInOneBackend = fs.readFileSync(path.join(root, 'apps-script/_all_in_one.gs'), 'utf8');
 const coursePrepBackend = fs.readFileSync(path.join(root, 'apps-script/courseprep.gs'), 'utf8');
 const qaHarness = fs.readFileSync(path.join(root, 'review/anqin-v2/qa-harness.js'), 'utf8');
+const saveEvaluationSource = evaluationBackend.slice(
+  evaluationBackend.indexOf('function saveEval('),
+  evaluationBackend.indexOf('function getEval('),
+);
 
 assert.doesNotMatch(source, /maybeShowPushPermissionReminder/, '通知邀請不得以延遲彈窗打斷老師開始填寫');
 assert.match(source, /data-action="enable-push"/, '保留使用者主動開啟通知的設定入口');
@@ -73,6 +77,13 @@ assert.match(source, /舊版學生追蹤紀錄[\s\S]*歷史資料唯讀，不再
 
 assert.match(source, /class="evaluation-score-list"/, '老師查看主管評核時分數不可使用寬表格');
 assert.match(source, /class="manager-eval-score-input"/, '主管輸入分數需要靠近評核項目');
+assert.match(source, /id="manager-eval-manual-missing"[^>]*name="manual_missing_count"[^>]*data-input="manager-eval-manual-missing"/,
+  '主管每個月份都需看到同一個缺交 KPI 次數欄位');
+assert.match(source, /payload\.manual_missing_count = manualMissingCount;|manual_missing_count:\s*manualMissingCount/,
+  '主管評核必須以統一 manual_missing_count payload 儲存');
+assert.match(saveEvaluationSource, /manual_missing_count/, '正式後端需接受主管手動缺交次數');
+assert.doesNotMatch(saveEvaluationSource, /SHEET_NAMES\.LOGS|is_makeup/,
+  '正式後端儲存評核時不得掃描日誌或自動偵測缺交扣分');
 assert.match(styles, /\.task-open-button[\s\S]*overflow-wrap: anywhere/, '待辦事項摘要需要可換行');
 assert.match(styles, /\.evaluation-score-row[\s\S]*grid-template-columns: minmax\(0, 1fr\) auto/, '各項分數必須在目前畫面直接可見');
 assert.match(source, /loadTeacherEvaluation\('latest'\)/, '老師進入主管評核時必須直接載入最近一次已公布結果');
@@ -132,8 +143,8 @@ assert.match(source, /function applyPreviewReviewContext\(/, '安親審查模式
 assert.match(source, /if \(!applyPreviewReviewContext\(control\.dataset\.role\)\) state\.ui\.role = control\.dataset\.role/, '切換審查角色時必須同步身份範圍');
 assert.match(source, /applyPreviewReviewContext\(LOCAL_REVIEW_ROLE\)/, '網址指定主管視角時首次載入就必須套用正確身份');
 assert.match(source, /GLOBAL_MANAGER_NICKNAMES\.some\(name => sameReviewIdentity\(name, managerNickname\)\)/, '小魚在審查與正式登入都必須擁有全教室檢視範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20261014-release-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20261014-release-1/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20261110-manager-missing-manual-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20261110-manager-missing-manual-1/, '登入備援路徑也必須避開舊版快取');
 
 const startupSafetySource = source.slice(source.indexOf('function stripEmbeddedMediaJson('), source.indexOf('function loadState()'));
 const startupSafetyContext = vm.createContext({ JSON, Number, Set });
@@ -526,6 +537,9 @@ assert.match(qaHarness, /Object\.values\(cloudStore\.logs\)/, '隔離驗收需�
 assert.match(qaHarness, /action === 'addFeedback'/, '隔離驗收需保存主管與老師對話');
 assert.match(qaHarness, /action === 'saveEval'/, '隔離驗收需保存主管評核並讓老師重新讀取');
 assert.match(qaHarness, /total_score: totalScore, grade: tier\.grade, bonus: tier\.bonus/, '隔離驗收雲端需像正式後端一樣計算評核總分、等第與獎金');
+const qaEvaluationSaveSource = qaHarness.slice(qaHarness.indexOf("action === 'saveEval'"), qaHarness.indexOf("action === 'getEval'"));
+assert.match(qaEvaluationSaveSource, /manual_missing_count/, '隔離驗收後端需接受主管手動缺交次數');
+assert.doesNotMatch(qaEvaluationSaveSource, /cloudStore\.logs/, '隔離驗收後端不得從日誌自動扣缺交分數');
 assert.match(qaHarness, /role !== 'teacher' \|\| item\.status === 'submitted'/, '老師不得讀到主管尚未完成的評核草稿');
 assert.match(source, /const calculatedTotal = displayedEvaluationTotal\(evaluation, scoreValues\)/, '老師評核優先顯示已公布保存總分，舊資料缺少總分時才由各項與保存扣分核算');
 assert.match(source, /const latePenalty = Math\.max\(0, savedEvaluationNumber\(evaluation, 'late_penalty'\) \|\| 0\)/, '老師已公布畫面必須以保存的遲到扣分為準');

@@ -39,7 +39,7 @@ function createDomNode(initial = {}) {
 function assertStaticEvaluationFieldsReset(nodes, message) {
   assert.equal(String(nodes.score_okr.value), '0', `${message}: OKR score must reset`);
   assert.equal(String(nodes.score_late_count.value), '0', `${message}: late count must reset`);
-  assert.equal(String(nodes.september_missing_count.value), '0', `${message}: September missing count must reset`);
+  assert.equal(String(nodes.manual_missing_count.value), '0', `${message}: manager-entered missing KPI count must reset`);
   assert.equal(nodes.manager_comment.value, '', `${message}: manager comment must reset`);
   assert.equal(nodes.interview_notes.value, '', `${message}: interview notes must reset`);
   assert.equal(nodes.bonus_granted.checked, true, `${message}: bonus decision must reset to granted`);
@@ -48,6 +48,7 @@ function assertStaticEvaluationFieldsReset(nodes, message) {
 function assertPreviousStaticEvaluationLoaded(nodes, message) {
   assert.equal(String(nodes.score_okr.value), '29', `${message}: fixture must load the previous OKR score`);
   assert.equal(String(nodes.score_late_count.value), '4', `${message}: fixture must load the previous late count`);
+  assert.equal(String(nodes.manual_missing_count.value), '3', `${message}: fixture must load the previous manager-entered missing count`);
   assert.equal(nodes.manager_comment.value, '前一位主管評語', `${message}: fixture must load the previous manager comment`);
   assert.equal(nodes.interview_notes.value, '前一位面談紀錄', `${message}: fixture must load the previous interview notes`);
   assert.equal(nodes.bonus_granted.checked, false, `${message}: fixture must load the previous denied bonus decision`);
@@ -299,7 +300,7 @@ async function verifyLegacyManagerClearsPreviousStaticFields() {
     'select-month': createDomNode({ value: '2026-08' }),
     score_okr: createDomNode({ value: '0' }),
     score_late_count: createDomNode({ value: '0' }),
-    september_missing_count: createDomNode({ value: '0' }),
+    manual_missing_count: createDomNode({ value: '0' }),
     september_bonus_points: createDomNode({ value: '0' }),
     manager_comment: createDomNode(),
     interview_notes: createDomNode(),
@@ -317,6 +318,8 @@ async function verifyLegacyManagerClearsPreviousStaticFields() {
       eval: {
         score_okr: 29,
         score_late_count: 4,
+        makeup_count: 3,
+        makeup_penalty: 6,
         manager_comment: '前一位主管評語',
         interview_notes: '前一位面談紀錄',
         bonus_granted: false,

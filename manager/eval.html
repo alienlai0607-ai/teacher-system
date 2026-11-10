@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>月度評核</title>
 <link rel="stylesheet" href="../shared/style.css?v=20260624k">
-<script src="../shared/config.js?v=20261014-release-1"></script>
-<script src="../shared/auth.js?v=20261014-release-1"></script>
-<script src="../shared/api.js?v=20261014-release-1"></script>
-<script src="../shared/ui.js?v=20261014-release-1"></script>
+<script src="../shared/config.js?v=20261110-manager-missing-manual-1"></script>
+<script src="../shared/auth.js?v=20261110-manager-missing-manual-1"></script>
+<script src="../shared/api.js?v=20261110-manager-missing-manual-1"></script>
+<script src="../shared/ui.js?v=20261110-manager-missing-manual-1"></script>
 <script src="../shared/pwa.js?v=20260825-production-audit-2"></script>
 <script src="../shared/push.js?v=20260912-push-resilience-2"></script>
 <style>
@@ -100,14 +100,14 @@
           <div class="text-sm mt-1" id="late-note" style="display:none; color:#c0392b; font-weight:700;"></div>
         </div>
 
-        <div class="card" id="september-missing-card" style="display:none;">
-          <div class="card-title">📝 九月缺交扣分（主管填寫）</div>
+        <div class="card" id="manual-missing-card" style="display:none;">
+          <div class="card-title">📝 缺交 KPI 扣分（主管填寫）</div>
           <div class="form-row">
-            <label>九月缺交次數</label>
-            <input type="number" id="september_missing_count" min="0" step="1" value="0" oninput="recalc()">
+            <label>本月缺交 KPI 次數</label>
+            <input type="number" id="manual_missing_count" min="0" step="1" value="0" oninput="recalc()">
           </div>
-          <div class="muted text-sm">2026 年 9 月因系統不穩定，不採用系統日誌自動統計；請由主管確認後填寫，每次缺交扣 2 分。</div>
-          <div class="text-sm mt-1" id="september-missing-note" style="display:none; color:#c0392b; font-weight:700;"></div>
+          <div class="muted text-sm">由主管依實際工作日、連假與請假狀況確認後填寫；系統不自動判定。每次缺交扣 2 分。</div>
+          <div class="text-sm mt-1" id="manual-missing-note" style="display:none; color:#c0392b; font-weight:700;"></div>
         </div>
 
         <div class="card" id="september-bonus-card" style="display:none;">
@@ -117,12 +117,6 @@
             <input type="number" id="september_bonus_points" min="0" max="5" step="1" value="0" oninput="recalc()">
           </div>
           <div class="muted text-sm">僅適用 2026 年 9 月安親老師評核；加分後總分最高 100 分。</div>
-        </div>
-
-        <div class="card" id="makeup-card" style="display:none;">
-          <div class="card-title">⏳ 缺交扣分（系統統計）</div>
-          <div class="text-sm" id="makeup-note" style="color:#c0392b; font-weight:700;"></div>
-          <div class="muted text-sm mt-1">每次缺交扣 2 分，依當月雲端紀錄自動統計，儲存時後端會再核算一次。</div>
         </div>
 
         <div class="card">
@@ -162,7 +156,6 @@ let teacherList = [];
 let currentTeacher = null;     // 目前評核中的老師物件
 let currentKpiDef = APP_CONFIG.TEACHER_KPI;
 let currentAnqin = false;      // 是否安親 100 分制
-let currentMakeupCount = 0;    // 非九月缺交次數（每次扣 2 分，系統自動）
 let evaluationLoadGeneration = 0; // 快速切換老師／月份時，只接受最後一次雲端回應
 const SEPTEMBER_BONUS_MONTH = '2026-09';
 const SEPTEMBER_BONUS_MAX = 5;
@@ -211,20 +204,18 @@ function updateSeptemberBonusVisibility() {
   const month = document.getElementById('select-month').value;
   const eligible = currentAnqin && month === SEPTEMBER_BONUS_MONTH;
   document.getElementById('september-bonus-card').style.display = eligible ? '' : 'none';
-  document.getElementById('september-missing-card').style.display = eligible ? '' : 'none';
+  document.getElementById('manual-missing-card').style.display = currentTeacher ? '' : 'none';
   document.getElementById('late-rule-note').textContent = eligible
-    ? '九月由主管填寫遲到次數：0～2 次不扣分，3 次含以上固定扣 5 分。'
-    : '遲到 0～2 次不扣分，3 次含以上固定扣 5 分，並依扣分後總分計算獎金級距。';
+    ? '遲到次數由主管填寫：0～2 次不扣分，3 次含以上固定扣 5 分。'
+    : '遲到次數由主管填寫；0～2 次不扣分，3 次含以上固定扣 5 分，並依扣分後總分計算獎金級距。';
   if (!eligible) document.getElementById('september_bonus_points').value = 0;
-  if (!eligible) document.getElementById('september_missing_count').value = 0;
   return eligible;
 }
 
 function resetEvaluationFormFields() {
-  currentMakeupCount = 0;
   document.getElementById('score_okr').value = 0;
   document.getElementById('score_late_count').value = 0;
-  document.getElementById('september_missing_count').value = 0;
+  document.getElementById('manual_missing_count').value = 0;
   document.getElementById('september_bonus_points').value = 0;
   document.getElementById('manager_comment').value = '';
   document.getElementById('interview_notes').value = '';
@@ -255,21 +246,16 @@ async function loadEvidence() {
     return;
   }
 
-  // 摘要
-  currentMakeupCount = septemberBonusEligible ? 0 : Number(res.summary.makeup_count || 0);
+  // 缺交只作主管手動評核，不使用證據彙整的自動缺交數。
   document.getElementById('summary').innerHTML = `
     <div class="stat-grid mb-2">
       <div class="stat-box"><div class="stat-num">${res.summary.log_count}</div><div class="stat-label">日誌數</div></div>
       <div class="stat-box"><div class="stat-num">${res.summary.evidence_count}</div><div class="stat-label">證據</div></div>
       <div class="stat-box"><div class="stat-num">${res.summary.feedback_count}</div><div class="stat-label">已給回饋</div></div>
       <div class="stat-box"><div class="stat-num">${res.summary.observation_count}</div><div class="stat-label">觀課/巡班</div></div>
-      <div class="stat-box"><div class="stat-num" style="${currentMakeupCount ? 'color:#c0392b;' : ''}">${septemberBonusEligible ? '手動' : currentMakeupCount}</div><div class="stat-label">${septemberBonusEligible ? '九月缺交改由主管填寫' : '缺交次數'}</div></div>
+      <div class="stat-box"><div class="stat-num">手動</div><div class="stat-label">缺交 KPI 由主管填寫</div></div>
     </div>
   `;
-  // 非九月缺交扣分卡（系統統計到次數才顯示）
-  document.getElementById('makeup-card').style.display = !septemberBonusEligible && currentMakeupCount ? '' : 'none';
-  document.getElementById('makeup-note').textContent =
-    currentMakeupCount ? `本月缺交 ${currentMakeupCount} 次，自 KPI 總分扣 ${currentMakeupCount * 2} 分` : '';
 
   // 證據分類
   const KPI_DEF = currentKpiDef;
@@ -304,7 +290,9 @@ async function loadEvidence() {
     }
     document.getElementById('score_okr').value = e.score_okr || 0;
     document.getElementById('score_late_count').value = e.score_late_count || 0;
-    if (septemberBonusEligible) document.getElementById('september_missing_count').value = e.september_missing_count || 0;
+    document.getElementById('manual_missing_count').value = septemberBonusEligible
+      ? (e.september_missing_count || 0)
+      : (e.makeup_count || 0);
     if (septemberBonusEligible) document.getElementById('september_bonus_points').value = e.september_bonus_points || 0;
     document.getElementById('manager_comment').value = e.manager_comment || '';
     document.getElementById('interview_notes').value = e.interview_notes || '';
@@ -339,11 +327,10 @@ function recalc() {
   const okr = currentAnqin ? 0 : Number(document.getElementById('score_okr').value || 0);
 
   const septemberBonusEligible = currentAnqin && document.getElementById('select-month').value === SEPTEMBER_BONUS_MONTH;
-  // 九月缺交次數由主管手動填寫；其他月份採用系統彙整的缺交次數。
-  const septemberMissingValue = Number(document.getElementById('september_missing_count').value || 0);
-  const septemberMissingValid = Number.isInteger(septemberMissingValue) && septemberMissingValue >= 0;
-  const deductionCount = septemberBonusEligible && septemberMissingValid ? septemberMissingValue : currentMakeupCount;
-  const makeupPenalty = deductionCount * 2;
+  const manualMissingValue = Number(document.getElementById('manual_missing_count').value || 0);
+  const manualMissingValid = Number.isInteger(manualMissingValue) && manualMissingValue >= 0;
+  const deductionCount = manualMissingValid ? manualMissingValue : 0;
+  const manualMissingPenalty = deductionCount * 2;
   const lateValue = Number(document.getElementById('score_late_count').value || 0);
   const lateValid = Number.isInteger(lateValue) && lateValue >= 0;
   const lateCount = currentAnqin && lateValid ? lateValue : 0;
@@ -352,9 +339,9 @@ function recalc() {
   const septemberBonusValid = Number.isInteger(septemberBonusValue) && septemberBonusValue >= 0 && septemberBonusValue <= SEPTEMBER_BONUS_MAX;
   const septemberBonusPoints = septemberBonusEligible && septemberBonusValid ? septemberBonusValue : 0;
   const kpiEff = currentAnqin
-    ? Math.min(100, Math.max(0, kpi + septemberBonusPoints - makeupPenalty - latePenalty))
-    : Math.max(0, kpi - makeupPenalty);
-  const mkText = makeupPenalty ? `｜${septemberBonusEligible ? '缺交' : '補繳'} ${deductionCount} 次 −${makeupPenalty}` : '';
+    ? Math.min(100, Math.max(0, kpi + septemberBonusPoints - manualMissingPenalty - latePenalty))
+    : Math.max(0, kpi - manualMissingPenalty);
+  const mkText = manualMissingPenalty ? `｜缺交 KPI ${deductionCount} 次 −${manualMissingPenalty}` : '';
   const lateText = currentAnqin && latePenalty ? `｜遲到 ${lateCount} 次 −${latePenalty}` : '';
   const septemberBonusText = septemberBonusEligible && septemberBonusPoints ? `｜九月加分 +${septemberBonusPoints}` : '';
 
@@ -365,10 +352,13 @@ function recalc() {
     : `KPI ${kpi}${mkText} + OKR ${okr}`;
 
   const tier = tierFor(kpiEff);
-  const missingNote = document.getElementById('september-missing-note');
-  if (septemberBonusEligible && !septemberMissingValid) {
+  const missingNote = document.getElementById('manual-missing-note');
+  if (!manualMissingValid) {
     missingNote.style.display = 'block';
-    missingNote.textContent = '⚠️ 九月缺交次數需為 0 以上的整數';
+    missingNote.textContent = '⚠️ 本月缺交 KPI 次數需為 0 以上的整數';
+  } else if (deductionCount > 0) {
+    missingNote.style.display = 'block';
+    missingNote.textContent = `⚠️ 本月缺交 ${deductionCount} 次，扣 ${manualMissingPenalty} 分`;
   } else {
     missingNote.style.display = 'none';
   }
@@ -406,9 +396,9 @@ async function saveEval(status) {
     return;
   }
   const septemberBonusEligible = currentAnqin && ym === SEPTEMBER_BONUS_MONTH;
-  const septemberMissingCount = septemberBonusEligible ? Number(document.getElementById('september_missing_count').value) : 0;
-  if (septemberBonusEligible && (!Number.isInteger(septemberMissingCount) || septemberMissingCount < 0)) {
-    UI.toast('九月缺交次數需為 0 以上的整數', 'danger');
+  const manualMissingCount = Number(document.getElementById('manual_missing_count').value);
+  if (!Number.isInteger(manualMissingCount) || manualMissingCount < 0) {
+    UI.toast('本月缺交 KPI 次數需為 0 以上的整數', 'danger');
     return;
   }
   const septemberBonusPoints = septemberBonusEligible ? Number(document.getElementById('september_bonus_points').value) : 0;
@@ -423,14 +413,14 @@ async function saveEval(status) {
     evaluator: session.nickname,
     status,
     score_okr: currentAnqin ? 0 : Number(document.getElementById('score_okr').value || 0),
+    manual_missing_count: manualMissingCount,
     score_late_count: lateCount,
     manager_comment: document.getElementById('manager_comment').value,
     interview_notes: document.getElementById('interview_notes').value,
     bonus_granted: document.getElementById('bonus_granted').checked,
   };
-  // 只有 2026-09 安親評核送出此欄；明確 0 可清除，新版以外的舊頁省略時由後端保留既有值。
+  // 九月加分仍為特例；缺交次數則由所有月份共用 manual_missing_count。
   if (septemberBonusEligible) {
-    payload.september_missing_count = septemberMissingCount;
     payload.september_bonus_points = septemberBonusPoints;
   }
   for (let i = 1; i <= 6; i++) {

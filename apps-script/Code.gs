@@ -10,7 +10,7 @@
  * 5. 把網址貼到前端 shared/config.js 的 API_URL
  */
 
-const KPI_RELEASE_VERSION_ = '20261014-release-1';
+const KPI_RELEASE_VERSION_ = '20261110-manager-missing-manual-1';
 
 // ============ 路由 ============
 function doGet(e) {

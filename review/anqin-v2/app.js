@@ -3210,17 +3210,33 @@
     return Number.isInteger(saved) && saved >= 0 && saved <= ANQIN_SEPTEMBER_BONUS_MAX ? saved : 0;
   }
 
+  // 缺交次數一律由主管填寫；為了相容既有試算表欄位，九月沿用
+  // september_missing_*，其他月份沿用 makeup_*，不新增保存欄位。
+  function evaluationManualMissingCount(evaluation) {
+    const key = String(evaluation?.year_month || '') === ANQIN_SEPTEMBER_BONUS_MONTH
+      ? 'september_missing_count'
+      : 'makeup_count';
+    return Math.max(0, Math.floor(savedEvaluationNumber(evaluation, key) || 0));
+  }
+
+  function evaluationManualMissingPenalty(evaluation) {
+    const key = String(evaluation?.year_month || '') === ANQIN_SEPTEMBER_BONUS_MONTH
+      ? 'september_missing_penalty'
+      : 'makeup_penalty';
+    const saved = savedEvaluationNumber(evaluation, key);
+    return saved === null ? evaluationManualMissingCount(evaluation) * 2 : Math.max(0, saved);
+  }
+
   // 已公布評核以當時寫入的 total_score 與各加扣分欄位為準，
-  // 不在讀取時套用新規則回算；舊資料沒有九月缺交／加分欄時視為 0。
+  // 不在讀取時套用新規則回算；舊資料沿用原月份對應的缺交欄位。
   function displayedEvaluationTotal(evaluation, scoreValues) {
     const storedTotal = savedEvaluationNumber(evaluation, 'total_score');
     if (storedTotal !== null) return Math.max(0, storedTotal);
     const scoreTotal = scoreValues.reduce((sum, score) => sum + (Number.isFinite(score) ? score : 0), 0);
-    const septemberMissingPenalty = Math.max(0, savedEvaluationNumber(evaluation, 'september_missing_penalty') || 0);
-    const makeupPenalty = Math.max(0, savedEvaluationNumber(evaluation, 'makeup_penalty') || 0);
+    const manualMissingPenalty = evaluationManualMissingPenalty(evaluation);
     const latePenalty = Math.max(0, savedEvaluationNumber(evaluation, 'late_penalty') || 0);
     const septemberBonus = evaluationSeptemberBonusPoints(evaluation);
-    return Math.min(100, Math.max(0, scoreTotal + septemberBonus - septemberMissingPenalty - makeupPenalty - latePenalty));
+    return Math.min(100, Math.max(0, scoreTotal + septemberBonus - manualMissingPenalty - latePenalty));
   }
 
   function evaluationBonusNumber(value, fallback = 0) {
@@ -3232,15 +3248,14 @@
   function latePenaltySummary(lateCount, latePenalty, preserveSaved = false, yearMonth = '') {
     const count = Math.max(0, Math.floor(Number(lateCount) || 0));
     const penalty = Math.max(0, Number(latePenalty) || 0);
-    const septemberException = String(yearMonth) === ANQIN_SEPTEMBER_BONUS_MONTH;
     const currentPenalty = evaluationLatePenaltyForCount(count, yearMonth);
-    if (!count) return { title: '本月無遲到扣分', copy: `${septemberException ? '九月由主管手動確認次數；' : ''}0–2 次不扣分，3 次含以上固定扣 ${ANQIN_LATE_PENALTY_POINTS} 分。` };
+    if (!count) return { title: '本月無遲到扣分', copy: `次數由主管手動確認；0–2 次不扣分，3 次含以上固定扣 ${ANQIN_LATE_PENALTY_POINTS} 分。` };
     if (preserveSaved && penalty !== currentPenalty) {
       return { title: `已公布紀錄：遲到 ${count} 次，當時保存扣 ${penalty} 分`, copy: `本次僅讀取舊紀錄，不自動改分；若重新儲存，將依現行規則扣 ${currentPenalty} 分。` };
     }
     return penalty
-      ? { title: `本月遲到 ${count} 次，固定扣 ${penalty} 分`, copy: `${septemberException ? '九月次數由主管手動確認；' : ''}已納入 KPI 總分與獎金級距，達 3 次後不會按次累加扣分。` }
-      : { title: `本月遲到 ${count} 次，不扣分`, copy: `${septemberException ? '九月次數由主管手動確認；' : ''}0–2 次不扣分，3 次含以上固定扣 5 分。` };
+      ? { title: `本月遲到 ${count} 次，固定扣 ${penalty} 分`, copy: '次數由主管手動確認，已納入 KPI 總分與獎金級距；達 3 次後不會按次累加扣分。' }
+      : { title: `本月遲到 ${count} 次，不扣分`, copy: '次數由主管手動確認；0–2 次不扣分，3 次含以上固定扣 5 分。' };
   }
 
   function renderTeacherEvaluation() {
@@ -3263,14 +3278,11 @@
     const grade = String(evaluation.grade || '').trim() || tier.grade;
     const fallbackBonus = evaluationBonusNumber(tier.bonus, 0);
     const bonus = evaluationBonusNumber(evaluation.bonus, fallbackBonus);
-    const makeupCount = Math.max(0, savedEvaluationNumber(evaluation, 'makeup_count') || 0);
-    const makeupPenalty = Math.max(0, savedEvaluationNumber(evaluation, 'makeup_penalty') || 0);
-    const septemberMissingCount = Math.max(0, savedEvaluationNumber(evaluation, 'september_missing_count') || 0);
-    const septemberMissingPenalty = Math.max(0, savedEvaluationNumber(evaluation, 'september_missing_penalty') || 0);
+    const manualMissingCount = evaluationManualMissingCount(evaluation);
+    const manualMissingPenalty = evaluationManualMissingPenalty(evaluation);
     const lateCount = Math.max(0, savedEvaluationNumber(evaluation, 'score_late_count') || 0);
     const latePenalty = Math.max(0, savedEvaluationNumber(evaluation, 'late_penalty') || 0);
     const septemberBonusPoints = evaluationSeptemberBonusPoints(evaluation);
-    const septemberManualPenalty = month === ANQIN_SEPTEMBER_BONUS_MONTH;
     const latePenaltyDisplay = latePenalty
       ? (latePenalty === evaluationLatePenaltyForCount(lateCount, month)
         ? `固定扣 ${latePenalty} 分`
@@ -3286,7 +3298,7 @@
       ${pageHead('主管評核', `${esc(month)} · ${state.context.teacher}`, actions)}
       ${hasInvalidScores ? `<div class="notice-band danger">${icon('triangle-alert', 19)}<div><div class="notice-title">這份評核需要主管重新確認</div><div class="notice-copy">部分舊資料超過新版項目配分，系統暫不顯示錯誤分數與總分。</div></div></div>` : ''}
       <div class="status-strip"><div class="status-cell"><div class="status-label">KPI 總分</div><div class="status-value">${hasInvalidScores ? '待確認' : `${calculatedTotal} / 100`}</div></div><div class="status-cell"><div class="status-label">等第</div><div class="status-value status-value-badge">${statusBadge(hasInvalidScores ? '待確認' : grade, hasInvalidScores ? 'red' : 'blue')}</div></div><div class="status-cell"><div class="status-label">績效獎金</div><div class="status-value">${hasInvalidScores ? '待確認' : granted ? `NT$${bonus.toLocaleString('zh-TW')}` : '未核發'}</div></div><div class="status-cell"><div class="status-label">評核狀態</div><div class="status-value status-value-badge">${statusBadge(hasInvalidScores ? '需修正' : '已完成', hasInvalidScores ? 'red' : 'green')}</div></div></div>
-      <div class="content-grid mt-16"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('chart-no-axes-column-increasing')}各項評分</div></div></div><div class="panel-body flush"><div class="evaluation-score-list">${scoreRows}</div></div></section><aside class="stack"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('message-square-text')}主管建議</div></div></div><div class="panel-body"><p class="text-small">${nl2br(managerComment || '主管未填寫其他建議。')}</p>${interviewNotes ? `<div class="section-divider"></div><h3 class="section-title">面談紀錄</h3><p class="text-small">${nl2br(interviewNotes)}</p>` : ''}</div></section>${septemberMissingPenalty || makeupPenalty || lateCount || latePenalty || septemberBonusPoints ? `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('circle-alert')}加扣分紀錄</div></div></div><div class="panel-body"><div class="metadata-list">${septemberBonusPoints ? `<div class="metadata-row"><div class="metadata-label">九月加分</div><div class="metadata-value">加 ${septemberBonusPoints} 分（總分最高 100 分）</div></div>` : ''}${septemberMissingPenalty ? `<div class="metadata-row"><div class="metadata-label">九月缺交</div><div class="metadata-value">主管填寫 ${septemberMissingCount} 次，扣 ${septemberMissingPenalty} 分</div></div>` : ''}${makeupPenalty ? `<div class="metadata-row"><div class="metadata-label">缺交</div><div class="metadata-value">系統統計 ${makeupCount} 次，扣 ${makeupPenalty} 分</div></div>` : ''}${lateCount || latePenalty ? `<div class="metadata-row"><div class="metadata-label">遲到</div><div class="metadata-value">${lateCount} 次，${latePenaltyDisplay}${septemberManualPenalty ? '（九月由主管填寫）' : ''}</div></div>` : ''}</div></div></section>` : ''}</aside></div>
+      <div class="content-grid mt-16"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('chart-no-axes-column-increasing')}各項評分</div></div></div><div class="panel-body flush"><div class="evaluation-score-list">${scoreRows}</div></div></section><aside class="stack"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('message-square-text')}主管建議</div></div></div><div class="panel-body"><p class="text-small">${nl2br(managerComment || '主管未填寫其他建議。')}</p>${interviewNotes ? `<div class="section-divider"></div><h3 class="section-title">面談紀錄</h3><p class="text-small">${nl2br(interviewNotes)}</p>` : ''}</div></section>${manualMissingCount || manualMissingPenalty || lateCount || latePenalty || septemberBonusPoints ? `<section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('circle-alert')}加扣分紀錄</div></div></div><div class="panel-body"><div class="metadata-list">${septemberBonusPoints ? `<div class="metadata-row"><div class="metadata-label">九月加分</div><div class="metadata-value">加 ${septemberBonusPoints} 分（總分最高 100 分）</div></div>` : ''}${manualMissingCount || manualMissingPenalty ? `<div class="metadata-row"><div class="metadata-label">缺交 KPI</div><div class="metadata-value">主管填寫 ${manualMissingCount} 次，扣 ${manualMissingPenalty} 分</div></div>` : ''}${lateCount || latePenalty ? `<div class="metadata-row"><div class="metadata-label">遲到</div><div class="metadata-value">主管填寫 ${lateCount} 次，${latePenaltyDisplay}</div></div>` : ''}</div></div></section>` : ''}</aside></div>
     </div>`;
   }
 
@@ -3429,16 +3441,8 @@
     const values = managerEvaluationValues();
     const invalid = values.some((score, index) => score < 0 || score > ANQIN_KPI_STANDARDS[index].points);
     const preservePublished = evaluation?.status === 'submitted';
-    const septemberManualPenaltyEligible = selectedMonth === ANQIN_SEPTEMBER_BONUS_MONTH;
-    const manualMissingCount = septemberManualPenaltyEligible
-      ? Math.max(0, Math.floor(savedEvaluationNumber(evaluation, 'september_missing_count') || 0))
-      : 0;
-    const septemberMissingPenalty = manualMissingCount * 2;
-    const currentMakeupPenalty = Number(evidence.summary?.makeup_count || 0) * 2;
-    const storedMakeupPenalty = savedEvaluationNumber(evaluation, 'makeup_penalty');
-    const makeupPenalty = septemberManualPenaltyEligible
-      ? 0
-      : (preservePublished && storedMakeupPenalty !== null ? Math.max(0, storedMakeupPenalty) : currentMakeupPenalty);
+    const manualMissingCount = evaluationManualMissingCount({ ...(evaluation || {}), year_month: selectedMonth });
+    const manualMissingPenalty = manualMissingCount * 2;
     const lateCount = Math.max(0, Math.floor(Number(evaluation?.score_late_count || 0)));
     const currentLatePenalty = evaluationLatePenaltyForCount(lateCount, selectedMonth);
     const storedLatePenalty = savedEvaluationNumber(evaluation, 'late_penalty');
@@ -3446,7 +3450,7 @@
     const septemberBonusEligible = selectedMonth === ANQIN_SEPTEMBER_BONUS_MONTH;
     const septemberBonusPoints = septemberBonusEligible ? evaluationSeptemberBonusPoints(evaluation) : 0;
     const calculatedTotal = Math.min(100, Math.max(0,
-      values.reduce((sum, score) => sum + score, 0) + septemberBonusPoints - septemberMissingPenalty - makeupPenalty - latePenalty));
+      values.reduce((sum, score) => sum + score, 0) + septemberBonusPoints - manualMissingPenalty - latePenalty));
     const total = preservePublished ? displayedEvaluationTotal(evaluation, values) : calculatedTotal;
     const calculatedTier = evaluationTier(total);
     const tier = preservePublished
@@ -3462,9 +3466,7 @@
     const septemberBonusField = septemberBonusEligible
       ? `<div class="form-field"><label class="form-label" for="manager-eval-september-bonus">九月加分</label><input id="manager-eval-september-bonus" type="number" name="september_bonus_points" min="0" max="${ANQIN_SEPTEMBER_BONUS_MAX}" step="1" value="${septemberBonusPoints}" data-input="manager-eval-september-bonus"><div class="field-hint">僅適用 2026 年 9 月，可加 0～5 分；加分後總分最高 100 分。</div></div>`
       : '';
-    const septemberMissingField = septemberManualPenaltyEligible
-      ? `<div class="form-field"><label class="form-label" for="manager-eval-september-missing">九月缺交次數</label><input id="manager-eval-september-missing" type="number" name="september_missing_count" min="0" step="1" value="${manualMissingCount}" data-input="manager-eval-september-missing"><div class="field-hint">九月系統不穩定，此數字由主管確認後填寫，不採用系統日誌自動統計；每次扣 2 分。</div></div>`
-      : '';
+    const manualMissingField = `<div class="form-field"><label class="form-label" for="manager-eval-manual-missing">本月缺交 KPI 次數</label><input id="manager-eval-manual-missing" type="number" name="manual_missing_count" min="0" step="1" value="${manualMissingCount}" data-input="manager-eval-manual-missing"><div class="field-hint">由主管依實際工作日、連假與請假狀況確認後填寫；系統不自動判定。每次扣 2 分。</div><div id="manager-eval-manual-missing-note" class="field-hint" style="${manualMissingCount ? 'color:var(--red);font-weight:800;' : ''}">${manualMissingCount ? `本月缺交 ${manualMissingCount} 次，扣 ${manualMissingPenalty} 分。` : '目前 0 次，不扣分。'}</div></div>`;
     const summary = evidence.summary || {};
     return `<div class="page manager-evaluation-page">
       ${pageHead('月度評核', `${esc(selectedMonth)} · ${esc(selectedTeacher)}`, actions)}
@@ -3472,7 +3474,7 @@
       ${invalid ? `<div class="notice-band danger">${icon('triangle-alert', 19)}<div><div class="notice-title">既有分數超過新版配分</div><div class="notice-copy">請逐項修正後再完成評核；系統不會儲存超過上限的分數。</div></div></div>` : ''}
       <div class="status-strip"><div class="status-cell"><div class="status-label">日報</div><div class="status-value">${Number(summary.log_count || 0)}</div></div><div class="status-cell"><div class="status-label">成果證據</div><div class="status-value">${Number(summary.evidence_count || 0)}</div></div><div class="status-cell"><div class="status-label">主管回饋</div><div class="status-value">${Number(summary.feedback_count || 0)}</div></div><div class="status-cell"><div class="status-label">觀課／巡班</div><div class="status-value">${Number(summary.observation_count || 0)}</div></div></div>
       <form id="manager-evaluation-form" class="content-grid wide-aside">
-        <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('sliders-horizontal')}六項 KPI 評分</div><div class="panel-subtitle">各項分數受正式配分上限限制</div></div>${statusBadge(status[0], status[1])}</div><div class="panel-body"><div class="manager-eval-score-list">${scoreInputs}</div>${!septemberManualPenaltyEligible && makeupPenalty ? `<div class="notice-band danger mt-16">${icon('clock-alert', 19)}<div><div class="notice-title">本月缺交扣 ${makeupPenalty} 分</div><div class="notice-copy">依雲端紀錄自動統計，每次缺交扣 2 分。</div></div></div>` : ''}<div id="manager-eval-late-note" class="notice-band ${latePenalty ? 'danger' : 'info'} mt-16">${icon('clock-3', 19)}<div><div id="manager-eval-late-title" class="notice-title">${esc(lateSummary.title)}</div><div id="manager-eval-late-copy" class="notice-copy">${esc(lateSummary.copy)}</div></div></div><div class="section-divider"></div><div class="form-grid"><div class="form-field span-2"><label class="form-label" for="manager-eval-comment">主管評語 <span class="required">*</span></label><textarea id="manager-eval-comment" name="manager_comment" placeholder="寫出本月具體優點、需要調整的地方與下一步。">${esc(evaluation?.manager_comment || '')}</textarea><div class="field-hint">完成評核時至少 8 字；儲存草稿可稍後補寫。</div></div><div class="form-field span-2"><label class="form-label" for="manager-eval-interview">面談紀錄（選填）</label><textarea id="manager-eval-interview" name="interview_notes" placeholder="面談日期、共識與下月調整。">${esc(evaluation?.interview_notes || '')}</textarea></div>${septemberMissingField}<div class="form-field"><label class="form-label" for="manager-eval-late">本月遲到次數</label><input id="manager-eval-late" type="number" name="score_late_count" min="0" step="1" value="${lateCount}" data-input="manager-eval-late"><div class="field-hint">${septemberManualPenaltyEligible ? '九月次數由主管確認；' : '由主管依打卡紀錄填寫；'}0～2 次不扣分，3 次含以上固定扣 ${ANQIN_LATE_PENALTY_POINTS} 分。</div></div>${septemberBonusField}<div class="form-field"><label class="choice-chip"><input type="checkbox" name="bonus_granted" ${granted ? 'checked' : ''}>核發級距獎金</label></div></div></div></section>
+        <section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('sliders-horizontal')}六項 KPI 評分</div><div class="panel-subtitle">各項分數受正式配分上限限制</div></div>${statusBadge(status[0], status[1])}</div><div class="panel-body"><div class="manager-eval-score-list">${scoreInputs}</div><div id="manager-eval-late-note" class="notice-band ${latePenalty ? 'danger' : 'info'} mt-16">${icon('clock-3', 19)}<div><div id="manager-eval-late-title" class="notice-title">${esc(lateSummary.title)}</div><div id="manager-eval-late-copy" class="notice-copy">${esc(lateSummary.copy)}</div></div></div><div class="section-divider"></div><div class="form-grid"><div class="form-field span-2"><label class="form-label" for="manager-eval-comment">主管評語 <span class="required">*</span></label><textarea id="manager-eval-comment" name="manager_comment" placeholder="寫出本月具體優點、需要調整的地方與下一步。">${esc(evaluation?.manager_comment || '')}</textarea><div class="field-hint">完成評核時至少 8 字；儲存草稿可稍後補寫。</div></div><div class="form-field span-2"><label class="form-label" for="manager-eval-interview">面談紀錄（選填）</label><textarea id="manager-eval-interview" name="interview_notes" placeholder="面談日期、共識與下月調整。">${esc(evaluation?.interview_notes || '')}</textarea></div>${manualMissingField}<div class="form-field"><label class="form-label" for="manager-eval-late">本月遲到次數</label><input id="manager-eval-late" type="number" name="score_late_count" min="0" step="1" value="${lateCount}" data-input="manager-eval-late"><div class="field-hint">由主管依打卡紀錄填寫；0～2 次不扣分，3 次含以上固定扣 ${ANQIN_LATE_PENALTY_POINTS} 分。</div></div>${septemberBonusField}<div class="form-field"><label class="choice-chip"><input type="checkbox" name="bonus_granted" ${granted ? 'checked' : ''}>核發級距獎金</label></div></div></div></section>
         <aside class="stack"><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('calculator')}評核結果</div></div></div><div class="panel-body"><div class="manager-eval-total"><span>目前 KPI</span><strong id="manager-eval-total">${invalid ? '待修正' : total}</strong><small id="manager-eval-tier">${invalid ? '請修正超出上限的分數' : `${tier.grade} · ${tier.bonus}`}</small></div><div class="flex gap-8 flex-wrap mt-16"><button type="button" class="btn" data-action="save-manager-evaluation" data-status="draft">儲存草稿</button><button type="button" class="btn btn-primary" data-action="save-manager-evaluation" data-status="submitted">完成評核</button></div></div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">${icon('database')}評分依據</div></div></div><div class="panel-body"><div class="check-list">${ANQIN_KPI_STANDARDS.map((category, index) => `<div class="check-item ${(evidence.evidence_by_kpi?.[index + 1] || []).length ? 'done' : 'pending'}"><span class="check-icon">${icon((evidence.evidence_by_kpi?.[index + 1] || []).length ? 'check' : 'minus', 12)}</span><span>${esc(category.name)}</span><span class="badge outline">${(evidence.evidence_by_kpi?.[index + 1] || []).length} 件</span></div>`).join('')}</div><button type="button" class="btn btn-small mt-16" data-action="navigate" data-route="evidence">開啟證據中心</button></div></section></aside>
       </form>
     </div>`;
@@ -3484,12 +3486,9 @@
     const values = ANQIN_KPI_STANDARDS.map((category, index) => Number(form.elements[`score_k${index + 1}`]?.value));
     const invalidScores = values.some((score, index) => !Number.isFinite(score) || score < 0 || score > ANQIN_KPI_STANDARDS[index].points);
     const septemberBonusEligible = integrationRuntime.managerEvaluationMonth === ANQIN_SEPTEMBER_BONUS_MONTH;
-    const septemberMissingCount = septemberBonusEligible ? Number(form.elements.september_missing_count?.value) : 0;
-    const invalidSeptemberMissing = septemberBonusEligible &&
-      (!Number.isInteger(septemberMissingCount) || septemberMissingCount < 0);
-    const septemberMissingPenalty = septemberBonusEligible && !invalidSeptemberMissing ? septemberMissingCount * 2 : 0;
-    const makeupCount = septemberBonusEligible ? 0 : Number(integrationRuntime.managerEvaluationEvidence?.summary?.makeup_count || 0);
-    const makeupPenalty = makeupCount * 2;
+    const manualMissingCount = Number(form.elements.manual_missing_count?.value);
+    const invalidManualMissing = !Number.isInteger(manualMissingCount) || manualMissingCount < 0;
+    const manualMissingPenalty = invalidManualMissing ? 0 : manualMissingCount * 2;
     const rawLateCount = Number(form.elements.score_late_count?.value);
     const invalidLate = !Number.isInteger(rawLateCount) || rawLateCount < 0;
     const lateCount = invalidLate ? 0 : rawLateCount;
@@ -3497,15 +3496,23 @@
     const septemberBonusPoints = septemberBonusEligible ? Number(form.elements.september_bonus_points?.value) : 0;
     const invalidSeptemberBonus = septemberBonusEligible && (
       !Number.isInteger(septemberBonusPoints) || septemberBonusPoints < 0 || septemberBonusPoints > ANQIN_SEPTEMBER_BONUS_MAX);
-    const invalid = invalidScores || invalidSeptemberMissing || invalidLate || invalidSeptemberBonus;
+    const invalid = invalidScores || invalidManualMissing || invalidLate || invalidSeptemberBonus;
     const total = Math.min(100, Math.max(0,
       values.reduce((sum, score) => sum + (Number.isFinite(score) ? score : 0), 0) +
-      (invalidSeptemberBonus ? 0 : septemberBonusPoints) - septemberMissingPenalty - makeupPenalty - latePenalty));
+      (invalidSeptemberBonus ? 0 : septemberBonusPoints) - manualMissingPenalty - latePenalty));
     const tier = evaluationTier(total);
     const totalNode = $('#manager-eval-total');
     const tierNode = $('#manager-eval-tier');
     if (totalNode) totalNode.textContent = invalid ? '待修正' : String(total);
     if (tierNode) tierNode.textContent = invalid ? '請修正超出上限的分數' : `${tier.grade} · ${tier.bonus}`;
+    const manualMissingNote = $('#manager-eval-manual-missing-note');
+    if (manualMissingNote) {
+      manualMissingNote.textContent = invalidManualMissing
+        ? '本月缺交 KPI 次數需為 0 以上的整數。'
+        : (manualMissingCount ? `本月缺交 ${manualMissingCount} 次，扣 ${manualMissingPenalty} 分。` : '目前 0 次，不扣分。');
+      manualMissingNote.style.color = invalidManualMissing || manualMissingCount ? 'var(--red)' : '';
+      manualMissingNote.style.fontWeight = invalidManualMissing || manualMissingCount ? '800' : '';
+    }
     const lateSummary = latePenaltySummary(lateCount, latePenalty, false, integrationRuntime.managerEvaluationMonth);
     const lateNote = $('#manager-eval-late-note');
     const lateTitle = $('#manager-eval-late-title');
@@ -3528,10 +3535,10 @@
       return;
     }
     const septemberBonusEligible = integrationRuntime.managerEvaluationMonth === ANQIN_SEPTEMBER_BONUS_MONTH;
-    const septemberMissingCount = septemberBonusEligible ? Number(data.get('september_missing_count')) : 0;
-    if (septemberBonusEligible && (!Number.isInteger(septemberMissingCount) || septemberMissingCount < 0)) {
-      toast('九月缺交次數需為 0 以上的整數', 'danger');
-      $('#manager-eval-september-missing')?.focus();
+    const manualMissingCount = Number(data.get('manual_missing_count'));
+    if (!Number.isInteger(manualMissingCount) || manualMissingCount < 0) {
+      toast('本月缺交 KPI 次數需為 0 以上的整數', 'danger');
+      $('#manager-eval-manual-missing')?.focus();
       return;
     }
     const septemberBonusPoints = septemberBonusEligible ? Number(data.get('september_bonus_points')) : 0;
@@ -3547,14 +3554,13 @@
       evaluator: session.nickname,
       manager_comment: comment,
       interview_notes: String(data.get('interview_notes') || '').trim(),
+      manual_missing_count: manualMissingCount,
       score_late_count: Number(data.get('score_late_count') || 0),
       bonus_granted: Boolean(data.get('bonus_granted')),
       status,
     };
-    // 新版九月表單即使是 0 也明確送出；其他月份完全不送此欄位。
-    // 因此舊快取未帶欄位時，後端能保留既有九月加分。
+    // 九月加分仍為特例；缺交次數則由所有月份共用 manual_missing_count。
     if (septemberBonusEligible) {
-      payload.september_missing_count = septemberMissingCount;
       payload.september_bonus_points = septemberBonusPoints;
     }
     for (let index = 0; index < ANQIN_KPI_STANDARDS.length; index += 1) {
@@ -3571,7 +3577,6 @@
       toast(`評核未儲存：${result?.error || '請稍後重試'}`, 'danger');
       return;
     }
-    const makeupCount = septemberBonusEligible ? 0 : Number(integrationRuntime.managerEvaluationEvidence?.summary?.makeup_count || 0);
     integrationRuntime.managerEvaluation = {
       ...(integrationRuntime.managerEvaluation || {}),
       ...payload,
@@ -3580,9 +3585,10 @@
       grade: result.grade || '',
       bonus: result.bonus || 0,
       late_penalty: evaluationLatePenaltyForCount(payload.score_late_count, integrationRuntime.managerEvaluationMonth),
-      makeup_count: makeupCount,
-      makeup_penalty: makeupCount * 2,
-      september_missing_penalty: septemberBonusEligible ? septemberMissingCount * 2 : 0,
+      makeup_count: septemberBonusEligible ? 0 : manualMissingCount,
+      makeup_penalty: septemberBonusEligible ? 0 : manualMissingCount * 2,
+      september_missing_count: septemberBonusEligible ? manualMissingCount : 0,
+      september_missing_penalty: septemberBonusEligible ? manualMissingCount * 2 : 0,
       updated_at: new Date().toISOString(),
     };
     integrationRuntime.managerEvaluationStatus = 'saved';
@@ -3637,7 +3643,7 @@
       '<section class="kpi-detail-section"><div class="kpi-section-heading"><span class="kpi-section-kicker">逐項查閱</span><h2>KPI 各項評分標準</h2><p>每一類都列出評分內容、配分與查核方式。</p></div><div class="kpi-standard-grid">' + categoryCards + '</div></section>' +
       '<div class="content-grid kpi-bottom-grid"><section class="panel"><div class="panel-head"><div><div class="panel-title">' + icon('badge-dollar-sign') + '月績效獎金級距</div><div class="panel-subtitle">KPI 82 分起開始有獎金</div></div></div><div class="panel-body flush"><div class="table-wrap"><table class="data-table"><thead><tr><th>KPI 分數</th><th>評等</th><th>績效獎金</th></tr></thead><tbody>' + bonusRows + '</tbody></table></div></div></section><section class="panel"><div class="panel-head"><div><div class="panel-title">' + icon('list-ordered') + '每月評核流程</div><div class="panel-subtitle">完成評分後才進入獎金核發</div></div></div><div class="panel-body"><div class="kpi-process">' + processRows + '</div></div></section></div>' +
       '<section class="panel mt-16"><div class="panel-head"><div><div class="panel-title">' + icon('database') + '系統資料如何對應評分</div><div class="panel-subtitle">系統幫忙彙整證據，不會自動代替主管下分</div></div></div><div class="panel-body"><div class="kpi-evidence-map">' + evidenceMap + '</div></div></section>' +
-      '<section class="kpi-rule-band"><div>' + icon('clock-3', 19) + '<div><strong>加扣分規則</strong><p>所有月份缺交每次扣 2 分；遲到 0～2 次不扣、3 次含以上固定扣 5 分，不按次累加。只有 2026 年 9 月因系統不穩，缺交與遲到次數改由主管填寫，不採用系統紀錄自動扣分；其他月份缺交由系統統計。九月另可填寫 0～5 分「九月加分」，加扣分後總分最高 100 分。</p></div></div><div>' + icon('shield-alert', 19) + '<div><strong>例外與扣發</strong><p>如有重大教學事故、嚴重違反工作規範、家長投訴經查屬實，或教學品質未達要求，本期 KPI 獎金得延期或取消。</p></div></div></section>' +
+      '<section class="kpi-rule-band"><div>' + icon('clock-3', 19) + '<div><strong>加扣分規則</strong><p>所有月份的缺交 KPI 次數皆由主管依實際工作日、連假與請假狀況填寫，系統不自動判定；每次扣 2 分。遲到次數也由主管確認，0～2 次不扣、3 次含以上固定扣 5 分，不按次累加。2026 年 9 月另可填寫 0～5 分「九月加分」，加扣分後總分最高 100 分。</p></div></div><div>' + icon('shield-alert', 19) + '<div><strong>例外與扣發</strong><p>如有重大教學事故、嚴重違反工作規範、家長投訴經查屬實，或教學品質未達要求，本期 KPI 獎金得延期或取消。</p></div></div></section>' +
       '<p class="kpi-effective-note">KPI 自 115 年 7 月施行；OKR 自 115 年 9 月起生效。未盡事宜由教室管理團隊依實際情形補充公告。</p>' +
     '</div>';
   }
@@ -9295,7 +9301,7 @@
       const root = window.AUTH?.relativeRoot?.() || '../../';
       if (realRole === 'admin') window.location.href = `${root}admin/dashboard.html?v=20260827-test-view-fast-1#test-view`;
       else if (window.AUTH?.routeByRole) window.AUTH.routeByRole(realRole, realSession);
-      else window.location.href = `${root}review/anqin-v2/index.html?v=20261014-release-1`;
+      else window.location.href = `${root}review/anqin-v2/index.html?v=20261110-manager-missing-manual-1`;
     }
     else if (action === 'open-test-view') {
       const root = window.AUTH?.relativeRoot?.() || '../../';
@@ -9622,7 +9628,7 @@
       scheduleDailyCloudDraftSync();
     }
     if (event.target.matches('[data-input="evidence-quality"]')) updateEvidenceQualityFromForm();
-    if (event.target.matches('[data-input="manager-eval-score"], [data-input="manager-eval-late"], [data-input="manager-eval-september-missing"], [data-input="manager-eval-september-bonus"]')) refreshManagerEvaluationTotal();
+    if (event.target.matches('[data-input="manager-eval-score"], [data-input="manager-eval-late"], [data-input="manager-eval-manual-missing"], [data-input="manager-eval-september-bonus"]')) refreshManagerEvaluationTotal();
     if (event.target.matches('[data-evidence-attachment-note]')) updateEvidenceQualityFromForm();
     if (event.target.matches('[data-input="view-filter"]') && !event.isComposing) {
       const control = event.target;
