@@ -4220,7 +4220,8 @@ function saveEval(params) {
   }
 
   // ===== 缺交扣分 =====
-  // 所有月份都由主管手動填寫，避免連假或例外工作日被系統誤判；每次一律扣 2 分。
+  // 老師的所有月份都由主管手動填寫，避免連假或例外工作日被系統誤判；每次一律扣 2 分。
+  // 老闆評主管的 ManagerEval 不屬於本次調整，保留原本日誌統計規則。
   // 新版只信任 manual_missing_count。舊版可能仍會送 makeup_count（自動證據值），
   // 該欄位不得作為輸入，避免快取中的舊前端覆蓋主管已確認的次數。
   const manualMissingSupplied = Object.prototype.hasOwnProperty.call(params, 'manual_missing_count') &&
@@ -4263,7 +4264,10 @@ function saveEval(params) {
   const septemberMissingPenalty = septemberMissingCount * 2;
   let makeupCount = 0;
   if (!septemberManualPenaltyEligible) {
-    if (manualMissingSupplied) {
+    if (isManager) {
+      makeupCount = sheetToObjects(SHEET_NAMES.LOGS).filter(l =>
+        l.nickname === nickname && String(l.date).slice(0, 7) === year_month && l.is_makeup === true).length;
+    } else if (manualMissingSupplied) {
       makeupCount = manualMissingCount;
     } else if (existing) {
       // 舊快取未帶新版欄位時保留已存值；全新評核未帶則預設 0。

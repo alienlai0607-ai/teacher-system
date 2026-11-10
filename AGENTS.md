@@ -8,7 +8,7 @@
 - **後端**：Google Apps Script Web App + Google Sheets 當資料庫。
 - **正式 Apps Script 專案 ID**：`1IAjubvvfK9s8MwXxSCr5tcQcnjFE_4y37SKPX1kQpYhQUP-kp62LzgMC`（有同名測試專案，部署前務必核對 ID）。
 - **目前 API URL**（在 `shared/config.js`）：
-  `https://script.google.com/macros/s/AKfycbxffD7kptprHhPk8nQChjlKI_pJjXpt1pIU6vDctzPtjDEVdYAKXHiDf2ZDweFFOrJfPg/exec`
+  `https://script.google.com/macros/s/AKfycbxZrfmISQP4BMLrENspjW1YBHMLUFe05XAJOYY3n_CGyShHRoRTSNMmaLVm07RXwhh8/exec`
 - **角色**：admin（柏翰）/ manager（酸酸-永康、小魚-北區、柳丁-才藝）/ teacher / admin_staff（皮皮老師-美編行銷）。三部門：永康教室、北區教室、才藝部門。
 
 ## 目錄結構
@@ -61,7 +61,7 @@
 
 ## 未完成／待觀察
 
-- 2026-11-10 `20261110-manager-missing-manual-1` 候選版已完成，**尚未正式部署**：所有月份的老師缺交 KPI 次數改由主管手動填寫，每次扣 2 分，不再以日誌或月曆自動扣分；九月與舊資料欄位皆相容，舊快取漏傳時保留已存值，新評核預設 0。本機完整 release gate 已通過：瀏覽器 2,192／2,192、可靠性 1,031、後端課程 50／50、故障情境 50／50、Apps Script 17 個模組同步，0 failures、0 browser errors。下一步必須由柏翰將 `apps-script/_all_in_one.gs` 貼到正式 Apps Script 專案 `1IAjubvvfK9s8MwXxSCr5tcQcnjFE_4y37SKPX1kQpYhQUP-kp62LzgMC`、「新增部署」後回傳新 URL；再更新 `shared/config.js`、commit/push main 與正式驗收。
+- 2026-11-10 `20261110-manager-missing-manual-1` 已依柏翰本次明確授權，由代理接手編輯器貼上完整合併碼並「新增部署」為 **Apps Script v88**，新 API `AKfycbxZrfmISQP4BMLrENspjW1YBHMLUFe05XAJOYY3n_CGyShHRoRTSNMmaLVm07RXwhh8` 的 `ping` 已回傳正確版本。所有月份的老師缺交 KPI 次數改由主管手動填寫，每次扣 2 分，不再以日誌或月曆自動扣分；九月與舊資料欄位皆相容，舊快取漏傳時保留已存值，新評核預設 0。老闆評主管的 ManagerEval 保留原規則，報表區分資料來源。本機完整 release gate：瀏覽器 2,192／2,192、可靠性 1,031、後端課程 50／50、故障情境 50／50、Apps Script 17 個模組同步，0 failures、0 browser errors；部署前範圍回歸追加測試亦全數通過。未改動正式評分資料，未清除登入或老師草稿。
 - 2026-11-02 才藝／才藝 PT 跨月修正 `20261102-talent-rollover-1`：舊版把裝置內的 10 月月份與 10/31 草稿持續帶入，導致老師進入 11 月仍看見 10/31。新版跨月首次開啟會自動切回當月；手機／PWA 跨日喚醒會刷新日期上下限，但不改動表單文字或照片。「新增今天紀錄」與「繼續舊草稿」已分流；舊草稿不會被自動刪除或覆寫，只有老師明確確認且雲端、本機附件暫存與畫面狀態都安全清除後才建立今天的新紀錄，任何一步失敗都會保留或回復。後端原本即允許 10/31 週六課於 11/2 週一完成並接受 11 月日期，本次只需前端 push，不需重新部署 Apps Script。完整 release gate：瀏覽器 2,189／2,189、controlled 50／50、可靠性 1,031、系統邏輯 33／33、跨月與草稿交易 16／16、次要儲存安全 13／13、Apps Script 17 個模組同步，0 failures、0 browser errors、0 external warnings。
 - 2026-10-14 `20261014-release-1` 已正式部署為 Apps Script v87，API 改為 `AKfycbxffD7kptprHhPk8nQChjlKI_pJjXpt1pIU6vDctzPtjDEVdYAKXHiDf2ZDweFFOrJfPg`，`ping` 已回 HTTP 200 與正確 release。安親老師切換至上一個工作日後，草稿、照片、班務與正式送出全部固定使用畫面選定日期，不再因背景同步或跨午夜誤存到今天；主管／老師快取遇到同一筆正式紀錄被管理員搬日時，會跟隨雲端日期並移除純舊快取，但上傳中、送出中或尚未同步的本機內容一律保留。才藝／才藝 PT 固定課程亦可在課程日或下一個工作日送出（週五、六、日的下一工作日為週一），照片責任仍屬原上課日。羊羊誤存於 2026/10/14 的正式安親紀錄已安全搬至 2026/10/13：8 筆 Evidence 同步、0 筆 Feedback、PDF 重建成功；舊 10/14 PDF 未自動刪除。完整 release gate：瀏覽器 2,189／2,189、可靠性 1,031、故障情境 50／50、後端課程紀錄 50／50、日期搬移 21／21、羊羊修復 9／9、系統邏輯 33／33、課程紀錄 13／13，0 failures、0 browser errors；Apps Script 17 個模組語法與 bundle 同步通過。
 - 2026-10-08 `20261008-release-6` 已正式部署為 Apps Script v86，API 改為 `AKfycbxMCvwIMm5PJ2yFZueEVooKtGVDzaZOiK9Knz9Is6Vu2her_mBPd1_2VFkBoMrOwimkFg`。安親既有新版正式日誌不可被舊頁面降版覆蓋，Evidence 類型與 KPI 由新版送出快照或既有版本化證據衍生；附件身分不明或互相衝突時，會在日誌與 Evidence 寫入前整筆拒絕。安親本機遇到較新、不支援或損壞的資料版本時改為唯讀保全，主要資料、備份與草稿不會在啟動、離頁或重設時被覆寫；支援版本仍照常遷移與儲存。後端課程紀錄 50／50、可靠性 1,031 項、系統邏輯 32 項、正式送出狀態 16 項、送出復原 15 項、瀏覽器整合 2,189 項、版本保全與 bundle 檢查皆通過，0 失敗。

@@ -19,8 +19,10 @@ let updated = null;
 const users = {
   '紅豆': { nickname: '紅豆', role: 'teacher', department: '東橋教室', status: 'active' },
   '小魚': { nickname: '小魚', role: 'manager', department: '東橋教室', status: 'active' },
+  '柏翰': { nickname: '柏翰', role: 'admin', department: '東橋教室', status: 'active' },
 };
 const logs = [];
+let logReads = 0;
 const ensuredHeaders = [];
 const tiers = [
   { min: 95, max: 100, grade: '卓越', bonus: 3000 },
@@ -37,7 +39,10 @@ const context = vm.createContext({
   isAnqinUser: user => user?.role === 'teacher' && user.department === '東橋教室',
   getSheet: name => ({ name }),
   ensureHeaders: (sheet, headers) => ensuredHeaders.push({ sheet: sheet.name, headers: [...headers] }),
-  sheetToObjects: sheet => sheet === 'DailyLogs' ? logs : rows,
+  sheetToObjects: sheet => {
+    if (sheet === 'DailyLogs') { logReads += 1; return logs; }
+    return rows;
+  },
   findObject: () => existing,
   appendRow: (_sheet, data) => rows.push({ ...data }),
   updateRow: (_sheet, _row, data) => { updated = { ...data }; },
@@ -116,6 +121,34 @@ for (const invalid of [-1, 1.5, 'not-a-number']) {
   assert.equal(context.saveEval(payload({ manual_missing_count: invalid })).ok, false,
     `manual missing count ${invalid} must be rejected`);
 }
+assert.equal(logReads, 0, 'teacher evaluations never read automatic daily-log counts for scoring');
+
+// 老闆評主管不是本次「主管填老師」的規則變更範圍，必須維持原本計分。
+logs.push(
+  { nickname: '小魚', date: '2026-10-02', is_makeup: true },
+  { nickname: '小魚', date: '2026-10-03', is_makeup: true },
+  { nickname: '小魚', date: '2026-09-03', is_makeup: true },
+  { nickname: '小魚', date: '2026-10-04', is_makeup: false },
+);
+existing = null;
+const managerPayload = {
+  nickname: '小魚', evaluator: '柏翰', year_month: '2026-10', status: 'submitted',
+  score_m1: 15, score_m2: 15, score_m3: 10, score_m4: 10, score_m5: 15, score_m6: 5,
+  score_okr: 0, dept_avg_score: 80,
+};
+const managerResult = context.saveEval(managerPayload);
+assert.equal(managerResult.total_score, 66, 'ManagerEval retains its original two-record four-point deduction');
+assert.equal(rows.at(-1).eval_id, 'MEVAL-2026-10-小魚');
+assert.equal(rows.at(-1).makeup_count, 2);
+assert.equal(rows.at(-1).makeup_penalty, 4);
+assert.equal(logReads, 1, 'only ManagerEval reads daily logs for its unchanged existing rule');
+existing = { _row: 9, ...rows.at(-1) };
+logs.push({ nickname: '小魚', date: '2026-10-05', is_makeup: true });
+const managerResaved = context.saveEval({ ...managerPayload, manual_missing_count: 0 });
+assert.equal(managerResaved.total_score, 64, 'ManagerEval still refreshes its original evidence count on resave');
+assert.equal(updated.makeup_count, 3, 'a teacher-only manual field cannot silently cancel a manager deduction');
+assert.equal(updated.makeup_penalty, 6);
+assert.equal(logReads, 2);
 
 const helperStart = frontend.indexOf('  function savedEvaluationNumber(');
 const helperEnd = frontend.indexOf('  function renderTeacherEvaluation()', helperStart);

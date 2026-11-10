@@ -82,8 +82,8 @@ assert.match(source, /id="manager-eval-manual-missing"[^>]*name="manual_missing_
 assert.match(source, /payload\.manual_missing_count = manualMissingCount;|manual_missing_count:\s*manualMissingCount/,
   '主管評核必須以統一 manual_missing_count payload 儲存');
 assert.match(saveEvaluationSource, /manual_missing_count/, '正式後端需接受主管手動缺交次數');
-assert.doesNotMatch(saveEvaluationSource, /SHEET_NAMES\.LOGS|is_makeup/,
-  '正式後端儲存評核時不得掃描日誌或自動偵測缺交扣分');
+assert.match(saveEvaluationSource, /if \(isManager\) \{\s*makeupCount = sheetToObjects\(SHEET_NAMES\.LOGS\)/,
+  '既有日誌自動統計僅保留於老闆評主管的 ManagerEval；老師手填不受影響');
 assert.match(styles, /\.task-open-button[\s\S]*overflow-wrap: anywhere/, '待辦事項摘要需要可換行');
 assert.match(styles, /\.evaluation-score-row[\s\S]*grid-template-columns: minmax\(0, 1fr\) auto/, '各項分數必須在目前畫面直接可見');
 assert.match(source, /loadTeacherEvaluation\('latest'\)/, '老師進入主管評核時必須直接載入最近一次已公布結果');

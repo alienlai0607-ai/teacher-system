@@ -407,7 +407,7 @@ function renderReport(nickname, ym, ev, evalObj) {
     ? (latePenalty === currentLatePenalty ? `保存固定扣 ${latePenalty} 分` : `依當時已公布結果扣 ${latePenalty} 分`)
     : '未達 3 次不扣分';
   const adjustmentBreakdown = evalObj
-    ? `${septemberBonusPoints ? `　➕ 九月加分 ${septemberBonusPoints} 分` : ''}${manualMissingCount || manualMissingPenalty ? `　📝 缺交 KPI（主管填寫） ${manualMissingCount} 次，保存扣 ${manualMissingPenalty} 分` : ''}${lateCount || latePenalty ? `　⏰ 遲到（主管填寫） ${lateCount} 次，${latePenaltyText}` : ''}`
+    ? `${septemberBonusPoints ? `　➕ 九月加分 ${septemberBonusPoints} 分` : ''}${manualMissingCount || manualMissingPenalty ? `　📝 缺交 KPI（${isManager ? '系統統計' : '主管填寫'}） ${manualMissingCount} 次，保存扣 ${manualMissingPenalty} 分` : ''}${lateCount || latePenalty ? `　⏰ 遲到（${isManager ? '既有評核紀錄' : '主管填寫'}） ${lateCount} 次，${latePenaltyText}` : ''}`
     : '';
   const breakdown = anqin
     ? `KPI ${evalObj ? kpiTotal : '—'} 分（OKR 獨立另計）${adjustmentBreakdown}`

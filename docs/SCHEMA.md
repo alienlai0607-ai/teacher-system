@@ -40,6 +40,7 @@ Apps Script `setupSheets()` 會建立或補齊 16 個資料表。它不刪除既
 - `september_bonus_points` 僅適用安親老師的 `2026-09` 評核，為主管填寫的 0～5 整數；其他月份拒絕非 0 值。總分依「六項分數＋九月加分－缺交／補繳扣分－遲到扣分」計算並封頂 100。
 - 舊前端未傳 `manual_missing_count`、`september_missing_count` 或 `september_bonus_points` 時，後端保留既有值；新版明確傳 `0` 才會清除。全新評核未傳時視為 0，絕不回掃日誌扣分；已公布資料讀取時仍以保存的 `total_score` 與加扣分欄位為準，不套用新規則回算。
 - 教師只能查看自己；同教室主管可評核，酸酸不跨北區，小魚可跨教室。
+- 本次手動缺交規則只調整老師的 `TeacherEval`；老闆評主管的 `ManagerEval` 保留原日誌統計扣分邏輯。
 
 ## 5. ManagerEval
 
