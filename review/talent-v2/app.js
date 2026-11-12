@@ -207,7 +207,7 @@
     const app = $('#app');
     if (app) app.innerHTML = '<main class="auth-required"><img src="../../shared/icons/logo.png" alt="布拉克星球 Logo"><h1>請先登入正式帳號</h1><p>正在返回登入頁面…</p></main>';
     const root = window.AUTH?.relativeRoot?.() || '../../';
-    const returnPath = `review/talent-v2/index.html?workspace=${encodeURIComponent(requestedWorkspace())}&v=20261110-backfill-clarity-1`;
+    const returnPath = `review/talent-v2/index.html?workspace=${encodeURIComponent(requestedWorkspace())}&v=20261112-evidence-source-1`;
     window.setTimeout(() => window.location.replace(`${root}index.html?return=${encodeURIComponent(returnPath)}`), 300);
     return;
   }

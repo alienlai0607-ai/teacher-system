@@ -78,7 +78,7 @@ const invalid = [
   ['mismatched file ID and Drive URL are rejected', p => { p.kpi6_data.v2_snapshot.submission.courseRecord.attachments[0].cloudFileId = 'different-file'; }, 'EVIDENCE_SOURCE_CONFLICT'],
   ['snapshot proof must also be present in the formal attachment manifest', p => { p.attachments = []; }],
   ['the attachment identity must match the screenshot', p => { p.attachments[0].attachmentId = 'other-shot'; }],
-  ['the manifest must refer to the same original file', p => { p.attachments[0].fileId = 'different-file'; p.attachments[0].url = 'https://drive.google.com/file/d/different-file/view'; }, 'EVIDENCE_SOURCE_UNVERIFIED'],
+  ['the manifest must refer to the same original file', p => { p.attachments[0].fileId = 'different-file'; p.attachments[0].url = 'https://drive.google.com/file/d/different-file/view'; }, 'EVIDENCE_SOURCE_CONFLICT'],
   ['the manifest must classify the screenshot as an image', p => { p.attachments[0].mimeType = 'application/pdf'; }],
   ['the manifest must contain a photo', p => { p.attachments[0].type = 'file'; }],
   ['the manifest needs the URL used by Evidence indexing', p => { delete p.attachments[0].url; }],
@@ -257,6 +257,123 @@ test('ambiguous Evidence identities fail before changing the log or Evidence ind
   assert.equal(rejected.code, 'EVIDENCE_SOURCE_CONFLICT');
   assert.deepEqual(copy(c.sheetToObjects('DailyLogs')), beforeLogs, 'identity conflict must not change the log revision or attachments');
   assert.deepEqual(copy(c.sheetToObjects('Evidence')), beforeEvidence, 'identity conflict must not replace Evidence');
+});
+
+function sharedOperationPayload(keys = ['classroom', 'toilet'], explicitIds = false) {
+  const input = payload();
+  keys.forEach(key => {
+    const attachment = {
+      ...activityAttachment(explicitIds ? `cleaning-${key}` : `env_${key}`),
+      fileId: 'synthetic-shared-cleaning', url: 'https://drive.google.com/file/d/synthetic-shared-cleaning/view',
+      forType: 'forged-source', kpi: 1, description: `合成整潔證據 ${key}`,
+    };
+    input.attachments.push(attachment);
+    addOperationSnapshot(input, attachment, key);
+    if (!explicitIds) delete input.kpi6_data.v2_snapshot.operation.evidenceByCheck[key].id;
+  });
+  return input;
+}
+
+test('content-addressed upload reuses the same original for two cleaning slots', () => {
+  const { c } = setup();
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../apps-script/archivefiles.gs'), 'utf8'), c);
+  const files = new Map();
+  const folder = {
+    getFilesByName(name) {
+      const matches = files.has(name) ? [files.get(name)] : [];
+      return { hasNext: () => matches.length > 0, next: () => matches.shift() };
+    },
+    createFile(blob) {
+      const item = { getId: () => 'synthetic-deduplicated-file', isTrashed: () => false };
+      files.set(blob.getName(), item);
+      return item;
+    },
+  };
+  const makeBlob = () => {
+    let name = 'K6-2026-09-18.jpg';
+    return { getContentType: () => 'image/jpeg', getName: () => name, setName: value => { name = value; } };
+  };
+  const first = c.createOrResumeKpiUpload_(folder, makeBlob(), 'north', '6', '2026-09-18', 'synthetic-same-bytes');
+  const second = c.createOrResumeKpiUpload_(folder, makeBlob(), 'north', '6', '2026-09-18', 'synthetic-same-bytes');
+  assert.equal(first.getId(), second.getId());
+  assert.equal(files.size, 1, 'the fix must not create duplicate originals to distinguish checklist slots');
+});
+
+for (const [label, keys, explicitIds] of [
+  ['two fallback cleaning slots', ['classroom', 'toilet'], false],
+  ['tools and toilet fallback slots', ['tools', 'toilet'], false],
+  ['four explicit cleaning slots', ['classroom', 'tools', 'trash', 'toilet'], true],
+]) {
+  test('one original safely serves ' + label, () => {
+    const { c, request } = setup();
+    const input = sharedOperationPayload(keys, explicitIds);
+    const saved = request('north', 'saveLog', input);
+    assert.equal(saved.ok, true, saved.error);
+    const restored = request('north', 'getLog', { nickname: input.nickname, date: input.date }).log;
+    assert.deepEqual(restored.attachments.slice(1).map(item => [item.forType, item.kpi]), keys.map(key => ['env_' + key, 6]));
+    assert.deepEqual(c.sheetToObjects('Evidence').slice(1).map(item => [item.source_type, item.kpi_category]), keys.map(key => ['env_' + key, 6]));
+    const before = copy(c.sheetToObjects('Evidence'));
+    assert.equal(request('north', 'saveLog', input).revision, saved.revision);
+    assert.deepEqual(copy(c.sheetToObjects('Evidence')), before, 'replaying the confirmed receipt cannot duplicate Evidence');
+  });
+}
+
+test('same original across two activity types derives each source and KPI from its attachment slot', () => {
+  const { request } = setup();
+  const input = payload();
+  ['project', 'tutoring'].forEach(type => {
+    const item = { ...activityAttachment(type + '-shared'), fileId: 'synthetic-shared-activity',
+      url: 'https://drive.google.com/file/d/synthetic-shared-activity/view', forType: 'env_tools', kpi: 6 };
+    input.attachments.push(item);
+    addActivitySnapshot(input, item, { type });
+  });
+  assert.equal(request('north', 'saveLog', input).ok, true);
+  const restored = request('north', 'getLog', { nickname: input.nickname, date: input.date }).log;
+  assert.deepEqual(restored.attachments.slice(1).map(item => [item.forType, item.kpi]), [['v2-project', 2], ['v2-tutoring', 1]]);
+});
+
+test('same original may be a course screenshot and activity evidence with distinct slots', () => {
+  const { request } = setup();
+  const input = payload();
+  const course = input.attachments[0];
+  const activity = { ...activityAttachment('activity-shared-course'), fileId: course.fileId, url: course.url };
+  input.attachments.push(activity);
+  addActivitySnapshot(input, activity);
+  assert.equal(request('north', 'saveLog', input).ok, true);
+  const restored = request('north', 'getLog', { nickname: input.nickname, date: input.date }).log;
+  assert.deepEqual(restored.attachments.map(item => item.forType), ['v2-course-record', 'v2-project']);
+});
+
+for (const [label, mutate] of [
+  ['missing attachment slot', input => { delete input.attachments[1].attachmentId; }],
+  ['unclaimed slot even with an apparently correct forType', input => { input.attachments[1].attachmentId = 'unknown-slot'; input.attachments[1].forType = 'env_classroom'; input.attachments[1].kpi = 6; }],
+  ['same slot claimed by two different sources', input => { input.kpi6_data.v2_snapshot.operation.evidenceByCheck.toilet.id = 'env_classroom'; }],
+  ['copied slot pointing to a different original', input => { input.attachments[1].attachmentId = 'course-shot'; }],
+]) {
+  test('shared-file source remains rejected for ' + label, () => {
+    const { c, request } = setup();
+    const input = sharedOperationPayload();
+    mutate(input);
+    const rejected = request('north', 'saveLog', input);
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.code, 'EVIDENCE_SOURCE_CONFLICT');
+    assert.equal(c.sheetToObjects('DailyLogs').length, 0, 'an ambiguous source cannot write a log');
+    assert.equal(c.sheetToObjects('Evidence').length, 0, 'an ambiguous source cannot write Evidence');
+  });
+}
+
+test('preserved source fallback also resolves a shared file only by its exact slot', () => {
+  const { request } = setup();
+  const input = sharedOperationPayload();
+  const saved = request('north', 'saveLog', input);
+  assert.equal(saved.ok, true);
+  const update = copy(input);
+  update.request_id = 'synthetic-preserved-shared-file';
+  update.base_revision = saved.revision;
+  delete update.kpi6_data.v2_snapshot.operation;
+  assert.equal(request('north', 'saveLog', update).ok, true);
+  const restored = request('north', 'getLog', { nickname: input.nickname, date: input.date }).log;
+  assert.deepEqual(restored.attachments.slice(1).map(item => [item.forType, item.kpi]), [['env_classroom', 6], ['env_toilet', 6]]);
 });
 
 test('removing then re-adding v2 evidence cannot downgrade its source metadata', () => {

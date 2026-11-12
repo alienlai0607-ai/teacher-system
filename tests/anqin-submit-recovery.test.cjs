@@ -242,6 +242,43 @@ function submitContext(options = {}) {
     assert.equal(reloaded.state.integration.pendingDailySubmission, undefined);
   });
 
+  await test('definite evidence conflict clears pending and retries with a new request ID', async () => {
+    let sequence = 0;
+    let attempts = 0;
+    const context = submitContext({ save: () => ++attempts === 1
+      ? { ok: false, code: 'EVIDENCE_SOURCE_CONFLICT', error: 'synthetic definite conflict' }
+      : { ok: true, log_id: 'LOG', revision: 'after-fix' } });
+    context.uid = () => 'evidence-retry-' + (++sequence);
+    context.state.daily.summary.teacherNote = '原始內容保留';
+    await context.submitDailyRequest();
+    assert.equal(context.state.integration.pendingDailySubmission, undefined);
+    assert.equal(context.state.daily.summary.teacherNote, '原始內容保留');
+    assert.equal(context.receipts.length, 0);
+    await context.submitDailyRequest();
+    assert.notEqual(context.saved[0].request_id, context.saved[1].request_id);
+    assert.equal(context.receipts.length, 1);
+  });
+
+  await test('unknown save resolves old failed receipt before a new-ID retry', async () => {
+    let sequence = 0;
+    let attempts = 0;
+    const context = submitContext({ save: () => {
+      attempts++;
+      if (attempts === 1) return { ok: false, uncertain: true, code: 'NETWORK_ERROR' };
+      if (attempts === 2) return { ok: false, code: 'EVIDENCE_SOURCE_CONFLICT', error: 'old failed receipt' };
+      return { ok: true, log_id: 'LOG', revision: 'new-success' };
+    } });
+    context.uid = () => 'uncertain-retry-' + (++sequence);
+    await context.submitDailyRequest();
+    assert.ok(context.state.integration.pendingDailySubmission);
+    await context.submitDailyRequest();
+    assert.equal(context.state.integration.pendingDailySubmission, undefined);
+    assert.equal(context.saved[0].request_id, context.saved[1].request_id);
+    await context.submitDailyRequest();
+    assert.notEqual(context.saved[1].request_id, context.saved[2].request_id);
+    assert.equal(context.receipts.length, 1);
+  });
+
   console.log(`${passed} passed; ${failures.length} failed (isolated client tests, no cloud writes)`);
   if (failures.length) process.exitCode = 1;
 })();

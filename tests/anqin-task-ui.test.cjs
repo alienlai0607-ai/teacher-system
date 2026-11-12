@@ -143,8 +143,8 @@ assert.match(source, /function applyPreviewReviewContext\(/, '安親審查模式
 assert.match(source, /if \(!applyPreviewReviewContext\(control\.dataset\.role\)\) state\.ui\.role = control\.dataset\.role/, '切換審查角色時必須同步身份範圍');
 assert.match(source, /applyPreviewReviewContext\(LOCAL_REVIEW_ROLE\)/, '網址指定主管視角時首次載入就必須套用正確身份');
 assert.match(source, /GLOBAL_MANAGER_NICKNAMES\.some\(name => sameReviewIdentity\(name, managerNickname\)\)/, '小魚在審查與正式登入都必須擁有全教室檢視範圍');
-assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20261110-backfill-clarity-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
-assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20261110-backfill-clarity-1/, '登入備援路徑也必須避開舊版快取');
+assert.equal((workspaces.match(/review\/anqin-v2\/index\.html\?v=20261112-evidence-source-1/g) || []).length, 2, '安親老師與主管切換入口都必須帶入本次版本碼');
+assert.match(sharedAuth, /review\/anqin-v2\/index\.html\?v=20261112-evidence-source-1/, '登入備援路徑也必須避開舊版快取');
 
 const startupSafetySource = source.slice(source.indexOf('function stripEmbeddedMediaJson('), source.indexOf('function loadState()'));
 const startupSafetyContext = vm.createContext({ JSON, Number, Set });
@@ -288,7 +288,7 @@ assert.match(apiRouter, /'getSessionIdentity': \(\) => getSessionIdentity\(param
 assert.match(authBackend, /function getSessionIdentity\(params\)/, '後端需由驗簽結果回傳目前正式身分');
 assert.match(source, /if \(dailySubmitInFlight\) return/, '日結送出需防止連點產生重複請求');
 const dailySubmitSource = source.slice(source.indexOf('async function submitDaily()'), source.indexOf('async function submitWeekly()'));
-assert.match(dailySubmitSource, /integrationRuntime\.cloudMessage = `正在確認並送出\$\{activeGraceBackfill\(\) \? '上個工作日' : '今日'\}紀錄`/, '老師按下送出後需立即顯示正確日期的送出中狀態');
+assert.match(dailySubmitSource, /integrationRuntime\.cloudMessage = `正在確認並送出 \$\{state\.daily\.date\} 紀錄`/, '老師按下送出後需立即顯示畫面選定日期，歷史草稿不可誤稱今天');
 assert.match(dailySubmitSource, /finally \{[\s\S]*dailySubmitInFlight = false;[\s\S]*renderApp\(\);/, '送出完成或失敗後都必須重新恢復可操作畫面');
 assert.match(dailySubmitSource, /function showDailySubmissionReceipt\(/, '日結送出後需顯示固定的送出收據');
 assert.match(dailySubmitSource, /今日紀錄已成功送出/, '送出收據需清楚宣告成功');

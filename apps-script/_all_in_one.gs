@@ -21,7 +21,7 @@
  * 5. 把網址貼到前端 shared/config.js 的 API_URL
  */
 
-const KPI_RELEASE_VERSION_ = '20261110-backfill-clarity-1';
+const KPI_RELEASE_VERSION_ = '20261112-evidence-source-1';
 
 // ============ 路由 ============
 function doGet(e) {
@@ -3055,12 +3055,12 @@ function normalizeAnqinEvidenceAttachments_(params, user, existing) {
     });
   });
 
+  function overlaps(left, right) {
+    const wanted = {};
+    left.forEach(function (value) { wanted[value] = true; });
+    return right.some(function (value) { return wanted[value]; });
+  }
   function matchingClaims(identity, candidates) {
-    function overlaps(left, right) {
-      const wanted = {};
-      left.forEach(function (value) { wanted[value] = true; });
-      return right.some(function (value) { return wanted[value]; });
-    }
     return candidates.filter(function (candidate) {
       const other = candidate.identity;
       // A canonical Drive file ID is strongest.  A copied attachment ID must not
@@ -3079,6 +3079,30 @@ function normalizeAnqinEvidenceAttachments_(params, user, existing) {
     const keys = Object.keys(metadata);
     return keys.length === 1 ? { value: metadata[keys[0]] } : { conflict: keys.length > 1 };
   }
+  function metadataForIdentity(identity, candidates) {
+    // An attachment ID cannot point at a different original in this snapshot.
+    // Check before the preserved-source fallback so a stale manifest cannot
+    // silently reuse the previous file when the current snapshot changed it.
+    const idMatches = candidates.filter(function (candidate) {
+      return overlaps(identity.attachmentIds, candidate.identity.attachmentIds);
+    });
+    if (idMatches.some(function (candidate) {
+      return identity.fileIds.length && candidate.identity.fileIds.length
+        && !overlaps(identity.fileIds, candidate.identity.fileIds);
+    })) return { conflict: true };
+
+    const matches = matchingClaims(identity, candidates);
+    const metadata = oneMetadata(matches);
+    if (!metadata.conflict || !identity.fileIds.length || !identity.attachmentIds.length) return metadata;
+    // Content-addressed uploads legitimately share one Drive file across two
+    // cleaning checks or activities. Resolve only by BOTH the original file and
+    // the attachment slot declared in the snapshot, never incoming forType/kpi.
+    const exactMatches = matches.filter(function (candidate) {
+      return overlaps(identity.fileIds, candidate.identity.fileIds)
+        && overlaps(identity.attachmentIds, candidate.identity.attachmentIds);
+    });
+    return exactMatches.length ? oneMetadata(exactMatches) : metadata;
+  }
 
   const normalized = [];
   for (let index = 0; index < incoming.length; index++) {
@@ -3091,12 +3115,12 @@ function normalizeAnqinEvidenceAttachments_(params, user, existing) {
     if (identity.conflictingFileIds) {
       return { ok: false, code: 'EVIDENCE_SOURCE_CONFLICT', error: '附件檔案識別不一致，未覆蓋原日誌；請重新讀取後再送出' };
     }
-    let metadata = oneMetadata(matchingClaims(identity, expected.claims));
+    let metadata = metadataForIdentity(identity, expected.claims);
     if (metadata.conflict) {
       return { ok: false, code: 'EVIDENCE_SOURCE_CONFLICT', error: '附件來源版本互相衝突，未覆蓋原日誌；請重新讀取後再送出' };
     }
     if (!metadata.value) {
-      metadata = oneMetadata(matchingClaims(identity, preservedCandidates));
+      metadata = metadataForIdentity(identity, preservedCandidates);
       if (metadata.conflict) {
         return { ok: false, code: 'EVIDENCE_SOURCE_CONFLICT', error: '既有附件來源版本互相衝突，未覆蓋原日誌；請重新讀取後再送出' };
       }

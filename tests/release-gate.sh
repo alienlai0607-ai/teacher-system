@@ -37,6 +37,7 @@ cd "$ROOT"
 "$NODE_BIN" tests/evaluation-evidence-performance.test.cjs
 "$NODE_BIN" tests/anqin-task-ui.test.cjs
 "$NODE_BIN" tests/anqin-selected-date-save.test.cjs
+"$NODE_BIN" tests/anqin-historical-draft-recovery.test.cjs
 "$NODE_BIN" tests/yangyang-date-repair.test.cjs
 "$NODE_BIN" tests/anqin-manager-month.test.cjs
 "$NODE_BIN" tests/anqin-photo-batch.test.cjs

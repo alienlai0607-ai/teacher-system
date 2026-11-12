@@ -1352,6 +1352,36 @@
     return state.ui.role === 'teacher' && isNextWorkdayGraceDate(state.daily.date) && !state.daily.submittedAt;
   }
 
+  function isHistoricalDailyDate(date = state.daily.date) {
+    return String(date || '') < previousKpiWorkday();
+  }
+
+  function canResumeHistoricalDailyDraft(date) {
+    const today = todayIso();
+    if (state.ui.role !== 'teacher' || !/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))
+      || date.slice(0, 7) !== today.slice(0, 7) || date >= today || !isHistoricalDailyDate(date)) return false;
+    const parsed = new Date(`${date}T00:00:00Z`);
+    if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) return false;
+    const teacher = state.context.teacher;
+    const submission = state.submissions.find(item => item.teacher === teacher && item.date === date);
+    const workspace = state.integration.dailyWorkspaces?.[date];
+    if (submission && (submission.status !== 'draft' || submission.submittedAt || submission.cloudSubmittedAt
+      || submission.previousSubmittedAt || submission.previousStatus)) return false;
+    if (workspace?.daily && (workspace.daily.status !== 'draft' || workspace.daily.submittedAt)) return false;
+    if (workspace && (workspace.daily?.date !== date || workspace.operation?.dutyOwner !== teacher)) return false;
+    return Boolean(submission || (workspace?.daily?.date === date && workspace.operation?.dutyOwner === teacher));
+  }
+
+  function historicalDailyWorkspaceSignature(workspace) {
+    const daily = workspace?.daily || {};
+    const summary = daily.summary || {};
+    return JSON.stringify({
+      summary: Object.fromEntries(['keyResult', 'followup', 'tomorrowPriority', 'teacherNote'].map(key => [key, summary[key] || ''])),
+      parentStatus: daily.parentStatus || '', parentHandoffConfirmed: Boolean(daily.parentHandoffConfirmed), parentHandoffNote: daily.parentHandoffNote || '',
+      courseRecord: normalizeCourseRecord(clone(daily.courseRecord || {})), operation: workspace?.operation || null,
+    });
+  }
+
   function graceBackfillSubmission() {
     const graceDate = previousKpiWorkday();
     if (dailyKpiOptional(graceDate)) return null;
@@ -1374,6 +1404,7 @@
       daily: clone(state.daily),
       operation: state.operations?.date === date ? clone(state.operations) : null,
       weekly: clone(state.weekly),
+      sourceCloudSavedAt: state.submissions.find(item => item.teacher === state.context.teacher && item.date === date)?.cloudSavedAt || '',
     };
     const submission = state.submissions.find(item => item.teacher === state.context.teacher && item.date === date && item.status === 'draft');
     if (submission) Object.assign(submission, {
@@ -1428,13 +1459,59 @@
     return { ...(workspace || {}), daily, operation };
   }
 
-  function switchTeacherDailyDate(date) {
+  function switchTeacherDailyDate(date, recoveryChoice = '') {
     const today = todayIso();
     const graceDate = previousKpiWorkday(today);
-    if (state.ui.role !== 'teacher' || ![today, graceDate].includes(date) || (date === graceDate && dailyKpiOptional(date))) return false;
+    const historicalTarget = ![today, graceDate].includes(date);
+    if (state.ui.role !== 'teacher' || (historicalTarget && !canResumeHistoricalDailyDraft(date)) || (date === graceDate && dailyKpiOptional(date))) return false;
     if (dailySubmitInFlight || state.integration.pendingDailySubmission) {
       toast('目前送出結果仍在確認，完成後才能切換日期', 'warning');
       return false;
+    }
+    // Historical recovery must not detach a live upload, editable drawer, or
+    // unsupported local state. Ordinary today/grace switching is unchanged.
+    if (historicalTarget || isHistoricalDailyDate(state.daily.date)) {
+      if (stateStorageWriteProtected || activePhotoSaveTasks.size || integrationRuntime.courseRecordUploading
+        || localMediaRestoreInFlight || cloudDraftInFlight) {
+        toast('資料或照片仍在保存，請完成後再切換日期；目前內容仍保留', 'warning');
+        return false;
+      }
+      if (currentDrawerDraftKey) {
+        persistCurrentDrawerDraft(true);
+        toast('請先儲存或關閉目前編輯視窗，再繼續歷史草稿', 'warning');
+        return false;
+      }
+      if (date === state.daily.date) {
+        state.ui.route = 'today';
+        persist('已開啟目前草稿');
+        renderApp();
+        return true;
+      }
+      const saved = state.integration.dailyWorkspaces?.[date];
+      const remote = state.submissions.find(item => item.teacher === state.context.teacher && item.date === date);
+      const cloudWorkspace = remote ? dailyWorkspaceFromSubmission(date) : null;
+      const changedCloudVersion = saved && remote && (saved.sourceCloudSavedAt === undefined || saved.sourceCloudSavedAt !== (remote.cloudSavedAt || ''));
+      const versionsDiffer = historicalTarget && changedCloudVersion
+        && historicalDailyWorkspaceSignature(saved) !== historicalDailyWorkspaceSignature(cloudWorkspace);
+      if (versionsDiffer && !['local', 'cloud'].includes(recoveryChoice)) {
+        openDialog({ title: `${date} 有兩份草稿，請選擇`,
+          body: '<div class="notice-band warning">本機與雲端草稿內容不同，不會自動覆蓋。選擇後仍須檢查並手動送出；兩份原始內容都會保留。</div>',
+          footer: `<button type="button" class="btn" data-action="resume-daily-version" data-version="local" data-date="${esc(date)}">繼續本機草稿</button><button type="button" class="btn btn-primary" data-action="resume-daily-version" data-version="cloud" data-date="${esc(date)}">使用雲端草稿</button>`,
+        });
+        return false;
+      }
+      if (versionsDiffer) {
+        state.integration.historicalDraftRecoveryCopies = state.integration.historicalDraftRecoveryCopies || {};
+        const copies = state.integration.historicalDraftRecoveryCopies[date] || [];
+        copies.push({ savedAt: new Date().toISOString(), local: clone(saved), cloud: clone(cloudWorkspace) });
+        state.integration.historicalDraftRecoveryCopies[date] = copies;
+        if (!persist('兩份歷史草稿已保留')) return false;
+        if (recoveryChoice === 'cloud') state.integration.dailyWorkspaces[date] = {
+          ...clone(cloudWorkspace), sourceCloudSavedAt: remote.cloudSavedAt || '',
+        };
+      }
+      saveActiveDailyWorkspace();
+      if (!persist('目前日期的草稿已保留')) return false;
     }
     flushScheduledDailyCloudDraft();
     persistCurrentDrawerDraft(true);
@@ -1469,7 +1546,7 @@
     state.operationHistory = (state.operationHistory || []).filter(item => item.id !== state.operations.id);
     state.ui.route = 'today';
     state.ui.todayTab = 'activities';
-    persist(date === graceDate ? '已開啟上個工作日的 KPI' : '已切回今天的 KPI');
+    persist(historicalTarget ? `已開啟 ${date} 既有草稿，送出仍依原補繳規則` : date === graceDate ? '已開啟上個工作日的 KPI' : '已切回今天的 KPI');
     renderApp();
     return true;
   }
@@ -1533,6 +1610,14 @@
         parentHandoffNote: state.daily.parentHandoffNote || '',
         courseRecord: clone(state.daily.courseRecord || { channels: [], attachments: [], note: '' }),
       });
+    }
+    if (!stateStorageWriteProtected) {
+      // Reloading a historical edit must not leave an older workspace behind.
+      state.integration.dailyWorkspaces = state.integration.dailyWorkspaces || {};
+      state.integration.dailyWorkspaces[previousDate] = {
+        daily: clone(state.daily), operation: state.operations?.date === previousDate ? clone(state.operations) : null,
+        weekly: clone(state.weekly || {}), sourceCloudSavedAt: existingSubmission?.cloudSavedAt || '',
+      };
     }
     const operation = state.operations;
     const hasOperationContent = operation?.date === previousDate && operationHasDailyContent(operation);
@@ -2695,20 +2780,23 @@
     const tabStatus = todaySectionStatus();
     const graceActive = activeGraceBackfill();
     const graceDraft = graceBackfillSubmission();
-    const dayWord = graceActive ? '上個工作日' : '今日';
-    const switchAction = graceActive
+    const historicalActive = isHistoricalDailyDate();
+    const dayWord = historicalActive ? '當日' : graceActive ? '上個工作日' : '今日';
+    const switchAction = graceActive || historicalActive
       ? `<button type="button" class="btn" data-action="switch-daily-date" data-date="${todayIso()}">${icon('calendar-days', 16)}<span>切換 KPI 日期：${formatShortDate(todayIso())}（今天）</span></button>`
       : graceDraft && !graceDraft.active
         ? `<button type="button" class="btn btn-primary" data-action="switch-daily-date" data-date="${esc(graceDraft.date)}">${icon('history', 16)}<span>切換 KPI 日期：${formatShortDate(graceDraft.date)}（上個工作日）</span></button>`
         : '';
     const actions = `${switchAction}<button type="button" class="btn" data-action="open-contact">${icon('message-circle-plus', 16)}<span class="btn-label-mobile-hide">記錄孩子狀況</span></button><button type="button" class="btn" data-action="open-activity" data-type="lessonprep">${icon('notebook-tabs', 16)}<span class="btn-label-mobile-hide">新增備課檔案</span></button>`;
-    const graceNotice = graceActive
+    const graceNotice = historicalActive
+      ? `<div class="notice-band warning next-workday-grace-notice">${icon('history', 20)}<div><div class="notice-title">正在補完 ${formatDate(state.daily.date)} 既有草稿</div><div class="notice-copy">僅恢復原本未送出的內容；送出仍依原有補繳期限、額度與照片規則檢查，不代表已補交成功。</div></div><button type="button" class="btn btn-small" data-action="switch-daily-date" data-date="${todayIso()}">切回今天</button></div>`
+      : graceActive
       ? `<div class="notice-band warning next-workday-grace-notice">${icon('clock-3', 20)}<div><div class="notice-title">目前 KPI 日期：${formatDate(state.daily.date)}（上個工作日）</div><div class="notice-copy">寬限至今天結束；週五可於週一完成，不列補繳、不扣補繳分。照片與證據責任不順延，若當日未拍到必要照片，仍由老師自行負責。</div></div><button type="button" class="btn btn-small" data-action="switch-daily-date" data-date="${todayIso()}">切回今天</button></div>`
       : graceDraft && !graceDraft.active
         ? `<div class="notice-band warning next-workday-grace-notice">${icon('clock-alert', 20)}<div><div class="notice-title">可切換 KPI 日期至 ${formatDate(graceDraft.date)}</div><div class="notice-copy">無論是否已有草稿，都可在今天結束前填寫上個工作日；週五可於週一完成，不列補繳。照片與證據仍須符合原規則。</div></div><button type="button" class="btn btn-small btn-primary" data-action="switch-daily-date" data-date="${esc(graceDraft.date)}">填寫 ${formatShortDate(graceDraft.date)} KPI</button></div>`
         : '';
     return `<div class="page">
-      ${pageHead(graceActive ? '補寫上個工作日 KPI' : '今日工作紀錄', `KPI 日期：${formatDate(state.daily.date)} · ${state.context.department} · ${state.context.teacher}`, actions)}
+      ${pageHead(historicalActive ? '補填 KPI' : graceActive ? '補寫上個工作日 KPI' : '今日工作紀錄', `KPI 日期：${formatDate(state.daily.date)} · ${state.context.department} · ${state.context.teacher}`, actions)}
       ${renderGuideInvite()}
       ${graceNotice}
       <div class="status-strip">
@@ -3066,7 +3154,7 @@
     if (!dailyKpiOptional() && !dailyRequiredTracksReady()) blockers.push('新增一筆學科內或學科外紀錄');
     if (!dailyKpiOptional() && dailyRequiredTracksReady() && !status.activities) blockers.push('已新增的課程需選擇備課檔案並完成課後回饋；班級經營只需工作欄位及可判讀成果證據');
     if (!dailyKpiOptional() && !status.parents) blockers.push('新增一筆親師溝通紀錄，或確認已完成門口交接');
-    if (!dailyKpiOptional() && !status.operations) blockers.push(`${graceActive ? '當日' : '今日'}值日班務尚未確認`);
+    if (!dailyKpiOptional() && !status.operations) blockers.push(`${state.daily.date < todayIso() ? '當日' : '今日'}值日班務尚未確認`);
     if (courseRecordRequired() && !status['course-record']) blockers.push('完成第 5 項課程紀錄：確認照片已分享，並附上截圖證據');
     if (dailyKpiOptional() && !todayActivities().every(activityComplete)) blockers.push('已新增的工作紀錄尚未完整');
     return `<div class="content-grid wide-aside">
@@ -3079,7 +3167,7 @@
           ${needsResubmit ? `<div class="notice-band warning">${icon('refresh-cw', 19)}<div><div class="notice-title">內容已修改，尚未重新送出</div><div class="notice-copy">主管目前看到的是前一版；按下重新送出後才會更新。</div></div></div>` : ''}
           <form id="daily-summary-form" data-form="daily-summary">
             <div class="summary-list">
-              <div class="summary-line"><span class="summary-index">1</span><div><div class="summary-title">${graceActive ? '當日' : '今日'}成果</div><div class="summary-copy">${esc(summary.keyResult)}</div></div></div>
+              <div class="summary-line"><span class="summary-index">1</span><div><div class="summary-title">${state.daily.date < todayIso() ? '當日' : '今日'}成果</div><div class="summary-copy">${esc(summary.keyResult)}</div></div></div>
               <div class="summary-line"><span class="summary-index">2</span><div><div class="summary-title">孩子狀況與課程問題</div><div class="summary-copy">${esc(summary.followup)}</div></div></div>
               <div class="summary-line"><span class="summary-index">3</span><div><div class="summary-title">目前待辦（即時）</div><div class="summary-copy">${esc(summary.tomorrowPriority)}</div><div class="text-tiny muted mt-4">此處會依目前未完成事項即時更新。</div></div></div>
             </div>
@@ -4339,7 +4427,8 @@
     const action = entry.route ? 'navigate' : 'open-record';
     const target = entry.route ? `data-route="${esc(entry.route)}"` : `data-submission-id="${esc(entry.submissionId)}"`;
     const tone = entry.status === '待補充' ? 'red' : entry.status === '已採認' ? 'green' : 'yellow';
-    return `<div class="timeline-item"><div class="timeline-date">${formatDate(entry.date)}</div><span class="timeline-dot"></span><button type="button" class="timeline-content record-entry-button" data-action="${action}" ${target}><span class="record-entry-head"><span class="text-strong">${esc(entry.title)}</span><span class="badge ${tone}">${esc(entry.status)}</span></span><span class="text-small muted">${esc(entry.copy)}</span><span class="record-entry-open">查看完整內容 ${icon('chevron-right', 16)}</span></button></div>`;
+    const resume = canResumeHistoricalDailyDraft(entry.date);
+    return `<div class="timeline-item"><div class="timeline-date">${formatDate(entry.date)}</div><span class="timeline-dot"></span><div class="timeline-content"><button type="button" class="record-entry-button" data-action="${entry.workspaceOnly ? 'resume-daily-draft' : action}" ${entry.workspaceOnly ? `data-date="${esc(entry.date)}"` : target}><span class="record-entry-head"><span class="text-strong">${esc(entry.title)}</span><span class="badge ${tone}">${esc(entry.status)}</span></span><span class="text-small muted">${esc(entry.copy)}</span><span class="record-entry-open">${entry.workspaceOnly ? '繼續填寫' : '查看完整內容'} ${icon('chevron-right', 16)}</span></button>${resume && !entry.workspaceOnly ? `<button type="button" class="btn btn-small btn-primary mt-8" data-action="resume-daily-draft" data-date="${esc(entry.date)}">${icon('pencil', 14)}繼續填寫 ${formatShortDate(entry.date)}</button>` : ''}</div></div>`;
   }
 
   async function loadLegacyArchiveFiles(notify = false) {
@@ -4458,7 +4547,11 @@
     const currentEntry = currentSubmission
       ? submissionEntry(currentSubmission)
       : { date: state.daily.date, statusKey: 'draft', status: '草稿', title: '今日工作紀錄', copy: `${todayActivities().length} 筆工作、${state.contacts.filter(item => item.date === state.daily.date && item.teacher === state.context.teacher).length} 筆親師溝通、${todayEvidenceCount} 份證據`, searchText: todaySearchText, route: 'today' };
-    const allEntries = [currentEntry, ...teacherSubmissions.filter(item => item.id !== currentSubmission?.id).map(submissionEntry)];
+    const workspaceEntries = Object.keys(state.integration.dailyWorkspaces || {}).filter(date => date !== state.daily.date
+      && !teacherSubmissions.some(item => item.date === date) && canResumeHistoricalDailyDraft(date)).map(date => ({
+      date, statusKey: 'draft', status: '草稿', title: '未送出工作紀錄', copy: '本機草稿已保留，可繼續填寫', workspaceOnly: true,
+    }));
+    const allEntries = [currentEntry, ...teacherSubmissions.filter(item => item.id !== currentSubmission?.id).map(submissionEntry), ...workspaceEntries];
     const query = filters.query.trim().toLowerCase();
     const entries = allEntries.filter(entry => isDateInPeriod(entry.date, filters.period) && (filters.status === 'all' || entry.statusKey === filters.status) && (!query || `${entry.title} ${entry.copy} ${entry.searchText || ''}`.toLowerCase().includes(query)));
     const filtersMarkup = `<div class="filter-bar"><div class="filter-field"><label for="records-period">期間</label><select id="records-period" aria-label="紀錄期間" data-change="view-filter" data-filter-group="records" data-filter-key="period"><option value="30d" ${filters.period === '30d' ? 'selected' : ''}>最近 30 天</option><option value="month" ${filters.period === 'month' ? 'selected' : ''}>本月</option><option value="last-month" ${filters.period === 'last-month' ? 'selected' : ''}>上月</option><option value="all" ${filters.period === 'all' ? 'selected' : ''}>全部</option></select></div><div class="filter-field"><label for="records-status">狀態</label><select id="records-status" data-change="view-filter" data-filter-group="records" data-filter-key="status" aria-label="紀錄狀態"><option value="all" ${filters.status === 'all' ? 'selected' : ''}>全部</option><option value="pending" ${filters.status === 'pending' ? 'selected' : ''}>待審查</option><option value="clarify" ${filters.status === 'clarify' ? 'selected' : ''}>待補充</option><option value="accepted" ${filters.status === 'accepted' ? 'selected' : ''}>已採認</option><option value="draft" ${filters.status === 'draft' ? 'selected' : ''}>草稿</option></select></div><div class="filter-field grow"><label for="records-query">搜尋</label><input id="records-query" value="${esc(filters.query)}" data-input="view-filter" data-filter-group="records" data-filter-key="query" placeholder="搜尋課程、學生或關鍵字"></div></div>`;
@@ -7708,12 +7801,12 @@
     integrationRuntime.cloudStatus = 'submitting';
     integrationRuntime.cloudMessage = activePhotoSaveTasks.size
       ? `正在等待 ${activePhotoSaveTasks.size} 批照片完成上傳`
-      : `正在確認並送出${activeGraceBackfill() ? '上個工作日' : '今日'}紀錄`;
+      : `正在確認並送出 ${state.daily.date} 紀錄`;
     updateSaveIndicator('saving', integrationRuntime.cloudMessage);
     renderApp();
     try {
       if (activePhotoSaveTasks.size) await waitForActivePhotoSaves();
-      integrationRuntime.cloudMessage = `正在確認並送出${activeGraceBackfill() ? '上個工作日' : '今日'}紀錄`;
+      integrationRuntime.cloudMessage = `正在確認並送出 ${state.daily.date} 紀錄`;
       updateSaveIndicator('saving', integrationRuntime.cloudMessage);
       const form = $('#daily-summary-form');
       if (form) saveDailySummaryForm(form, false);
@@ -7740,7 +7833,7 @@
     const isWarning = type === 'warning';
     const isGraceSubmission = submission.date === previousKpiWorkday();
     openDialog({
-      title: isWarning ? '已送出，尚有後續提醒' : isGraceSubmission ? '上個工作日 KPI 已成功補交' : '今日紀錄已成功送出',
+      title: isWarning ? '已送出，尚有後續提醒' : isGraceSubmission ? '上個工作日 KPI 已成功補交' : submission.date < todayIso() ? `${submission.date} KPI 已成功送出` : '今日紀錄已成功送出',
       body: `<div class="notice-band ${isWarning ? 'warning' : 'success'}">${icon(isWarning ? 'triangle-alert' : 'circle-check', 22)}<div><div class="notice-title">${isWarning ? '資料已送出，請查看後續提醒' : '主管已可查看本次紀錄'}</div><div class="notice-copy">${esc(message)}</div></div></div><div class="metadata-list mt-16"><div class="metadata-row"><div class="metadata-label">送出日期</div><div class="metadata-value">${formatDate(submission.date)}</div></div><div class="metadata-row"><div class="metadata-label">送出時間</div><div class="metadata-value">${formatTime(submission.submittedAt)}</div></div><div class="metadata-row"><div class="metadata-label">目前狀態</div><div class="metadata-value">待主管審查</div></div></div>`,
       footer: `<button type="button" class="btn" data-action="view-daily-submission-status">查看送出狀態</button>${isGraceSubmission ? `<button type="button" class="btn btn-primary" data-action="switch-daily-date" data-date="${todayIso()}">開始填寫今天 KPI</button>` : '<button type="button" class="btn btn-primary" data-action="close-dialog">我知道了</button>'}`,
     });
@@ -9035,7 +9128,15 @@
       state.ui.todayTab = control.dataset.tab;
       persist(); renderApp();
     }
+    else if (action === 'resume-daily-draft' || action === 'resume-daily-version') {
+      if (!canResumeHistoricalDailyDraft(control.dataset.date)) { toast('此紀錄不符合當月未送出草稿條件', 'warning'); return; }
+      if (switchTeacherDailyDate(control.dataset.date, action === 'resume-daily-version' ? control.dataset.version : '')) { closeDialog(); closeDrawer(); }
+    }
     else if (action === 'switch-daily-date') {
+      if (isHistoricalDailyDate(state.daily.date)) {
+        if (switchTeacherDailyDate(control.dataset.date)) { closeDialog(); closeDrawer(); }
+        return;
+      }
       closeDialog();
       closeDrawer();
       switchTeacherDailyDate(control.dataset.date);
@@ -9301,7 +9402,7 @@
       const root = window.AUTH?.relativeRoot?.() || '../../';
       if (realRole === 'admin') window.location.href = `${root}admin/dashboard.html?v=20260827-test-view-fast-1#test-view`;
       else if (window.AUTH?.routeByRole) window.AUTH.routeByRole(realRole, realSession);
-      else window.location.href = `${root}review/anqin-v2/index.html?v=20261110-backfill-clarity-1`;
+      else window.location.href = `${root}review/anqin-v2/index.html?v=20261112-evidence-source-1`;
     }
     else if (action === 'open-test-view') {
       const root = window.AUTH?.relativeRoot?.() || '../../';

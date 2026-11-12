@@ -33,7 +33,7 @@ function harness(logs, options = {}) {
     operationHistory: copy(options.operationHistory || []), tasks: [], feedbackThreads: {},
   };
   const context = vm.createContext({
-    state, console, clone: copy, SAFE_START_MODE: true,
+    state, console, clone: copy, SAFE_START_MODE: true, stateStorageWriteProtected: false,
     cloudLogId: (name, date) => `${name}-${date}`, dailyNeedsResubmit: () => false,
     cloudDraftInFlight: options.cloudDraftInFlight || null,
     dailySubmitInFlight: Boolean(options.dailySubmitInFlight), dailyCloudConflict: null,

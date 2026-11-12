@@ -30,7 +30,7 @@ function fixture() {
   };
   const writes = [];
   const context = vm.createContext({
-    state, clone: copy, writes,
+    state, clone: copy, writes, stateStorageWriteProtected: false,
     uid: prefix => `${prefix}-fixture`, todayIso: () => '2026-09-21', isoWeekString: date => String(date).slice(0, 7),
     addDays: (date, amount) => {
       const value = new Date(`${date}T12:00:00Z`);

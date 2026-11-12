@@ -34,7 +34,7 @@ function baseState() {
 {
   const state = baseState();
   const ctx = vm.createContext({
-    state, console, clone: copy, dailySubmitInFlight: false,
+    state, console, clone: copy, dailySubmitInFlight: false, stateStorageWriteProtected: false,
     todayIso: () => today,
     addDays: (value, amount) => {
       const date = new Date(`${value}T12:00:00+08:00`);
